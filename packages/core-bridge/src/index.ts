@@ -4,5 +4,9 @@
 export type { CoreBridge, SqliteDriver, SqlValue, Note } from "./types";
 export { notesApi } from "./notes";
 export type { NotesApi, CreateNoteInput, UpdateNoteInput } from "./notes";
+export { syncApi } from "./sync";
+export type { SyncApi } from "./sync";
+export * as auth from "./auth";
+export type { AuthResult } from "./auth";
 export { createHttpBridge } from "./http";
 export type { HttpBridgeOptions } from "./http";

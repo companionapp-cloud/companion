@@ -1,0 +1,117 @@
+package main
+
+import (
+	"database/sql"
+	"fmt"
+	"strconv"
+	"strings"
+
+	_ "github.com/jackc/pgx/v5/stdlib" // Postgres (production, PLAN §4.2)
+	_ "modernc.org/sqlite"             // SQLite (dev + fast headless tests)
+)
+
+// schema is the server store. It mirrors the client's business columns but adds
+// multi-tenancy (user_id) and a per-user monotonic server_seq for cheap, idempotent
+// pulls (PLAN §4.2). The types (TEXT / BIGINT / BYTEA) and `ON CONFLICT … EXCLUDED`
+// upserts are valid on both Postgres and SQLite; timestamps are stored as RFC3339
+// text, matching the client and wire format.
+const schema = `
+CREATE TABLE IF NOT EXISTS users (
+  id            TEXT PRIMARY KEY,
+  email         TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  token      TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_seq (
+  user_id TEXT PRIMARY KEY,
+  seq     BIGINT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS notes (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  title      TEXT NOT NULL DEFAULT '',
+  content_md TEXT NOT NULL DEFAULT '',
+  date       TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  version    BIGINT NOT NULL DEFAULT 1,
+  server_seq BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notes_user_seq ON notes (user_id, server_seq);
+
+CREATE TABLE IF NOT EXISTS user_secrets (
+  user_id    TEXT NOT NULL,
+  key        TEXT NOT NULL,
+  value_enc  BYTEA NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, key)
+);
+`
+
+// openDB opens the store, choosing the driver from the DSN: a postgres:// URL uses
+// pgx; anything else is treated as a SQLite path (dev + tests). It returns the
+// dialect so queries can be rebound to the right placeholder style.
+func openDB(dsn string) (*sql.DB, string, error) {
+	dialect, driver := "sqlite", "sqlite"
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		dialect, driver = "postgres", "pgx"
+	}
+	db, err := sql.Open(driver, dsn)
+	if err != nil {
+		return nil, "", fmt.Errorf("open %s: %w", dialect, err)
+	}
+	if dialect == "sqlite" {
+		db.SetMaxOpenConns(1) // serialize; keeps :memory: alive
+	}
+	if _, err := db.Exec(schema); err != nil {
+		db.Close()
+		return nil, "", fmt.Errorf("apply schema: %w", err)
+	}
+	return db, dialect, nil
+}
+
+// rebind converts the '?' placeholders used throughout the queries to Postgres'
+// positional '$N' form. Our SQL never contains a literal '?', so a simple scan is
+// safe.
+func rebind(dialect, query string) string {
+	if dialect != "postgres" {
+		return query
+	}
+	var b strings.Builder
+	n := 0
+	for i := 0; i < len(query); i++ {
+		if query[i] == '?' {
+			n++
+			b.WriteByte('$')
+			b.WriteString(strconv.Itoa(n))
+			continue
+		}
+		b.WriteByte(query[i])
+	}
+	return b.String()
+}
+
+// nextSeq bumps and returns the per-user monotonic sequence, inside tx.
+func (s *Server) nextSeq(tx *sql.Tx, userID string) (int64, error) {
+	if _, err := tx.Exec(s.rebind(
+		`INSERT INTO user_seq (user_id, seq) VALUES (?, 0) ON CONFLICT (user_id) DO NOTHING;`), userID); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(s.rebind(`UPDATE user_seq SET seq = seq + 1 WHERE user_id = ?;`), userID); err != nil {
+		return 0, err
+	}
+	var seq int64
+	if err := tx.QueryRow(s.rebind(`SELECT seq FROM user_seq WHERE user_id = ?;`), userID).Scan(&seq); err != nil {
+		return 0, err
+	}
+	return seq, nil
+}

@@ -25,6 +25,7 @@ type EventHandler interface {
 type Core struct {
 	store   *store.Store
 	handler EventHandler
+	sync    syncConfig
 }
 
 // New builds a Core over an already-open store.
@@ -60,6 +61,10 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.notesUpdate(payload)
 	case "notes.delete":
 		return c.notesDelete(payload)
+	case "sync.configure":
+		return c.syncConfigure(payload)
+	case "sync.run":
+		return c.syncRun()
 	default:
 		return nil, fmt.Errorf("unknown method %q", method)
 	}

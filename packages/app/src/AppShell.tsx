@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { View } from "react-native";
 import {
   NavigationContainer,
@@ -28,6 +28,8 @@ import { NavContext, useNav, type NavLocation, type Navigator, type ViewId } fro
 import { NotesProvider } from "./NotesProvider";
 import { AppToolbar } from "./AppToolbar";
 import { NotesScreen } from "./NotesScreen";
+import { SettingsPanel } from "./SettingsPanel";
+import { useSync } from "./SyncProvider";
 
 const NAV: { id: ViewId; label: string; icon: IconName }[] = [
   { id: "chat", label: "Chat", icon: "chat" },
@@ -210,9 +212,17 @@ export function AppShell({ topInset = 0 }: AppShellProps) {
  * screen (children). */
 function Shell({ topInset, children }: { topInset: number; children: ReactNode }) {
   const nav = useNav();
+  const sync = useSync();
   const [open, setOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [pinned, setPinned] = usePersistentBoolean("companion.sidebar.pinned", false);
   const expanded = open || pinned;
+
+  // Sync on navigation (§5.4). Key on the location so param-only changes still fire.
+  const locKey = nav.current.kind + (nav.current.kind === "note" ? nav.current.id : "");
+  useEffect(() => {
+    sync.trigger();
+  }, [locKey, sync]);
 
   return (
     <View style={{ flex: 1, flexDirection: "row", backgroundColor: colors.surfaceApp }}>
@@ -262,7 +272,13 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
         </View>
 
         <View style={{ gap: space.sm, paddingTop: space.md }}>
-          <RailItem icon={<Icon name="settings" size={18} color={colors.textSecondary} />} label="Settings" expanded={expanded} onPress={() => {}} />
+          <RailItem
+            icon={<Icon name="settings" size={18} color={settingsOpen ? colors.accentHover : colors.textSecondary} />}
+            label="Settings"
+            active={settingsOpen}
+            expanded={expanded}
+            onPress={() => setSettingsOpen(true)}
+          />
           <View style={{ flexDirection: "row", alignItems: "center", gap: space.lg, paddingHorizontal: space.sm, height: 32 }}>
             <Avatar name="You" size="sm" />
             {expanded ? (
@@ -277,6 +293,8 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
       <View style={{ flex: 1, minWidth: 0 }}>
         <Frame toolbar={<AppToolbar />}>{children}</Frame>
       </View>
+
+      {settingsOpen ? <SettingsPanel onClose={() => setSettingsOpen(false)} /> : null}
     </View>
   );
 }

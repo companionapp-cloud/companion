@@ -8,10 +8,13 @@ export interface InputProps {
   placeholder?: string;
   leadingIcon?: ReactNode;
   size?: "sm" | "md";
+  secureTextEntry?: boolean;
+  autoCapitalize?: "none" | "sentences" | "words" | "characters";
+  autoFocus?: boolean;
 }
 
 /** Bordered single-line text input with an optional leading icon and focus ring. */
-export function Input({ value, onChangeText, placeholder, leadingIcon, size = "md" }: InputProps) {
+export function Input({ value, onChangeText, placeholder, leadingIcon, size = "md", secureTextEntry, autoCapitalize, autoFocus }: InputProps) {
   const [focused, setFocused] = useState(false);
   const height = size === "sm" ? control.sm : control.md;
   const fontSize = size === "sm" ? font.size.sm : font.size.base;
@@ -28,6 +31,9 @@ export function Input({ value, onChangeText, placeholder, leadingIcon, size = "m
         onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor={colors.textTertiary}
+        secureTextEntry={secureTextEntry}
+        autoCapitalize={autoCapitalize}
+        autoFocus={autoFocus}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         style={[styles.input, { fontSize }]}

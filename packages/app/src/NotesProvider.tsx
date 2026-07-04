@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Note } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
+import { useSync } from "./SyncProvider";
 
 export interface NotesStore {
   notes: Note[];
@@ -16,6 +17,7 @@ const NotesCtx = createContext<NotesStore | null>(null);
 
 export function NotesProvider({ children }: { children: ReactNode }) {
   const { core, notes: api } = useCore();
+  const { trigger: syncTrigger } = useSync();
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const saving = useRef(0); // count of in-flight saves; suppress refresh while > 0
@@ -48,27 +50,30 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         try {
           const updated = await api.update(id, toSave);
           setNotes((prev) => prev.map((n) => (n.id === id ? updated : n)));
+          syncTrigger();
         } finally {
           saving.current = Math.max(0, saving.current - 1);
         }
       }, 400);
       savers.current.set(id, entry);
     },
-    [api],
+    [api, syncTrigger],
   );
 
   const create = useCallback(async () => {
     const note = await api.create({ title: "Untitled", contentMd: "" });
     setNotes((prev) => [note, ...prev]);
+    syncTrigger();
     return note;
-  }, [api]);
+  }, [api, syncTrigger]);
 
   const remove = useCallback(
     async (id: string) => {
       await api.remove(id);
       setNotes((prev) => prev.filter((n) => n.id !== id));
+      syncTrigger();
     },
-    [api],
+    [api, syncTrigger],
   );
 
   const value = useMemo<NotesStore>(

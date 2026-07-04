@@ -4,6 +4,7 @@ import type { Note } from "@companion/core-bridge";
 import { Center, Spinner, Text, colors, dragRegion, radius, shadow, space } from "@companion/design-system";
 import { useCore } from "./CoreContext";
 import { NoteEditor } from "./NoteEditor";
+import { useSync } from "./SyncProvider";
 
 export interface FocusViewProps {
   id: string;
@@ -15,6 +16,7 @@ export interface FocusViewProps {
  * Rendered when the URL requests ?note=<id> (its own tab/window). */
 export function FocusView({ id, topInset = 0 }: FocusViewProps) {
   const { core, notes } = useCore();
+  const { trigger: syncTrigger } = useSync();
   const [note, setNote] = useState<Note | null | undefined>(undefined); // undefined = loading
   const saving = useRef(false);
 
@@ -47,18 +49,20 @@ export function FocusView({ id, topInset = 0 }: FocusViewProps) {
         const updated = await notes.update(noteId, toSave);
         setNote(updated);
         saving.current = false;
+        syncTrigger();
       }, 400);
     },
-    [notes],
+    [notes, syncTrigger],
   );
 
   const onDelete = useCallback(
     async (id: string) => {
       await notes.remove(id);
       setNote(null);
+      syncTrigger();
       if (typeof window !== "undefined") window.close();
     },
-    [notes],
+    [notes, syncTrigger],
   );
 
   let body: ReactNode;

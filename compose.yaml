@@ -1,0 +1,26 @@
+# Local development databases (PLAN §4.2 — the server's production store is Postgres).
+# `docker compose up -d` / `make db-up`. Clients persist to local SQLite, not this DB.
+name: companion
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-companion}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-companion}
+      POSTGRES_DB: ${POSTGRES_DB:-companion}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Creates the separate companion_test database on first init (tests only).
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-companion} -d ${POSTGRES_DB:-companion}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

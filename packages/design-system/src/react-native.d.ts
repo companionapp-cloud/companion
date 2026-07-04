@@ -17,6 +17,8 @@ declare module "react-native" {
     ref?: Ref<unknown>;
     onPointerEnter?: () => void;
     onPointerLeave?: () => void;
+    onPointerDown?: (event: { clientX?: number; nativeEvent?: { clientX?: number } }) => void;
+    "aria-label"?: string;
   }
   interface ScrollViewProps extends ViewProps {
     contentContainerStyle?: StyleProp;
@@ -35,6 +37,9 @@ declare module "react-native" {
     placeholderTextColor?: string;
     multiline?: boolean;
     autoFocus?: boolean;
+    secureTextEntry?: boolean;
+    autoCapitalize?: "none" | "sentences" | "words" | "characters";
+    keyboardType?: string;
     onChangeText?: (text: string) => void;
     onFocus?: () => void;
     onBlur?: () => void;

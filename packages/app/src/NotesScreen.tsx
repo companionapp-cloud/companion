@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ScrollView, View } from "react-native";
 import type { Note } from "@companion/core-bridge";
-import { Center, Icon, Input, ListRow, Spinner, Text, colors, layout, space } from "@companion/design-system";
+import { Center, Icon, Input, ListRow, SplitView, Spinner, Text, colors, layout, space } from "@companion/design-system";
 import { useNav } from "./nav-context";
 import { useNotes } from "./NotesProvider";
 import { NoteEditor } from "./NoteEditor";
@@ -38,46 +38,51 @@ export function NotesScreen({ activeNoteId }: { activeNoteId: string | null }) {
   }
 
   return (
-    <View style={{ flexDirection: "row", height: "100%" }}>
-      {/* LIST COLUMN */}
-      <View style={styles.list}>
-        <View style={styles.listHeader}>
-          <Text variant="caption" tone="secondary" style={{ flex: 1, fontWeight: "600" }}>
-            All notes
-          </Text>
-          <Text variant="mono" tone="tertiary">
-            {store.notes.length}
-          </Text>
-        </View>
-        <View style={styles.search}>
-          <Input
-            size="sm"
-            placeholder="Search notes"
-            value={query}
-            onChangeText={setQuery}
-            leadingIcon={<Icon name="search" size={15} color={colors.textTertiary} />}
-          />
-        </View>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.md, gap: 2 }}>
-          {filtered.length ? (
-            filtered.map((n) => (
-              <ListRow
-                key={n.id}
-                icon={<Icon name="file" size={17} color={n.id === activeNoteId ? colors.accentHover : colors.textTertiary} />}
-                title={n.title || "Untitled"}
-                subtitle={preview(n)}
-                selected={n.id === activeNoteId}
-                onPress={() => nav.openNote(n.id)}
-              />
-            ))
-          ) : (
-            <Text tone="tertiary" variant="caption" style={styles.empty}>
-              {query ? "No notes match that." : "Nothing here yet. A blank page is just potential, etc."}
+    <SplitView
+      storageKey="companion.notes.listWidth"
+      defaultWidth={layout.listW}
+      minWidth={240}
+      maxWidth={480}
+      aside={
+        <View style={styles.list}>
+          <View style={styles.listHeader}>
+            <Text variant="caption" tone="secondary" style={{ flex: 1, fontWeight: "600" }}>
+              All notes
             </Text>
-          )}
-        </ScrollView>
-      </View>
-
+            <Text variant="mono" tone="tertiary">
+              {store.notes.length}
+            </Text>
+          </View>
+          <View style={styles.search}>
+            <Input
+              size="sm"
+              placeholder="Search notes"
+              value={query}
+              onChangeText={setQuery}
+              leadingIcon={<Icon name="search" size={15} color={colors.textTertiary} />}
+            />
+          </View>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.md, gap: 2 }}>
+            {filtered.length ? (
+              filtered.map((n) => (
+                <ListRow
+                  key={n.id}
+                  icon={<Icon name="file" size={17} color={n.id === activeNoteId ? colors.accentHover : colors.textTertiary} />}
+                  title={n.title || "Untitled"}
+                  subtitle={preview(n)}
+                  selected={n.id === activeNoteId}
+                  onPress={() => nav.openNote(n.id)}
+                />
+              ))
+            ) : (
+              <Text tone="tertiary" variant="caption" style={styles.empty}>
+                {query ? "No notes match that." : "Nothing here yet. A blank page is just potential, etc."}
+              </Text>
+            )}
+          </ScrollView>
+        </View>
+      }
+    >
       {/* DETAIL */}
       <View style={styles.detail}>
         {active ? (
@@ -88,7 +93,7 @@ export function NotesScreen({ activeNoteId }: { activeNoteId: string | null }) {
           </Center>
         )}
       </View>
-    </View>
+    </SplitView>
   );
 }
 
@@ -99,10 +104,8 @@ function preview(n: Note): string {
 
 const styles = {
   list: {
-    width: layout.listW,
-    flexShrink: 0,
-    borderRightWidth: 1,
-    borderRightColor: colors.borderSubtle,
+    flex: 1,
+    minHeight: 0,
     backgroundColor: colors.surfaceCard,
   },
   listHeader: {

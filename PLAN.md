@@ -507,10 +507,10 @@ the OS or pixels, it's in the shell; if it must run when devices are asleep
 2. **Web + wasm** — Vite RNW app; `core.wasm`; wa-sqlite/OPFS driver behind
    `store.Driver`. Notes work offline in the browser. *(De-risks the hardest binding
    early.)*
-3. **Mobile** — Expo app; gomobile + local expo module; editor via `use dom`. Notes
-   on all six platforms.
-4. **Server + sync** — auth, push/pull, conflict rule + conflicted copies, sync loop
+2.  **Server + sync** — auth, push/pull, conflict rule + conflicted copies, sync loop
    in core. Notes sync everywhere.
+4. **Mobile** — Expo app; gomobile + local expo module; editor via `use dom`. Notes
+   on all six platforms.
 5. **Tasks + reminders** — task CRUD, notification planning in core, per-platform
    scheduling.
 6. **Repeating tasks** — RRULE on seeds, server cron materialization, regeneration on
@@ -519,7 +519,7 @@ the OS or pixels, it's in the shell; if it must run when devices are asleep
 8. **Calendar** — feeds, server ICS fetcher, event clone, merged calendar view.
 9. **LLM** — provider configs (device vs account scope), secrets sync, chat with
    local retrieval tools, streaming UI.
-10. **Polish** — background sync triggers, tombstone retention + full-resync path,
+10.  **Polish** — background sync triggers, tombstone retention + full-resync path,
     E2E-encrypted secrets, import/export.
 
 ---
