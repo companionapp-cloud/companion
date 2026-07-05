@@ -42,8 +42,10 @@ export function NoteGraph({ noteId, depth = 2 }: { noteId: string; depth?: numbe
     <GraphView
       graph={graph}
       focusKey={nodeKey("note", noteId)}
-      onOpenNode={(type, id, newTab) => {
-        if (type === "note") nav.openNote(id, { newTab });
+      onOpenNode={(type, id) => {
+        if (type === "note") nav.openNote(id);
+        else if (type === "task") nav.openTask(id);
+        else if (type === "project") nav.openProject(id);
       }}
     />
   );

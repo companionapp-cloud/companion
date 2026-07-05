@@ -29,6 +29,8 @@ export function NoteGraphScreen() {
       focusKey={`note:${noteId}`}
       onOpenNode={(type, id) => {
         if (type === 'note' && id !== noteId) nav.push('NoteEditor', { id });
+        else if (type === 'task') nav.push('TaskEditor', { id });
+        else if (type === 'project') nav.push('Project', { projectId: id });
       }}
     />
   );

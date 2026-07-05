@@ -12,7 +12,7 @@ import (
 
 // trashTables are the server tables carrying a deleting_at Trash marker. Projects and
 // areas are never trashed, so they are absent here.
-var trashTables = []string{"notes"}
+var trashTables = []string{"notes", "tasks"}
 
 // trashSweepInterval is how often the collector wakes. Trash retention is measured in
 // days, so hourly is ample precision (PLAN §7.6).

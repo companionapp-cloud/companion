@@ -1,22 +1,31 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import {
+  datesApi,
   graphApi,
   notesApi,
+  notifyApi,
   projectsApi,
+  tasksApi,
   trashApi,
   type CoreBridge,
+  type DatesApi,
   type GraphApi,
   type NotesApi,
+  type NotifyApi,
   type ProjectsApi,
+  type TasksApi,
   type TrashApi,
 } from "@companion/core-bridge";
 
 interface CoreValue {
   core: CoreBridge;
   notes: NotesApi;
+  tasks: TasksApi;
   graph: GraphApi;
   projects: ProjectsApi;
   trash: TrashApi;
+  notify: NotifyApi;
+  dates: DatesApi;
 }
 
 const CoreCtx = createContext<CoreValue | null>(null);
@@ -24,7 +33,16 @@ const CoreCtx = createContext<CoreValue | null>(null);
 /** CoreProvider makes a platform-supplied CoreBridge available to the UI tree. */
 export function CoreProvider({ core, children }: { core: CoreBridge; children: ReactNode }) {
   const value = useMemo<CoreValue>(
-    () => ({ core, notes: notesApi(core), graph: graphApi(core), projects: projectsApi(core), trash: trashApi(core) }),
+    () => ({
+      core,
+      notes: notesApi(core),
+      tasks: tasksApi(core),
+      graph: graphApi(core),
+      projects: projectsApi(core),
+      trash: trashApi(core),
+      notify: notifyApi(core),
+      dates: datesApi(core),
+    }),
     [core],
   );
   return <CoreCtx.Provider value={value}>{children}</CoreCtx.Provider>;

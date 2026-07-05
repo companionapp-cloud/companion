@@ -41,6 +41,7 @@ func (s *Server) handlers() map[string]*entityHandler {
 	if s.entities == nil {
 		s.entities = map[string]*entityHandler{
 			protocol.EntityNote:          noteHandler,
+			protocol.EntityTask:          taskHandler,
 			protocol.EntityArea:          areaHandler,
 			protocol.EntityProject:       projectHandler,
 			protocol.EntityProjectMember: memberHandler,

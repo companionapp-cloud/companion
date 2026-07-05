@@ -152,6 +152,8 @@ export function NoteEditorScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceCard },
-  title: { paddingHorizontal: space.lg, paddingTop: space.md },
+  // 20px matches the editor body's horizontal inset on mobile (.pm-wrap in
+  // packages/editor/src/styles.ts) so the title lines up with the content beneath it.
+  title: { paddingHorizontal: 20, paddingTop: space.md },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
 });

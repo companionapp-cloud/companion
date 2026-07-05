@@ -38,7 +38,21 @@ func (c *Core) trashList() ([]byte, error) {
 		})
 	}
 
-	// tasks / habits join here once they have repos + Trash support.
+	tasks, err := c.store.Tasks.ListTrash()
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range tasks {
+		items = append(items, trashItem{
+			EntityType: "task",
+			ID:         t.ID,
+			Title:      t.Title,
+			DeletingAt: t.DeletingAt,
+			UpdatedAt:  t.UpdatedAt,
+		})
+	}
+
+	// habits join here once they have repos + Trash support.
 
 	return json.Marshal(items)
 }
@@ -56,6 +70,11 @@ func (c *Core) trashRestore(payload []byte) ([]byte, error) {
 		}
 		c.emit(notesChangedEvent, nil)
 		c.emitDataChanged("note", id)
+	case "task":
+		if err := c.store.Tasks.Restore(id); err != nil {
+			return nil, mapStoreErr(err)
+		}
+		c.emitTaskChanged(id)
 	default:
 		return nil, fmt.Errorf("cannot restore entity type %q", entityType)
 	}
@@ -76,6 +95,11 @@ func (c *Core) trashPurge(payload []byte) ([]byte, error) {
 		}
 		c.emit(notesChangedEvent, nil)
 		c.emitDataChanged("note", id)
+	case "task":
+		if err := c.store.Tasks.Delete(id); err != nil {
+			return nil, mapStoreErr(err)
+		}
+		c.emitTaskChanged(id)
 	default:
 		return nil, fmt.Errorf("cannot purge entity type %q", entityType)
 	}

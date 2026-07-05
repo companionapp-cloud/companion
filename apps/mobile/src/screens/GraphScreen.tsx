@@ -24,6 +24,8 @@ export function GraphScreen() {
       graph={graph}
       onOpenNode={(type, id) => {
         if (type === 'note') nav.navigate('NoteEditor', { id });
+        else if (type === 'task') nav.navigate('TaskEditor', { id });
+        else if (type === 'project') nav.navigate('Project', { projectId: id });
       }}
     />
   );

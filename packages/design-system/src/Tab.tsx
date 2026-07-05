@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Pressable, StyleSheet } from "react-native";
 import { Icon } from "./Icon";
 import { noDragRegion, type PressState } from "./platform";
@@ -7,13 +8,18 @@ import { colors, radius, space } from "./tokens";
 export interface TabProps {
   label: string;
   active?: boolean;
+  /** Optional leading icon (e.g. a note vs task glyph). */
+  icon?: ReactNode;
   onPress?: () => void;
+  /** When provided, an expand affordance that pops the tab's document out to its own
+   *  window/browser tab. */
+  onExpand?: () => void;
   onClose?: () => void;
 }
 
-/** A single document tab: title + close affordance. Active tabs read as a raised
- * card; inactive tabs are quiet until hovered. */
-export function Tab({ label, active, onPress, onClose }: TabProps) {
+/** A single document tab: optional type icon, title, and expand/close affordances. Active
+ * tabs read as a raised card; inactive tabs are quiet until hovered. */
+export function Tab({ label, active, icon, onPress, onExpand, onClose }: TabProps) {
   return (
     <Pressable
       onPress={onPress}
@@ -26,6 +32,7 @@ export function Tab({ label, active, onPress, onClose }: TabProps) {
         },
       ]}
     >
+      {icon}
       <Text
         variant="caption"
         tone={active ? "default" : "secondary"}
@@ -34,12 +41,24 @@ export function Tab({ label, active, onPress, onClose }: TabProps) {
       >
         {label}
       </Text>
+      {onExpand ? (
+        <Pressable
+          onPress={onExpand}
+          aria-label="Open in new window"
+          style={({ hovered }: PressState) => [
+            styles.affordance,
+            { backgroundColor: hovered ? colors.surfaceActive : "transparent" },
+          ]}
+        >
+          <Icon name="external" size={12} color={colors.textTertiary} />
+        </Pressable>
+      ) : null}
       {onClose ? (
         <Pressable
           onPress={onClose}
           aria-label="Close tab"
           style={({ hovered }: PressState) => [
-            styles.close,
+            styles.affordance,
             { backgroundColor: hovered ? colors.surfaceActive : "transparent" },
           ]}
         >
@@ -63,5 +82,5 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   label: { flexShrink: 1 },
-  close: { width: 18, height: 18, alignItems: "center", justifyContent: "center", borderRadius: radius.sm },
+  affordance: { width: 18, height: 18, alignItems: "center", justifyContent: "center", borderRadius: radius.sm },
 });

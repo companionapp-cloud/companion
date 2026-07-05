@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { ScrollView, View } from "react-native";
 import {
   NavigationContainer,
   StackActions,
@@ -25,17 +25,25 @@ import {
   transition,
   type IconName,
 } from "@companion/design-system";
-import { NavContext, useNav, type NavLocation, type Navigator, type ProjectSection, type ViewId } from "./nav-context";
+import { NavContext, useNav, type NavLocation, type Navigator, type ProjectSection, type Tab, type TabRef, type ViewId } from "./nav-context";
+import { openFocusWindow } from "./focus";
 import { NotesProvider } from "./NotesProvider";
+import { TasksProvider } from "./TasksProvider";
+import { RemindersProvider } from "./RemindersProvider";
 import { ProjectsProvider } from "./ProjectsProvider";
 import { ProjectsSidebar } from "./ProjectsSidebar";
 import { ProjectView } from "./ProjectView";
 import { AppToolbar } from "./AppToolbar";
-import { NotesScreen } from "./NotesScreen";
+import { WorkspaceScreen } from "./WorkspaceScreen";
 import { GraphScreen } from "./GraphScreen";
 import { TrashScreen } from "./TrashScreen";
 import { SettingsPanel } from "./SettingsPanel";
 import { useSync } from "./SyncProvider";
+
+// Monotonic tab uid so React keys are stable across reorders/overwrites even when two
+// tabs hold the same document.
+let tabSeq = 0;
+const freshTab = (): Tab => ({ uid: `tab${++tabSeq}`, ref: null });
 
 const NAV: { id: ViewId; label: string; icon: IconName }[] = [
   { id: "chat", label: "Chat", icon: "chat" },
@@ -76,11 +84,14 @@ function webLinking(): LinkingOptions<ParamListBase> | undefined {
       screens: {
         chat: "chat",
         calendar: "calendar",
+        // notes/tasks are the two workspace browse lists; open documents live in session
+        // tabs (not the URL). A specific document is deep-linked via focus mode (?note= /
+        // ?task=), which the expand/pop-out action opens.
+        notes: "notes",
         tasks: "tasks",
         habits: "habits",
         graph: "graph",
         trash: "trash",
-        notes: "notes/:id?",
         // Deep-linkable project drill-down: /project/<id>[/<section>[/<itemId>]].
         project: "project/:projectId/:section?/:itemId?",
       },
@@ -88,9 +99,13 @@ function webLinking(): LinkingOptions<ParamListBase> | undefined {
   };
 }
 
-// The notes UI is mounted persistently by Shell (so per-tab editor state survives route
-// changes), not on the router. This screen only anchors the "notes" route for linking.
+// The workspace (notes/tasks list + tab strip) is mounted persistently by Shell so per-tab
+// editor state survives route changes; it doesn't live on the router. These screens only
+// anchor the "notes"/"tasks" routes for linking + rail highlighting.
 function NotesRouteScreen() {
+  return null;
+}
+function TasksRouteScreen() {
   return null;
 }
 
@@ -161,7 +176,10 @@ function NavBridge({
   topInset: number;
   children: ReactNode;
 }) {
-  const [tabs, setTabs] = useState<string[]>([]);
+  // The workspace tab strip: notes and tasks share one set of slots (always ≥ 1). Tabs are
+  // session state, not in the URL; the route only tracks which list is browsed.
+  const [tabs, setTabs] = useState<Tab[]>(() => [freshTab()]);
+  const [activeIndex, setActiveIndex] = useState(0);
   const [forwardStack, setForwardStack] = useState<{ name: string; params?: RouteParams }[]>([]);
 
   const route = state.routes[state.index];
@@ -174,21 +192,42 @@ function NavBridge({
           section: route.params?.section as ProjectSection | undefined,
           itemId: route.params?.itemId,
         }
-      : routeName === "notes"
-        ? route.params?.id
-          ? { kind: "note", id: route.params.id }
-          : { kind: "notes" }
-        : { kind: "view", view: routeName as Exclude<ViewId, "notes"> };
+      : routeName === "tasks"
+        ? { kind: "tasks" }
+        : routeName === "notes"
+          ? { kind: "notes" }
+          : { kind: "view", view: routeName as Exclude<ViewId, "notes" | "tasks"> };
+
+  const active = Math.min(activeIndex, tabs.length - 1);
+  const activeTab = tabs[active];
 
   const nav = useMemo<Navigator>(() => {
     const goto = (name: string, params?: RouteParams) => {
       setForwardStack([]);
       navigation.dispatch(StackActions.push(name, params));
     };
+    // Ensure the workspace for `kind` is on screen (so a doc opened from elsewhere — the
+    // graph, a project — becomes visible), without stacking history when already there.
+    const ensureRoute = (name: string) => {
+      if (routeName !== name) goto(name);
+    };
+    // Overwrite the active tab's document. Opening a note/task shows its matching list.
+    const setActiveRef = (ref: TabRef) => {
+      setTabs((t) => t.map((tab, i) => (i === active ? { ...tab, ref } : tab)));
+    };
+    // Close a tab, keeping at least one (empty) slot and a valid active index.
+    const removeTab = (index: number) => {
+      if (tabs.length <= 1) {
+        setTabs([freshTab()]);
+        setActiveIndex(0);
+        return;
+      }
+      setTabs((t) => t.filter((_, i) => i !== index));
+      setActiveIndex((cur) => (index < cur ? cur - 1 : index === cur ? Math.min(cur, tabs.length - 2) : cur));
+    };
     return {
       current,
-      tabs,
-      activeView: routeName === "project" ? "project" : routeName === "notes" ? "notes" : (routeName as ViewId),
+      activeView: routeName === "project" ? "project" : (routeName as ViewId),
       canBack: state.index > 0,
       canForward: forwardStack.length > 0,
       back: () => {
@@ -205,43 +244,40 @@ function NavBridge({
         });
       },
       goView: (view) => {
-        if (routeName === view && !(view === "notes" && current.kind === "note")) return;
+        if (routeName === view) return;
         goto(view);
       },
-      openNote: (id, opts) => {
-        setTabs((t) => {
-          if (t.includes(id)) return t;
-          // Cmd/Ctrl-click always adds a new tab; otherwise, if a note tab is currently
-          // active, replace it in place with the new note.
-          if (!opts?.newTab && current.kind === "note") {
-            const i = t.indexOf(current.id);
-            if (i !== -1) {
-              const next = [...t];
-              next[i] = id;
-              return next;
-            }
-          }
-          return [...t, id];
-        });
-        goto("notes", { id });
+
+      tabs,
+      activeIndex: active,
+      activeTab,
+      openNote: (id) => {
+        setActiveRef({ kind: "note", id });
+        ensureRoute("notes");
       },
-      closeTab: (id) => {
-        setTabs((t) => t.filter((x) => x !== id));
-        if (current.kind === "note" && current.id === id) {
-          const remaining = tabs.filter((x) => x !== id);
-          goto("notes", remaining.length ? { id: remaining[remaining.length - 1] } : undefined);
-        }
+      openTask: (id) => {
+        setActiveRef({ kind: "task", id });
+        ensureRoute("tasks");
       },
-      deselect: () => {
-        if (current.kind === "note") goto("notes");
+      addTab: () => {
+        setActiveIndex(tabs.length);
+        setTabs((t) => [...t, freshTab()]);
       },
+      selectTab: (index) => setActiveIndex(index),
+      closeTab: (index) => removeTab(index),
+      expandTab: (index) => {
+        const ref = tabs[index]?.ref;
+        if (ref) openFocusWindow(ref.kind, ref.id);
+        removeTab(index);
+      },
+
       // Each level of the project drill-down is a push, so Back pops overview ← section
       // ← item and the URL stays deep-linkable.
       openProject: (projectId) => goto("project", { projectId }),
       openProjectSection: (projectId, section) => goto("project", { projectId, section }),
       openProjectItem: (projectId, section, itemId) => goto("project", { projectId, section, itemId }),
     };
-  }, [current, tabs, routeName, state, forwardStack, navigation]);
+  }, [current, tabs, active, activeTab, routeName, state, forwardStack, navigation]);
 
   return (
     <NavContext.Provider value={nav}>
@@ -254,20 +290,24 @@ export function AppShell({ topInset = 0 }: AppShellProps) {
   const linking = useMemo(webLinking, []);
   return (
     <NotesProvider>
-      <ProjectsProvider>
-        <NavigationContainer linking={linking} documentTitle={{ enabled: false }}>
-          <Nav.Navigator initialRouteName="notes" topInset={topInset}>
-            <Nav.Screen name="chat" component={ViewScreen} />
-            <Nav.Screen name="calendar" component={ViewScreen} />
-            <Nav.Screen name="notes" component={NotesRouteScreen} />
-            <Nav.Screen name="tasks" component={ViewScreen} />
-            <Nav.Screen name="habits" component={ViewScreen} />
-            <Nav.Screen name="graph" component={GraphScreen} />
-            <Nav.Screen name="trash" component={TrashScreen} />
-            <Nav.Screen name="project" component={ProjectView} />
-          </Nav.Navigator>
-        </NavigationContainer>
-      </ProjectsProvider>
+      <TasksProvider>
+       <RemindersProvider>
+        <ProjectsProvider>
+          <NavigationContainer linking={linking} documentTitle={{ enabled: false }}>
+            <Nav.Navigator initialRouteName="notes" topInset={topInset}>
+              <Nav.Screen name="chat" component={ViewScreen} />
+              <Nav.Screen name="calendar" component={ViewScreen} />
+              <Nav.Screen name="notes" component={NotesRouteScreen} />
+              <Nav.Screen name="tasks" component={TasksRouteScreen} />
+              <Nav.Screen name="habits" component={ViewScreen} />
+              <Nav.Screen name="graph" component={GraphScreen} />
+              <Nav.Screen name="trash" component={TrashScreen} />
+              <Nav.Screen name="project" component={ProjectView} />
+            </Nav.Navigator>
+          </NavigationContainer>
+        </ProjectsProvider>
+       </RemindersProvider>
+      </TasksProvider>
     </NotesProvider>
   );
 }
@@ -276,7 +316,8 @@ export function AppShell({ topInset = 0 }: AppShellProps) {
  * screen (children). */
 function Shell({ topInset, children }: { topInset: number; children: ReactNode }) {
   const nav = useNav();
-  const onNotes = nav.activeView === "notes";
+  // The notes/tasks workspace is shown for both those sections (it's one shared thing).
+  const inWorkspace = nav.current.kind === "notes" || nav.current.kind === "tasks";
   const sync = useSync();
   const [open, setOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -284,11 +325,11 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
   const expanded = open || pinned;
   const activeProjectId = nav.current.kind === "project" ? nav.current.projectId : null;
 
-  // Sync on navigation (§5.4). Key on the location so param-only changes still fire.
+  // Sync on navigation (§5.4). Key on the location + active tab so param-only changes fire.
   const loc = nav.current;
   const locKey =
     loc.kind +
-    (loc.kind === "note" ? loc.id : "") +
+    (nav.activeTab.ref ? `${nav.activeTab.ref.kind}:${nav.activeTab.ref.id}` : "") +
     (loc.kind === "project" ? `${loc.projectId}:${loc.section ?? ""}:${loc.itemId ?? ""}` : "");
   // Depend on the stable `trigger`, not the whole `sync` object: `sync` is a memo that
   // changes identity on every status/lastSyncedAt update, so listing it here would
@@ -345,8 +386,8 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
           </View>
           {/* Areas → projects tree, only when there's room to render labels. */}
           {expanded ? <ProjectsSidebar onSelectProject={nav.openProject} activeProjectId={activeProjectId} /> : null}
-          {/* Empty rail space deselects the active note (still a window drag handle on desktop). */}
-          <Pressable onPress={nav.deselect} style={{ flexGrow: 1, minHeight: space.xl, cursor: "auto" }} aria-label="Deselect note" />
+          {/* Empty rail space fills the column (a window drag handle on desktop). */}
+          <View style={{ flexGrow: 1, minHeight: space.xl }} />
         </ScrollView>
 
         <View style={{ gap: space.sm, paddingTop: space.md }}>
@@ -370,13 +411,13 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
 
       <View style={{ flex: 1, minWidth: 0 }}>
         <Frame toolbar={<AppToolbar />}>
-          {/* Notes is mounted once and only shown on the notes view; keeping it alive
-              across route changes is what makes tabs stateful (see NotesScreen). Other
-              views render through the router as usual. */}
-          <View style={[{ flex: 1 }, onNotes ? null : { display: "none" }]}>
-            <NotesScreen />
+          {/* The workspace (notes/tasks list + shared tab strip) is mounted once and only
+              shown on those sections; keeping it alive across route changes is what makes
+              every open tab's editor stateful. Other views render through the router. */}
+          <View style={[{ flex: 1 }, inWorkspace ? null : { display: "none" }]}>
+            <WorkspaceScreen />
           </View>
-          {onNotes ? null : children}
+          {inWorkspace ? null : children}
         </Frame>
       </View>
 

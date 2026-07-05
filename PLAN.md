@@ -1011,15 +1011,21 @@ Done:
    lifecycle wiring (visibility / foreground) + sync-on-(re)connect + reconnect on
    token rotation. Notes edited on one device appear on the others in ~a second.
    *Small, and every later milestone inherits it.*
-
-Next:
 7. **Areas + projects** — `areas`/`projects`/`project_members` entities + sync;
    `member` edge mirroring; sidebar with area headings and project nav items;
    note membership pickers; `nav.sidebar` (indicators return null until tasks and
    habits exist and simply light up as later milestones land).
-8. **Tasks + reminders** — task CRUD through the same extraction path (task nodes
-   join the graph for free); task membership; the sidebar progress ring goes live;
-   notification planning in core; per-platform scheduling.
+
+8. ✅ **Tasks + reminders** — `tasks` entity + sync (`core/domain/task.go`,
+   `core/store/tasks.go`, server `taskHandler`); task nodes join the graph via the same
+   `notes_md` extraction path; Trash lifecycle like notes; task↔project membership (the
+   sidebar progress ring is now live); `core/notify` notification planning +
+   `RemindersProvider` (web `Notification` scheduler, native injection point); task UI
+   (global Tasks splitview, project Tasks section, mobile list + editor); due/reminder via
+   natural-language parsing (`core/dates` over `olebedev/when`) + a concrete date/time
+   picker + quick presets.
+
+Next:
 9. **Embedded tasks** — `taskRef` NodeView + `![[task:id]]` serialization; editor
    data-provider prop; `[]` and `[[` input rules; live refresh via `data.changed`.
 10. **Objects** — `object_types` entity + sync; `object_type_id`/`props_json` on

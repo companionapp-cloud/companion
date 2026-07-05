@@ -57,6 +57,26 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 CREATE INDEX IF NOT EXISTS idx_notes_user_seq ON notes (user_id, server_seq);
 
+CREATE TABLE IF NOT EXISTS tasks (
+  id             TEXT PRIMARY KEY,
+  user_id        TEXT NOT NULL,
+  title          TEXT NOT NULL DEFAULT '',
+  notes_md       TEXT NOT NULL DEFAULT '',
+  status         TEXT NOT NULL DEFAULT 'open',
+  due_at         TEXT,
+  remind_at      TEXT,
+  completed_at   TEXT,
+  repeat_rule    TEXT,
+  repeat_seed_id TEXT,
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL,
+  deleting_at    TEXT,
+  deleted_at     TEXT,
+  version        BIGINT NOT NULL DEFAULT 1,
+  server_seq     BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_user_seq ON tasks (user_id, server_seq);
+
 CREATE TABLE IF NOT EXISTS areas (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL,

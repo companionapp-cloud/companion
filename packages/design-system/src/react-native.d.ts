@@ -48,6 +48,8 @@ declare module "react-native" {
     onChangeText?: (text: string) => void;
     onFocus?: () => void;
     onBlur?: () => void;
+    onSubmitEditing?: () => void;
+    returnKeyType?: string;
   }
   interface PressableState {
     pressed: boolean;

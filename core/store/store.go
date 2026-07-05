@@ -13,6 +13,7 @@ type Store struct {
 	clock domain.Clock
 
 	Notes          *NotesRepo
+	Tasks          *TasksRepo
 	Areas          *AreasRepo
 	Projects       *ProjectsRepo
 	ProjectMembers *ProjectMembersRepo
@@ -35,6 +36,9 @@ func New(d Driver, clock domain.Clock) (*Store, error) {
 	// Notes extract wikilinks into the shared index on every write and sync-apply, so
 	// the graph stays current without re-parsing the knowledgebase (PLAN §5.1).
 	s.Notes = &NotesRepo{db: d, clock: clock, links: s.Links}
+	// Tasks extract wikilinks from their notes into the shared index too, so a task is a
+	// first-class graph node the moment it exists (PLAN §5.1, §6.4).
+	s.Tasks = &TasksRepo{db: d, clock: clock, links: s.Links}
 	s.Areas = &AreasRepo{db: d, clock: clock}
 	s.Projects = &ProjectsRepo{db: d, clock: clock}
 	// Project membership mirrors into the link index as authored 'member' edges.

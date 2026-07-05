@@ -5,30 +5,55 @@ export type ViewId = "chat" | "calendar" | "notes" | "tasks" | "habits" | "graph
 /** The content types a project drills into (its sub-nav). */
 export type ProjectSection = "notes" | "tasks" | "calendars" | "habits";
 
-/** The current navigable location, derived from the React Navigation route. A project
- * is a three-level drill-down: overview (no section) → a section's content list →
- * a single item, each a deep-linkable URL on web. */
+/** A document open in a workspace tab. */
+export type TabRef = { kind: "note" | "task"; id: string };
+
+/** One workspace tab slot: a stable uid plus its (possibly empty) document. Notes and
+ *  tasks share one strip; an empty slot renders as "Nothing selected". */
+export type Tab = { uid: string; ref: TabRef | null };
+
+/** The current navigable location, derived from the React Navigation route. The workspace
+ * sections (notes/tasks) only pick which list the left column browses — the content area
+ * always shows the active tab (which may hold a note, a task, or nothing). A project is a
+ * three-level drill-down, each a deep-linkable URL on web. */
 export type NavLocation =
-  | { kind: "view"; view: Exclude<ViewId, "notes"> }
+  | { kind: "view"; view: Exclude<ViewId, "notes" | "tasks"> }
   | { kind: "notes" }
-  | { kind: "note"; id: string }
+  | { kind: "tasks" }
   | { kind: "project"; projectId: string; section?: ProjectSection; itemId?: string };
 
 /** The app-facing navigation API. Implemented on top of React Navigation (routing +
- * URL linking) plus a thin layer for open-note tabs and forward history. */
+ * URL linking) plus a thin layer for the workspace tab strip and forward history. */
 export interface Navigator {
   current: NavLocation;
-  tabs: string[];
   activeView: ViewId | "project";
   canBack: boolean;
   canForward: boolean;
   back: () => void;
   forward: () => void;
   goView: (view: ViewId) => void;
-  openNote: (id: string, opts?: { newTab?: boolean }) => void;
-  closeTab: (id: string) => void;
-  /** Deselect the active note (keeps tabs open, shows the notes list). No-op elsewhere. */
-  deselect: () => void;
+
+  // --- workspace tabs (web/desktop) -----------------------------------------
+  /** The open tab slots; always at least one. */
+  tabs: Tab[];
+  /** Index of the active tab. */
+  activeIndex: number;
+  /** The active tab (tabs[activeIndex]). */
+  activeTab: Tab;
+  /** Set the active tab's document to this note (overrides whatever it held). */
+  openNote: (id: string) => void;
+  /** Set the active tab's document to this task. */
+  openTask: (id: string) => void;
+  /** Add a new empty tab and make it active. */
+  addTab: () => void;
+  /** Make the tab at `index` active. */
+  selectTab: (index: number) => void;
+  /** Close the tab at `index`; the strip never drops below one (empty) tab. */
+  closeTab: (index: number) => void;
+  /** Pop the tab's document out to its own window/browser tab, then close the tab. */
+  expandTab: (index: number) => void;
+
+  // --- projects -------------------------------------------------------------
   /** Open a project's overview (its sub-nav). */
   openProject: (projectId: string) => void;
   /** Push into one of a project's content sections (its list). */

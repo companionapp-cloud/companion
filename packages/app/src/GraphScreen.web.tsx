@@ -38,8 +38,10 @@ export function GraphScreen() {
   return (
     <GraphView
       graph={graph}
-      onOpenNode={(type, id, newTab) => {
-        if (type === "note") nav.openNote(id, { newTab });
+      onOpenNode={(type, id) => {
+        if (type === "note") nav.openNote(id);
+        else if (type === "task") nav.openTask(id);
+        else if (type === "project") nav.openProject(id);
       }}
     />
   );

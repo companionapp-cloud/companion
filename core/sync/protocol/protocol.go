@@ -13,6 +13,7 @@ import (
 // Entity type tags on the wire (PLAN §7). Every syncable table has one.
 const (
 	EntityNote          = "note"
+	EntityTask          = "task"
 	EntityArea          = "area"
 	EntityProject       = "project"
 	EntityProjectMember = "project_member"

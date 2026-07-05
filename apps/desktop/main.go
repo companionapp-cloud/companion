@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 
@@ -41,12 +42,30 @@ func main() {
 	handler := newBridgeHandler(core)
 	core.SetEventHandler(handler)
 
-	app := application.New(application.Options{
+	// Assigned right after the app is built; the /window handler (below) captures it by
+	// reference and only runs once requests arrive, so the app is set by then.
+	var app *application.App
+	openFocusWindow := func(url string) {
+		app.Window.NewWithOptions(application.WebviewWindowOptions{
+			Title:            "Companion",
+			Width:            820,
+			Height:           720,
+			MinWidth:         480,
+			MinHeight:        360,
+			BackgroundColour: application.NewRGB(245, 245, 243),
+			URL:              url,
+			Mac: application.MacWindow{
+				TitleBar: application.MacTitleBarHiddenInset,
+			},
+		})
+	}
+
+	app = application.New(application.Options{
 		Name:        "Companion",
 		Description: "Offline-first notes, tasks, habits, and calendar.",
 		Services:    []application.Service{},
 		Assets: application.AssetOptions{
-			Handler: rootHandler(handler),
+			Handler: rootHandler(handler, openFocusWindow),
 		},
 	})
 
@@ -72,8 +91,10 @@ func main() {
 }
 
 // rootHandler serves the embedded frontend at "/" and routes the core bridge API
-// (/invoke, /events) to the bridge handler.
-func rootHandler(bridge *bridgeHandler) http.Handler {
+// (/invoke, /events) to the bridge handler. /window spawns a focus-mode window for a
+// document (the workspace's expand/pop-out action) — browser window.open can't create a
+// real app window in the Wails webview, so the frontend asks the Go side here.
+func rootHandler(bridge *bridgeHandler, openFocusWindow func(url string)) http.Handler {
 	frontend, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {
 		log.Fatalf("mount frontend assets: %v", err)
@@ -83,6 +104,16 @@ func rootHandler(bridge *bridgeHandler) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/invoke", bridge)
 	mux.Handle("/events", bridge)
+	mux.HandleFunc("/window", func(w http.ResponseWriter, r *http.Request) {
+		kind := r.URL.Query().Get("kind")
+		id := r.URL.Query().Get("id")
+		if (kind != "note" && kind != "task") || id == "" {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		openFocusWindow("/?" + url.Values{kind: {id}}.Encode())
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.Handle("/", files)
 	return mux
 }

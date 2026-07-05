@@ -8,6 +8,7 @@ import { Icon, Text, colors, font, type IconName } from '@companion/design-syste
 import type { ProjectTabParamList, RootStackParamList } from '../MobileShell';
 import { ProjectContext } from '../ProjectContext';
 import { NotesListScreen } from './NotesListScreen';
+import { TasksListScreen } from './TasksListScreen';
 import { PlaceholderScreen } from './PlaceholderScreen';
 
 const Tabs = createBottomTabNavigator<ProjectTabParamList>();
@@ -61,7 +62,7 @@ export function ProjectScreen({ route }: NativeStackScreenProps<RootStackParamLi
         })}
       >
         <Tabs.Screen name="ProjectNotes" component={NotesListScreen} />
-        <Tabs.Screen name="ProjectTasks" component={PlaceholderScreen} />
+        <Tabs.Screen name="ProjectTasks" component={TasksListScreen} />
         <Tabs.Screen name="ProjectCalendar" component={PlaceholderScreen} />
       </Tabs.Navigator>
     </ProjectContext.Provider>

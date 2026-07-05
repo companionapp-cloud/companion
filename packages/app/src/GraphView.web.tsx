@@ -422,7 +422,9 @@ function CircleNode({ data }: NodeProps<CircleNode>) {
   const accent = data.ghost ? colors.textTertiary : typeColor(data.entityType);
   const iconName = TYPE_ICON[data.entityType] ?? "dot";
   const iconSize = Math.round(data.size * 0.5);
-  const navigable = data.entityType === "note" && !data.focus;
+  // Notes, tasks, and projects open; the focus node (you're already on it) and ghosts
+  // (unresolved link targets) don't.
+  const navigable = !data.focus && !data.ghost && (data.entityType === "note" || data.entityType === "task" || data.entityType === "project");
 
   const open = useCallback(
     (e: ReactMouseEvent) => {

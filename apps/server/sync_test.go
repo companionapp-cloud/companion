@@ -85,7 +85,7 @@ func newServerAPI(t *testing.T) (*httptest.Server, *Server) {
 		if !strings.Contains(dsn, "test") {
 			t.Fatalf("refusing to run destructive tests on %q; use a *_test database (COMPANION_TEST_DB)", dsn)
 		}
-		if _, err := db.Exec(`TRUNCATE users, sessions, refresh_tokens, user_seq, notes, areas, projects, project_members, user_secrets;`); err != nil {
+		if _, err := db.Exec(`TRUNCATE users, sessions, refresh_tokens, user_seq, notes, tasks, areas, projects, project_members, user_secrets;`); err != nil {
 			t.Fatalf("truncate: %v", err)
 		}
 	}
@@ -256,6 +256,42 @@ func TestSyncConflictedCopy(t *testing.T) {
 	}
 	if !hasCopy {
 		t.Errorf("expected a 'B loses (conflicted copy …)' note; got %v", titles(notes))
+	}
+}
+
+// Tasks sync end-to-end: create on A, converge on B, complete on A, B converges — proving
+// the task server handler and the completed_at/status columns round-trip.
+func TestTaskSync(t *testing.T) {
+	ts := newServer(t)
+	token := register(t, ts.URL, "task@b.co", "password")
+	a := newClient(t, ts.URL, token, "devA")
+	b := newClient(t, ts.URL, token, "devB")
+
+	due := base.Add(48 * time.Hour)
+	task, _ := a.store.Tasks.Create(store.CreateTaskInput{Title: "Ship it", DueAt: &due})
+	a.engine.Sync()
+	b.engine.Sync()
+
+	got, err := b.store.Tasks.Get(task.ID)
+	if err != nil || got.Title != "Ship it" {
+		t.Fatalf("B did not receive task: %+v (err %v)", got, err)
+	}
+	if got.DueAt == nil || !got.DueAt.Equal(due) {
+		t.Errorf("B due_at = %v, want %v", got.DueAt, due)
+	}
+	if got.Status != "open" {
+		t.Errorf("B status = %q, want open", got.Status)
+	}
+
+	// A completes it; B converges and sees completed_at set.
+	a.clk.t = base.Add(time.Hour)
+	done := "done"
+	a.store.Tasks.Update(task.ID, store.UpdateTaskInput{Status: &done})
+	a.engine.Sync()
+	b.engine.Sync()
+	got, _ = b.store.Tasks.Get(task.ID)
+	if got.Status != "done" || got.CompletedAt == nil {
+		t.Errorf("B task after complete = status %q, completedAt %v; want done + set", got.Status, got.CompletedAt)
 	}
 }
 

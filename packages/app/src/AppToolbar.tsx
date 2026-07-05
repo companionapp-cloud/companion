@@ -1,21 +1,33 @@
-import { Pressable, ScrollView, View } from "react-native";
+import { ScrollView, View } from "react-native";
 import { Icon, IconButton, Tab, Toolbar, colors, space } from "@companion/design-system";
 import { useNav } from "./nav-context";
 import { useNotes } from "./NotesProvider";
+import { useTasks } from "./TasksProvider";
 
-/** The app's top toolbar: back/forward history, open-note tabs, and the section-level
- * action (New). Note-scoped actions (pop-out, delete, sync) live in the note view's
- * own sub-toolbar. */
+/** The app's top toolbar: back/forward history, the shared workspace tab strip (notes and
+ * tasks together — each tab is a document or empty), a "+" to add a tab, and the
+ * section-level New action. Per-tab expand pops the document out to its own window. */
 export function AppToolbar() {
   const nav = useNav();
-  const store = useNotes();
+  const notes = useNotes();
+  const tasks = useTasks();
 
-  const inNotes = nav.current.kind === "notes" || nav.current.kind === "note";
-  const noteId = nav.current.kind === "note" ? nav.current.id : null;
+  const inNotes = nav.current.kind === "notes";
+  const inTasks = nav.current.kind === "tasks";
+
+  const labelFor = (kind: "note" | "task", id: string) => {
+    const title = kind === "note" ? notes.byId(id)?.title : tasks.byId(id)?.title;
+    return title || "Untitled";
+  };
 
   const onCreate = async () => {
-    const note = await store.create();
-    nav.openNote(note.id);
+    if (inTasks) {
+      const task = await tasks.create({ title: "Untitled task" });
+      nav.openTask(task.id);
+    } else {
+      const note = await notes.create();
+      nav.openNote(note.id);
+    }
   };
 
   return (
@@ -35,22 +47,29 @@ export function AppToolbar() {
         style={{ flex: 1 }}
         contentContainerStyle={{ flexGrow: 1, alignItems: "center", gap: space.xs }}
       >
-        {nav.tabs.map((id) => (
-          <Tab
-            key={id}
-            label={store.byId(id)?.title || "Untitled"}
-            active={noteId === id}
-            onPress={() => nav.openNote(id)}
-            onClose={() => nav.closeTab(id)}
-          />
-        ))}
-        {/* Empty toolbar space deselects the active note. */}
-        <Pressable onPress={nav.deselect} style={{ flex: 1, alignSelf: "stretch", cursor: "auto" }} aria-label="Deselect note" />
+        {nav.tabs.map((tab, i) => {
+          const ref = tab.ref;
+          return (
+            <Tab
+              key={tab.uid}
+              label={ref ? labelFor(ref.kind, ref.id) : "Nothing selected"}
+              active={i === nav.activeIndex}
+              icon={ref ? <Icon name={ref.kind === "task" ? "tasks" : "file"} size={13} color={colors.textTertiary} /> : undefined}
+              onPress={() => nav.selectTab(i)}
+              onExpand={ref ? () => nav.expandTab(i) : undefined}
+              onClose={() => nav.closeTab(i)}
+            />
+          );
+        })}
+        <IconButton label="New tab" size="sm" onPress={nav.addTab}>
+          <Icon name="plus" size={15} color={colors.textTertiary} />
+        </IconButton>
+        {/* Fills the remaining toolbar width (also a desktop window drag handle). */}
+        <View style={{ flex: 1, alignSelf: "stretch" }} />
       </ScrollView>
 
-      {/* section action */}
-      {inNotes ? (
-        <IconButton label="New note" onPress={onCreate}>
+      {inNotes || inTasks ? (
+        <IconButton label={inTasks ? "New task" : "New note"} onPress={onCreate}>
           <Icon name="plus" color={colors.textSecondary} />
         </IconButton>
       ) : null}

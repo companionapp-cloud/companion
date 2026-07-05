@@ -81,6 +81,20 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.notesConflict()
 	case "notes.conflictResolve":
 		return c.notesConflictResolve(payload)
+	case "tasks.list":
+		return c.tasksList()
+	case "tasks.get":
+		return c.tasksGet(payload)
+	case "tasks.create":
+		return c.tasksCreate(payload)
+	case "tasks.update":
+		return c.tasksUpdate(payload)
+	case "tasks.delete":
+		return c.tasksDelete(payload)
+	case "notify.plan":
+		return c.notifyPlan(payload)
+	case "dates.parse":
+		return c.datesParse(payload)
 	case "trash.list":
 		return c.trashList()
 	case "trash.restore":

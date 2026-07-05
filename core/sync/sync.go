@@ -181,6 +181,7 @@ func New(st *store.Store, t Transport, clock domain.Clock) *Engine {
 	// (a project's area, a member's project) are tolerated because dangling references
 	// are expected and resolve as rows arrive (PLAN §5.1, §6.6).
 	e.register(newRepoSyncer[*domain.Note](st.Notes, clock))
+	e.register(newRepoSyncer[*domain.Task](st.Tasks, clock))
 	e.register(newRepoSyncer[*domain.Area](st.Areas, clock))
 	e.register(newRepoSyncer[*domain.Project](st.Projects, clock))
 	e.register(newRepoSyncer[*domain.ProjectMember](st.ProjectMembers, clock))

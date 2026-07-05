@@ -13,10 +13,12 @@ export interface InputProps {
   autoFocus?: boolean;
   /** Fired when the field loses focus (in addition to clearing the focus ring). */
   onBlur?: () => void;
+  /** Fired when the user presses Enter/Return. */
+  onSubmitEditing?: () => void;
 }
 
 /** Bordered single-line text input with an optional leading icon and focus ring. */
-export function Input({ value, onChangeText, placeholder, leadingIcon, size = "md", secureTextEntry, autoCapitalize, autoFocus, onBlur }: InputProps) {
+export function Input({ value, onChangeText, placeholder, leadingIcon, size = "md", secureTextEntry, autoCapitalize, autoFocus, onBlur, onSubmitEditing }: InputProps) {
   const [focused, setFocused] = useState(false);
   const height = size === "sm" ? control.sm : control.md;
   const fontSize = size === "sm" ? font.size.sm : font.size.base;
@@ -36,6 +38,7 @@ export function Input({ value, onChangeText, placeholder, leadingIcon, size = "m
         secureTextEntry={secureTextEntry}
         autoCapitalize={autoCapitalize}
         autoFocus={autoFocus}
+        onSubmitEditing={onSubmitEditing}
         onFocus={() => setFocused(true)}
         onBlur={() => {
           setFocused(false);

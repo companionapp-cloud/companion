@@ -6,6 +6,9 @@ export type {
   SqliteDriver,
   SqlValue,
   Note,
+  Task,
+  TaskStatus,
+  TaskNotification,
   Area,
   Project,
   ProjectMember,
@@ -17,6 +20,12 @@ export type {
 } from "./types";
 export { notesApi } from "./notes";
 export type { NotesApi, CreateNoteInput, UpdateNoteInput, NoteConflict, NoteConflictAction } from "./notes";
+export { tasksApi } from "./tasks";
+export type { TasksApi, CreateTaskInput, UpdateTaskInput } from "./tasks";
+export { notifyApi } from "./notify";
+export type { NotifyApi } from "./notify";
+export { datesApi } from "./dates";
+export type { DatesApi, ParsedDate } from "./dates";
 export { trashApi } from "./trash";
 export type { TrashApi } from "./trash";
 export { projectsApi } from "./projects";

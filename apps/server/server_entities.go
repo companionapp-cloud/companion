@@ -102,6 +102,127 @@ func scanServerNote(sc rowScanner) (*domain.Note, int64, error) {
 	return &n, seq, nil
 }
 
+// ---- tasks ---------------------------------------------------------------
+
+const taskCols = `id, title, notes_md, status, due_at, remind_at, completed_at, repeat_rule, repeat_seed_id, created_at, updated_at, deleting_at, deleted_at, version, server_seq`
+
+var taskHandler = &entityHandler{
+	typ:   protocol.EntityTask,
+	table: "tasks",
+	upsert: func(s *Server, tx *sql.Tx, uid string, raw []byte, updatedAt time.Time, version, seq int64) error {
+		var t domain.Task
+		if err := json.Unmarshal(raw, &t); err != nil {
+			return err
+		}
+		_, err := tx.Exec(s.rebind(
+			`INSERT INTO tasks (id, user_id, title, notes_md, status, due_at, remind_at, completed_at, repeat_rule, repeat_seed_id, created_at, updated_at, deleting_at, deleted_at, version, server_seq)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT (id) DO UPDATE SET
+			   title = excluded.title, notes_md = excluded.notes_md, status = excluded.status,
+			   due_at = excluded.due_at, remind_at = excluded.remind_at, completed_at = excluded.completed_at,
+			   repeat_rule = excluded.repeat_rule, repeat_seed_id = excluded.repeat_seed_id,
+			   updated_at = excluded.updated_at, deleting_at = excluded.deleting_at,
+			   deleted_at = excluded.deleted_at, version = excluded.version, server_seq = excluded.server_seq;`),
+			t.ID, uid, t.Title, t.NotesMD, t.Status,
+			fmtTime(t.DueAt), fmtTime(t.RemindAt), fmtTime(t.CompletedAt), t.RepeatRule, t.RepeatSeedID,
+			t.CreatedAt.UTC().Format(timeFormat), updatedAt.Format(timeFormat),
+			fmtTime(t.DeletingAt), fmtTime(t.DeletedAt), version, seq)
+		return err
+	},
+	loadRaw: func(s *Server, tx *sql.Tx, uid, id string) ([]byte, error) {
+		row := tx.QueryRow(s.rebind(`SELECT `+taskCols+` FROM tasks WHERE id = ? AND user_id = ?;`), id, uid)
+		t, _, err := scanServerTask(row)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(t)
+	},
+	pull: func(s *Server, uid string, cursor, limit int64) ([]seqRow, error) {
+		rows, err := s.query(`SELECT `+taskCols+` FROM tasks WHERE user_id = ? AND server_seq > ? ORDER BY server_seq ASC LIMIT ?;`, uid, cursor, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var out []seqRow
+		for rows.Next() {
+			t, seq, err := scanServerTask(rows)
+			if err != nil {
+				return nil, err
+			}
+			body, err := json.Marshal(t)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, seqRow{seq, protocol.PullChange{EntityType: protocol.EntityTask, Row: body, ServerSeq: seq}})
+		}
+		return out, rows.Err()
+	},
+}
+
+func scanServerTask(sc rowScanner) (*domain.Task, int64, error) {
+	var (
+		t                                                 domain.Task
+		notesMD                                           sql.NullString
+		dueAt, remindAt, completedAt, deletingAt, deleted sql.NullString
+		repeatRule, repeatSeedID                          sql.NullString
+		createdAt, updatedAt                              string
+		seq                                               int64
+	)
+	if err := sc.Scan(&t.ID, &t.Title, &notesMD, &t.Status, &dueAt, &remindAt, &completedAt,
+		&repeatRule, &repeatSeedID, &createdAt, &updatedAt, &deletingAt, &deleted, &t.Version, &seq); err != nil {
+		return nil, 0, err
+	}
+	t.NotesMD = notesMD.String
+	var err error
+	if t.CreatedAt, err = time.Parse(timeFormat, createdAt); err != nil {
+		return nil, 0, err
+	}
+	if t.UpdatedAt, err = time.Parse(timeFormat, updatedAt); err != nil {
+		return nil, 0, err
+	}
+	if t.DueAt, err = parseServerTime(dueAt); err != nil {
+		return nil, 0, err
+	}
+	if t.RemindAt, err = parseServerTime(remindAt); err != nil {
+		return nil, 0, err
+	}
+	if t.CompletedAt, err = parseServerTime(completedAt); err != nil {
+		return nil, 0, err
+	}
+	if t.DeletingAt, err = parseServerTime(deletingAt); err != nil {
+		return nil, 0, err
+	}
+	if t.DeletedAt, err = parseServerTime(deleted); err != nil {
+		return nil, 0, err
+	}
+	if repeatRule.Valid {
+		t.RepeatRule = &repeatRule.String
+	}
+	if repeatSeedID.Valid {
+		t.RepeatSeedID = &repeatSeedID.String
+	}
+	return &t, seq, nil
+}
+
+// fmtTime binds a nullable timestamp (or NULL). parseServerTime is its inverse.
+func fmtTime(t *time.Time) any {
+	if t == nil {
+		return nil
+	}
+	return t.UTC().Format(timeFormat)
+}
+
+func parseServerTime(s sql.NullString) (*time.Time, error) {
+	if !s.Valid {
+		return nil, nil
+	}
+	parsed, err := time.Parse(timeFormat, s.String)
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
+}
+
 // ---- areas ---------------------------------------------------------------
 
 const areaCols = `id, name, color, sort_order, created_at, updated_at, deleted_at, version, server_seq`

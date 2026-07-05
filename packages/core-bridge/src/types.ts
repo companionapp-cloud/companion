@@ -40,6 +40,38 @@ export interface Note {
   dirty: boolean;
 }
 
+/** A task's lifecycle status (mirrors core/domain task status constants). */
+export type TaskStatus = "open" | "done" | "cancelled";
+
+/** A task as returned by the core (mirrors core/domain.Task). A task is also a graph node
+ *  — its `notesMd` is scanned for wikilinks like a note's body. */
+export interface Task {
+  id: string;
+  title: string;
+  notesMd: string;
+  status: TaskStatus;
+  dueAt?: string | null;
+  remindAt?: string | null;
+  completedAt?: string | null;
+  repeatRule?: string | null;
+  repeatSeedId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletingAt?: string | null;
+  deletedAt?: string | null;
+  version: number;
+  dirty: boolean;
+}
+
+/** A planned notification (mirrors core/notify.Notification). */
+export interface TaskNotification {
+  taskId: string;
+  kind: "reminder" | "due";
+  fireAt: string;
+  title: string;
+  body: string;
+}
+
 /** The kinds of entity that can be trashed (mirrors the server's trashable tables). */
 export type TrashEntityType = "note" | "task" | "habit";
 

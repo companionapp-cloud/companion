@@ -5,6 +5,9 @@ import { TrashScreen } from '@companion/app';
 import { HomeScreen } from './screens/HomeScreen';
 import { NotesListScreen } from './screens/NotesListScreen';
 import { NoteEditorScreen } from './screens/NoteEditorScreen';
+import { TasksListScreen } from './screens/TasksListScreen';
+import { TaskEditorScreen } from './screens/TaskEditorScreen';
+import { TaskGraphScreen } from './screens/TaskGraphScreen';
 import { NoteGraphScreen } from './screens/NoteGraphScreen';
 import { GraphScreen } from './screens/GraphScreen';
 import { PlaceholderScreen } from './screens/PlaceholderScreen';
@@ -32,7 +35,9 @@ export type RootStackParamList = {
   Project: { projectId: string };
   // Shared detail/overlay screens.
   NoteEditor: { id: string };
+  TaskEditor: { id: string };
   NoteGraph: { id: string };
+  TaskGraph: { id: string };
   Settings: undefined;
 };
 
@@ -60,14 +65,16 @@ export function MobileShell() {
         <RootStack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
         <RootStack.Screen name="Chat" component={PlaceholderScreen} options={{ title: 'Chat' }} />
         <RootStack.Screen name="Notes" component={NotesListScreen} options={{ title: 'All notes' }} />
-        <RootStack.Screen name="Tasks" component={PlaceholderScreen} options={{ title: 'Tasks' }} />
+        <RootStack.Screen name="Tasks" component={TasksListScreen} options={{ title: 'All tasks' }} />
         <RootStack.Screen name="Habits" component={PlaceholderScreen} options={{ title: 'Habits' }} />
         <RootStack.Screen name="Calendar" component={PlaceholderScreen} options={{ title: 'Calendar' }} />
         <RootStack.Screen name="Graph" component={GraphScreen} options={{ title: 'Graph' }} />
         <RootStack.Screen name="Trash" component={TrashScreen} options={{ title: 'Trash' }} />
         <RootStack.Screen name="Project" component={ProjectScreen} />
         <RootStack.Screen name="NoteEditor" component={NoteEditorScreen} options={{ title: '' }} />
+        <RootStack.Screen name="TaskEditor" component={TaskEditorScreen} options={{ title: 'Task' }} />
         <RootStack.Screen name="NoteGraph" component={NoteGraphScreen} options={{ title: 'Graph' }} />
+        <RootStack.Screen name="TaskGraph" component={TaskGraphScreen} options={{ title: 'Graph' }} />
         <RootStack.Screen
           name="Settings"
           component={SettingsScreen}

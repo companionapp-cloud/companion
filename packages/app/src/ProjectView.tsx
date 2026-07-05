@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
-import type { Note, ProjectMember } from "@companion/core-bridge";
+import type { Note, ProjectMember, Task } from "@companion/core-bridge";
 import {
   Button,
   Center,
@@ -20,7 +20,9 @@ import { useNav, type ProjectSection } from "./nav-context";
 import { useCore } from "./CoreContext";
 import { useProjects } from "./ProjectsProvider";
 import { useNotes } from "./NotesProvider";
+import { useTasks } from "./TasksProvider";
 import { NoteEditor } from "./NoteEditor";
+import { TaskEditor, TaskRow } from "./TaskEditor";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 const SECTIONS: { id: ProjectSection; label: string; icon: IconName }[] = [
@@ -40,6 +42,7 @@ export function ProjectView() {
   const { core } = useCore();
   const { projects, membershipsForProject } = useProjects();
   const notesStore = useNotes();
+  const tasksStore = useTasks();
   const loc = nav.current;
 
   // A project's live memberships, kept fresh as they change locally or via sync.
@@ -64,6 +67,11 @@ export function ProjectView() {
     () => noteMembers.map((m) => notesStore.byId(m.entityId)).filter((n): n is Note => !!n),
     [noteMembers, notesStore],
   );
+  const taskMembers = useMemo(() => members.filter((m) => m.entityType === "task"), [members]);
+  const tasks = useMemo(
+    () => taskMembers.map((m) => tasksStore.byId(m.entityId)).filter((t): t is Task => !!t),
+    [taskMembers, tasksStore],
+  );
 
   if (loc.kind !== "project") return null;
   const project = projects.find((p) => p.id === loc.projectId);
@@ -76,7 +84,7 @@ export function ProjectView() {
   }
 
   return (
-    <SplitView storageKey="companion.project.listWidth" defaultWidth={layout.listW} minWidth={240} maxWidth={460} aside={<ListColumn notes={notes} noteCount={noteMembers.length} />}>
+    <SplitView storageKey="companion.project.listWidth" defaultWidth={layout.listW} minWidth={240} maxWidth={460} aside={<ListColumn notes={notes} tasks={tasks} noteCount={noteMembers.length} taskCount={taskMembers.length} />}>
       <DetailPane notes={notes} />
     </SplitView>
   );
@@ -84,18 +92,24 @@ export function ProjectView() {
 
 /** The list column: a two-level push sub-nav. Level 0 shows the section menu; pressing
  * a section pushes to that section's item list (with a back to the menu). */
-function ListColumn({ notes, noteCount }: { notes: Note[]; noteCount: number }) {
+function ListColumn({ notes, tasks, noteCount, taskCount }: { notes: Note[]; tasks: Task[]; noteCount: number; taskCount: number }) {
   const nav = useNav();
   const notesStore = useNotes();
+  const tasksStore = useTasks();
   const { addMember } = useProjects();
   const loc = nav.current;
   if (loc.kind !== "project") return null;
   const { projectId, section, itemId } = loc;
 
-  const createInProject = async () => {
+  const createNoteInProject = async () => {
     const note = await notesStore.create();
     await addMember(projectId, "note", note.id);
     nav.openProjectItem(projectId, "notes", note.id);
+  };
+  const createTaskInProject = async () => {
+    const task = await tasksStore.create({ title: "Untitled task" });
+    await addMember(projectId, "task", task.id);
+    nav.openProjectItem(projectId, "tasks", task.id);
   };
 
   // Section list (level 1).
@@ -110,7 +124,11 @@ function ListColumn({ notes, noteCount }: { notes: Note[]; noteCount: number }) 
             {SECTION_LABEL[section]}
           </Text>
           {section === "notes" ? (
-            <IconButton label="New note" size="sm" onPress={createInProject}>
+            <IconButton label="New note" size="sm" onPress={createNoteInProject}>
+              <Icon name="plus" size={16} color={colors.textSecondary} />
+            </IconButton>
+          ) : section === "tasks" ? (
+            <IconButton label="New task" size="sm" onPress={createTaskInProject}>
               <Icon name="plus" size={16} color={colors.textSecondary} />
             </IconButton>
           ) : null}
@@ -131,6 +149,22 @@ function ListColumn({ notes, noteCount }: { notes: Note[]; noteCount: number }) 
             ) : (
               <Text tone="tertiary" variant="caption" style={styles.empty}>
                 No notes yet. Add one with ＋, or add existing notes from a note’s “Projects” menu.
+              </Text>
+            )
+          ) : section === "tasks" ? (
+            tasks.length ? (
+              tasks.map((t) => (
+                <TaskRow
+                  key={t.id}
+                  task={t}
+                  selected={t.id === itemId}
+                  onPress={() => nav.openProjectItem(projectId, "tasks", t.id)}
+                  onToggle={() => void tasksStore.setStatus(t.id, t.status === "done" ? "open" : "done")}
+                />
+              ))
+            ) : (
+              <Text tone="tertiary" variant="caption" style={styles.empty}>
+                No tasks yet. Add one with ＋, or add existing tasks from a task’s “Projects” menu.
               </Text>
             )
           ) : (
@@ -157,7 +191,7 @@ function ListColumn({ notes, noteCount }: { notes: Note[]; noteCount: number }) 
             key={s.id}
             icon={<Icon name={s.icon} size={18} color={colors.textSecondary} />}
             title={s.label}
-            trailing={s.id === "notes" ? String(noteCount) : undefined}
+            trailing={s.id === "notes" ? String(noteCount) : s.id === "tasks" ? String(taskCount) : undefined}
             hasChildren
             onPress={() => nav.openProjectSection(projectId, s.id)}
           />
@@ -167,11 +201,12 @@ function ListColumn({ notes, noteCount }: { notes: Note[]; noteCount: number }) 
   );
 }
 
-/** The detail pane: the project's home (settings) at the root, a selected note, or a
- * prompt to pick one. */
+/** The detail pane: the project's home (settings) at the root, a selected note or task, or
+ * a prompt to pick one. */
 function DetailPane({ notes }: { notes: Note[] }) {
   const nav = useNav();
   const notesStore = useNotes();
+  const tasksStore = useTasks();
   const loc = nav.current;
   if (loc.kind !== "project") return null;
   const { section, itemId } = loc;
@@ -199,10 +234,38 @@ function DetailPane({ notes }: { notes: Note[] }) {
     );
   }
 
+  if (section === "tasks" && itemId) {
+    const task = tasksStore.byId(itemId);
+    if (!task) {
+      return (
+        <Center>
+          <Text tone="tertiary">This task is gone.</Text>
+        </Center>
+      );
+    }
+    return (
+      <TaskEditor
+        key={task.id}
+        task={task}
+        save={tasksStore.update}
+        onDelete={async (id) => {
+          await tasksStore.remove(id);
+          nav.openProjectSection(loc.projectId, "tasks");
+        }}
+      />
+    );
+  }
+
   if (section) {
+    const prompt =
+      section === "notes"
+        ? "Select a note, or start a new one."
+        : section === "tasks"
+          ? "Select a task, or add a new one."
+          : `${SECTION_LABEL[section]} land in a later milestone.`;
     return (
       <Center>
-        <Text tone="tertiary">{section === "notes" ? "Select a note, or start a new one." : `${SECTION_LABEL[section]} land in a later milestone.`}</Text>
+        <Text tone="tertiary">{prompt}</Text>
       </Center>
     );
   }

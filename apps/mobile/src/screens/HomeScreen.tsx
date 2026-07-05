@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { SidebarProject } from '@companion/core-bridge';
-import { useNotes, useProjects, SortableList } from '@companion/app';
+import { useNotes, useProjects, useTasks, useCore, SortableList } from '@companion/app';
 import { Icon, IconButton, Input, ProgressRing, Text, colors, font, radius, space, type IconName } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
 import { Card, CardRow, CountPill, IconTile, SectionLabel } from '../ui/native';
@@ -260,22 +260,96 @@ function ProjectRow({
   );
 }
 
-/** Quick-capture bottom sheet: dump text, get a note. Tasks/chat routing lands with
- * those milestones; for now it creates a note and opens it. */
-function CaptureSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
-  const nav = useNavigation<Nav>();
-  const insets = useSafeAreaInsets();
-  const store = useNotes();
-  const [draft, setDraft] = useState('');
+type CaptureKind = 'note' | 'task';
 
-  const newNote = async () => {
-    const text = draft.trim();
-    setDraft('');
-    onClose();
-    const title = text.split('\n')[0].slice(0, 60);
-    const note = await store.create(text ? { title, contentMd: text } : undefined);
-    nav.navigate('NoteEditor', { id: note.id });
+/** Quick-capture bottom sheet, redesigned as a two-question form (a note or a task).
+ *  Q1 is a pill toggle; Q2 is the entry form for the chosen kind. Notes are a plain-text
+ *  quick entry (no ProseMirror); tasks capture a title plus natural-language due / reminder
+ *  fields (parsed in core via dates.parse). Both create-and-close — quick capture shouldn't
+ *  yank you into an editor. */
+function CaptureSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const insets = useSafeAreaInsets();
+  const notes = useNotes();
+  const tasks = useTasks();
+  const { dates } = useCore();
+
+  const [kind, setKind] = useState<CaptureKind>('note');
+  const [noteDraft, setNoteDraft] = useState('');
+  const [taskTitle, setTaskTitle] = useState('');
+  const [due, setDue] = useState('');
+  const [dueResolved, setDueResolved] = useState<string | null>(null);
+  const [dueFailed, setDueFailed] = useState(false);
+  const [remind, setRemind] = useState('');
+  const [remindResolved, setRemindResolved] = useState<string | null>(null);
+  const [remindFailed, setRemindFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  // Fresh form every time the sheet opens.
+  useEffect(() => {
+    if (!visible) return;
+    setKind('note');
+    setNoteDraft('');
+    setTaskTitle('');
+    setDue('');
+    setDueResolved(null);
+    setDueFailed(false);
+    setRemind('');
+    setRemindResolved(null);
+    setRemindFailed(false);
+    setBusy(false);
+  }, [visible]);
+
+  // Parse a NL field; returns the ISO timestamp, `null` when empty, or 'invalid' when the
+  // text couldn't be understood. Shared by the live preview and the final submit.
+  const parseNl = async (text: string): Promise<string | null | 'invalid'> => {
+    const t = text.trim();
+    if (!t) return null;
+    const parsed = await dates.parse(t);
+    return parsed ? parsed.at : 'invalid';
   };
+
+  const previewDue = async () => {
+    const r = await parseNl(due);
+    setDueFailed(r === 'invalid');
+    setDueResolved(typeof r === 'string' && r !== 'invalid' ? formatResolved(r) : null);
+  };
+  const previewRemind = async () => {
+    const r = await parseNl(remind);
+    setRemindFailed(r === 'invalid');
+    setRemindResolved(typeof r === 'string' && r !== 'invalid' ? formatResolved(r) : null);
+  };
+
+  const saveNote = async () => {
+    const text = noteDraft.trim();
+    if (!text || busy) return;
+    setBusy(true);
+    const title = text.split('\n')[0].slice(0, 60);
+    await notes.create({ title, contentMd: text });
+    onClose();
+  };
+
+  const saveTask = async () => {
+    const title = taskTitle.trim();
+    if (!title || busy) return;
+    setBusy(true);
+    const dueAt = await parseNl(due);
+    if (dueAt === 'invalid') {
+      setDueFailed(true);
+      setBusy(false);
+      return;
+    }
+    const remindAt = await parseNl(remind);
+    if (remindAt === 'invalid') {
+      setRemindFailed(true);
+      setBusy(false);
+      return;
+    }
+    await tasks.create({ title, dueAt: dueAt ?? undefined, remindAt: remindAt ?? undefined });
+    onClose();
+  };
+
+  const canSubmit = kind === 'note' ? noteDraft.trim().length > 0 : taskTitle.trim().length > 0;
+  const submit = kind === 'note' ? saveNote : saveTask;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -283,35 +357,136 @@ function CaptureSheet({ visible, onClose }: { visible: boolean; onClose: () => v
         <Pressable style={styles.scrim} onPress={onClose} />
         <View style={[styles.sheet, { paddingBottom: insets.bottom + space.xl }]}>
           <View style={styles.grabber} />
-        <Text style={styles.sheetTitle}>Quick capture</Text>
-        <Text variant="caption" tone="tertiary" style={{ marginBottom: space.md }}>
-          Dump it here — I&apos;ll file it where it belongs.
-        </Text>
-        <TextInput
-          value={draft}
-          onChangeText={setDraft}
-          placeholder="Type anything. Use [[ to link a note."
-          placeholderTextColor={colors.textTertiary}
-          multiline
-          autoFocus
-          style={styles.sheetInput}
-        />
-        <View style={styles.sheetActions}>
-          <Pressable style={[styles.sheetBtn, styles.sheetBtnGhost]} onPress={onClose}>
-            <Text variant="label" tone="secondary">
-              Cancel
-            </Text>
-          </Pressable>
-          <Pressable style={[styles.sheetBtn, styles.sheetBtnPrimary]} onPress={newNote}>
-            <Text variant="label" style={{ color: colors.textInverse, fontWeight: font.weight.semibold }}>
-              New note
-            </Text>
-          </Pressable>
-        </View>
+
+          {/* Q1: note or task */}
+          <View style={styles.segment}>
+            {(['note', 'task'] as const).map((k) => (
+              <Pressable
+                key={k}
+                onPress={() => setKind(k)}
+                style={[styles.segmentBtn, kind === k ? styles.segmentBtnActive : null]}
+                aria-label={k === 'note' ? 'Capture a note' : 'Capture a task'}
+              >
+                <Icon name={k === 'note' ? 'notes' : 'tasks'} size={15} color={kind === k ? colors.textInverse : colors.textSecondary} />
+                <Text
+                  variant="label"
+                  style={{ color: kind === k ? colors.textInverse : colors.textSecondary, fontWeight: font.weight.semibold }}
+                >
+                  {k === 'note' ? 'Note' : 'Task'}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
+          {/* Q2: the form for that kind */}
+          {kind === 'note' ? (
+            <TextInput
+              value={noteDraft}
+              onChangeText={setNoteDraft}
+              placeholder="Type anything. Use [[ to link a note."
+              placeholderTextColor={colors.textTertiary}
+              multiline
+              autoFocus
+              style={styles.sheetInput}
+            />
+          ) : (
+            <View style={{ gap: space.lg }}>
+              <Field label="What do you need to do?">
+                <TextInput
+                  value={taskTitle}
+                  onChangeText={setTaskTitle}
+                  placeholder="e.g. Email the design draft"
+                  placeholderTextColor={colors.textTertiary}
+                  autoFocus
+                  style={styles.taskTitleInput}
+                />
+              </Field>
+              <Field label="When is this due?" hint={dueResolved} error={dueFailed ? "Couldn't read a date — try “next friday”." : null}>
+                <Input
+                  size="sm"
+                  value={due}
+                  onChangeText={(t) => {
+                    setDue(t);
+                    setDueFailed(false);
+                  }}
+                  onSubmitEditing={() => void previewDue()}
+                  onBlur={() => void previewDue()}
+                  placeholder="Natural language, e.g. tomorrow"
+                  leadingIcon={<Icon name="calendar" size={14} color={colors.textTertiary} />}
+                />
+              </Field>
+              <Field
+                label="Do you want me to remind you?"
+                hint={remindResolved}
+                error={remindFailed ? "Couldn't read a time — try “tomorrow 9am”." : null}
+              >
+                <Input
+                  size="sm"
+                  value={remind}
+                  onChangeText={(t) => {
+                    setRemind(t);
+                    setRemindFailed(false);
+                  }}
+                  onSubmitEditing={() => void previewRemind()}
+                  onBlur={() => void previewRemind()}
+                  placeholder="Natural language, e.g. in 2 hours"
+                  leadingIcon={<Icon name="calendar" size={14} color={colors.textTertiary} />}
+                />
+              </Field>
+            </View>
+          )}
+
+          <View style={styles.sheetActions}>
+            <Pressable style={[styles.sheetBtn, styles.sheetBtnGhost]} onPress={onClose}>
+              <Text variant="label" tone="secondary">
+                Cancel
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.sheetBtn, styles.sheetBtnPrimary, !canSubmit || busy ? styles.sheetBtnDisabled : null]}
+              onPress={() => void submit()}
+              disabled={!canSubmit || busy}
+            >
+              <Text variant="label" style={{ color: colors.textInverse, fontWeight: font.weight.semibold }}>
+                {kind === 'note' ? 'Save note' : 'Save task'}
+              </Text>
+            </Pressable>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </Modal>
   );
+}
+
+/** A labelled form field for the task capture form, with an optional resolved-date hint
+ *  (green confirmation of what a NL phrase parsed to) or an error line. */
+function Field({ label, hint, error, children }: { label: string; hint?: string | null; error?: string | null; children: ReactNode }) {
+  return (
+    <View style={{ gap: space.xs }}>
+      <Text variant="label" tone="secondary" style={{ fontWeight: font.weight.medium }}>
+        {label}
+      </Text>
+      {children}
+      {error ? (
+        <Text variant="caption" tone="accent">
+          {error}
+        </Text>
+      ) : hint ? (
+        <Text variant="caption" style={{ color: colors.success }}>
+          {hint}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/** Format a parsed ISO timestamp as a short confirmation, e.g. "Fri, Jul 10 · 5:00 PM". */
+function formatResolved(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const date = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return `${date} · ${time}`;
 }
 
 function CreateInput({
@@ -391,7 +566,35 @@ const styles = StyleSheet.create({
     padding: space.xl,
   },
   grabber: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.borderDefault, alignSelf: 'center', marginBottom: space.lg },
-  sheetTitle: { fontSize: 17, fontWeight: font.weight.semibold, color: colors.textPrimary, marginBottom: space.xs },
+  segment: {
+    flexDirection: 'row',
+    gap: space.xs,
+    padding: 3,
+    borderRadius: radius.full,
+    backgroundColor: colors.surfaceSunken,
+    marginBottom: space.lg,
+  },
+  segmentBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.xs,
+    height: 38,
+    borderRadius: radius.full,
+  },
+  segmentBtnActive: { backgroundColor: colors.accent },
+  taskTitleInput: {
+    borderWidth: 1,
+    borderColor: colors.borderDefault,
+    backgroundColor: colors.surfaceSunken,
+    borderRadius: radius.lg,
+    paddingHorizontal: space.lg,
+    height: 46,
+    fontSize: 15,
+    fontFamily: font.sans,
+    color: colors.textPrimary,
+  },
   sheetInput: {
     minHeight: 96,
     borderWidth: 1,
@@ -409,4 +612,5 @@ const styles = StyleSheet.create({
   sheetBtn: { flex: 1, height: 46, borderRadius: radius.full, alignItems: 'center', justifyContent: 'center' },
   sheetBtnGhost: { borderWidth: 1, borderColor: colors.borderDefault, backgroundColor: colors.surfaceCard },
   sheetBtnPrimary: { backgroundColor: colors.accent },
+  sheetBtnDisabled: { opacity: 0.4 },
 });
