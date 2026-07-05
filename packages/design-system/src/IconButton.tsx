@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Pressable } from "react-native";
-import { noDragRegion } from "./platform";
+import { noDragRegion, type PressState } from "./platform";
 import { colors, radius } from "./tokens";
 
 export type IconButtonSize = "sm" | "md";
@@ -22,7 +22,7 @@ export function IconButton({ children, label, onPress, size = "md", active = fal
       onPress={disabled ? undefined : onPress}
       disabled={disabled}
       aria-label={label}
-      style={({ hovered, pressed }) => [
+      style={({ hovered, pressed }: PressState) => [
         noDragRegion,
         {
           width: dim,
@@ -39,7 +39,9 @@ export function IconButton({ children, label, onPress, size = "md", active = fal
                 : pressed
                   ? colors.surfaceActive
                   : colors.surfaceHover,
-          transform: pressed && !disabled ? [{ scale: 0.94 }] : undefined,
+          // Always a valid transform array: on the New Architecture, clearing it back
+          // to undefined is sent to native as null, and processTransform(null) crashes.
+          transform: [{ scale: pressed && !disabled ? 0.94 : 1 }],
         },
       ]}
     >

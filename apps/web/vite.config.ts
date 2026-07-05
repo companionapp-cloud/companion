@@ -28,7 +28,7 @@ export default defineConfig(({ mode }) => ({
   optimizeDeps: {
     // Source-only workspace packages must be transpiled by Vite, not prebundled.
     // wa-sqlite loads its .wasm via new URL(import.meta.url); prebundling breaks that.
-    exclude: ["@companion/app", "@companion/core-bridge", "@companion/design-system", "wa-sqlite"],
+    exclude: ["@companion/app", "@companion/core-bridge", "@companion/design-system", "@companion/editor", "wa-sqlite"],
   },
   server: { port: 5273 },
 }));

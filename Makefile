@@ -5,10 +5,11 @@ GO ?= go
 BUILD_DIR ?= build
 WASM_EXEC := $(shell $(GO) env GOROOT)/lib/wasm/wasm_exec.js
 WEB_PUBLIC := apps/web/public
+MOBILE_MODULE := apps/mobile/modules/companion-core
 
 .PHONY: all test test-go fmt vet desktop desktop-frontend desktop-run core-wasm web-assets \
-        web-run server server-run gomobile-init core-android core-ios \
-        db-up db-down db-logs db-reset clean
+        web-run server server-run gomobile-init core-android core-ios android-lib \
+        mobile-artifacts mobile-run db-up db-down db-logs db-reset clean
 
 all: test
 
@@ -78,10 +79,11 @@ gomobile-init:
 	$(GO) install golang.org/x/mobile/cmd/gobind@latest
 	gomobile init
 
-## core-android: bind the mobile core -> build/core.aar (needs Android SDK + NDK)
+## core-android: bind the mobile core -> build/core.aar (needs Android SDK + NDK).
+## -androidapi 21 is the NDK's minimum supported platform (default 16 is rejected).
 core-android:
 	mkdir -p $(BUILD_DIR)
-	cd core && gomobile bind -target=android -javapkg=so.companion.core \
+	cd core && gomobile bind -target=android -androidapi 21 -javapkg=so.companion.core \
 		-o ../$(BUILD_DIR)/core.aar ./cmd/mobile
 
 ## core-ios: bind the mobile core -> build/Core.xcframework (needs Xcode)
@@ -89,6 +91,31 @@ core-ios:
 	mkdir -p $(BUILD_DIR)
 	cd core && gomobile bind -target=ios \
 		-o ../$(BUILD_DIR)/Core.xcframework ./cmd/mobile
+
+## android-lib: decompose build/core.aar into the Expo module. Local .aar file-deps
+## aren't resolvable under Expo/RN's centralized Gradle repositories, so we ship the
+## Java classes as a plain jar (libs/core.jar) and the JNI libs under jniLibs/ (which
+## AGP packages automatically).
+android-lib: core-android
+	rm -rf $(MOBILE_MODULE)/android/libs $(MOBILE_MODULE)/android/src/main/jniLibs $(BUILD_DIR)/core-aar
+	mkdir -p $(MOBILE_MODULE)/android/libs $(MOBILE_MODULE)/android/src/main/jniLibs
+	cd $(BUILD_DIR) && unzip -o -q core.aar classes.jar 'jni/*' -d core-aar
+	cp $(BUILD_DIR)/core-aar/classes.jar $(MOBILE_MODULE)/android/libs/core.jar
+	cp -R $(BUILD_DIR)/core-aar/jni/. $(MOBILE_MODULE)/android/src/main/jniLibs/
+	rm -rf $(BUILD_DIR)/core-aar
+
+## mobile-artifacts: build both bindings and place them into the Expo local module
+## (apps/mobile/modules/companion-core) where the podspec/build.gradle expect them.
+mobile-artifacts: android-lib core-ios
+	rm -rf $(MOBILE_MODULE)/ios/vendor/Core.xcframework
+	mkdir -p $(MOBILE_MODULE)/ios/vendor
+	cp -R $(BUILD_DIR)/Core.xcframework $(MOBILE_MODULE)/ios/vendor/Core.xcframework
+
+## mobile-run: build the Android core binding + run the mobile app on Android
+## (emulator or connected device). Only needs the aar, so no Xcode required; the
+## first run regenerates the native android/ project via expo prebuild.
+mobile-run: android-lib
+	npm run android -w @companion/mobile
 
 ## db-up: start the local development database(s) in the background
 db-up:

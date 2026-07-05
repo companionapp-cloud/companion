@@ -22,6 +22,7 @@ import {
   layout,
   radius,
   space,
+  transition,
   type IconName,
 } from "@companion/design-system";
 import { NavContext, useNav, type NavLocation, type Navigator, type ViewId } from "./nav-context";
@@ -238,10 +239,8 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
             paddingTop: space.md + topInset,
             paddingBottom: space.md,
             overflow: "hidden",
-            transitionProperty: "width",
-            transitionDuration: "200ms",
-            transitionTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
           },
+          transition("width", 200),
         ]}
       >
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.lg, height: 40, paddingHorizontal: space.sm, marginBottom: space.md }}>

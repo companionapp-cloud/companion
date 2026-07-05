@@ -1,0 +1,42 @@
+{
+  "name": "@companion/editor",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build:editor": "node scripts/build-editor.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "prosemirror-commands": "1.7.1",
+    "prosemirror-history": "1.5.0",
+    "prosemirror-keymap": "1.2.3",
+    "prosemirror-markdown": "1.13.4",
+    "prosemirror-model": "1.25.9",
+    "prosemirror-state": "1.4.4",
+    "prosemirror-view": "1.42.0"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "react-native": "*",
+    "react-native-webview": "*"
+  },
+  "peerDependenciesMeta": {
+    "react-native": {
+      "optional": true
+    },
+    "react-native-webview": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/react": "19.2.2",
+    "esbuild": "0.28.1",
+    "react": "19.2.3",
+    "typescript": "5.9.3"
+  }
+}

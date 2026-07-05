@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Text as RNText, StyleSheet, type StyleProp } from "react-native";
+import { Text as RNText, StyleSheet, type StyleProp, type TextStyle } from "react-native";
 import { colors, font } from "./tokens";
 
 export type TextVariant =
@@ -17,7 +17,7 @@ export interface TextProps {
   variant?: TextVariant;
   tone?: TextTone;
   numberOfLines?: number;
-  style?: StyleProp;
+  style?: StyleProp<TextStyle>;
   children?: ReactNode;
 }
 

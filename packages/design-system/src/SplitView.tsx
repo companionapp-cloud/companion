@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { StyleSheet, View, type StyleProp } from "react-native";
+import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import { colors, layout } from "./tokens";
 
 export interface SplitViewProps {
@@ -15,7 +15,7 @@ export interface SplitViewProps {
   maxWidth?: number;
   /** localStorage key. When set, the aside width persists across sessions. */
   storageKey?: string;
-  style?: StyleProp;
+  style?: StyleProp<ViewStyle>;
 }
 
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
@@ -157,7 +157,8 @@ const styles = StyleSheet.create({
     zIndex: 1,
     alignItems: "center",
     justifyContent: "center",
-    cursor: "col-resize",
+    // Web-only resize cursor; not a valid native CursorValue, so cast (no-op on native).
+    cursor: "col-resize" as unknown as "auto",
   },
   line: { width: 1, height: "100%", backgroundColor: colors.borderSubtle },
   lineActive: { backgroundColor: colors.accent },

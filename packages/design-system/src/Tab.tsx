@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet } from "react-native";
 import { Icon } from "./Icon";
-import { noDragRegion } from "./platform";
+import { noDragRegion, type PressState } from "./platform";
 import { Text } from "./Text";
 import { colors, radius, space } from "./tokens";
 
@@ -17,7 +17,7 @@ export function Tab({ label, active, onPress, onClose }: TabProps) {
   return (
     <Pressable
       onPress={onPress}
-      style={({ hovered }) => [
+      style={({ hovered }: PressState) => [
         noDragRegion,
         styles.tab,
         {
@@ -38,7 +38,7 @@ export function Tab({ label, active, onPress, onClose }: TabProps) {
         <Pressable
           onPress={onClose}
           aria-label="Close tab"
-          style={({ hovered }) => [
+          style={({ hovered }: PressState) => [
             styles.close,
             { backgroundColor: hovered ? colors.surfaceActive : "transparent" },
           ]}

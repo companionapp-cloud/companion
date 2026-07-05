@@ -60,4 +60,12 @@ func (c *Core) Close() error {
 // eventAdapter bridges the gomobile-exported EventHandler to bridge.EventHandler.
 type eventAdapter struct{ h EventHandler }
 
-func (a eventAdapter) OnEvent(name string, payload []byte) { a.h.OnEvent(name, payload) }
+func (a eventAdapter) OnEvent(name string, payload []byte) {
+	// gomobile marshals a nil []byte as a null on the Java/Swift side; a Kotlin handler
+	// with a non-null parameter would then crash. Normalize to an empty (non-nil) slice
+	// so payload-less events cross the bridge as an empty byte array.
+	if payload == nil {
+		payload = []byte{}
+	}
+	a.h.OnEvent(name, payload)
+}

@@ -1,64 +1,98 @@
-# Companion — Mobile (Expo + gomobile)
+# @companion/mobile
 
-Milestone 3: iOS + Android. The Go core is compiled with **`gomobile bind`** into a
-native library (`Core.xcframework` / `core.aar`), wrapped by a **local Expo module**
-that exposes `invoke` + an event emitter to JS. The shared React Native UI
-(`@companion/app`) renders on device via Metro — the same screens as web/desktop.
+The iOS + Android client (PLAN §4). It reuses the shared **data layer** and
+**design-system primitives** from `@companion/app` / `@companion/design-system`, but
+wraps them in a **mobile-native shell** (bottom tabs + stack) — the desktop `AppShell`
+(hover rail, split-view, note tabs, window chrome) is intentionally *not* used here.
+The Go core is compiled natively via **gomobile** instead of WASM (web) / HTTP (desktop).
 
 ```
-@companion/app  (shared RN UI)
-      │ CoreBridge
-      ▼
-@companion/core-bridge/native  ── createNativeBridge({ module, emitter })
-      │  invoke(method, jsonPayload) -> Promise<jsonResult>
-      ▼
-local Expo module (Swift / Kotlin)
-      │  calls the bound Go type
-      ▼
-core/cmd/mobile  (gomobile)  ── Core.Invoke([]byte) / SetEventHandler
-      │
-      ▼
-core/  (domain · store[modernc sqlite] · bridge)   — same tested logic as desktop
+apps/mobile/App.tsx
+  └─ CoreProvider → SyncProvider → NotesProvider     (shared, from @companion/app)
+       └─ src/MobileShell.tsx                        (mobile-only: bottom tabs + stack)
+            ├─ NotesListScreen → NoteEditorScreen     (native title + @companion/editor body)
+            ├─ Chat / Calendar / Tasks placeholders
+            └─ Settings (reuses shared SettingsPanel)
+
+apps/mobile/App.tsx ── createNativeBridge ──▶ modules/companion-core (Expo module)
+                                                 │  Swift  → Core.xcframework
+                                                 │  Kotlin → core.aar (jar + jniLibs)
+                                                 ▼
+                                        core/cmd/mobile (gomobile bind)
 ```
 
-## What's done (verified headlessly)
+### What's shared vs. mobile-only
 
-- **`core/cmd/mobile`** — the gomobile-bindable package: `New(dbPath)`, `Invoke`,
-  `SetEventHandler(EventHandler)`, `Close`. Only basic/`[]byte`/`error`/interface
-  types cross the boundary, per gomobile's constraints. Compiles + unit-tested
-  (`go test ./core/cmd/mobile`).
-- **Build targets** — `make gomobile-init`, `make core-android` (→ `build/core.aar`),
-  `make core-ios` (→ `build/Core.xcframework`).
-- **`@companion/core-bridge/native`** — `createNativeBridge` adapting the Expo
-  module to the shared `CoreBridge` (dependency-injected; no Expo dep, typechecks).
+- **Shared** (`@companion/app`): `CoreProvider` / `SyncProvider` / `NotesProvider`
+  (all UI-framework-agnostic data + sync logic), `SettingsPanel`, and every
+  `@companion/design-system` primitive.
+- **Mobile-only** (`apps/mobile/src`): the navigation shell — bottom tabs switch sections;
+  a native stack pushes the list → full-screen editor. No hover, split-view, or windows.
 
-## What remains (needs the mobile toolchain — not in this environment)
+The rich-text editor is the shared **`@companion/editor`** package. On native it resolves
+to a `react-native-webview` hosting ProseMirror (bundled offline); on web/desktop it
+resolves to ProseMirror mounted straight in the DOM. See that package's README for the
+`build:editor` step. (Expo's `use dom` was tried first but its DomWebView crashes on mount
+on Android + the New Architecture, so native drives a raw WebView instead.)
 
-Requires **Xcode**, **Android SDK + NDK**, a JDK, `gomobile`, and **Expo/EAS** (the
-gomobile native module means a custom dev client — no Expo Go; PLAN §10).
+## Architecture
 
-1. Scaffold the Expo app here: `npx create-expo-app apps/mobile` (SDK 52+).
-2. Build the core artifact: `make gomobile-init && make core-android core-ios`.
-3. **Local Expo module** wrapping the artifact. Its JS surface must match
-   `@companion/core-bridge/native`:
-   - `invoke(method: string, payloadJson: string): Promise<string>` → calls the bound
-     `Core.Invoke`. Open the DB at `FileSystem.documentDirectory + "companion.db"`.
-   - an event emitter firing `onCoreEvent` with `{ name, payload }` for each
-     `EventHandler.OnEvent` (implement the Go `EventHandler` interface in Swift/Kotlin
-     and forward to the module's `sendEvent`).
-4. Mount `@companion/app`'s `App` with `createNativeBridge({ module, emitter })`.
-5. Editor via **`'use dom'`** for the (future) `packages/editor` ProseMirror
-   component (PLAN §6.1).
+- **`modules/companion-core`** — a local Expo module wrapping the gomobile artifacts.
+  - `initialize(dbPath)` opens the on-device SQLite database and registers an event sink.
+  - `invoke(method, payloadJson): Promise<string>` dispatches a core method (JSON in / JSON out).
+  - emits `onCoreEvent` for every core `EventHandler.OnEvent`.
+  - Swift (`ios/CompanionCoreModule.swift`) and Kotlin
+    (`android/.../CompanionCoreModule.kt`) implement the same surface against the
+    gomobile-generated API (`MobileNew`/`MobileCore` on iOS, `Mobile.new_`/`Core` on Android).
+- **`App.tsx`** opens the DB in the app documents directory, builds the `CoreBridge`
+  via `@companion/core-bridge/native`, mounts the shared providers, and renders
+  `<MobileShell />`.
 
-### Shared-UI portability to native (before Metro will render `@companion/app`)
+## Building & running
 
-The UI was built web-first (react-native-web); these need native variants:
+The native artifacts are **not** committed (they're large and regenerated). Build them
+into the module first, then run the app.
 
-- **`Icon`** renders inline `<svg>` (web only) → add a `react-native-svg` `.native`
-  variant, or a platform split in `@companion/design-system`.
-- **`react-native` ambient shim** in the design system is a web substitution; on
-  native the real `react-native` types apply — scope the shim to web.
-- **Web-only APIs** guarded/kept off the native path: `--wails-draggable` +
-  `transitionProperty` styles, `onPointerEnter`, `localStorage`, `window.open` /
-  `EventSource` (desktop/web bridges). React Navigation linking already degrades to
-  in-memory off the web (see AppShell).
+### 1. Build the gomobile artifacts (needs Xcode + Android SDK/NDK)
+
+```sh
+make mobile-artifacts   # builds Core.xcframework + core.aar into modules/companion-core
+```
+
+This runs `make core-ios` + `make core-android` and copies the results into
+`modules/companion-core/ios/vendor/` and `modules/companion-core/android/libs/`.
+Requires the one-time gomobile setup (`make gomobile-init`; see the repo README).
+
+### 2. iOS — requires CocoaPods
+
+CocoaPods needs a modern Ruby (the macOS system Ruby 2.6 is too old). Install one via
+your version manager, e.g.:
+
+```sh
+asdf install ruby 3.3.5 && asdf global ruby 3.3.5   # or rbenv/chruby
+gem install cocoapods
+```
+
+Then:
+
+```sh
+npm run ios -w @companion/mobile     # expo run:ios (runs prebuild + pod install + build)
+```
+
+### 3. Android
+
+```sh
+npm run android -w @companion/mobile # expo run:android (runs prebuild + gradle build)
+```
+
+`expo run:*` regenerates the native `ios/` and `android/` projects (continuous native
+generation — both are gitignored) and links the autolinked `companion-core` module.
+
+## Dev notes
+
+- Metro is configured for the monorepo (`metro.config.js`): it watches the repo root and
+  resolves hoisted `node_modules`.
+- The JS/TS side is verifiable without a device: `npm run typecheck -w @companion/mobile`
+  and `npx expo export --platform ios` (Metro bundle) both run in CI-style checks.
+- Icons render cross-platform via `react-native-svg`; there is no web-only DOM in the
+  shared UI (see `@companion/design-system` `platform.ts` for the web/native shims).

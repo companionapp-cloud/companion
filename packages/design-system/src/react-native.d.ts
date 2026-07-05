@@ -9,10 +9,15 @@ declare module "react-native" {
   import type { ComponentType, ReactNode, Ref, ComponentType as CT } from "react";
 
   export type Style = Record<string, unknown>;
-  export type StyleProp = Style | StyleProp[] | false | null | undefined;
+  // Generic to match real react-native's StyleProp<T>; the default keeps the shim
+  // loose (design-system code is the source of truth for the element type).
+  export type StyleProp<T = Style> = T | StyleProp<T>[] | false | null | undefined;
+  export type ViewStyle = Style;
+  export type TextStyle = Style;
+  export type ImageStyle = Style;
 
   interface ViewProps {
-    style?: StyleProp;
+    style?: StyleProp<ViewStyle>;
     children?: ReactNode;
     ref?: Ref<unknown>;
     onPointerEnter?: () => void;
@@ -21,7 +26,7 @@ declare module "react-native" {
     "aria-label"?: string;
   }
   interface ScrollViewProps extends ViewProps {
-    contentContainerStyle?: StyleProp;
+    contentContainerStyle?: StyleProp<ViewStyle>;
     horizontal?: boolean;
     showsHorizontalScrollIndicator?: boolean;
     showsVerticalScrollIndicator?: boolean;
@@ -30,7 +35,7 @@ declare module "react-native" {
     numberOfLines?: number;
   }
   interface TextInputProps {
-    style?: StyleProp;
+    style?: StyleProp<TextStyle>;
     value?: string;
     defaultValue?: string;
     placeholder?: string;

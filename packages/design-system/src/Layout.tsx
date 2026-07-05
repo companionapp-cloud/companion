@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { StyleSheet, View, type StyleProp } from "react-native";
+import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import { colors, space } from "./tokens";
 
 /** Center centers its children in the available space. */
@@ -20,21 +20,23 @@ interface FlexProps {
   gap?: number;
   justify?: Justify;
   align?: Align;
-  style?: StyleProp;
+  style?: StyleProp<ViewStyle>;
 }
 
-const justifyMap: Record<Justify, string> = {
+// `as const` so the values are literal unions (real react-native's ViewStyle types
+// justifyContent/alignItems as string literals, not plain string).
+const justifyMap = {
   start: "flex-start",
   center: "center",
   end: "flex-end",
   between: "space-between",
-};
-const alignMap: Record<Align, string> = {
+} as const;
+const alignMap = {
   start: "flex-start",
   center: "center",
   end: "flex-end",
   stretch: "stretch",
-};
+} as const;
 
 /** Row lays children out horizontally. */
 export function Row({ children, gap, justify, align, style }: FlexProps) {

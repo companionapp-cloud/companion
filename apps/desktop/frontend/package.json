@@ -12,9 +12,11 @@
   "dependencies": {
     "@companion/app": "*",
     "@companion/core-bridge": "*",
+    "@companion/editor": "*",
     "@wailsio/runtime": "3.0.0-alpha.95",
-    "react": "19.2.0",
-    "react-dom": "19.2.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native-svg": "15.15.4",
     "react-native-web": "0.21.2"
   },
   "devDependencies": {

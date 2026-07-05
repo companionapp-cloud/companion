@@ -1,7 +1,13 @@
 import { useState } from "react";
-import { ScrollView, View } from "react-native";
+import { Platform, ScrollView, View } from "react-native";
 import type { Note } from "@companion/core-bridge";
 import { Badge, Icon, IconButton, Text, TextField, colors, layout, space } from "@companion/design-system";
+import { Editor } from "@companion/editor";
+
+// The document reads as a roomy page on web/desktop, but that much padding is cramping
+// on a phone-width screen, so tighten it on native.
+const DOC_PAD = Platform.OS === "web" ? 44 : 20;
+const DOC_PAD_TOP = Platform.OS === "web" ? 32 : 16;
 
 export interface NoteEditorProps {
   note: Note;
@@ -12,11 +18,13 @@ export interface NoteEditorProps {
   onDelete?: (id: string) => void;
 }
 
-/** The document-style editor for a single note, with a sub-toolbar of note-scoped
- * actions (sync status, pop-out, delete). App-level chrome stays in the app toolbar. */
+/** The document-style editor for a single note: a sub-toolbar of note-scoped actions,
+ * the title, and a ProseMirror body (from @companion/editor). App-level chrome stays in
+ * the app toolbar. Keyed by note id upstream, so each note gets a fresh instance. */
 export function NoteEditor({ note, onChange, onPopOut, onDelete }: NoteEditorProps) {
   const [title, setTitle] = useState(note.title);
-  const [content, setContent] = useState(note.contentMd);
+  // Seed the editor once; it owns its content thereafter and reports edits back out.
+  const [initialContent] = useState(() => note.contentMd);
 
   return (
     <View style={{ flex: 1 }}>
@@ -49,16 +57,7 @@ export function NoteEditor({ note, onChange, onPopOut, onDelete }: NoteEditorPro
         <Text variant="mono" tone="tertiary" style={{ marginTop: space.md, marginBottom: space.xl }}>
           Edited {new Date(note.updatedAt).toLocaleString()}
         </Text>
-        <TextField
-          variant="prose"
-          value={content}
-          placeholder="Start writing — type [[ to link another note."
-          multiline
-          onChangeText={(t) => {
-            setContent(t);
-            onChange(note.id, { contentMd: t });
-          }}
-        />
+        <Editor markdown={initialContent} onChangeMarkdown={(md) => onChange(note.id, { contentMd: md })} />
       </ScrollView>
     </View>
   );
@@ -79,7 +78,7 @@ const styles = {
     maxWidth: layout.contentMax,
     width: "100%" as const,
     marginHorizontal: "auto" as const,
-    padding: 44,
-    paddingTop: 32,
+    padding: DOC_PAD,
+    paddingTop: DOC_PAD_TOP,
   },
 };

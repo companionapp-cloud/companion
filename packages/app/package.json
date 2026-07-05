@@ -13,6 +13,7 @@
   "dependencies": {
     "@companion/core-bridge": "*",
     "@companion/design-system": "*",
+    "@companion/editor": "*",
     "@react-navigation/native": "7.3.7"
   },
   "peerDependencies": {
@@ -26,7 +27,7 @@
   },
   "devDependencies": {
     "@types/react": "19.2.2",
-    "react": "19.2.0",
+    "react": "19.2.3",
     "typescript": "5.9.3"
   }
 }

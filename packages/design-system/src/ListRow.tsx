@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Icon } from "./Icon";
+import { type PressState } from "./platform";
 import { Text } from "./Text";
 import { colors, radius, space } from "./tokens";
 
@@ -20,7 +21,7 @@ export function ListRow({ title, subtitle, icon, trailing, selected, hasChildren
   return (
     <Pressable
       onPress={onPress}
-      style={({ hovered }) => [
+      style={({ hovered }: PressState) => [
         styles.row,
         { backgroundColor: selected ? colors.accentSoft : hovered ? colors.surfaceHover : "transparent" },
       ]}

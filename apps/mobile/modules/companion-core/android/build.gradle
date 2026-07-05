@@ -1,0 +1,26 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.companioncore'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.companioncore"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  // The gomobile binding, decomposed from build/core.aar by `make mobile-artifacts`:
+  // the Java classes as a plain jar (local .aar file-deps aren't resolvable under
+  // Expo/RN's centralized repositories) and the JNI libs under src/main/jniLibs,
+  // which AGP packages automatically.
+  implementation files('libs/core.jar')
+}

@@ -28,7 +28,7 @@ export default defineConfig(({ mode }) => ({
     "process.env.NODE_ENV": JSON.stringify(mode),
   },
   optimizeDeps: {
-    exclude: ["@companion/app", "@companion/core-bridge", "@companion/design-system"],
+    exclude: ["@companion/app", "@companion/core-bridge", "@companion/design-system", "@companion/editor"],
   },
   server: { port: 5274 },
 }));

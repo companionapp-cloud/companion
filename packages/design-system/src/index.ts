@@ -1,7 +1,7 @@
 export * from "./tokens";
-export { dragRegion, noDragRegion } from "./platform";
+export { dragRegion, noDragRegion, transition, type PressState } from "./platform";
 export { Icon } from "./Icon";
-export type { IconProps, IconName } from "./Icon";
+export type { IconProps, IconName } from "./iconPaths";
 export { Text } from "./Text";
 export type { TextProps, TextVariant, TextTone } from "./Text";
 export { Button } from "./Button";

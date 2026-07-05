@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
-import { noDragRegion } from "./platform";
+import { noDragRegion, type PressState } from "./platform";
 import { Text } from "./Text";
 import { colors, radius, space } from "./tokens";
 
@@ -19,7 +19,7 @@ export function RailItem({ icon, label, active, expanded, onPress }: RailItemPro
     <Pressable
       onPress={onPress}
       aria-label={label}
-      style={({ hovered }) => [
+      style={({ hovered }: PressState) => [
         styles.item,
         noDragRegion,
         {

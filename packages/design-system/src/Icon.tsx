@@ -1,56 +1,18 @@
-import type { CSSProperties } from "react";
+import Svg, { Path } from "react-native-svg";
+import { ICON_DEFAULT_COLOR, ICON_PATHS, type IconProps } from "./iconPaths";
 
-// Lucide-style outline icons (1.75 stroke, rounded caps/joins). Rendered as inline
-// SVG — on web/desktop (react-native-web) SVG is valid inside the tree. A native
-// (react-native-svg) variant will land with milestone 3.
-const ICON_PATHS = {
-  chat: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z",
-  notes: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6M9 13h6M9 17h4",
-  calendar: "M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z",
-  tasks: "M11 12H3m18-6H3m18 12H3M16 17l2 2 4-4",
-  search: "M21 21l-4.35-4.35M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z",
-  plus: "M12 5v14M5 12h14",
-  folder: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.6 3.9A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z",
-  file: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6",
-  chevronRight: "m9 18 6-6-6-6",
-  chevronLeft: "m15 18-6-6 6-6",
-  settings:
-    "M12.2 2h-.4a2 2 0 0 0-2 2 1.7 1.7 0 0 1-1 1.5 1.7 1.7 0 0 1-1.9-.3 2 2 0 0 0-2.8 0l-.3.3a2 2 0 0 0 0 2.8 1.7 1.7 0 0 1 .3 1.9 1.7 1.7 0 0 1-1.5 1 2 2 0 0 0-2 2v.4a2 2 0 0 0 2 2 1.7 1.7 0 0 1 1.5 1 1.7 1.7 0 0 1-.3 1.9 2 2 0 0 0 0 2.8l.3.3a2 2 0 0 0 2.8 0 1.7 1.7 0 0 1 1.9-.3 1.7 1.7 0 0 1 1 1.5 2 2 0 0 0 2 2h.4a2 2 0 0 0 2-2 1.7 1.7 0 0 1 1-1.5 1.7 1.7 0 0 1 1.9.3 2 2 0 0 0 2.8 0l.3-.3a2 2 0 0 0 0-2.8 1.7 1.7 0 0 1-.3-1.9 1.7 1.7 0 0 1 1.5-1 2 2 0 0 0 2-2v-.4a2 2 0 0 0-2-2 1.7 1.7 0 0 1-1.5-1 1.7 1.7 0 0 1 .3-1.9 2 2 0 0 0 0-2.8l-.3-.3a2 2 0 0 0-2.8 0 1.7 1.7 0 0 1-1.9.3A1.7 1.7 0 0 1 14.2 4a2 2 0 0 0-2-2Z",
-  link: "M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5",
-  panelLeft: "M9 3v18M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z",
-  moreH: "M12 12h.01M19 12h.01M5 12h.01",
-  trash: "M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6",
-  external: "M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6",
-  close: "M18 6 6 18M6 6l12 12",
-  check: "M20 6 9 17l-5-5",
-  dot: "M12 12h.01",
-} as const;
-
-export type IconName = keyof typeof ICON_PATHS;
-
-export interface IconProps {
-  name: IconName;
-  size?: number;
-  color?: string;
-  strokeWidth?: number;
-  style?: CSSProperties;
-}
-
-export function Icon({ name, size = 18, color = "currentColor", strokeWidth = 1.75, style }: IconProps) {
+// Native icon: react-native-svg. Web/desktop resolve Icon.web.tsx instead (inline DOM
+// <svg>), so react-native-svg never enters the react-native-web bundle.
+export function Icon({ name, size = 18, color = ICON_DEFAULT_COLOR, strokeWidth = 1.75 }: IconProps) {
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke={color}
-      strokeWidth={strokeWidth}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      style={style}
-      aria-hidden="true"
-    >
-      <path d={ICON_PATHS[name] ?? ICON_PATHS.dot} />
-    </svg>
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d={ICON_PATHS[name] ?? ICON_PATHS.dot}
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
   );
 }
