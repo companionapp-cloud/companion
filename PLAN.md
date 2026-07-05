@@ -946,19 +946,20 @@ Done:
    loop in core. Notes sync everywhere.
 4. ✅ **Mobile (basic)** — Expo app; gomobile + local expo module; editor via
    react-native-webview bundle; own mobile shell. Notes on all six platforms.
-5. **Graph substrate** — `links` table + migration; wikilink parser
+5. ✅ **Graph substrate** — `links` table + migration; wikilink parser
    (`core/domain/links.go`); extraction wired into the note write path *including
    sync-apply*; `graph.*` bridge methods; `graph.rebuild`; `data.changed` events;
    React Flow view over notes only. *Small, and proves the whole pattern before
    tasks exist.*
+6. ✅ **Realtime sync** — `GET /v1/sync/events` + per-user SSE hub on the server
+   (`apps/server/hub.go`, `events.go`), publishing after every `user_seq`-bumping
+   push; `SyncNotifier` in core-bridge (`notifier.ts` fetch-stream web/desktop,
+   `notifier.native.ts` react-native-sse mobile, injected by the shell); SyncProvider
+   lifecycle wiring (visibility / foreground) + sync-on-(re)connect + reconnect on
+   token rotation. Notes edited on one device appear on the others in ~a second.
+   *Small, and every later milestone inherits it.*
 
 Next:
-
-6. **Realtime sync** — `GET /v1/sync/events` + per-user SSE hub on the server,
-   publishing after every `user_seq`-bumping commit; `SyncNotifier` in core-bridge
-   (fetch-stream web/desktop, react-native-sse mobile); shell lifecycle wiring
-   (visibility / foreground); sync-on-reconnect. Notes edited on one device appear
-   on the others in ~a second. *Small, and every later milestone inherits it.*
 7. **Areas + projects** — `areas`/`projects`/`project_members` entities + sync;
    `member` edge mirroring; sidebar with area headings and project nav items;
    note membership pickers; `nav.sidebar` (indicators return null until tasks and

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { auth, syncApi, type SyncApi } from "@companion/core-bridge";
+import { auth, syncApi, createSyncNotifier, type SyncApi, type SyncNotifier } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
 
 const STORAGE_KEY = "companion.sync.config";
@@ -69,9 +69,20 @@ const SyncCtx = createContext<SyncController | null>(null);
  * and every 5 idle minutes (PLAN §5.4). Auth token + endpoint persist locally; the
  * short-lived access token is refreshed silently via the refresh token so an expired
  * session never forces a manual re-auth. */
-export function SyncProvider({ children, storage = localStorageBacked }: { children: ReactNode; storage?: SyncStorage }) {
+export function SyncProvider({
+  children,
+  storage = localStorageBacked,
+  notifier: injectedNotifier,
+}: {
+  children: ReactNode;
+  storage?: SyncStorage;
+  /** Realtime SSE poke (PLAN §7.5). Defaults to the fetch-stream notifier (web +
+   * desktop); mobile injects a react-native-sse-backed one. */
+  notifier?: SyncNotifier;
+}) {
   const { core } = useCore();
   const api = useMemo<SyncApi>(() => syncApi(core), [core]);
+  const notifier = useMemo<SyncNotifier>(() => injectedNotifier ?? createSyncNotifier(), [injectedNotifier]);
 
   const storageRef = useRef(storage);
   storageRef.current = storage;
@@ -106,7 +117,10 @@ export function SyncProvider({ children, storage = localStorageBacked }: { child
     const next: PersistedConfig = { ...prev, token: res.token, refreshToken: res.refreshToken, expiresAt: Date.parse(res.expiresAt) };
     configRef.current = next;
     saveConfig(next, storageRef.current);
-  }, []);
+    // Reopen the realtime stream with the fresh token so SSE survives rotation (the
+    // old access token would 401 the stream once it expires).
+    notifier.connect(next.baseUrl, next.token);
+  }, [notifier]);
 
   // Refresh the access token and reconfigure the core with it. Returns false if the
   // refresh token is missing/expired/revoked (the user must sign in again).
@@ -179,6 +193,21 @@ export function SyncProvider({ children, storage = localStorageBacked }: { child
       cancelled = true;
     };
   }, [config, api, runNow]);
+
+  // Realtime: hold an SSE stream while connected. Each server change — and every
+  // (re)connect, foreground, or tab-visible transition — pokes a debounced sync
+  // (PLAN §7.5). The originating device hears its own echo, but that cycle is a cheap
+  // no-op (its cursor already advanced during its push). Token rotation reconnects via
+  // applyRotatedTokens; here we react only to identity (connect/disconnect) changes.
+  useEffect(() => {
+    if (!config) return;
+    const off = notifier.onChange(() => trigger());
+    notifier.connect(config.baseUrl, config.token);
+    return () => {
+      off();
+      notifier.disconnect();
+    };
+  }, [config, notifier, trigger]);
 
   useEffect(
     () => () => {

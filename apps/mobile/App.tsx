@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, AppState, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Paths } from 'expo-file-system';
 import { StatusBar } from 'expo-status-bar';
+import EventSource from 'react-native-sse';
 import { CoreProvider, NotesProvider, SyncProvider } from '@companion/app';
 import { createNativeBridge } from '@companion/core-bridge/native';
-import type { CoreBridge } from '@companion/core-bridge';
+import { createNativeSyncNotifier, type CoreBridge, type SyncNotifier } from '@companion/core-bridge';
 import CompanionCore from './modules/companion-core';
 import { MobileShell } from './src/MobileShell';
 import { nativeSyncStorage } from './src/syncStorage';
@@ -21,6 +22,14 @@ function toFsPath(uri: string): string {
 function Root() {
   const [bridge, setBridge] = useState<CoreBridge | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Realtime SSE notifier (PLAN §7.5). react-native-sse + AppState are injected here
+  // so core-bridge carries no react-native dependency. Foreground-only: SSE dies on
+  // background (the OS kills the socket), so we catch up on next foreground.
+  const notifier = useMemo<SyncNotifier>(
+    () => createNativeSyncNotifier({ EventSource, appState: AppState }),
+    [],
+  );
 
   useEffect(() => {
     let created: CoreBridge | null = null;
@@ -51,7 +60,7 @@ function Root() {
   }
   return (
     <CoreProvider core={bridge}>
-      <SyncProvider storage={nativeSyncStorage}>
+      <SyncProvider storage={nativeSyncStorage} notifier={notifier}>
         <NotesProvider>
           <MobileShell />
         </NotesProvider>

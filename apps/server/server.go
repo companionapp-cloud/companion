@@ -16,10 +16,11 @@ type Server struct {
 	db      *sql.DB
 	dialect string
 	clock   domain.Clock
+	hub     *Hub
 }
 
 func NewServer(db *sql.DB, dialect string) *Server {
-	return &Server{db: db, dialect: dialect, clock: domain.SystemClock{}}
+	return &Server{db: db, dialect: dialect, clock: domain.SystemClock{}, hub: NewHub()}
 }
 
 // rebind adapts '?' placeholders to the active dialect ('$N' on Postgres).
@@ -42,6 +43,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/auth/refresh", s.handleRefresh)
 	mux.Handle("GET /v1/sync/pull", s.authed(s.handlePull))
 	mux.Handle("POST /v1/sync/push", s.authed(s.handlePush))
+	mux.Handle("GET /v1/sync/events", s.authed(s.handleEvents))
 	return withCORS(mux)
 }
 

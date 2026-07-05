@@ -114,8 +114,13 @@ mobile-artifacts: android-lib core-ios
 ## mobile-run: build the Android core binding + run the mobile app on Android
 ## (emulator or connected device). Only needs the aar, so no Xcode required; the
 ## first run regenerates the native android/ project via expo prebuild.
-mobile-run: android-lib
+mobile-run: mobile-artifacts
 	npm run android -w @companion/mobile
+
+android-run: mobile-run
+
+ios-run: mobile-artifacts
+	npm run ios -w @companion/mobile
 
 ## db-up: start the local development database(s) in the background
 db-up:

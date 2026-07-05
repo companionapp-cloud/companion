@@ -53,27 +53,40 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	results := make([]protocol.PushResult, 0, len(req.Changes))
+	var maxSeq int64
 	for _, ch := range req.Changes {
-		res, err := s.applyPush(uid, ch)
+		res, seq, err := s.applyPush(uid, ch)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "push failed")
 			return
 		}
+		if seq > maxSeq {
+			maxSeq = seq
+		}
 		results = append(results, res)
+	}
+	// Fan out to this user's other online devices (PLAN §7.5). Fire-and-forget after
+	// the writes committed; the originating device hears its own echo but no-ops
+	// (its cursor already advanced past this seq during the push above).
+	if maxSeq > 0 {
+		s.hub.publish(uid, maxSeq)
 	}
 	writeJSON(w, http.StatusOK, protocol.PushResponse{Results: results})
 }
 
-func (s *Server) applyPush(userID string, ch protocol.PushChange) (protocol.PushResult, error) {
+// applyPush applies one client row and returns the result plus the server_seq it was
+// assigned (0 when nothing was written, i.e. a conflict). The seq feeds the realtime
+// change fan-out (PLAN §7.5).
+func (s *Server) applyPush(userID string, ch protocol.PushChange) (protocol.PushResult, int64, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return protocol.PushResult{}, err
+		return protocol.PushResult{}, 0, err
 	}
 	defer tx.Rollback()
 
 	existing, exists, err := s.loadNote(tx, userID, ch.ID)
 	if err != nil {
-		return protocol.PushResult{}, err
+		return protocol.PushResult{}, 0, err
 	}
 
 	// Clamp client timestamps arriving from the future (PLAN §10).
@@ -83,22 +96,22 @@ func (s *Server) applyPush(userID string, ch protocol.PushChange) (protocol.Push
 		clientUpdated = now
 	}
 
-	accept := func() (protocol.PushResult, error) {
+	accept := func() (protocol.PushResult, int64, error) {
 		version := int64(1)
 		if exists {
 			version = existing.Version + 1
 		}
 		seq, err := s.nextSeq(tx, userID)
 		if err != nil {
-			return protocol.PushResult{}, err
+			return protocol.PushResult{}, 0, err
 		}
 		if err := s.upsertNote(tx, userID, ch.Row, clientUpdated, version, seq); err != nil {
-			return protocol.PushResult{}, err
+			return protocol.PushResult{}, 0, err
 		}
 		if err := tx.Commit(); err != nil {
-			return protocol.PushResult{}, err
+			return protocol.PushResult{}, 0, err
 		}
-		return protocol.PushResult{ID: ch.ID, Status: protocol.StatusAccepted, Version: version}, nil
+		return protocol.PushResult{ID: ch.ID, Status: protocol.StatusAccepted, Version: version}, seq, nil
 	}
 
 	switch {
@@ -110,7 +123,7 @@ func (s *Server) applyPush(userID string, ch protocol.PushChange) (protocol.Push
 		// Stale push: the row moved on since the client last saw it. Server wins
 		// only if it is at least as new; otherwise the client is newer, apply it.
 		if !existing.UpdatedAt.Before(clientUpdated) {
-			return protocol.PushResult{ID: ch.ID, Status: protocol.StatusConflict, ServerRow: existing}, nil
+			return protocol.PushResult{ID: ch.ID, Status: protocol.StatusConflict, ServerRow: existing}, 0, nil
 		}
 		return accept()
 	}

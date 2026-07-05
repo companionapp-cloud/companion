@@ -8,6 +8,16 @@ export { syncApi } from "./sync";
 export type { SyncApi } from "./sync";
 export { graphApi } from "./graph";
 export type { GraphApi, Graph, GraphNode, GraphEdge } from "./graph";
+export { createSyncNotifier } from "./notifier";
+export type { SyncNotifier } from "./notifier";
+export { createNativeSyncNotifier } from "./notifier.native";
+export type {
+  NativeSyncNotifierDeps,
+  RNEventSource,
+  RNEventSourceCtor,
+  RNAppState,
+  RNAppStateSubscription,
+} from "./notifier.native";
 export * as auth from "./auth";
 export type { AuthResult } from "./auth";
 export { createHttpBridge } from "./http";
