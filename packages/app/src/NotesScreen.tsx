@@ -100,7 +100,7 @@ export function NotesScreen() {
           if (!n) return null;
           return (
             <View key={id} style={[styles.fill, id === activeNoteId ? null : styles.hidden]}>
-              <NoteEditor note={n} onChange={store.save} onPopOut={onPopOut} onDelete={onDelete} />
+              <NoteEditor note={n} onChange={store.save} onPopOut={onPopOut} onDelete={onDelete} onCreatedNote={(id) => nav.openNote(id)} />
             </View>
           );
         })}

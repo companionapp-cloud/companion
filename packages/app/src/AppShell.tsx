@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Pressable, View } from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
 import {
   NavigationContainer,
   StackActions,
@@ -25,11 +25,15 @@ import {
   transition,
   type IconName,
 } from "@companion/design-system";
-import { NavContext, useNav, type NavLocation, type Navigator, type ViewId } from "./nav-context";
+import { NavContext, useNav, type NavLocation, type Navigator, type ProjectSection, type ViewId } from "./nav-context";
 import { NotesProvider } from "./NotesProvider";
+import { ProjectsProvider } from "./ProjectsProvider";
+import { ProjectsSidebar } from "./ProjectsSidebar";
+import { ProjectView } from "./ProjectView";
 import { AppToolbar } from "./AppToolbar";
 import { NotesScreen } from "./NotesScreen";
 import { GraphScreen } from "./GraphScreen";
+import { TrashScreen } from "./TrashScreen";
 import { SettingsPanel } from "./SettingsPanel";
 import { useSync } from "./SyncProvider";
 
@@ -38,13 +42,18 @@ const NAV: { id: ViewId; label: string; icon: IconName }[] = [
   { id: "calendar", label: "Calendar", icon: "calendar" },
   { id: "notes", label: "Notes", icon: "notes" },
   { id: "tasks", label: "Tasks", icon: "tasks" },
+  { id: "habits", label: "Habits", icon: "habits" },
   { id: "graph", label: "Graph", icon: "graph" },
+  { id: "trash", label: "Trash", icon: "trash" },
 ];
 
-const PLACEHOLDER: Record<"chat" | "calendar" | "tasks", string> = {
+type PlaceholderView = "chat" | "calendar" | "tasks" | "habits";
+
+const PLACEHOLDER: Record<PlaceholderView, string> = {
   chat: "Chat lands here soon. For now, your notes are just to the left.",
   calendar: "A calendar is coming. Time keeps happening in the meantime.",
   tasks: "Tasks are on the way. Until then, a note that says “do the thing” works.",
+  habits: "Habits, streaks, and gentle nudges are on the way.",
 };
 
 export interface AppShellProps {
@@ -63,7 +72,19 @@ function webLinking(): LinkingOptions<ParamListBase> | undefined {
   if (typeof window === "undefined" || !/^https?:$/.test(window.location.protocol)) return undefined;
   return {
     prefixes: [window.location.origin],
-    config: { screens: { chat: "chat", calendar: "calendar", tasks: "tasks", graph: "graph", notes: "notes/:id?" } },
+    config: {
+      screens: {
+        chat: "chat",
+        calendar: "calendar",
+        tasks: "tasks",
+        habits: "habits",
+        graph: "graph",
+        trash: "trash",
+        notes: "notes/:id?",
+        // Deep-linkable project drill-down: /project/<id>[/<section>[/<itemId>]].
+        project: "project/:projectId/:section?/:itemId?",
+      },
+    },
   };
 }
 
@@ -75,7 +96,7 @@ function NotesRouteScreen() {
 
 function ViewScreen() {
   const route = useRoute();
-  return <ComingSoon view={route.name as "chat" | "calendar" | "tasks"} />;
+  return <ComingSoon view={route.name as PlaceholderView} />;
 }
 
 function CompanionNavigator({
@@ -109,10 +130,16 @@ function CompanionNavigator({
 const createCompanionNavigator = createNavigatorFactory(CompanionNavigator as any);
 const Nav = createCompanionNavigator();
 
+interface RouteParams {
+  id?: string;
+  projectId?: string;
+  section?: string;
+  itemId?: string;
+}
 interface RouteLike {
   key: string;
   name: string;
-  params?: { id?: string };
+  params?: RouteParams;
 }
 interface StateLike {
   index: number;
@@ -135,26 +162,33 @@ function NavBridge({
   children: ReactNode;
 }) {
   const [tabs, setTabs] = useState<string[]>([]);
-  const [forwardStack, setForwardStack] = useState<{ name: string; params?: { id?: string } }[]>([]);
+  const [forwardStack, setForwardStack] = useState<{ name: string; params?: RouteParams }[]>([]);
 
   const route = state.routes[state.index];
-  const routeName = route.name as ViewId;
+  const routeName = route.name;
   const current: NavLocation =
-    routeName === "notes"
-      ? route.params?.id
-        ? { kind: "note", id: route.params.id }
-        : { kind: "notes" }
-      : { kind: "view", view: routeName };
+    routeName === "project"
+      ? {
+          kind: "project",
+          projectId: route.params?.projectId ?? "",
+          section: route.params?.section as ProjectSection | undefined,
+          itemId: route.params?.itemId,
+        }
+      : routeName === "notes"
+        ? route.params?.id
+          ? { kind: "note", id: route.params.id }
+          : { kind: "notes" }
+        : { kind: "view", view: routeName as Exclude<ViewId, "notes"> };
 
   const nav = useMemo<Navigator>(() => {
-    const goto = (name: string, params?: { id?: string }) => {
+    const goto = (name: string, params?: RouteParams) => {
       setForwardStack([]);
       navigation.dispatch(StackActions.push(name, params));
     };
     return {
       current,
       tabs,
-      activeView: routeName === "notes" ? "notes" : routeName,
+      activeView: routeName === "project" ? "project" : routeName === "notes" ? "notes" : (routeName as ViewId),
       canBack: state.index > 0,
       canForward: forwardStack.length > 0,
       back: () => {
@@ -201,6 +235,11 @@ function NavBridge({
       deselect: () => {
         if (current.kind === "note") goto("notes");
       },
+      // Each level of the project drill-down is a push, so Back pops overview ← section
+      // ← item and the URL stays deep-linkable.
+      openProject: (projectId) => goto("project", { projectId }),
+      openProjectSection: (projectId, section) => goto("project", { projectId, section }),
+      openProjectItem: (projectId, section, itemId) => goto("project", { projectId, section, itemId }),
     };
   }, [current, tabs, routeName, state, forwardStack, navigation]);
 
@@ -215,15 +254,20 @@ export function AppShell({ topInset = 0 }: AppShellProps) {
   const linking = useMemo(webLinking, []);
   return (
     <NotesProvider>
-      <NavigationContainer linking={linking} documentTitle={{ enabled: false }}>
-        <Nav.Navigator initialRouteName="notes" topInset={topInset}>
-          <Nav.Screen name="chat" component={ViewScreen} />
-          <Nav.Screen name="calendar" component={ViewScreen} />
-          <Nav.Screen name="notes" component={NotesRouteScreen} />
-          <Nav.Screen name="tasks" component={ViewScreen} />
-          <Nav.Screen name="graph" component={GraphScreen} />
-        </Nav.Navigator>
-      </NavigationContainer>
+      <ProjectsProvider>
+        <NavigationContainer linking={linking} documentTitle={{ enabled: false }}>
+          <Nav.Navigator initialRouteName="notes" topInset={topInset}>
+            <Nav.Screen name="chat" component={ViewScreen} />
+            <Nav.Screen name="calendar" component={ViewScreen} />
+            <Nav.Screen name="notes" component={NotesRouteScreen} />
+            <Nav.Screen name="tasks" component={ViewScreen} />
+            <Nav.Screen name="habits" component={ViewScreen} />
+            <Nav.Screen name="graph" component={GraphScreen} />
+            <Nav.Screen name="trash" component={TrashScreen} />
+            <Nav.Screen name="project" component={ProjectView} />
+          </Nav.Navigator>
+        </NavigationContainer>
+      </ProjectsProvider>
     </NotesProvider>
   );
 }
@@ -238,12 +282,21 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pinned, setPinned] = usePersistentBoolean("companion.sidebar.pinned", false);
   const expanded = open || pinned;
+  const activeProjectId = nav.current.kind === "project" ? nav.current.projectId : null;
 
   // Sync on navigation (§5.4). Key on the location so param-only changes still fire.
-  const locKey = nav.current.kind + (nav.current.kind === "note" ? nav.current.id : "");
+  const loc = nav.current;
+  const locKey =
+    loc.kind +
+    (loc.kind === "note" ? loc.id : "") +
+    (loc.kind === "project" ? `${loc.projectId}:${loc.section ?? ""}:${loc.itemId ?? ""}` : "");
+  // Depend on the stable `trigger`, not the whole `sync` object: `sync` is a memo that
+  // changes identity on every status/lastSyncedAt update, so listing it here would
+  // re-fire this effect after each sync and loop (a sync every ~second).
+  const syncTrigger = sync.trigger;
   useEffect(() => {
-    sync.trigger();
-  }, [locKey, sync]);
+    syncTrigger();
+  }, [locKey, syncTrigger]);
 
   return (
     <View style={{ flex: 1, flexDirection: "row", backgroundColor: colors.surfaceApp }}>
@@ -277,20 +330,24 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
           ) : null}
         </View>
 
-        <View style={{ gap: 3 }}>
-          {NAV.map((n) => (
-            <RailItem
-              key={n.id}
-              icon={<Icon name={n.icon} size={19} color={nav.activeView === n.id ? colors.accentHover : colors.textSecondary} />}
-              label={n.label}
-              active={nav.activeView === n.id}
-              expanded={expanded}
-              onPress={() => nav.goView(n.id)}
-            />
-          ))}
-        </View>
-        {/* Empty rail space deselects the active note (still a window drag handle on desktop). */}
-        <Pressable onPress={nav.deselect} style={{ flex: 1, cursor: "auto" }} aria-label="Deselect note" />
+        <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1 }}>
+          <View style={{ gap: 3 }}>
+            {NAV.map((n) => (
+              <RailItem
+                key={n.id}
+                icon={<Icon name={n.icon} size={19} color={nav.activeView === n.id ? colors.accentHover : colors.textSecondary} />}
+                label={n.label}
+                active={nav.activeView === n.id}
+                expanded={expanded}
+                onPress={() => nav.goView(n.id)}
+              />
+            ))}
+          </View>
+          {/* Areas → projects tree, only when there's room to render labels. */}
+          {expanded ? <ProjectsSidebar onSelectProject={nav.openProject} activeProjectId={activeProjectId} /> : null}
+          {/* Empty rail space deselects the active note (still a window drag handle on desktop). */}
+          <Pressable onPress={nav.deselect} style={{ flexGrow: 1, minHeight: space.xl, cursor: "auto" }} aria-label="Deselect note" />
+        </ScrollView>
 
         <View style={{ gap: space.sm, paddingTop: space.md }}>
           <RailItem
@@ -328,7 +385,7 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
   );
 }
 
-function ComingSoon({ view }: { view: "chat" | "calendar" | "tasks" }) {
+function ComingSoon({ view }: { view: PlaceholderView }) {
   return (
     <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: space.xxxl }}>
       <Text tone="tertiary" style={{ textAlign: "center", maxWidth: 360, lineHeight: 22 }}>

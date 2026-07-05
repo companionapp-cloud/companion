@@ -13,10 +13,11 @@ import (
 // Server is the sync + auth API over a SQL store (Postgres or SQLite). Single-user
 // auth ships now; the schema and endpoints are multi-tenant-ready (PLAN §10).
 type Server struct {
-	db      *sql.DB
-	dialect string
-	clock   domain.Clock
-	hub     *Hub
+	db       *sql.DB
+	dialect  string
+	clock    domain.Clock
+	hub      *Hub
+	entities map[string]*entityHandler // per-entity sync SQL, lazily built
 }
 
 func NewServer(db *sql.DB, dialect string) *Server {

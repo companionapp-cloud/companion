@@ -42,6 +42,33 @@ func (r *LinksRepo) SyncSource(sourceType, sourceID, markdown string) error {
 	return nil
 }
 
+// AddEdge inserts one authored edge (kind 'member' or 'stack') into the index, keyed by
+// its full tuple. Idempotent via the primary key. Unlike SyncSource, it targets a single
+// edge so a project's other member edges are untouched (PLAN §5.1).
+func (r *LinksRepo) AddEdge(sourceType, sourceID, targetType, targetID, kind string) error {
+	if _, err := r.db.Exec(
+		`INSERT OR IGNORE INTO links
+		   (source_type, source_id, target_type, target_id, kind)
+		 VALUES (?, ?, ?, ?, ?);`,
+		sourceType, sourceID, targetType, targetID, kind,
+	); err != nil {
+		return fmt.Errorf("insert edge: %w", err)
+	}
+	return nil
+}
+
+// DeleteEdge removes one authored edge (used when a membership/stack row is tombstoned).
+func (r *LinksRepo) DeleteEdge(sourceType, sourceID, targetType, targetID, kind string) error {
+	if _, err := r.db.Exec(
+		`DELETE FROM links WHERE source_type = ? AND source_id = ? AND target_type = ?
+		   AND target_id = ? AND kind = ?;`,
+		sourceType, sourceID, targetType, targetID, kind,
+	); err != nil {
+		return fmt.Errorf("delete edge: %w", err)
+	}
+	return nil
+}
+
 // DeleteSource removes every outgoing edge from a source (used when the source is
 // tombstoned). Incoming edges are intentionally left to dangle (PLAN §5.1).
 func (r *LinksRepo) DeleteSource(sourceType, sourceID string) error {
@@ -136,10 +163,15 @@ func (r *LinksRepo) Rebuild() (nodeCount, edgeCount int, err error) {
 	if _, err = r.db.Exec(`DELETE FROM links;`); err != nil {
 		return 0, 0, fmt.Errorf("truncate links: %w", err)
 	}
-	if err = r.extractAll(`SELECT id, content_md FROM notes WHERE deleted_at IS NULL;`, domain.NodeNote); err != nil {
+	if err = r.extractAll(`SELECT id, content_md FROM notes WHERE deleted_at IS NULL AND deleting_at IS NULL;`, domain.NodeNote); err != nil {
 		return 0, 0, err
 	}
-	if err = r.extractAll(`SELECT id, notes_md FROM tasks WHERE deleted_at IS NULL;`, domain.NodeTask); err != nil {
+	if err = r.extractAll(`SELECT id, notes_md FROM tasks WHERE deleted_at IS NULL AND deleting_at IS NULL;`, domain.NodeTask); err != nil {
+		return 0, 0, err
+	}
+	// Re-mirror authored edges: project_members → 'member' edges (PLAN §5.1). Safe to
+	// rebuild because the edges re-derive from their own synced table.
+	if err = r.rebuildMemberEdges(); err != nil {
 		return 0, 0, err
 	}
 	if nodeCount, err = r.count(`SELECT count(*) FROM graph_nodes;`); err != nil {
@@ -221,6 +253,38 @@ func (r *LinksRepo) count(query string) (int, error) {
 		}
 	}
 	return n, rows.Err()
+}
+
+// rebuildMemberEdges re-mirrors every live project membership as a 'member' edge
+// (source project → target member entity). Used by Rebuild after truncating links.
+func (r *LinksRepo) rebuildMemberEdges() error {
+	rows, err := r.db.Query(
+		`SELECT project_id, entity_type, entity_id FROM project_members WHERE deleted_at IS NULL;`)
+	if err != nil {
+		return fmt.Errorf("scan project_members: %w", err)
+	}
+	type edge struct{ projectID, entityType, entityID string }
+	var batch []edge
+	func() {
+		defer rows.Close()
+		for rows.Next() {
+			var e edge
+			if err = rows.Scan(&e.projectID, &e.entityType, &e.entityID); err != nil {
+				return
+			}
+			batch = append(batch, e)
+		}
+		err = rows.Err()
+	}()
+	if err != nil {
+		return err
+	}
+	for _, e := range batch {
+		if err := r.AddEdge(domain.NodeProject, e.projectID, e.entityType, e.entityID, domain.KindMember); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // extractAll parses refs for every (id, markdown) row of a source query and replaces

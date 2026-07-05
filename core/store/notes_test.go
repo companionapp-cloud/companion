@@ -161,6 +161,82 @@ func TestNotesDeleteIsSoft(t *testing.T) {
 	}
 }
 
+func TestNotesTrashRestoreLifecycle(t *testing.T) {
+	clk := &fixedClock{t: time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)}
+	s := newTestStore(t, clk)
+	n, _ := s.Notes.Create(CreateNoteInput{Title: "Keeper", ContentMD: "hi"})
+
+	// Trash it: gone from Get/List, present in ListTrash with deleting_at ~30d out.
+	if err := s.Notes.Trash(n.ID); err != nil {
+		t.Fatalf("trash: %v", err)
+	}
+	if _, err := s.Notes.Get(n.ID); err != ErrNotFound {
+		t.Errorf("get after trash = %v, want ErrNotFound", err)
+	}
+	if notes, _ := s.Notes.List(); len(notes) != 0 {
+		t.Errorf("list after trash has %d, want 0", len(notes))
+	}
+	trashed, err := s.Notes.ListTrash()
+	if err != nil || len(trashed) != 1 || trashed[0].ID != n.ID {
+		t.Fatalf("ListTrash = %v, %v; want the one trashed note", trashed, err)
+	}
+	if trashed[0].DeletingAt == nil {
+		t.Fatal("trashed note missing deleting_at")
+	}
+	if want := clk.t.Add(TrashRetention); !trashed[0].DeletingAt.Equal(want) {
+		t.Errorf("deleting_at = %v, want %v", trashed[0].DeletingAt, want)
+	}
+	// Double-trash is ErrNotFound.
+	if err := s.Notes.Trash(n.ID); err != ErrNotFound {
+		t.Errorf("double trash = %v, want ErrNotFound", err)
+	}
+
+	// Restore it: back in Get/List, out of ListTrash.
+	if err := s.Notes.Restore(n.ID); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if _, err := s.Notes.Get(n.ID); err != nil {
+		t.Errorf("get after restore = %v, want the note", err)
+	}
+	if trashed, _ := s.Notes.ListTrash(); len(trashed) != 0 {
+		t.Errorf("ListTrash after restore has %d, want 0", len(trashed))
+	}
+	// Restoring a note that isn't trashed is ErrNotFound.
+	if err := s.Notes.Restore(n.ID); err != ErrNotFound {
+		t.Errorf("restore of live note = %v, want ErrNotFound", err)
+	}
+}
+
+func TestNotesTrashThenDeleteForever(t *testing.T) {
+	s := newTestStore(t, nil)
+	n, _ := s.Notes.Create(CreateNoteInput{Title: "Doomed"})
+	if err := s.Notes.Trash(n.ID); err != nil {
+		t.Fatalf("trash: %v", err)
+	}
+	// Delete forever tombstones a trashed note.
+	if err := s.Notes.Delete(n.ID); err != nil {
+		t.Fatalf("delete forever: %v", err)
+	}
+	if trashed, _ := s.Notes.ListTrash(); len(trashed) != 0 {
+		t.Errorf("ListTrash after purge has %d, want 0", len(trashed))
+	}
+	rows, err := s.db.Query(`SELECT deleted_at FROM notes WHERE id = ?;`, n.ID)
+	if err != nil {
+		t.Fatalf("tombstone query: %v", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		t.Fatal("tombstone row missing")
+	}
+	var deletedAt *string
+	if err := rows.Scan(&deletedAt); err != nil {
+		t.Fatalf("scan tombstone: %v", err)
+	}
+	if deletedAt == nil {
+		t.Error("expected deleted_at set after delete forever")
+	}
+}
+
 func TestNotesDateValidation(t *testing.T) {
 	s := newTestStore(t, nil)
 	bad := "07/04/2026"

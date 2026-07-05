@@ -1,78 +1,50 @@
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Icon, IconButton, colors, type IconName } from '@companion/design-system';
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { colors } from '@companion/design-system';
+import { TrashScreen } from '@companion/app';
+import { HomeScreen } from './screens/HomeScreen';
 import { NotesListScreen } from './screens/NotesListScreen';
 import { NoteEditorScreen } from './screens/NoteEditorScreen';
 import { NoteGraphScreen } from './screens/NoteGraphScreen';
 import { GraphScreen } from './screens/GraphScreen';
 import { PlaceholderScreen } from './screens/PlaceholderScreen';
+import { ProjectScreen } from './screens/ProjectScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 
-// Mobile navigation (bottom tabs + stack). Unlike the desktop AppShell (rail +
-// split-view + note tabs + window chrome), phones drill list → editor via a stack and
-// switch sections via a bottom tab bar. The shared data layer (Core/Notes/Sync
-// providers) is mounted above this in App.tsx.
+// Mobile navigation. The root is a list (HomeScreen): the global sections
+// (Chat/Notes/Tasks/Calendar) plus the areas → projects tree. Global sections open as
+// full stack screens; opening a project pushes ProjectScreen, which hosts a bottom tab
+// bar scoped to that project (PLAN §6.6). The desktop AppShell is intentionally not
+// reused; the shared data layer (Core/Sync/Notes/Projects providers) is mounted above
+// this in App.tsx.
 
 export type RootStackParamList = {
-  Main: undefined;
+  Home: undefined;
+  // Global (all-items) section screens.
+  Chat: undefined;
+  Notes: undefined;
+  Tasks: undefined;
+  Habits: undefined;
+  Calendar: undefined;
+  Graph: undefined;
+  Trash: undefined;
+  // A project and its scoped tab bar.
+  Project: { projectId: string };
+  // Shared detail/overlay screens.
   NoteEditor: { id: string };
   NoteGraph: { id: string };
   Settings: undefined;
 };
 
-export type TabParamList = {
-  Notes: undefined;
-  Graph: undefined;
-  Chat: undefined;
-  Calendar: undefined;
-  Tasks: undefined;
+// The tabs shown inside a project (PLAN §6.6). Notes works today; Tasks and Calendar
+// are placeholders until those milestones land.
+export type ProjectTabParamList = {
+  ProjectNotes: undefined;
+  ProjectTasks: undefined;
+  ProjectCalendar: undefined;
 };
 
 const RootStack = createNativeStackNavigator<RootStackParamList>();
-const Tabs = createBottomTabNavigator<TabParamList>();
-
-const TAB_ICON: Record<keyof TabParamList, IconName> = {
-  Notes: 'notes',
-  Graph: 'graph',
-  Chat: 'chat',
-  Calendar: 'calendar',
-  Tasks: 'tasks',
-};
-
-// Opens Settings from a tab header; navigates up to the root stack.
-function SettingsButton() {
-  const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  return (
-    <IconButton label="Settings" size="sm" onPress={() => nav.navigate('Settings')}>
-      <Icon name="settings" size={18} color={colors.textSecondary} />
-    </IconButton>
-  );
-}
-
-function MainTabs() {
-  return (
-    <Tabs.Navigator
-      screenOptions={({ route }) => ({
-        headerRight: () => <SettingsButton />,
-        headerTitleStyle: { color: colors.textPrimary },
-        headerStyle: { backgroundColor: colors.surfaceApp },
-        tabBarActiveTintColor: colors.accent,
-        tabBarInactiveTintColor: colors.textTertiary,
-        tabBarStyle: { backgroundColor: colors.surfaceApp, borderTopColor: colors.borderSubtle },
-        tabBarIcon: ({ color }) => <Icon name={TAB_ICON[route.name]} size={22} color={color} />,
-      })}
-    >
-      <Tabs.Screen name="Chat" component={PlaceholderScreen} />
-      <Tabs.Screen name="Calendar" component={PlaceholderScreen} />
-      <Tabs.Screen name="Notes" component={NotesListScreen} />
-      <Tabs.Screen name="Graph" component={GraphScreen} />
-      <Tabs.Screen name="Tasks" component={PlaceholderScreen} />
-    </Tabs.Navigator>
-  );
-}
 
 export function MobileShell() {
   return (
@@ -85,7 +57,15 @@ export function MobileShell() {
           contentStyle: { backgroundColor: colors.surfaceApp },
         }}
       >
-        <RootStack.Screen name="Main" component={MainTabs} options={{ headerShown: false }} />
+        <RootStack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
+        <RootStack.Screen name="Chat" component={PlaceholderScreen} options={{ title: 'Chat' }} />
+        <RootStack.Screen name="Notes" component={NotesListScreen} options={{ title: 'All notes' }} />
+        <RootStack.Screen name="Tasks" component={PlaceholderScreen} options={{ title: 'Tasks' }} />
+        <RootStack.Screen name="Habits" component={PlaceholderScreen} options={{ title: 'Habits' }} />
+        <RootStack.Screen name="Calendar" component={PlaceholderScreen} options={{ title: 'Calendar' }} />
+        <RootStack.Screen name="Graph" component={GraphScreen} options={{ title: 'Graph' }} />
+        <RootStack.Screen name="Trash" component={TrashScreen} options={{ title: 'Trash' }} />
+        <RootStack.Screen name="Project" component={ProjectScreen} />
         <RootStack.Screen name="NoteEditor" component={NoteEditorScreen} options={{ title: '' }} />
         <RootStack.Screen name="NoteGraph" component={NoteGraphScreen} options={{ title: 'Graph' }} />
         <RootStack.Screen

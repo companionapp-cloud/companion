@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -30,8 +31,12 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
+	srv := NewServer(db, dialect)
+	// Hourly Trash collector: promotes expired trashed rows to tombstones (PLAN §7.6).
+	srv.StartTrashCollector(context.Background())
+
 	log.Printf("companion server listening on %s (store=%s)", addr, dialect)
-	if err := http.ListenAndServe(addr, NewServer(db, dialect).Handler()); err != nil {
+	if err := http.ListenAndServe(addr, srv.Handler()); err != nil {
 		log.Fatalf("serve: %v", err)
 	}
 }

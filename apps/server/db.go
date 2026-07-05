@@ -43,18 +43,64 @@ CREATE TABLE IF NOT EXISTS user_seq (
 );
 
 CREATE TABLE IF NOT EXISTS notes (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  title       TEXT NOT NULL DEFAULT '',
+  content_md  TEXT NOT NULL DEFAULT '',
+  date        TEXT,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  deleting_at TEXT,                          -- Trash: due-to-be-purged instant (PLAN §4.3)
+  deleted_at  TEXT,
+  version     BIGINT NOT NULL DEFAULT 1,
+  server_seq  BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notes_user_seq ON notes (user_id, server_seq);
+
+CREATE TABLE IF NOT EXISTS areas (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL,
-  title      TEXT NOT NULL DEFAULT '',
-  content_md TEXT NOT NULL DEFAULT '',
-  date       TEXT,
+  name       TEXT NOT NULL,
+  color      TEXT,
+  sort_order BIGINT NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   deleted_at TEXT,
   version    BIGINT NOT NULL DEFAULT 1,
   server_seq BIGINT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_notes_user_seq ON notes (user_id, server_seq);
+CREATE INDEX IF NOT EXISTS idx_areas_user_seq ON areas (user_id, server_seq);
+
+CREATE TABLE IF NOT EXISTS projects (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  area_id     TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  color       TEXT,
+  sort_order  BIGINT NOT NULL DEFAULT 0,
+  archived_at TEXT,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  deleted_at  TEXT,
+  version     BIGINT NOT NULL DEFAULT 1,
+  server_seq  BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_projects_user_seq ON projects (user_id, server_seq);
+
+CREATE TABLE IF NOT EXISTS project_members (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  project_id  TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id   TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  deleted_at  TEXT,
+  version     BIGINT NOT NULL DEFAULT 1,
+  server_seq  BIGINT NOT NULL,
+  UNIQUE (project_id, entity_type, entity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_project_members_user_seq ON project_members (user_id, server_seq);
 
 CREATE TABLE IF NOT EXISTS user_secrets (
   user_id    TEXT NOT NULL,
@@ -96,12 +142,18 @@ func openDB(dsn string) (*sql.DB, string, error) {
 // before refresh-token support). Each step is idempotent: a duplicate-column
 // error means the migration already ran.
 func migrate(db *sql.DB, dialect string) error {
-	alter := `ALTER TABLE sessions ADD COLUMN expires_at TEXT`
-	if dialect == "postgres" {
-		alter = `ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at TEXT`
+	alters := []string{
+		`ALTER TABLE sessions ADD COLUMN expires_at TEXT`,
+		// Trash marker on notes (PLAN §4.3), retrofitted onto pre-Trash dev DBs.
+		`ALTER TABLE notes ADD COLUMN deleting_at TEXT`,
 	}
-	if _, err := db.Exec(alter); err != nil && !strings.Contains(err.Error(), "duplicate column") {
-		return err
+	for _, alter := range alters {
+		if dialect == "postgres" {
+			alter = strings.Replace(alter, "ADD COLUMN", "ADD COLUMN IF NOT EXISTS", 1)
+		}
+		if _, err := db.Exec(alter); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return err
+		}
 	}
 	return nil
 }

@@ -4,7 +4,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Paths } from 'expo-file-system';
 import { StatusBar } from 'expo-status-bar';
 import EventSource from 'react-native-sse';
-import { CoreProvider, NotesProvider, SyncProvider } from '@companion/app';
+import { CoreProvider, NotesProvider, ProjectsProvider, SyncProvider } from '@companion/app';
 import { createNativeBridge } from '@companion/core-bridge/native';
 import { createNativeSyncNotifier, type CoreBridge, type SyncNotifier } from '@companion/core-bridge';
 import CompanionCore from './modules/companion-core';
@@ -62,7 +62,9 @@ function Root() {
     <CoreProvider core={bridge}>
       <SyncProvider storage={nativeSyncStorage} notifier={notifier}>
         <NotesProvider>
-          <MobileShell />
+          <ProjectsProvider>
+            <MobileShell />
+          </ProjectsProvider>
         </NotesProvider>
       </SyncProvider>
     </CoreProvider>

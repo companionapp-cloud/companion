@@ -223,7 +223,14 @@ Conventions for every **syncable** table:
 - `id` — UUIDv7 (client-generated, time-ordered)
 - `created_at`, `updated_at` — RFC3339 UTC. `updated_at` is set by whoever writes;
   after a successful sync the server's value is authoritative.
-- `deleted_at` — soft delete / tombstone (rows are never hard-deleted on clients)
+- `deleting_at` — **Trash** marker (§4.3): the future instant at which the row is due to
+  be permanently deleted (set to `now + 30d` when a user deletes a note/task/habit). A row
+  with a non-NULL `deleting_at` is in the Trash: it is excluded from every query except the
+  Trash query and is still fully syncable. Restoring clears it. **Projects and areas do not
+  have this column — they are never trashed** (deleting one takes effect immediately, §6.6).
+- `deleted_at` — soft delete / tombstone (rows are never hard-deleted on clients). Reached
+  either by "Delete forever" from the Trash or automatically when `deleting_at` elapses (the
+  server's hourly collector, §4.3 / §7.6).
 - `version` — the server version of the row the client last saw (`0` = never synced)
 - `dirty` — client-only flag: has local changes not yet pushed
 
@@ -242,7 +249,9 @@ CREATE TABLE notes (
   date           TEXT,                        -- optional; surfaces note on calendar
   object_type_id TEXT,                        -- archetype (NULL = plain note)
   props_json     TEXT NOT NULL DEFAULT '{}',  -- schema-validated structured metadata
-  created_at  TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT,
+  created_at  TEXT NOT NULL, updated_at TEXT NOT NULL,
+  deleting_at TEXT,                            -- Trash: due-to-be-purged instant (§4.3)
+  deleted_at  TEXT,
   version     INTEGER NOT NULL DEFAULT 0,
   dirty       INTEGER NOT NULL DEFAULT 1
 );
@@ -259,7 +268,9 @@ CREATE TABLE tasks (
   repeat_seed_id TEXT,           -- occurrences point at their seed; NULL on seeds/one-offs
   object_type_id TEXT,
   props_json     TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  deleting_at TEXT,                            -- Trash (§4.3)
+  deleted_at  TEXT,
   version INTEGER NOT NULL DEFAULT 0,
   dirty   INTEGER NOT NULL DEFAULT 1
 );
@@ -324,7 +335,9 @@ CREATE TABLE habits (
                                   --    "radius_m":100,"trigger":"enter"|"exit"}}
   color        TEXT,
   archived_at  TEXT,
-  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  deleting_at TEXT,                            -- Trash (§4.3)
+  deleted_at  TEXT,
   version INTEGER NOT NULL DEFAULT 0,
   dirty   INTEGER NOT NULL DEFAULT 1
 );
@@ -364,16 +377,17 @@ CREATE INDEX idx_links_target ON links (target_type, target_id);  -- backlinks
 
 CREATE VIEW graph_nodes AS        -- slim projection for graph queries; never bodies
   SELECT id, 'note'    AS type, title,      object_type_id, NULL   AS status
-    FROM notes    WHERE deleted_at IS NULL
+    FROM notes    WHERE deleted_at IS NULL AND deleting_at IS NULL
   UNION ALL
   SELECT id, 'task'    AS type, title,      object_type_id, status
-    FROM tasks    WHERE deleted_at IS NULL
+    FROM tasks    WHERE deleted_at IS NULL AND deleting_at IS NULL
   UNION ALL
   SELECT id, 'habit'   AS type, name,       NULL,           polarity
-    FROM habits   WHERE deleted_at IS NULL AND archived_at IS NULL
+    FROM habits   WHERE deleted_at IS NULL AND deleting_at IS NULL AND archived_at IS NULL
   UNION ALL
   SELECT id, 'project' AS type, name,       NULL,           area_id
     FROM projects WHERE deleted_at IS NULL AND archived_at IS NULL;
+-- Trashed rows (deleting_at set) drop out of the graph just like tombstones do.
 -- Areas are not graph nodes; they surface as sidebar headings and as an optional
 -- clustering dimension in the graph view (via the project's area_id).
 
@@ -469,6 +483,31 @@ full resync for cursors older than that.
 Shared Go structs in `core/domain` are the single definition of these entities; the
 client store and the server store both map to/from them. Object-prop validation (§6.3)
 runs the same Go code on push.
+
+### 4.3 Trash & 30-day retention
+
+Deleting a **note, task, or habit** does not tombstone it immediately. Instead the store
+sets `deleting_at = now + 30d` — the row enters the **Trash**. This is a first-class,
+synced state, distinct from the `deleted_at` tombstone:
+
+- **Excluded everywhere but the Trash.** Every normal read (`List`, `Get`, sidebar,
+  `graph_nodes`, link extraction) filters `deleting_at IS NULL`. The single exception is
+  the Trash query, `ListTrash`, which returns exactly the rows with `deleting_at` set (and
+  no tombstone). A trashed source also drops its outgoing links, so it leaves the graph.
+- **Reversible.** *Restore* clears `deleting_at` (and re-derives the row's links); the item
+  reappears in its normal lists. *Delete forever* from the Trash tombstones it now
+  (`deleted_at = now`), the same terminal state as before.
+- **Syncs like any field.** `deleting_at` rides in the entity's JSON body, so trashing,
+  restoring, and its eventual purge propagate to every device through the ordinary
+  push/pull path. A trashed row is *not* a tombstone (`SyncDeleted()` stays false), so it
+  keeps syncing until it is actually purged.
+- **Server-driven expiry (§7.6).** An hourly collector on the server promotes any row whose
+  `deleting_at` has elapsed to a tombstone (`deleted_at`, new `version`/`server_seq`),
+  which then pulls down to clients as a normal delete. Clients therefore never need to run
+  the clock themselves; they only ever *set* `deleting_at`.
+
+**Projects and areas are never trashed.** They have no `deleting_at` column; deleting one
+takes effect immediately (§6.6) and, per that section, does not cascade to member entities.
 
 ---
 
@@ -706,10 +745,13 @@ nav.sidebar -> {
 - The sidebar recomputes on `data.changed` for tasks, habit entries, projects,
   members, and areas (debounced).
 
-**Deletion semantics**: deleting an area does not cascade — its projects keep their
-dangling `area_id` and render under an implicit "Unsorted" heading until reassigned
-(same philosophy as dangling wikilinks: tolerate, don't destroy). Deleting a project
-tombstones its `project_members` rows but never touches the member entities.
+**Deletion semantics**: areas and projects delete *immediately* — they never go to the
+Trash (§4.3) and have no `deleting_at`. Deleting an area does not cascade — its projects
+keep their dangling `area_id` and render under an implicit "Unsorted" heading until
+reassigned (same philosophy as dangling wikilinks: tolerate, don't destroy). Deleting a
+project tombstones its `project_members` rows but never touches the member entities.
+Deleting a **note, task, or habit**, by contrast, moves it to the Trash for 30 days (§4.3);
+its `project_members` rows are left intact so restoring returns it to its projects.
 
 ### 6.7 Calendar
 
@@ -876,6 +918,17 @@ End-to-end, the realtime pipeline composes entirely from existing pieces: remote
 edit → push → SSE `change` → other clients `sync.run` → pull applies rows through
 the normal store write path → link extraction → `data.changed` events → open
 screens (graph, sidebar indicators, embedded-task NodeViews) update live.
+
+### 7.6 Trash collector (server cron)
+
+The server owns Trash expiry (§4.3). A background goroutine wakes **hourly** (and once at
+startup) and, per user, promotes every trashable row whose `deleting_at` has elapsed to a
+tombstone: `deleted_at = deleting_at`, a fresh `version` and `server_seq`. Because that is
+an ordinary row bump, the change flows out through the normal pull path — and, if any rows
+were purged for a user with live devices, the same `change` SSE that a push triggers (§7.5)
+so their next `sync.run` pulls the tombstones. Clients never run the retention clock; they
+only set `deleting_at` (delete) or clear it (restore). Only entities that carry
+`deleting_at` are swept — projects and areas are never touched.
 
 ---
 

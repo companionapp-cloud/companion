@@ -73,6 +73,50 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.notesUpdate(payload)
 	case "notes.delete":
 		return c.notesDelete(payload)
+	case "notes.hold":
+		return c.notesHold(payload)
+	case "notes.release":
+		return c.notesRelease()
+	case "notes.conflict":
+		return c.notesConflict()
+	case "notes.conflictResolve":
+		return c.notesConflictResolve(payload)
+	case "trash.list":
+		return c.trashList()
+	case "trash.restore":
+		return c.trashRestore(payload)
+	case "trash.purge":
+		return c.trashPurge(payload)
+	case "areas.list":
+		return c.areasList()
+	case "areas.create":
+		return c.areasCreate(payload)
+	case "areas.update":
+		return c.areasUpdate(payload)
+	case "areas.reorder":
+		return c.areasReorder(payload)
+	case "areas.delete":
+		return c.areasDelete(payload)
+	case "projects.list":
+		return c.projectsList()
+	case "projects.create":
+		return c.projectsCreate(payload)
+	case "projects.update":
+		return c.projectsUpdate(payload)
+	case "projects.reorder":
+		return c.projectsReorder(payload)
+	case "projects.delete":
+		return c.projectsDelete(payload)
+	case "projects.addMember":
+		return c.projectsAddMember(payload)
+	case "projects.removeMember":
+		return c.projectsRemoveMember(payload)
+	case "projects.members":
+		return c.projectsMembers(payload)
+	case "projects.forEntity":
+		return c.projectsForEntity(payload)
+	case "nav.sidebar":
+		return c.navSidebar()
 	case "sync.configure":
 		return c.syncConfigure(payload)
 	case "sync.run":

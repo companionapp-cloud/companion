@@ -22,6 +22,9 @@ const (
 const (
 	KindRef   = "ref"   // [[type:id]]
 	KindEmbed = "embed" // ![[type:id]]
+	// Authored kinds — mirrored into the index from their own synced tables, not parsed.
+	KindMember = "member" // project_members: project → note/task/habit
+	KindStack  = "stack"  // habit_links: habit → habit (arrives in the Habits milestone)
 )
 
 // Ref is a single outgoing reference parsed from a source's markdown: the target it

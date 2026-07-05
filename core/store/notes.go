@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"companion/core/domain"
@@ -19,6 +20,14 @@ type NotesRepo struct {
 	db    Driver
 	clock domain.Clock
 	links *LinksRepo
+
+	// Held-note conflict interception (editor UX): when the UI has a note open for
+	// editing it "holds" it, so a conflicting server version is stashed for the user to
+	// resolve instead of being silently auto-forked by the sync engine (§7.3). Guarded by
+	// mu because Hold/Release run on the UI path while the sync engine stashes/reads.
+	mu           sync.Mutex
+	heldID       string
+	heldConflict *domain.Note
 }
 
 // CreateNoteInput carries the client-supplied fields for a new note.
@@ -37,7 +46,12 @@ type UpdateNoteInput struct {
 
 const timeFormat = time.RFC3339Nano
 
-const noteColumns = `id, title, content_md, date, created_at, updated_at, deleted_at, version, dirty`
+// TrashRetention is how long a trashed note lingers before it is due to be purged
+// (PLAN §4.3). Trashing sets deleting_at = now + TrashRetention; the server's hourly
+// collector tombstones rows once that instant passes (PLAN §7.6).
+const TrashRetention = 30 * 24 * time.Hour
+
+const noteColumns = `id, title, content_md, date, created_at, updated_at, deleting_at, deleted_at, version, dirty`
 
 // Create inserts a new note with a client-generated UUIDv7 id (time-ordered),
 // stamped created_at/updated_at, version 0 and dirty=1 (unsynced local edit).
@@ -75,10 +89,11 @@ func (r *NotesRepo) Create(in CreateNoteInput) (*domain.Note, error) {
 	return n, nil
 }
 
-// Get returns a single non-deleted note by id, or ErrNotFound.
+// Get returns a single live note by id, or ErrNotFound. Trashed notes (deleting_at set)
+// are excluded — they surface only through ListTrash (PLAN §4.3).
 func (r *NotesRepo) Get(id string) (*domain.Note, error) {
 	rows, err := r.db.Query(
-		`SELECT `+noteColumns+` FROM notes WHERE id = ? AND deleted_at IS NULL;`, id)
+		`SELECT `+noteColumns+` FROM notes WHERE id = ? AND deleted_at IS NULL AND deleting_at IS NULL;`, id)
 	if err != nil {
 		return nil, fmt.Errorf("query note: %w", err)
 	}
@@ -92,10 +107,10 @@ func (r *NotesRepo) Get(id string) (*domain.Note, error) {
 	return scanNote(rows)
 }
 
-// List returns all non-deleted notes, newest-updated first.
+// List returns all live notes, newest-updated first. Trashed notes are excluded.
 func (r *NotesRepo) List() ([]*domain.Note, error) {
 	rows, err := r.db.Query(
-		`SELECT ` + noteColumns + ` FROM notes WHERE deleted_at IS NULL ORDER BY updated_at DESC, id DESC;`)
+		`SELECT ` + noteColumns + ` FROM notes WHERE deleted_at IS NULL AND deleting_at IS NULL ORDER BY updated_at DESC, id DESC;`)
 	if err != nil {
 		return nil, fmt.Errorf("query notes: %w", err)
 	}
@@ -134,7 +149,7 @@ func (r *NotesRepo) Update(id string, in UpdateNoteInput) (*domain.Note, error) 
 	}
 	res, err := r.db.Exec(
 		`UPDATE notes SET title = ?, content_md = ?, date = ?, updated_at = ?, dirty = 1
-		 WHERE id = ? AND deleted_at IS NULL;`,
+		 WHERE id = ? AND deleted_at IS NULL AND deleting_at IS NULL;`,
 		n.Title, n.ContentMD, n.Date, n.UpdatedAt.Format(timeFormat), id,
 	)
 	if err != nil {
@@ -149,8 +164,10 @@ func (r *NotesRepo) Update(id string, in UpdateNoteInput) (*domain.Note, error) 
 	return n, nil
 }
 
-// Delete soft-deletes a note (sets deleted_at, marks dirty so the tombstone syncs).
-// Deleting an already-deleted or missing note returns ErrNotFound.
+// Delete tombstones a note (sets deleted_at, marks dirty so the tombstone syncs). This is
+// the terminal "delete forever" primitive, reached from the Trash or by the server's
+// collector once a trashed note's retention elapses. Deleting an already-tombstoned or
+// missing note returns ErrNotFound. Everyday note deletion goes through Trash (PLAN §4.3).
 func (r *NotesRepo) Delete(id string) error {
 	now := r.clock.Now().UTC()
 	res, err := r.db.Exec(
@@ -171,14 +188,91 @@ func (r *NotesRepo) Delete(id string) error {
 	return nil
 }
 
+// Trash moves a note to the Trash (PLAN §4.3): sets deleting_at = now + TrashRetention,
+// bumps updated_at, and marks it dirty so the trashed state syncs. The note drops out of
+// every query but ListTrash, and its outgoing links are removed so it leaves the graph.
+// Trashing a missing, already-trashed, or tombstoned note returns ErrNotFound.
+func (r *NotesRepo) Trash(id string) error {
+	now := r.clock.Now().UTC()
+	deletingAt := now.Add(TrashRetention)
+	res, err := r.db.Exec(
+		`UPDATE notes SET deleting_at = ?, updated_at = ?, dirty = 1
+		 WHERE id = ? AND deleted_at IS NULL AND deleting_at IS NULL;`,
+		deletingAt.Format(timeFormat), now.Format(timeFormat), id,
+	)
+	if err != nil {
+		return fmt.Errorf("trash note: %w", err)
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return ErrNotFound
+	}
+	// Trashed rows leave the graph, mirroring a tombstone. Restore re-derives the edges.
+	if err := r.links.DeleteSource(domain.NodeNote, id); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Restore brings a note back to life from either delete state (PLAN §4.3): it clears both
+// deleting_at (Trash) and deleted_at (a tombstone — e.g. deleted on another device), bumps
+// updated_at, marks it dirty so the resurrection syncs and wins, and re-derives its
+// outgoing links. Restoring a note that is neither trashed nor tombstoned (or is missing)
+// returns ErrNotFound.
+func (r *NotesRepo) Restore(id string) error {
+	n, err := r.GetAny(id)
+	if err != nil {
+		return err
+	}
+	if n.DeletedAt == nil && n.DeletingAt == nil {
+		return ErrNotFound
+	}
+	now := r.clock.Now().UTC()
+	res, err := r.db.Exec(
+		`UPDATE notes SET deleting_at = NULL, deleted_at = NULL, updated_at = ?, dirty = 1
+		 WHERE id = ? AND (deleted_at IS NOT NULL OR deleting_at IS NOT NULL);`,
+		now.Format(timeFormat), id,
+	)
+	if err != nil {
+		return fmt.Errorf("restore note: %w", err)
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return ErrNotFound
+	}
+	// Re-index the note as a live graph source now that it's back.
+	if err := r.links.SyncSource(domain.NodeNote, n.ID, n.ContentMD); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ListTrash returns every trashed note (deleting_at set, not yet tombstoned), soonest to
+// be purged first. This is the one query that surfaces trashed rows (PLAN §4.3).
+func (r *NotesRepo) ListTrash() ([]*domain.Note, error) {
+	rows, err := r.db.Query(
+		`SELECT ` + noteColumns + ` FROM notes WHERE deleted_at IS NULL AND deleting_at IS NOT NULL ORDER BY deleting_at ASC, id ASC;`)
+	if err != nil {
+		return nil, fmt.Errorf("query trashed notes: %w", err)
+	}
+	defer rows.Close()
+	out := []*domain.Note{}
+	for rows.Next() {
+		n, err := scanNote(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
 func scanNote(rows Rows) (*domain.Note, error) {
 	var (
-		n                    domain.Note
-		date, deletedAt      sql.NullString
-		createdAt, updatedAt string
-		dirty                int
+		n                           domain.Note
+		date, deletingAt, deletedAt sql.NullString
+		createdAt, updatedAt        string
+		dirty                       int
 	)
-	if err := rows.Scan(&n.ID, &n.Title, &n.ContentMD, &date, &createdAt, &updatedAt, &deletedAt, &n.Version, &dirty); err != nil {
+	if err := rows.Scan(&n.ID, &n.Title, &n.ContentMD, &date, &createdAt, &updatedAt, &deletingAt, &deletedAt, &n.Version, &dirty); err != nil {
 		return nil, fmt.Errorf("scan note: %w", err)
 	}
 	if date.Valid {
@@ -190,6 +284,13 @@ func scanNote(rows Rows) (*domain.Note, error) {
 	}
 	if n.UpdatedAt, err = time.Parse(timeFormat, updatedAt); err != nil {
 		return nil, fmt.Errorf("parse updated_at: %w", err)
+	}
+	if deletingAt.Valid {
+		t, err := time.Parse(timeFormat, deletingAt.String)
+		if err != nil {
+			return nil, fmt.Errorf("parse deleting_at: %w", err)
+		}
+		n.DeletingAt = &t
 	}
 	if deletedAt.Valid {
 		t, err := time.Parse(timeFormat, deletedAt.String)

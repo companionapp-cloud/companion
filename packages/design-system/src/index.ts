@@ -27,3 +27,5 @@ export { Spinner } from "./Spinner";
 export { Center, Divider, Row, Stack } from "./Layout";
 export { SplitView } from "./SplitView";
 export type { SplitViewProps } from "./SplitView";
+export { ProgressRing } from "./ProgressRing";
+export type { ProgressRingProps } from "./ProgressRing";

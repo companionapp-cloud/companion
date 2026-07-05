@@ -11,10 +11,12 @@ export interface InputProps {
   secureTextEntry?: boolean;
   autoCapitalize?: "none" | "sentences" | "words" | "characters";
   autoFocus?: boolean;
+  /** Fired when the field loses focus (in addition to clearing the focus ring). */
+  onBlur?: () => void;
 }
 
 /** Bordered single-line text input with an optional leading icon and focus ring. */
-export function Input({ value, onChangeText, placeholder, leadingIcon, size = "md", secureTextEntry, autoCapitalize, autoFocus }: InputProps) {
+export function Input({ value, onChangeText, placeholder, leadingIcon, size = "md", secureTextEntry, autoCapitalize, autoFocus, onBlur }: InputProps) {
   const [focused, setFocused] = useState(false);
   const height = size === "sm" ? control.sm : control.md;
   const fontSize = size === "sm" ? font.size.sm : font.size.base;
@@ -35,7 +37,10 @@ export function Input({ value, onChangeText, placeholder, leadingIcon, size = "m
         autoCapitalize={autoCapitalize}
         autoFocus={autoFocus}
         onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
+        onBlur={() => {
+          setFocused(false);
+          onBlur?.();
+        }}
         style={[styles.input, { fontSize }]}
       />
     </View>

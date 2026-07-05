@@ -1,16 +1,22 @@
 // Package protocol defines the sync wire types shared by the client engine
-// (core/sync) and the server (apps/server). It depends only on core/domain, so the
-// server never pulls in the client store or sync engine (PLAN §7).
+// (core/sync) and the server (apps/server). It depends only on the standard library,
+// so the server never pulls in the client store or sync engine (PLAN §7). Row bodies
+// travel as opaque JSON tagged by EntityType, so one push/pull path serves every
+// syncable entity.
 package protocol
 
 import (
+	"encoding/json"
 	"time"
-
-	"companion/core/domain"
 )
 
-// EntityNote is the entity_type tag for notes on the wire.
-const EntityNote = "note"
+// Entity type tags on the wire (PLAN §7). Every syncable table has one.
+const (
+	EntityNote          = "note"
+	EntityArea          = "area"
+	EntityProject       = "project"
+	EntityProjectMember = "project_member"
+)
 
 // Push statuses.
 const (
@@ -18,13 +24,14 @@ const (
 	StatusConflict = "conflict"
 )
 
-// PushChange is a dirty client row offered to the server.
+// PushChange is a dirty client row offered to the server. Row is the entity's JSON
+// body, opaque to the transport; both ends decode it by EntityType.
 type PushChange struct {
-	EntityType  string      `json:"entityType"`
-	ID          string      `json:"id"`
-	BaseVersion int64       `json:"baseVersion"`
-	Row         domain.Note `json:"row"`
-	UpdatedAt   time.Time   `json:"updatedAt"`
+	EntityType  string          `json:"entityType"`
+	ID          string          `json:"id"`
+	BaseVersion int64           `json:"baseVersion"`
+	Row         json.RawMessage `json:"row"`
+	UpdatedAt   time.Time       `json:"updatedAt"`
 }
 
 // PushRequest is the body of POST /v1/sync/push.
@@ -32,24 +39,25 @@ type PushRequest struct {
 	Changes []PushChange `json:"changes"`
 }
 
-// PushResult is the server's per-row verdict.
+// PushResult is the server's per-row verdict. ServerRow carries the server-canonical
+// JSON body on a conflict (so the client can adopt it and fork a conflicted copy).
 type PushResult struct {
-	ID        string       `json:"id"`
-	Status    string       `json:"status"`
-	Version   int64        `json:"version,omitempty"`
-	ServerRow *domain.Note `json:"serverRow,omitempty"`
+	ID        string          `json:"id"`
+	Status    string          `json:"status"`
+	Version   int64           `json:"version,omitempty"`
+	ServerRow json.RawMessage `json:"serverRow,omitempty"`
 }
 
-// PushResponse carries a verdict per pushed row.
+// PushResponse carries a verdict per pushed row, in the same order as the request.
 type PushResponse struct {
 	Results []PushResult `json:"results"`
 }
 
-// PullChange is one server-canonical row with its sequence.
+// PullChange is one server-canonical row (opaque JSON) with its type and sequence.
 type PullChange struct {
-	EntityType string      `json:"entityType"`
-	Row        domain.Note `json:"row"`
-	ServerSeq  int64       `json:"serverSeq"`
+	EntityType string          `json:"entityType"`
+	Row        json.RawMessage `json:"row"`
+	ServerSeq  int64           `json:"serverSeq"`
 }
 
 // PullResponse is an ordered page of changes plus the next cursor.

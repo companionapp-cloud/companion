@@ -76,6 +76,33 @@ declare module "react-native" {
     ListEmptyComponent?: ReactNode;
   }
 
+  // Layout + gesture types for drag-and-drop (SortableList). Loose stand-ins.
+  export interface LayoutChangeEvent {
+    nativeEvent: { layout: { x: number; y: number; width: number; height: number } };
+  }
+  export interface PanResponderGestureState {
+    dx: number;
+    dy: number;
+    moveX: number;
+    moveY: number;
+    vx: number;
+    vy: number;
+  }
+  export type GestureResponderHandlers = Record<string, unknown>;
+  interface PanResponderInstance {
+    panHandlers: GestureResponderHandlers;
+  }
+  interface PanResponderCallbacks {
+    onStartShouldSetPanResponder?: (e: GestureResponderEvent, g: PanResponderGestureState) => boolean;
+    onMoveShouldSetPanResponder?: (e: GestureResponderEvent, g: PanResponderGestureState) => boolean;
+    onPanResponderGrant?: (e: GestureResponderEvent, g: PanResponderGestureState) => void;
+    onPanResponderMove?: (e: GestureResponderEvent, g: PanResponderGestureState) => void;
+    onPanResponderRelease?: (e: GestureResponderEvent, g: PanResponderGestureState) => void;
+    onPanResponderTerminate?: (e: GestureResponderEvent, g: PanResponderGestureState) => void;
+    onPanResponderTerminationRequest?: (e: GestureResponderEvent, g: PanResponderGestureState) => boolean;
+  }
+  export const PanResponder: { create(config: PanResponderCallbacks): PanResponderInstance };
+
   export const View: ComponentType<ViewProps>;
   export const ScrollView: ComponentType<ScrollViewProps>;
   export const Text: ComponentType<TextProps>;
@@ -94,4 +121,24 @@ declare module "react-native" {
     registerComponent(appKey: string, getComponent: () => CT<unknown>): void;
     runApplication(appKey: string, params: { rootTag: Element | null }): void;
   };
+
+  // Animated: just the surface SortableList uses (a JS-driven value, a spring, and an
+  // animatable View that accepts onLayout). Loose by design.
+  export namespace Animated {
+    class Value {
+      constructor(value: number);
+      setValue(value: number): void;
+    }
+    interface CompositeAnimation {
+      start(callback?: () => void): void;
+    }
+    interface SpringConfig {
+      toValue: number;
+      useNativeDriver?: boolean;
+      bounciness?: number;
+      speed?: number;
+    }
+    function spring(value: Value, config: SpringConfig): CompositeAnimation;
+    const View: ComponentType<ViewProps & { onLayout?: (e: LayoutChangeEvent) => void }>;
+  }
 }

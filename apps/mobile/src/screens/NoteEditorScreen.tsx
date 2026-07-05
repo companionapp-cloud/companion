@@ -2,7 +2,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useCore, useNotes } from '@companion/app';
+import { useCore, useNotes, MembershipPicker, ConfirmDialog, NoteConflictDialog, useNoteSyncGuard } from '@companion/app';
 import { Center, Icon, IconButton, Text, TextField, colors, space } from '@companion/design-system';
 import { Editor, type LinkSource } from '@companion/editor';
 import type { RootStackParamList } from '../MobileShell';
@@ -16,11 +16,15 @@ export function NoteEditorScreen() {
   const noteId = params.id;
   const note = store.byId(noteId);
   const [title, setTitle] = useState(note?.title ?? '');
-  // Seed the editor once. The prop must NOT track the live note (saves update it
-  // optimistically on every keystroke); the WebView owns its content after mount and
-  // reports changes back out. A changing markdown prop re-injects on every keystroke
-  // and crashes the DOM view.
-  const [initialMarkdown] = useState(() => note?.contentMd ?? '');
+  const [showProjects, setShowProjects] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  // Seed the editor from `seed.content`; the WebView owns its content after mount and
+  // reports changes back out (a changing markdown prop re-injects on every keystroke and
+  // crashes the DOM view). `seed.key` remounts the WebView when the sync guard silently
+  // adopts a server version.
+  const [seed, setSeed] = useState(() => ({ key: 0, content: note?.contentMd ?? '' }));
+  // The editor's latest reported markdown, read when saving local edits as a new note.
+  const contentRef = useRef(note?.contentMd ?? '');
 
   // `store` gets a new identity on every save (its useMemo tracks `notes`), so route
   // through a ref and give the DOM component / header callbacks stable identities that
@@ -28,9 +32,25 @@ export function NoteEditorScreen() {
   const storeRef = useRef(store);
   storeRef.current = store;
   const onChangeMarkdown = useCallback(
-    (md: string) => storeRef.current.save(noteId, { contentMd: md }),
+    (md: string) => {
+      contentRef.current = md;
+      storeRef.current.save(noteId, { contentMd: md });
+    },
     [noteId],
   );
+
+  // Reconcile the open editor with incoming synced versions (PLAN §7.3 editor UX).
+  const guard = useNoteSyncGuard({
+    noteId,
+    getEditorContent: () => ({ title, contentMd: contentRef.current }),
+    onReseed: (n) => {
+      setTitle(n.title);
+      contentRef.current = n.contentMd;
+      setSeed((s) => ({ key: s.key + 1, content: n.contentMd }));
+    },
+    onGone: () => nav.goBack(),
+    onCreatedNote: (id) => nav.push('NoteEditor', { id }),
+  });
 
   // Wikilink autocomplete ([[) + pasted-UUID resolution search the object graph. Stable
   // identity (graph is memoized on the core) so it doesn't reload the WebView.
@@ -51,9 +71,9 @@ export function NoteEditorScreen() {
   // the WebView; it's built once from the initial content and reports edits back out.
   const body = useMemo(
     () => (
-      <Editor markdown={initialMarkdown} onChangeMarkdown={onChangeMarkdown} linkSource={linkSource} />
+      <Editor key={seed.key} markdown={seed.content} onChangeMarkdown={onChangeMarkdown} linkSource={linkSource} />
     ),
-    [initialMarkdown, onChangeMarkdown, linkSource],
+    [seed.key, seed.content, onChangeMarkdown, linkSource],
   );
 
   // Deps exclude note/store so content edits don't re-run setOptions; only the title
@@ -63,6 +83,9 @@ export function NoteEditorScreen() {
       title: title || 'Untitled',
       headerRight: () => (
         <View style={styles.headerActions}>
+          <IconButton label="Add to projects" size="sm" onPress={() => setShowProjects(true)}>
+            <Icon name="folder" size={18} color={colors.textSecondary} />
+          </IconButton>
           <IconButton
             label="Note graph"
             size="sm"
@@ -70,14 +93,7 @@ export function NoteEditorScreen() {
           >
             <Icon name="graph" size={18} color={colors.textSecondary} />
           </IconButton>
-          <IconButton
-            label="Delete note"
-            size="sm"
-            onPress={async () => {
-              await storeRef.current.remove(noteId);
-              nav.goBack();
-            }}
-          >
+          <IconButton label="Delete note" size="sm" onPress={() => setConfirmDelete(true)}>
             <Icon name="trash" size={18} color={colors.textSecondary} />
           </IconButton>
         </View>
@@ -107,6 +123,29 @@ export function NoteEditorScreen() {
         />
       </View>
       {body}
+      {showProjects ? (
+        <MembershipPicker entityType="note" entityId={noteId} onClose={() => setShowProjects(false)} />
+      ) : null}
+      {confirmDelete ? (
+        <ConfirmDialog
+          title="Delete note?"
+          message="This note moves to the Trash and is permanently deleted after 30 days. You can restore it from the Trash until then."
+          confirmLabel="Delete note"
+          onConfirm={async () => {
+            await storeRef.current.remove(noteId);
+            nav.goBack();
+          }}
+          onClose={() => setConfirmDelete(false)}
+        />
+      ) : null}
+      {guard.conflict ? (
+        <NoteConflictDialog
+          kind={guard.conflict}
+          onDiscard={guard.discard}
+          onSaveAsNew={guard.saveAsNewNote}
+          onRestore={guard.restore}
+        />
+      ) : null}
     </View>
   );
 }

@@ -7,7 +7,7 @@ export interface NotesStore {
   notes: Note[];
   loading: boolean;
   byId: (id: string) => Note | undefined;
-  create: () => Promise<Note>;
+  create: (input?: { title?: string; contentMd?: string }) => Promise<Note>;
   remove: (id: string) => Promise<void>;
   /** Debounced, optimistic field save (per note). */
   save: (id: string, fields: { title?: string; contentMd?: string }) => void;
@@ -60,12 +60,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     [api, syncTrigger],
   );
 
-  const create = useCallback(async () => {
-    const note = await api.create({ title: "Untitled", contentMd: "" });
-    setNotes((prev) => [note, ...prev]);
-    syncTrigger();
-    return note;
-  }, [api, syncTrigger]);
+  const create = useCallback(
+    async (input?: { title?: string; contentMd?: string }) => {
+      const note = await api.create({ title: input?.title ?? "Untitled", contentMd: input?.contentMd ?? "" });
+      setNotes((prev) => [note, ...prev]);
+      syncTrigger();
+      return note;
+    },
+    [api, syncTrigger],
+  );
 
   const remove = useCallback(
     async (id: string) => {

@@ -1,10 +1,12 @@
 package store
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"companion/core/domain"
+	"companion/core/sync/protocol"
 
 	"github.com/google/uuid"
 )
@@ -53,7 +55,8 @@ func (s *Store) SetCursor(cursor int64, at time.Time) error {
 // ---- notes sync ----------------------------------------------------------
 
 // Dirty returns every locally-changed note (including tombstones), oldest first, for
-// pushing to the server.
+// pushing to the server. A held note with an unresolved conflict is excluded: it must not
+// keep re-pushing and re-conflicting while the user decides how to resolve it (see hold.go).
 func (r *NotesRepo) Dirty() ([]*domain.Note, error) {
 	rows, err := r.db.Query(
 		`SELECT ` + noteColumns + ` FROM notes WHERE dirty = 1 ORDER BY updated_at ASC, id ASC;`)
@@ -61,11 +64,15 @@ func (r *NotesRepo) Dirty() ([]*domain.Note, error) {
 		return nil, fmt.Errorf("query dirty notes: %w", err)
 	}
 	defer rows.Close()
+	held := r.heldConflictID()
 	out := []*domain.Note{}
 	for rows.Next() {
 		n, err := scanNote(rows)
 		if err != nil {
 			return nil, err
+		}
+		if held != "" && n.ID == held {
+			continue
 		}
 		out = append(out, n)
 	}
@@ -92,27 +99,31 @@ func (r *NotesRepo) GetAny(id string) (*domain.Note, error) {
 // Apply overwrites the local note with a server-canonical row and clears dirty. Used
 // when the server copy wins (or the local row was clean).
 func (r *NotesRepo) Apply(n *domain.Note) error {
-	var deletedAt any
+	var deletingAt, deletedAt any
+	if n.DeletingAt != nil {
+		deletingAt = n.DeletingAt.UTC().Format(timeFormat)
+	}
 	if n.DeletedAt != nil {
 		deletedAt = n.DeletedAt.UTC().Format(timeFormat)
 	}
 	_, err := r.db.Exec(
-		`INSERT INTO notes (id, title, content_md, date, created_at, updated_at, deleted_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+		`INSERT INTO notes (id, title, content_md, date, created_at, updated_at, deleting_at, deleted_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 		 ON CONFLICT(id) DO UPDATE SET
 		   title = excluded.title, content_md = excluded.content_md, date = excluded.date,
 		   created_at = excluded.created_at, updated_at = excluded.updated_at,
-		   deleted_at = excluded.deleted_at, version = excluded.version, dirty = 0;`,
+		   deleting_at = excluded.deleting_at, deleted_at = excluded.deleted_at,
+		   version = excluded.version, dirty = 0;`,
 		n.ID, n.Title, n.ContentMD, n.Date,
-		n.CreatedAt.UTC().Format(timeFormat), n.UpdatedAt.UTC().Format(timeFormat), deletedAt, n.Version,
+		n.CreatedAt.UTC().Format(timeFormat), n.UpdatedAt.UTC().Format(timeFormat), deletingAt, deletedAt, n.Version,
 	)
 	if err != nil {
 		return fmt.Errorf("apply note: %w", err)
 	}
 	// Re-derive links from the applied content so a synced device builds the same
-	// index as the device that authored the change (PLAN §5.1). A tombstone drops the
-	// source's outgoing edges.
-	if n.DeletedAt != nil {
+	// index as the device that authored the change (PLAN §5.1). A tombstone or a trashed
+	// note (PLAN §4.3) drops the source's outgoing edges; a restore re-derives them.
+	if n.DeletedAt != nil || n.DeletingAt != nil {
 		return r.links.DeleteSource(domain.NodeNote, n.ID)
 	}
 	return r.links.SyncSource(domain.NodeNote, n.ID, n.ContentMD)
@@ -164,4 +175,48 @@ func (r *NotesRepo) CreateConflictedCopy(from *domain.Note, suffix string) (*dom
 		return nil, err
 	}
 	return copy, nil
+}
+
+// --- SyncableRepo[*domain.Note] (PLAN §7) ---------------------------------
+
+// EntityType is the note's wire tag.
+func (r *NotesRepo) EntityType() string { return protocol.EntityNote }
+
+// Decode unmarshals a wire row body into a note.
+func (r *NotesRepo) Decode(raw json.RawMessage) (*domain.Note, error) {
+	var n domain.Note
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return nil, fmt.Errorf("decode note: %w", err)
+	}
+	return &n, nil
+}
+
+// MeaningfulDiff reports whether two notes differ in user content (not just
+// timestamps/version), including deleted-vs-alive.
+func (r *NotesRepo) MeaningfulDiff(a, b *domain.Note) bool {
+	if a.Title != b.Title || a.ContentMD != b.ContentMD {
+		return true
+	}
+	if derefStr(a.Date) != derefStr(b.Date) {
+		return true
+	}
+	// Trashing/restoring (deleting_at) and tombstoning (deleted_at) are both meaningful
+	// state changes that must fork a conflicting local edit rather than be lost (§7.3).
+	if (a.DeletingAt == nil) != (b.DeletingAt == nil) {
+		return true
+	}
+	return (a.DeletedAt == nil) != (b.DeletedAt == nil)
+}
+
+// ConflictedCopy forks a losing local note into a fresh row (§7.3).
+func (r *NotesRepo) ConflictedCopy(local *domain.Note, suffix string) error {
+	_, err := r.CreateConflictedCopy(local, suffix)
+	return err
+}
+
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

@@ -32,7 +32,87 @@ export interface Note {
   date?: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Trash marker (PLAN §4.3): when set, the note is in the Trash, due to be permanently
+   *  deleted at this instant, and hidden from every list but the Trash. */
+  deletingAt?: string | null;
   deletedAt?: string | null;
   version: number;
   dirty: boolean;
+}
+
+/** The kinds of entity that can be trashed (mirrors the server's trashable tables). */
+export type TrashEntityType = "note" | "task" | "habit";
+
+/** One row in the Trash, across entity types (mirrors bridge trashItem). */
+export interface TrashItem {
+  entityType: TrashEntityType;
+  id: string;
+  title: string;
+  /** When this item is due to be permanently deleted. */
+  deletingAt?: string | null;
+  updatedAt: string;
+}
+
+/** An area — a flat sidebar heading grouping projects (mirrors core/domain.Area). */
+export interface Area {
+  id: string;
+  name: string;
+  color?: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+  version: number;
+  dirty: boolean;
+}
+
+/** A project — belongs to exactly one area (mirrors core/domain.Project). */
+export interface Project {
+  id: string;
+  areaId: string;
+  name: string;
+  color?: string | null;
+  sortOrder: number;
+  archivedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+  version: number;
+  dirty: boolean;
+}
+
+/** A membership edge: project ⇄ note/task/habit (mirrors core/domain.ProjectMember). */
+export interface ProjectMember {
+  id: string;
+  projectId: string;
+  entityType: "note" | "task" | "habit";
+  entityId: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+  version: number;
+  dirty: boolean;
+}
+
+/** One project in the sidebar tree, with its live indicators (null until data exists). */
+export interface SidebarProject {
+  id: string;
+  name: string;
+  color?: string | null;
+  taskProgress: number | null; // 0..1 done/(open+done) member tasks; null if none
+  habitHealth: number | null; // 0..1 mean member-habit streak health; null if none
+}
+
+/** One area heading and its projects. */
+export interface SidebarArea {
+  id: string;
+  name: string;
+  color?: string | null;
+  projects: SidebarProject[];
+}
+
+/** The whole navigation tree (mirrors core/store.SidebarData). */
+export interface SidebarData {
+  areas: SidebarArea[];
+  unsorted: SidebarProject[];
 }
