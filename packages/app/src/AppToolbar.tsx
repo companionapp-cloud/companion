@@ -1,4 +1,4 @@
-import { ScrollView, View } from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
 import { Icon, IconButton, Tab, Toolbar, colors, space } from "@companion/design-system";
 import { useNav } from "./nav-context";
 import { useNotes } from "./NotesProvider";
@@ -33,7 +33,7 @@ export function AppToolbar() {
         horizontal
         showsHorizontalScrollIndicator={false}
         style={{ flex: 1 }}
-        contentContainerStyle={{ alignItems: "center", gap: space.xs }}
+        contentContainerStyle={{ flexGrow: 1, alignItems: "center", gap: space.xs }}
       >
         {nav.tabs.map((id) => (
           <Tab
@@ -44,6 +44,8 @@ export function AppToolbar() {
             onClose={() => nav.closeTab(id)}
           />
         ))}
+        {/* Empty toolbar space deselects the active note. */}
+        <Pressable onPress={nav.deselect} style={{ flex: 1, alignSelf: "stretch", cursor: "auto" }} aria-label="Deselect note" />
       </ScrollView>
 
       {/* section action */}

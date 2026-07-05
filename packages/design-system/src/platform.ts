@@ -1,4 +1,4 @@
-import type { ViewStyle } from "react-native";
+import type { GestureResponderEvent, ViewStyle } from "react-native";
 
 // Wails v3 window-drag hints. Applying `--wails-draggable: drag` to an element makes
 // it a window drag handle on desktop; `no-drag` opts an interactive child back out.
@@ -12,6 +12,13 @@ export const noDragRegion = { "--wails-draggable": "no-drag" } as unknown as Vie
 // omits it (so it's optional here). Annotate Pressable style/children callbacks with
 // this to read `hovered` on web/desktop without breaking the native types.
 export type PressState = { pressed: boolean; hovered?: boolean };
+
+// True when a press was a Cmd-click (macOS) or Ctrl-click (elsewhere) — the conventional
+// "open in a new tab" modifier. On native there are no modifier keys, so it's always false.
+export function opensInNewTab(e?: GestureResponderEvent): boolean {
+  const n = e?.nativeEvent as { metaKey?: boolean; ctrlKey?: boolean } | undefined;
+  return Boolean(n?.metaKey || n?.ctrlKey);
+}
 
 // A CSS transition, animated by react-native-web on web/desktop and ignored on native.
 // These aren't real ViewStyle keys, hence the cast. Use as its own style-array element.

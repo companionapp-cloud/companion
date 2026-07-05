@@ -2,9 +2,9 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useNotes } from '@companion/app';
+import { useCore, useNotes } from '@companion/app';
 import { Center, Icon, IconButton, Text, TextField, colors, space } from '@companion/design-system';
-import { Editor } from '@companion/editor';
+import { Editor, type LinkSource } from '@companion/editor';
 import type { RootStackParamList } from '../MobileShell';
 
 // Full-screen editor for one note (pushed above the tab bar): a native title field
@@ -32,11 +32,28 @@ export function NoteEditorScreen() {
     [noteId],
   );
 
+  // Wikilink autocomplete ([[) + pasted-UUID resolution search the object graph. Stable
+  // identity (graph is memoized on the core) so it doesn't reload the WebView.
+  const { graph } = useCore();
+  const linkSource = useMemo<LinkSource>(
+    () => ({
+      search: async (q, type) =>
+        (await graph.search(q, type)).map((n) => ({ type: n.type, id: n.id, title: n.title })),
+      lookup: async (id) => {
+        const n = await graph.lookup(id);
+        return n ? { type: n.type, id: n.id, title: n.title } : null;
+      },
+    }),
+    [graph],
+  );
+
   // Memoized so parent re-renders (title state, optimistic store updates) don't reload
   // the WebView; it's built once from the initial content and reports edits back out.
   const body = useMemo(
-    () => <Editor markdown={initialMarkdown} onChangeMarkdown={onChangeMarkdown} />,
-    [initialMarkdown, onChangeMarkdown],
+    () => (
+      <Editor markdown={initialMarkdown} onChangeMarkdown={onChangeMarkdown} linkSource={linkSource} />
+    ),
+    [initialMarkdown, onChangeMarkdown, linkSource],
   );
 
   // Deps exclude note/store so content edits don't re-run setOptions; only the title
@@ -45,16 +62,25 @@ export function NoteEditorScreen() {
     nav.setOptions({
       title: title || 'Untitled',
       headerRight: () => (
-        <IconButton
-          label="Delete note"
-          size="sm"
-          onPress={async () => {
-            await storeRef.current.remove(noteId);
-            nav.goBack();
-          }}
-        >
-          <Icon name="trash" size={18} color={colors.textSecondary} />
-        </IconButton>
+        <View style={styles.headerActions}>
+          <IconButton
+            label="Note graph"
+            size="sm"
+            onPress={() => nav.navigate('NoteGraph', { id: noteId })}
+          >
+            <Icon name="graph" size={18} color={colors.textSecondary} />
+          </IconButton>
+          <IconButton
+            label="Delete note"
+            size="sm"
+            onPress={async () => {
+              await storeRef.current.remove(noteId);
+              nav.goBack();
+            }}
+          >
+            <Icon name="trash" size={18} color={colors.textSecondary} />
+          </IconButton>
+        </View>
       ),
     });
   }, [nav, noteId, title]);
@@ -88,4 +114,5 @@ export function NoteEditorScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceCard },
   title: { paddingHorizontal: space.lg, paddingTop: space.md },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
 });

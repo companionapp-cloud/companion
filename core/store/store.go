@@ -13,6 +13,7 @@ type Store struct {
 	clock domain.Clock
 
 	Notes *NotesRepo
+	Links *LinksRepo
 }
 
 // New builds a Store over an already-open Driver, applying pending migrations. A nil
@@ -27,7 +28,10 @@ func New(d Driver, clock domain.Clock) (*Store, error) {
 		return nil, err
 	}
 	s := &Store{db: d, clock: clock}
-	s.Notes = &NotesRepo{db: d, clock: clock}
+	s.Links = &LinksRepo{db: d}
+	// Notes extract wikilinks into the shared index on every write and sync-apply, so
+	// the graph stays current without re-parsing the knowledgebase (PLAN §5.1).
+	s.Notes = &NotesRepo{db: d, clock: clock, links: s.Links}
 	return s, nil
 }
 

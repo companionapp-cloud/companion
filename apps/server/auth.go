@@ -13,14 +13,28 @@ import (
 
 const timeFormat = time.RFC3339Nano
 
+// Access tokens are short-lived and refreshed silently by the client; the
+// long-lived refresh token lets a device stay signed in across cold boots
+// without re-entering credentials.
+const (
+	accessTokenTTL  = time.Hour
+	refreshTokenTTL = 30 * 24 * time.Hour
+)
+
 type authRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
 type authResponse struct {
-	Token  string `json:"token"`
-	UserID string `json:"userId"`
+	Token        string `json:"token"`
+	RefreshToken string `json:"refreshToken"`
+	ExpiresAt    string `json:"expiresAt"` // RFC3339, when Token expires
+	UserID       string `json:"userId"`
+}
+
+type refreshRequest struct {
+	RefreshToken string `json:"refreshToken"`
 }
 
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -51,12 +65,12 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	s.exec(`INSERT INTO user_seq (user_id, seq) VALUES (?, 0) ON CONFLICT (user_id) DO NOTHING;`, uid)
 
-	token, err := s.newSession(uid)
+	session, err := s.newSession(uid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "session failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, authResponse{Token: token, UserID: uid})
+	writeJSON(w, http.StatusOK, session.response(uid))
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -73,25 +87,90 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "invalid email or password")
 		return
 	}
-	token, err := s.newSession(uid)
+	session, err := s.newSession(uid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "session failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, authResponse{Token: token, UserID: uid})
+	writeJSON(w, http.StatusOK, session.response(uid))
 }
 
-func (s *Server) newSession(userID string) (string, error) {
+// handleRefresh exchanges a valid refresh token for a fresh access token. The
+// refresh token is rotated (single-use): the presented one is deleted and a new
+// one issued, so a leaked token can't be replayed after the next refresh.
+func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
+	var req refreshRequest
+	if err := decode(r, &req); err != nil || req.RefreshToken == "" {
+		writeErr(w, http.StatusBadRequest, "refreshToken is required")
+		return
+	}
+	var uid, expiresAt string
+	err := s.queryRow(
+		`SELECT user_id, expires_at FROM refresh_tokens WHERE token = ?;`, req.RefreshToken).Scan(&uid, &expiresAt)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, "invalid refresh token")
+		return
+	}
+	// Rotate unconditionally: consume the presented token whether or not it's
+	// still valid, so an expired one can't be retried.
+	s.exec(`DELETE FROM refresh_tokens WHERE token = ?;`, req.RefreshToken)
+	exp, perr := time.Parse(timeFormat, expiresAt)
+	if perr != nil || !s.clock.Now().UTC().Before(exp) {
+		writeErr(w, http.StatusUnauthorized, "refresh token expired")
+		return
+	}
+	session, err := s.newSession(uid)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "session failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, session.response(uid))
+}
+
+// session is a freshly minted access token + its rotating refresh token.
+type session struct {
+	token        string
+	refreshToken string
+	expiresAt    time.Time
+}
+
+func (s session) response(userID string) authResponse {
+	return authResponse{
+		Token:        s.token,
+		RefreshToken: s.refreshToken,
+		ExpiresAt:    s.expiresAt.Format(timeFormat),
+		UserID:       userID,
+	}
+}
+
+func (s *Server) newSession(userID string) (session, error) {
+	now := s.clock.Now().UTC()
+	access, err := randomToken()
+	if err != nil {
+		return session{}, err
+	}
+	expiresAt := now.Add(accessTokenTTL)
+	if _, err := s.exec(
+		`INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?);`,
+		access, userID, now.Format(timeFormat), expiresAt.Format(timeFormat)); err != nil {
+		return session{}, err
+	}
+	refresh, err := randomToken()
+	if err != nil {
+		return session{}, err
+	}
+	if _, err := s.exec(
+		`INSERT INTO refresh_tokens (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?);`,
+		refresh, userID, now.Format(timeFormat), now.Add(refreshTokenTTL).Format(timeFormat)); err != nil {
+		return session{}, err
+	}
+	return session{token: access, refreshToken: refresh, expiresAt: expiresAt}, nil
+}
+
+func randomToken() (string, error) {
 	buf := make([]byte, 24)
 	if _, err := rand.Read(buf); err != nil {
 		return "", err
 	}
-	token := hex.EncodeToString(buf)
-	_, err := s.exec(
-		`INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?);`,
-		token, userID, s.clock.Now().UTC().Format(timeFormat))
-	if err != nil {
-		return "", err
-	}
-	return token, nil
+	return hex.EncodeToString(buf), nil
 }

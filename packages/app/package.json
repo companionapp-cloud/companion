@@ -8,26 +8,35 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:graph": "node scripts/build-graph.mjs"
   },
   "dependencies": {
     "@companion/core-bridge": "*",
     "@companion/design-system": "*",
     "@companion/editor": "*",
-    "@react-navigation/native": "7.3.7"
+    "@react-navigation/native": "7.3.7",
+    "@xyflow/react": "12.8.6"
   },
   "peerDependencies": {
     "react": "*",
-    "react-native": "*"
+    "react-native": "*",
+    "react-native-webview": "*"
   },
   "peerDependenciesMeta": {
     "react-native": {
+      "optional": true
+    },
+    "react-native-webview": {
       "optional": true
     }
   },
   "devDependencies": {
     "@types/react": "19.2.2",
+    "esbuild": "0.28.1",
     "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native-web": "0.21.2",
     "typescript": "5.9.3"
   }
 }

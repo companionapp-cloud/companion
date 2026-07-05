@@ -6,6 +6,8 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { NotesListScreen } from './screens/NotesListScreen';
 import { NoteEditorScreen } from './screens/NoteEditorScreen';
+import { NoteGraphScreen } from './screens/NoteGraphScreen';
+import { GraphScreen } from './screens/GraphScreen';
 import { PlaceholderScreen } from './screens/PlaceholderScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 
@@ -17,11 +19,13 @@ import { SettingsScreen } from './screens/SettingsScreen';
 export type RootStackParamList = {
   Main: undefined;
   NoteEditor: { id: string };
+  NoteGraph: { id: string };
   Settings: undefined;
 };
 
 export type TabParamList = {
   Notes: undefined;
+  Graph: undefined;
   Chat: undefined;
   Calendar: undefined;
   Tasks: undefined;
@@ -32,6 +36,7 @@ const Tabs = createBottomTabNavigator<TabParamList>();
 
 const TAB_ICON: Record<keyof TabParamList, IconName> = {
   Notes: 'notes',
+  Graph: 'graph',
   Chat: 'chat',
   Calendar: 'calendar',
   Tasks: 'tasks',
@@ -63,6 +68,7 @@ function MainTabs() {
       <Tabs.Screen name="Chat" component={PlaceholderScreen} />
       <Tabs.Screen name="Calendar" component={PlaceholderScreen} />
       <Tabs.Screen name="Notes" component={NotesListScreen} />
+      <Tabs.Screen name="Graph" component={GraphScreen} />
       <Tabs.Screen name="Tasks" component={PlaceholderScreen} />
     </Tabs.Navigator>
   );
@@ -81,6 +87,7 @@ export function MobileShell() {
       >
         <RootStack.Screen name="Main" component={MainTabs} options={{ headerShown: false }} />
         <RootStack.Screen name="NoteEditor" component={NoteEditorScreen} options={{ title: '' }} />
+        <RootStack.Screen name="NoteGraph" component={NoteGraphScreen} options={{ title: 'Graph' }} />
         <RootStack.Screen
           name="Settings"
           component={SettingsScreen}

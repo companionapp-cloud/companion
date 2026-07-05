@@ -15,6 +15,16 @@ func (h *capturingHandler) OnEvent(name string, _ []byte) {
 	h.events = append(h.events, name)
 }
 
+func (h *capturingHandler) count(name string) int {
+	n := 0
+	for _, e := range h.events {
+		if e == name {
+			n++
+		}
+	}
+	return n
+}
+
 func newTestCore(t *testing.T) (*Core, *capturingHandler) {
 	t.Helper()
 	st, err := store.Open(":memory:", domain.SystemClock{})
@@ -112,9 +122,13 @@ func TestNotesCRUDOverBridge(t *testing.T) {
 		t.Errorf("list after delete len = %d, want 0", len(list))
 	}
 
-	// Each mutation (create, update, delete) should have emitted a change event.
-	if len(h.events) != 3 {
-		t.Errorf("emitted %d events, want 3: %v", len(h.events), h.events)
+	// Each mutation (create, update, delete) emits both the legacy notes.changed and
+	// the generic data.changed (PLAN §5.4).
+	if got := h.count("notes.changed"); got != 3 {
+		t.Errorf("notes.changed emitted %d times, want 3: %v", got, h.events)
+	}
+	if got := h.count("data.changed"); got != 3 {
+		t.Errorf("data.changed emitted %d times, want 3: %v", got, h.events)
 	}
 }
 

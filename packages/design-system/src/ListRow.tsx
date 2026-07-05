@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, View, type GestureResponderEvent } from "react-native";
 import { Icon } from "./Icon";
 import { type PressState } from "./platform";
 import { Text } from "./Text";
@@ -12,7 +12,7 @@ export interface ListRowProps {
   trailing?: string;
   selected?: boolean;
   hasChildren?: boolean;
-  onPress?: () => void;
+  onPress?: (e: GestureResponderEvent) => void;
 }
 
 /** Selectable row for navigation lists (folders, notes). Two-line when a subtitle

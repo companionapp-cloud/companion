@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 
-export type ViewId = "chat" | "calendar" | "notes" | "tasks";
+export type ViewId = "chat" | "calendar" | "notes" | "tasks" | "graph";
 
 /** The current navigable location, derived from the React Navigation route. */
 export type NavLocation =
@@ -19,8 +19,10 @@ export interface Navigator {
   back: () => void;
   forward: () => void;
   goView: (view: ViewId) => void;
-  openNote: (id: string) => void;
+  openNote: (id: string, opts?: { newTab?: boolean }) => void;
   closeTab: (id: string) => void;
+  /** Deselect the active note (keeps tabs open, shows the notes list). No-op elsewhere. */
+  deselect: () => void;
 }
 
 export const NavContext = createContext<Navigator | null>(null);

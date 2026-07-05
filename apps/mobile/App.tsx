@@ -8,6 +8,7 @@ import { createNativeBridge } from '@companion/core-bridge/native';
 import type { CoreBridge } from '@companion/core-bridge';
 import CompanionCore from './modules/companion-core';
 import { MobileShell } from './src/MobileShell';
+import { nativeSyncStorage } from './src/syncStorage';
 
 // gomobile's Core.New wants a filesystem path, not a file:// URI.
 function toFsPath(uri: string): string {
@@ -50,7 +51,7 @@ function Root() {
   }
   return (
     <CoreProvider core={bridge}>
-      <SyncProvider>
+      <SyncProvider storage={nativeSyncStorage}>
         <NotesProvider>
           <MobileShell />
         </NotesProvider>

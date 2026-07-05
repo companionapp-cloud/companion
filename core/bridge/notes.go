@@ -42,6 +42,7 @@ func (c *Core) notesCreate(payload []byte) ([]byte, error) {
 		return nil, err
 	}
 	c.emit(notesChangedEvent, nil)
+	c.emitDataChanged("note", n.ID)
 	return json.Marshal(n)
 }
 
@@ -58,6 +59,7 @@ func (c *Core) notesUpdate(payload []byte) ([]byte, error) {
 		return nil, mapStoreErr(err)
 	}
 	c.emit(notesChangedEvent, nil)
+	c.emitDataChanged("note", n.ID)
 	return json.Marshal(n)
 }
 
@@ -72,5 +74,6 @@ func (c *Core) notesDelete(payload []byte) ([]byte, error) {
 		return nil, mapStoreErr(err)
 	}
 	c.emit(notesChangedEvent, nil)
+	c.emitDataChanged("note", args.ID)
 	return json.Marshal(map[string]bool{"ok": true})
 }

@@ -6,6 +6,8 @@ export { notesApi } from "./notes";
 export type { NotesApi, CreateNoteInput, UpdateNoteInput } from "./notes";
 export { syncApi } from "./sync";
 export type { SyncApi } from "./sync";
+export { graphApi } from "./graph";
+export type { GraphApi, Graph, GraphNode, GraphEdge } from "./graph";
 export * as auth from "./auth";
 export type { AuthResult } from "./auth";
 export { createHttpBridge } from "./http";

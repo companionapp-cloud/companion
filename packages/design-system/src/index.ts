@@ -1,5 +1,5 @@
 export * from "./tokens";
-export { dragRegion, noDragRegion, transition, type PressState } from "./platform";
+export { dragRegion, noDragRegion, opensInNewTab, transition, type PressState } from "./platform";
 export { Icon } from "./Icon";
 export type { IconProps, IconName } from "./iconPaths";
 export { Text } from "./Text";

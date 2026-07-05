@@ -78,7 +78,7 @@ func newServer(t *testing.T) *httptest.Server {
 		if !strings.Contains(dsn, "test") {
 			t.Fatalf("refusing to run destructive tests on %q; use a *_test database (COMPANION_TEST_DB)", dsn)
 		}
-		if _, err := db.Exec(`TRUNCATE users, sessions, user_seq, notes, user_secrets;`); err != nil {
+		if _, err := db.Exec(`TRUNCATE users, sessions, refresh_tokens, user_seq, notes, user_secrets;`); err != nil {
 			t.Fatalf("truncate: %v", err)
 		}
 	}

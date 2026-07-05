@@ -18,6 +18,7 @@ var ErrNotFound = errors.New("not found")
 type NotesRepo struct {
 	db    Driver
 	clock domain.Clock
+	links *LinksRepo
 }
 
 // CreateNoteInput carries the client-supplied fields for a new note.
@@ -67,6 +68,9 @@ func (r *NotesRepo) Create(in CreateNoteInput) (*domain.Note, error) {
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert note: %w", err)
+	}
+	if err := r.links.SyncSource(domain.NodeNote, n.ID, n.ContentMD); err != nil {
+		return nil, err
 	}
 	return n, nil
 }
@@ -139,6 +143,9 @@ func (r *NotesRepo) Update(id string, in UpdateNoteInput) (*domain.Note, error) 
 	if affected, _ := res.RowsAffected(); affected == 0 {
 		return nil, ErrNotFound
 	}
+	if err := r.links.SyncSource(domain.NodeNote, n.ID, n.ContentMD); err != nil {
+		return nil, err
+	}
 	return n, nil
 }
 
@@ -156,6 +163,10 @@ func (r *NotesRepo) Delete(id string) error {
 	}
 	if affected, _ := res.RowsAffected(); affected == 0 {
 		return ErrNotFound
+	}
+	// The source is gone; drop its outgoing edges. Incoming edges dangle by design.
+	if err := r.links.DeleteSource(domain.NodeNote, id); err != nil {
+		return err
 	}
 	return nil
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { View } from "react-native";
+import { Pressable, View } from "react-native";
 import {
   NavigationContainer,
   StackActions,
@@ -29,6 +29,7 @@ import { NavContext, useNav, type NavLocation, type Navigator, type ViewId } fro
 import { NotesProvider } from "./NotesProvider";
 import { AppToolbar } from "./AppToolbar";
 import { NotesScreen } from "./NotesScreen";
+import { GraphScreen } from "./GraphScreen";
 import { SettingsPanel } from "./SettingsPanel";
 import { useSync } from "./SyncProvider";
 
@@ -37,6 +38,7 @@ const NAV: { id: ViewId; label: string; icon: IconName }[] = [
   { id: "calendar", label: "Calendar", icon: "calendar" },
   { id: "notes", label: "Notes", icon: "notes" },
   { id: "tasks", label: "Tasks", icon: "tasks" },
+  { id: "graph", label: "Graph", icon: "graph" },
 ];
 
 const PLACEHOLDER: Record<"chat" | "calendar" | "tasks", string> = {
@@ -61,14 +63,14 @@ function webLinking(): LinkingOptions<ParamListBase> | undefined {
   if (typeof window === "undefined" || !/^https?:$/.test(window.location.protocol)) return undefined;
   return {
     prefixes: [window.location.origin],
-    config: { screens: { chat: "chat", calendar: "calendar", tasks: "tasks", notes: "notes/:id?" } },
+    config: { screens: { chat: "chat", calendar: "calendar", tasks: "tasks", graph: "graph", notes: "notes/:id?" } },
   };
 }
 
+// The notes UI is mounted persistently by Shell (so per-tab editor state survives route
+// changes), not on the router. This screen only anchors the "notes" route for linking.
 function NotesRouteScreen() {
-  const route = useRoute();
-  const id = (route.params as { id?: string } | undefined)?.id ?? null;
-  return <NotesScreen activeNoteId={id} />;
+  return null;
 }
 
 function ViewScreen() {
@@ -172,8 +174,21 @@ function NavBridge({
         if (routeName === view && !(view === "notes" && current.kind === "note")) return;
         goto(view);
       },
-      openNote: (id) => {
-        setTabs((t) => (t.includes(id) ? t : [...t, id]));
+      openNote: (id, opts) => {
+        setTabs((t) => {
+          if (t.includes(id)) return t;
+          // Cmd/Ctrl-click always adds a new tab; otherwise, if a note tab is currently
+          // active, replace it in place with the new note.
+          if (!opts?.newTab && current.kind === "note") {
+            const i = t.indexOf(current.id);
+            if (i !== -1) {
+              const next = [...t];
+              next[i] = id;
+              return next;
+            }
+          }
+          return [...t, id];
+        });
         goto("notes", { id });
       },
       closeTab: (id) => {
@@ -182,6 +197,9 @@ function NavBridge({
           const remaining = tabs.filter((x) => x !== id);
           goto("notes", remaining.length ? { id: remaining[remaining.length - 1] } : undefined);
         }
+      },
+      deselect: () => {
+        if (current.kind === "note") goto("notes");
       },
     };
   }, [current, tabs, routeName, state, forwardStack, navigation]);
@@ -203,6 +221,7 @@ export function AppShell({ topInset = 0 }: AppShellProps) {
           <Nav.Screen name="calendar" component={ViewScreen} />
           <Nav.Screen name="notes" component={NotesRouteScreen} />
           <Nav.Screen name="tasks" component={ViewScreen} />
+          <Nav.Screen name="graph" component={GraphScreen} />
         </Nav.Navigator>
       </NavigationContainer>
     </NotesProvider>
@@ -213,6 +232,7 @@ export function AppShell({ topInset = 0 }: AppShellProps) {
  * screen (children). */
 function Shell({ topInset, children }: { topInset: number; children: ReactNode }) {
   const nav = useNav();
+  const onNotes = nav.activeView === "notes";
   const sync = useSync();
   const [open, setOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -257,7 +277,7 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
           ) : null}
         </View>
 
-        <View style={{ gap: 3, flex: 1 }}>
+        <View style={{ gap: 3 }}>
           {NAV.map((n) => (
             <RailItem
               key={n.id}
@@ -269,6 +289,8 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
             />
           ))}
         </View>
+        {/* Empty rail space deselects the active note (still a window drag handle on desktop). */}
+        <Pressable onPress={nav.deselect} style={{ flex: 1, cursor: "auto" }} aria-label="Deselect note" />
 
         <View style={{ gap: space.sm, paddingTop: space.md }}>
           <RailItem
@@ -290,7 +312,15 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
       </View>
 
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Frame toolbar={<AppToolbar />}>{children}</Frame>
+        <Frame toolbar={<AppToolbar />}>
+          {/* Notes is mounted once and only shown on the notes view; keeping it alive
+              across route changes is what makes tabs stateful (see NotesScreen). Other
+              views render through the router as usual. */}
+          <View style={[{ flex: 1 }, onNotes ? null : { display: "none" }]}>
+            <NotesScreen />
+          </View>
+          {onNotes ? null : children}
+        </Frame>
       </View>
 
       {settingsOpen ? <SettingsPanel onClose={() => setSettingsOpen(false)} /> : null}

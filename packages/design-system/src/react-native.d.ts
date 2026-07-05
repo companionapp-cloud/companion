@@ -53,9 +53,14 @@ declare module "react-native" {
     pressed: boolean;
     hovered?: boolean; // react-native-web extension
   }
+  // Loose stand-in for RN's press event. On web (react-native-web) the nativeEvent is
+  // the DOM MouseEvent, so keyboard-modifier flags are available for Cmd/Ctrl-click.
+  export interface GestureResponderEvent {
+    nativeEvent: { metaKey?: boolean; ctrlKey?: boolean; [key: string]: unknown };
+  }
   interface PressableProps {
     style?: StyleProp | ((state: PressableState) => StyleProp);
-    onPress?: () => void;
+    onPress?: (event: GestureResponderEvent) => void;
     onHoverIn?: () => void;
     onHoverOut?: () => void;
     disabled?: boolean;

@@ -26,7 +26,15 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS sessions (
   token      TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  expires_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+  token      TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS user_seq (
@@ -76,7 +84,26 @@ func openDB(dsn string) (*sql.DB, string, error) {
 		db.Close()
 		return nil, "", fmt.Errorf("apply schema: %w", err)
 	}
+	if err := migrate(db, dialect); err != nil {
+		db.Close()
+		return nil, "", fmt.Errorf("migrate: %w", err)
+	}
 	return db, dialect, nil
+}
+
+// migrate applies column additions that a plain `CREATE TABLE IF NOT EXISTS`
+// can't retrofit onto an already-created table (e.g. a dev SQLite file from
+// before refresh-token support). Each step is idempotent: a duplicate-column
+// error means the migration already ran.
+func migrate(db *sql.DB, dialect string) error {
+	alter := `ALTER TABLE sessions ADD COLUMN expires_at TEXT`
+	if dialect == "postgres" {
+		alter = `ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at TEXT`
+	}
+	if _, err := db.Exec(alter); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		return err
+	}
+	return nil
 }
 
 // rebind converts the '?' placeholders used throughout the queries to Postgres'

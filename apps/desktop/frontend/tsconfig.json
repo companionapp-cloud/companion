@@ -3,7 +3,10 @@
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],
-    "noEmit": true
+    "noEmit": true,
+    // Resolve platform variants the way Vite does (Editor.web.tsx, GraphView.web.tsx, …)
+    // so the app never typechecks native-only RN modules.
+    "moduleSuffixes": [".web", ""]
   },
   "include": ["src", "vite.config.ts", "../../../packages/design-system/src/react-native.d.ts"]
 }

@@ -109,7 +109,13 @@ func (r *NotesRepo) Apply(n *domain.Note) error {
 	if err != nil {
 		return fmt.Errorf("apply note: %w", err)
 	}
-	return nil
+	// Re-derive links from the applied content so a synced device builds the same
+	// index as the device that authored the change (PLAN §5.1). A tombstone drops the
+	// source's outgoing edges.
+	if n.DeletedAt != nil {
+		return r.links.DeleteSource(domain.NodeNote, n.ID)
+	}
+	return r.links.SyncSource(domain.NodeNote, n.ID, n.ContentMD)
 }
 
 // MarkPushed clears the dirty flag and records the server version after a successful
@@ -153,6 +159,9 @@ func (r *NotesRepo) CreateConflictedCopy(from *domain.Note, suffix string) (*dom
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert conflicted copy: %w", err)
+	}
+	if err := r.links.SyncSource(domain.NodeNote, copy.ID, copy.ContentMD); err != nil {
+		return nil, err
 	}
 	return copy, nil
 }

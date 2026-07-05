@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"companion/core/domain"
 )
@@ -38,6 +39,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/auth/register", s.handleRegister)
 	mux.HandleFunc("POST /v1/auth/login", s.handleLogin)
+	mux.HandleFunc("POST /v1/auth/refresh", s.handleRefresh)
 	mux.Handle("GET /v1/sync/pull", s.authed(s.handlePull))
 	mux.Handle("POST /v1/sync/push", s.authed(s.handlePush))
 	return withCORS(mux)
@@ -78,10 +80,21 @@ func (s *Server) authed(next http.HandlerFunc) http.Handler {
 			return
 		}
 		var uid string
-		err := s.queryRow(`SELECT user_id FROM sessions WHERE token = ?;`, token).Scan(&uid)
+		var expiresAt sql.NullString
+		err := s.queryRow(`SELECT user_id, expires_at FROM sessions WHERE token = ?;`, token).Scan(&uid, &expiresAt)
 		if err != nil {
 			writeErr(w, http.StatusUnauthorized, "invalid token")
 			return
+		}
+		// Timestamps are RFC3339Nano text (variable-width fractional seconds), so
+		// compare as parsed times rather than lexically. A NULL expiry marks a
+		// legacy session minted before expiry existed — treat it as non-expiring.
+		if expiresAt.Valid {
+			exp, perr := time.Parse(timeFormat, expiresAt.String)
+			if perr != nil || !s.clock.Now().UTC().Before(exp) {
+				writeErr(w, http.StatusUnauthorized, "token expired")
+				return
+			}
 		}
 		next(w, r.WithContext(context.WithValue(r.Context(), userIDKey, uid)))
 	})

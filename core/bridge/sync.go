@@ -53,6 +53,9 @@ func (c *Core) syncRun() ([]byte, error) {
 	if err := engine.Sync(); err != nil {
 		return nil, err
 	}
+	// A pull may have applied many rows (and re-derived their links); signal a bulk
+	// change so notes lists and the graph both refresh.
 	c.emit(notesChangedEvent, nil)
+	c.emitDataChanged("", "")
 	return json.Marshal(map[string]bool{"ok": true})
 }

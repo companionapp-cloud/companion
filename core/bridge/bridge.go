@@ -44,6 +44,18 @@ func (c *Core) emit(name string, payload []byte) {
 	}
 }
 
+// dataChangedEvent is the generic "something changed, refresh" signal (PLAN §5.4). The
+// graph view, sidebar, and embedded-task NodeViews subscribe to it. An empty entityType
+// means a bulk change (a full sync or rebuild).
+const dataChangedEvent = "data.changed"
+
+// emitDataChanged notifies subscribers that an entity (or, with empty args, many)
+// changed. Handlers that only need "refresh" can ignore the payload.
+func (c *Core) emitDataChanged(entityType, id string) {
+	payload, _ := json.Marshal(map[string]string{"entityType": entityType, "id": id})
+	c.emit(dataChangedEvent, payload)
+}
+
 // Invoke dispatches a method by name. payload is the JSON-encoded argument (may be
 // nil for methods that take none); the result is JSON-encoded. Handlers own their
 // own argument/return marshalling.
@@ -65,6 +77,18 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.syncConfigure(payload)
 	case "sync.run":
 		return c.syncRun()
+	case "graph.full":
+		return c.graphFull()
+	case "graph.neighborhood":
+		return c.graphNeighborhood(payload)
+	case "graph.backlinks":
+		return c.graphBacklinks(payload)
+	case "graph.search":
+		return c.graphSearch(payload)
+	case "graph.lookup":
+		return c.graphLookup(payload)
+	case "graph.rebuild":
+		return c.graphRebuild()
 	default:
 		return nil, fmt.Errorf("unknown method %q", method)
 	}

@@ -56,8 +56,9 @@ func TestMobileCoreInvoke(t *testing.T) {
 		t.Fatalf("list len = %d, want 1", len(list))
 	}
 
-	if len(h.events) != 1 || h.events[0] != "notes.changed" {
-		t.Errorf("events = %v, want [notes.changed]", h.events)
+	// One create emits both notes.changed (legacy) and data.changed (PLAN §5.4).
+	if len(h.events) != 2 || h.events[0] != "notes.changed" || h.events[1] != "data.changed" {
+		t.Errorf("events = %v, want [notes.changed data.changed]", h.events)
 	}
 }
 
