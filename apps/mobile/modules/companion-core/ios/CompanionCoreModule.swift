@@ -34,8 +34,10 @@ public class CompanionCoreModule: Module {
         throw CoreException("core not initialized; call initialize(dbPath) first")
       }
       let payload = payloadJson.data(using: .utf8) ?? Data()
+      // gomobile bridges `([]byte, error)` with the ObjC error convention, so `invoke`
+      // imports as `throws -> Data` (non-optional): every core handler returns either an
+      // error or non-nil JSON bytes, so there is no nil-result case to guard here.
       let result = try core.invoke(method, payload: payload)
-      guard let result else { return "" }
       return String(data: result, encoding: .utf8) ?? ""
     }
 
@@ -52,9 +54,15 @@ internal final class CoreException: GenericException<String> {
   override var reason: String { "Companion core error: \(param)" }
 }
 
-// Conforms to the gomobile-generated MobileEventHandler protocol and forwards each Go
-// core event to the JS emitter, decoding the payload bytes as a UTF-8 JSON string.
-private class CoreEventForwarder: NSObject, MobileEventHandler {
+// Conforms to the gomobile-generated event-handler protocol and forwards each Go core
+// event to the JS emitter, decoding the payload bytes as a UTF-8 JSON string.
+//
+// gomobile emits both a `@protocol MobileEventHandler` and a same-named
+// `@class MobileEventHandler` (the proxy for Go-side values). As with ObjC's own
+// NSObject class/protocol clash, Swift imports the protocol with a `Protocol` suffix;
+// conforming to the bare `MobileEventHandler` would instead pick the class and fail
+// with "multiple inheritance from classes 'NSObject' and 'MobileEventHandler'".
+private class CoreEventForwarder: NSObject, MobileEventHandlerProtocol {
   private let forward: (String, String) -> Void
   init(_ forward: @escaping (String, String) -> Void) { self.forward = forward }
 

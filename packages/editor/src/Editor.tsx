@@ -195,6 +195,7 @@ function LinkPicker({
   const [query, setQuery] = useState("");
   const [type, setType] = useState<LinkType | "all">("all");
   const [items, setItems] = useState<LinkSuggestion[]>([]);
+  const [kbHeight, setKbHeight] = useState(0);
   const inputRef = useRef<TextInput>(null);
 
   // Reset and focus each time the sheet opens.
@@ -205,6 +206,25 @@ function LinkPicker({
     setItems([]);
     const t = setTimeout(() => inputRef.current?.focus(), 60);
     return () => clearTimeout(t);
+  }, [visible]);
+
+  // The sheet is anchored to the bottom of the screen, but the auto-focused search field
+  // raises the keyboard — and a Modal renders in its own view hierarchy, so it doesn't
+  // avoid the keyboard on its own. Track the keyboard height (mirroring the editor's
+  // listeners) and lift the sheet by it so the search field and results stay visible.
+  useEffect(() => {
+    if (!visible) {
+      setKbHeight(0);
+      return;
+    }
+    const showEvt = Platform.OS === "ios" ? "keyboardWillChangeFrame" : "keyboardDidShow";
+    const hideEvt = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const show = Keyboard.addListener(showEvt, (e) => setKbHeight(e.endCoordinates?.height ?? 0));
+    const hide = Keyboard.addListener(hideEvt, () => setKbHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
   }, [visible]);
 
   // Debounced search whenever the query or type changes while open.
@@ -228,7 +248,7 @@ function LinkPicker({
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
       <Pressable style={styles.backdrop} onPress={onCancel} />
-      <View style={styles.sheet}>
+      <View style={[styles.sheet, kbHeight > 0 && { marginBottom: kbHeight, paddingBottom: 12 }]}>
         <View style={styles.sheetHeader}>
           <Text style={styles.sheetTitle}>Insert reference</Text>
           <Pressable onPress={onCancel} hitSlop={8}>
