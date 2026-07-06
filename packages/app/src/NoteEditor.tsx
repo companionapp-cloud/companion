@@ -145,6 +145,9 @@ export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote, 
             }}
             linkSource={linkSource}
             onOpenRef={onOpenRef}
+            // `tasks.tasks` gets a fresh identity whenever any task changes (local edit or a
+            // synced pull), signalling the editor to re-hydrate its `[[task:…]]` chips.
+            linkRevision={tasks.tasks}
           />
         </ScrollView>
       )}

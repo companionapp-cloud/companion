@@ -57,7 +57,7 @@ interface PickerState {
   embed: boolean;
 }
 
-export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef }: EditorProps) {
+export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, linkRevision }: EditorProps) {
   const onChangeRef = useRef(onChangeMarkdown);
   onChangeRef.current = onChangeMarkdown;
   const linkSourceRef = useRef<LinkSource | undefined>(linkSource);
@@ -86,6 +86,20 @@ export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef }: Ed
   }, []);
 
   const inject = (js: string) => webRef.current?.injectJavaScript(`${js} true;`);
+
+  // Re-hydrate task chips inside the WebView when the host signals task data changed. Skips
+  // the initial mount, where chips already hydrate on creation (and the WebView may not be
+  // ready to receive the injection yet).
+  const firstRevision = useRef(true);
+  useEffect(() => {
+    if (firstRevision.current) {
+      firstRevision.current = false;
+      return;
+    }
+    inject("window.__refreshLinks && window.__refreshLinks();");
+    // `inject` is stable across renders (reads webRef); depend only on the revision.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkRevision]);
   const jsonArg = (v: unknown) => JSON.stringify(v).replace(/</g, "\\u003c");
 
   const resolve = (requestId: unknown, result: unknown) =>

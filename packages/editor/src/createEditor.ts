@@ -9,7 +9,7 @@ import { schema, parser, serializer, wikilinkInputRules, wikilinkNode } from "./
 import { commonmarkInputRules } from "./inputrules";
 import { wikilinkAutocomplete } from "./autocomplete";
 import { wikilinkHostAutocomplete, type HostAutocompleteBridge } from "./hostAutocomplete";
-import { wikilinkNodeView } from "./wikilinkView";
+import { wikilinkNodeView, type WikilinkView } from "./wikilinkView";
 import type { LinkRef, LinkSource } from "./types";
 
 // The shared ProseMirror setup — pure DOM, no framework. Used directly on web/desktop
@@ -17,6 +17,9 @@ import type { LinkRef, LinkSource } from "./types";
 // markdown in / markdown out to match the note model.
 export interface EditorHandle {
   destroy(): void;
+  /** Re-hydrate every `[[task:…]]` chip from the host. Call when task data changed
+   * elsewhere while the editor stayed open, so the chips reflect it. */
+  refreshLinks(): void;
 }
 
 export interface CreateEditorOptions {
@@ -104,6 +107,9 @@ export function createEditor(
   ];
   const state = EditorState.create({ schema, doc, plugins });
 
+  // Live task chips register here so refreshLinks() can re-hydrate them on demand.
+  const linkViews = new Set<WikilinkView>();
+
   let pending: string | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   const flush = () => {
@@ -121,7 +127,14 @@ export function createEditor(
     state,
     // Task chips hydrate from the host and are clickable; other links keep the plain pill.
     nodeViews: {
-      wikilink: wikilinkNodeView({ linkSource, onOpenRef: options.onOpenRef }),
+      wikilink: wikilinkNodeView({
+        linkSource,
+        onOpenRef: options.onOpenRef,
+        register: (v) => {
+          linkViews.add(v);
+          return () => linkViews.delete(v);
+        },
+      }),
     },
     handleDOMEvents: {
       focus: () => {
@@ -170,6 +183,9 @@ export function createEditor(
       if (options.flushOnDestroy) flush();
       else if (timer) clearTimeout(timer);
       view.destroy();
+    },
+    refreshLinks() {
+      linkViews.forEach((v) => v.rehydrate());
     },
   };
 }

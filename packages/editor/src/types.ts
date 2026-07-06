@@ -10,6 +10,11 @@ export interface EditorProps {
   /** Called when the reader opens a wikilink chip (select it, then click again). The host
    * decides how — e.g. open the target in a new workspace tab. Omit and chips only select. */
   onOpenRef?: (ref: LinkRef) => void;
+  /** Change this value's identity to re-hydrate `[[task:…]]` chips against the latest task
+   * data (via {@link LinkSource.lookup}). The editor otherwise hydrates a chip only when it
+   * mounts, so a task edited elsewhere while the note stays open would look stale. Only
+   * touches already-rendered chips; the document itself is unchanged. */
+  linkRevision?: unknown;
 }
 
 /** A reference to open — the payload of {@link EditorProps.onOpenRef}. */

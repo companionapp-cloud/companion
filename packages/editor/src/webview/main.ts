@@ -11,6 +11,7 @@ declare global {
     __INITIAL_MARKDOWN__?: string;
     __HAS_LINK_SOURCE__?: boolean;
     __resolveLink?: (requestId: number, payload: unknown) => void;
+    __refreshLinks?: () => void;
   }
 }
 
@@ -50,7 +51,7 @@ function init(): void {
   const mount = document.getElementById("editor");
   if (!mount) return;
   const hasLinks = !!window.__HAS_LINK_SOURCE__;
-  createEditor(mount, window.__INITIAL_MARKDOWN__ ?? "", (markdown) => post("change", markdown), {
+  const handle = createEditor(mount, window.__INITIAL_MARKDOWN__ ?? "", (markdown) => post("change", markdown), {
     // linkSource still resolves pasted UUIDs; `[[` delegates to the native modal, which
     // posts linkTrigger/linkTriggerEnd and injects window.__insertRef / __cancelRef.
     linkSource: hasLinks ? bridgedLinkSource() : undefined,
@@ -64,6 +65,8 @@ function init(): void {
     // Opening a referenced entity is the shell's job; hand the ref up over the bridge.
     onOpenRef: (ref) => post("openRef", ref),
   });
+  // The host injects __refreshLinks() to re-hydrate task chips after task data changes.
+  window.__refreshLinks = () => handle.refreshLinks();
   post("ready", null);
 }
 

@@ -13,6 +13,9 @@ import type { LinkRef, LinkSource } from "./types";
 export interface WikilinkViewDeps {
   linkSource?: LinkSource;
   onOpenRef?: (ref: LinkRef) => void;
+  /** Register a live view so the host can re-hydrate task chips when the underlying task
+   * data changes elsewhere (see {@link WikilinkView.rehydrate}). Returns an unregister fn. */
+  register?: (view: WikilinkView) => () => void;
 }
 
 interface Attrs {
@@ -27,11 +30,12 @@ export function wikilinkNodeView(deps: WikilinkViewDeps) {
     new WikilinkView(node, view, getPos, deps);
 }
 
-class WikilinkView implements NodeView {
+export class WikilinkView implements NodeView {
   dom: HTMLElement;
   private attrs: Attrs;
   // A lookup token so a slow response for a stale node (after update()) is ignored.
   private token = 0;
+  private unregister?: () => void;
 
   constructor(
     private node: Node,
@@ -44,10 +48,18 @@ class WikilinkView implements NodeView {
     this.dom.addEventListener("mousedown", this.onMouseDown);
     this.dom.addEventListener("click", this.onClick);
     this.render();
+    this.unregister = deps.register?.(this);
   }
 
   private isTask(): boolean {
     return this.attrs.type === "task";
+  }
+
+  // Re-fetch a task chip's state from the host. Called when task data changed elsewhere
+  // (e.g. its done state toggled in another tab) so an open note reflects it. No-op for
+  // non-task chips, whose label is fixed by the doc.
+  rehydrate(): void {
+    if (this.isTask()) this.hydrateTask();
   }
 
   private render(): void {
@@ -145,6 +157,7 @@ class WikilinkView implements NodeView {
 
   destroy(): void {
     this.token++;
+    this.unregister?.();
     this.dom.removeEventListener("mousedown", this.onMouseDown);
     this.dom.removeEventListener("click", this.onClick);
   }
