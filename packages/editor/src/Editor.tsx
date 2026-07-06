@@ -25,19 +25,32 @@ import type { EditorProps, LinkSource, LinkSuggestion, LinkType } from "./types"
 // because a DOM popup fights the on-screen keyboard, `[[` opens a *native* picker here:
 // the WebView posts linkTrigger, this host shows a modal, and injects window.__insertRef /
 // __cancelRef with the result. A keyboard toolbar offers the same via an explicit button.
-function buildHtml(markdown: string, hasLinkSource: boolean): string {
+function buildHtml(
+  markdown: string,
+  hasLinkSource: boolean,
+  opts: { simple: boolean; placeholder?: string; submitOnEnter: boolean; debounceMs?: number },
+): string {
   // Escape `<` so note content can't break out of the <script> (e.g. "</script>").
   const initial = JSON.stringify(markdown).replace(/</g, "\\u003c");
+  const placeholder = JSON.stringify(opts.placeholder ?? "").replace(/</g, "\\u003c");
+  const debounce = typeof opts.debounceMs === "number" ? String(opts.debounceMs) : "undefined";
+  // The full document editor is a full-screen page (min-height:100%, roomy .pm-wrap). The
+  // simple editor is an inline field that hugs its content, so the host can size the WebView
+  // to it (see the height message) — no min-height, tight padding.
+  const bodyCss = opts.simple
+    ? "html,body{margin:0;padding:0;background:transparent;}"
+    : "html,body{margin:0;padding:0;min-height:100%;background:#ffffff;}";
+  const mountClass = opts.simple ? "pm-compact" : "pm-wrap";
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<style>html,body{margin:0;padding:0;min-height:100%;background:#ffffff;}${EDITOR_CSS}</style>
+<style>${bodyCss}${EDITOR_CSS}</style>
 </head>
 <body>
-<div id="editor" class="pm-wrap"></div>
-<script>window.__INITIAL_MARKDOWN__ = ${initial}; window.__HAS_LINK_SOURCE__ = ${hasLinkSource ? "true" : "false"};</script>
+<div id="editor" class="${mountClass}"></div>
+<script>window.__INITIAL_MARKDOWN__ = ${initial}; window.__HAS_LINK_SOURCE__ = ${hasLinkSource ? "true" : "false"}; window.__EDITOR_VARIANT__ = ${opts.simple ? '"simple"' : '"full"'}; window.__PLACEHOLDER__ = ${placeholder}; window.__SUBMIT_ON_ENTER__ = ${opts.submitOnEnter ? "true" : "false"}; window.__DEBOUNCE_MS__ = ${debounce};</script>
 <script>${EDITOR_JS}</script>
 </body>
 </html>`;
@@ -57,22 +70,28 @@ interface PickerState {
   embed: boolean;
 }
 
-export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, linkRevision }: EditorProps) {
+export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, linkRevision, variant, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs }: EditorProps) {
+  const simple = variant === "simple";
   const onChangeRef = useRef(onChangeMarkdown);
   onChangeRef.current = onChangeMarkdown;
   const linkSourceRef = useRef<LinkSource | undefined>(linkSource);
   linkSourceRef.current = linkSource;
   const onOpenRefRef = useRef(onOpenRef);
   onOpenRefRef.current = onOpenRef;
+  const onSubmitRef = useRef(onSubmit);
+  onSubmitRef.current = onSubmit;
   const webRef = useRef<WebView>(null);
 
   const [editorFocused, setEditorFocused] = useState(false);
   const [kbHeight, setKbHeight] = useState(0);
   const [picker, setPicker] = useState<PickerState>({ open: false, fromTrigger: false, embed: false });
+  // Simple variant: the WebView is sized to its reported content height, between the host's
+  // min and (optional) max. Seed at the min so it never starts collapsed.
+  const [contentHeight, setContentHeight] = useState(minHeight ?? 40);
 
   // Built once from the initial content; the WebView owns edits thereafter.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const html = useMemo(() => buildHtml(markdown, !!linkSource), []);
+  const html = useMemo(() => buildHtml(markdown, !!linkSource, { simple, placeholder, submitOnEnter: !!onSubmit, debounceMs }), []);
 
   useEffect(() => {
     const showEvt = Platform.OS === "ios" ? "keyboardWillChangeFrame" : "keyboardDidShow";
@@ -100,6 +119,17 @@ export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, link
     // `inject` is stable across renders (reads webRef); depend only on the revision.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linkRevision]);
+
+  // Empty the editor when the host bumps clearSignal (composer, post-send). Skips mount.
+  const firstClear = useRef(true);
+  useEffect(() => {
+    if (firstClear.current) {
+      firstClear.current = false;
+      return;
+    }
+    inject("window.__clear && window.__clear();");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clearSignal]);
   const jsonArg = (v: unknown) => JSON.stringify(v).replace(/</g, "\\u003c");
 
   const resolve = (requestId: unknown, result: unknown) =>
@@ -111,6 +141,16 @@ export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, link
       switch (msg.type) {
         case "change":
           if (typeof msg.payload === "string") onChangeRef.current(msg.payload);
+          break;
+        case "submit":
+          if (typeof msg.payload === "string") onSubmitRef.current?.(msg.payload);
+          break;
+        case "height":
+          if (typeof msg.payload === "number") {
+            const min = minHeight ?? 40;
+            const h = Math.max(min, maxHeight ? Math.min(msg.payload, maxHeight) : msg.payload);
+            setContentHeight(h);
+          }
           break;
         case "focus":
           setEditorFocused(!!msg.payload);
@@ -161,13 +201,15 @@ export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, link
     setPicker((p) => ({ ...p, open: false }));
   };
 
-  const showToolbar = editorFocused && kbHeight > 0 && !picker.open && !!linkSource;
+  // The simple field types `[[` to open the native picker; its keyboard toolbar is skipped
+  // (it's a screen-anchored overlay that assumes the full-screen editor's layout).
+  const showToolbar = !simple && editorFocused && kbHeight > 0 && !picker.open && !!linkSource;
 
   return (
-    <View style={styles.root}>
+    <View style={simple ? { height: contentHeight } : styles.root}>
       <WebView
         ref={webRef}
-        style={styles.web}
+        style={simple ? { height: contentHeight, backgroundColor: "transparent" } : styles.web}
         originWhitelist={["*"]}
         source={{ html }}
         onMessage={onMessage}

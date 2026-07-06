@@ -96,6 +96,7 @@ function NoteTabBody({ id, onDelete }: { id: string; onDelete: () => void }) {
 
 function TaskTabBody({ id, onDelete }: { id: string; onDelete: () => void }) {
   const tasks = useTasks();
+  const nav = useNav();
   const task = tasks.byId(id);
   if (!task) {
     return (
@@ -112,6 +113,10 @@ function TaskTabBody({ id, onDelete }: { id: string; onDelete: () => void }) {
       onDelete={async (tid) => {
         await tasks.remove(tid);
         onDelete();
+      }}
+      onOpenRef={(ref) => {
+        // Clicking a chip in the notes opens its target in a new tab, leaving this task put.
+        if (ref.type === "task" || ref.type === "note") nav.openInNewTab({ kind: ref.type, id: ref.id });
       }}
     />
   );

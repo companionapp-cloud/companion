@@ -1,11 +1,14 @@
 import { EditorState, Plugin } from "prosemirror-state";
-import { EditorView } from "prosemirror-view";
+import { EditorView, Decoration, DecorationSet } from "prosemirror-view";
+import type { Node } from "prosemirror-model";
 import { history, undo, redo } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
-import { baseKeymap, chainCommands } from "prosemirror-commands";
+import { baseKeymap, chainCommands, splitBlock } from "prosemirror-commands";
 import { splitListItemKeepingType, liftListItem, sinkListItem } from "./listCommands";
 // Schema/parser/serializer extended with wikilink support (chips + un-escaped [[…]]).
 import { schema, parser, serializer, wikilinkInputRules, wikilinkNode } from "./wikilink";
+// The restricted plain-text-plus-references schema and its round-trip (see simpleSchema.ts).
+import { simpleSchema, parseSimple, serializeSimple } from "./simpleSchema";
 import { commonmarkInputRules } from "./inputrules";
 import { wikilinkAutocomplete } from "./autocomplete";
 import { wikilinkHostAutocomplete, type HostAutocompleteBridge } from "./hostAutocomplete";
@@ -20,6 +23,11 @@ export interface EditorHandle {
   /** Re-hydrate every `[[task:…]]` chip from the host. Call when task data changed
    * elsewhere while the editor stayed open, so the chips reflect it. */
   refreshLinks(): void;
+  /** Replace the whole document with fresh content (not added to the undo history). Used
+   * by the chat composer to reset after sending. */
+  setContent(markdown: string): void;
+  /** Empty the document. Shorthand for `setContent("")`. */
+  clear(): void;
 }
 
 export interface CreateEditorOptions {
@@ -40,6 +48,33 @@ export interface CreateEditorOptions {
   /** Open a referenced entity when its chip is clicked (after it's selected). Wired to the
    * host's navigation (web opens a new tab; native posts the ref to the shell). */
   onOpenRef?: (ref: LinkRef) => void;
+  /** "full" is the document editor (headings, lists, task items, marks …). "simple" is a
+   * plain-text-plus-references editor for task notes and the chat composer. Default "full". */
+  variant?: "full" | "simple";
+  /** Placeholder shown while the document is empty (simple variant). */
+  placeholder?: string;
+  /** When set, Enter submits (calls this with the current content) instead of inserting a
+   * newline, and Shift-Enter makes a new paragraph — the chat composer's send behavior. The
+   * markdown is passed so the host sends exactly what's shown, not a debounced draft. Simple
+   * variant only. */
+  onSubmit?: (markdown: string) => void;
+}
+
+// Show placeholder text over an empty document. Decorates the single empty paragraph with a
+// class + the text (rendered via CSS ::before), the standard ProseMirror placeholder trick.
+function placeholderPlugin(text: string): Plugin {
+  return new Plugin({
+    props: {
+      decorations(state) {
+        const { doc } = state;
+        const only = doc.childCount === 1 ? doc.firstChild : null;
+        if (!only || !only.isTextblock || only.content.size > 0) return null;
+        return DecorationSet.create(doc, [
+          Decoration.node(0, only.nodeSize, { class: "pm-empty", "data-placeholder": text }),
+        ]);
+      },
+    },
+  });
 }
 
 // A bare UUID on the clipboard becomes a wikilink (its type resolved via linkSource).
@@ -80,32 +115,63 @@ export function createEditor(
 ): EditorHandle {
   const debounceMs = options.debounceMs ?? 400;
   const { linkSource, hostAutocomplete } = options;
+  const simple = options.variant === "simple";
+  // Each variant owns its schema and markdown round-trip. The simple editor is plain text
+  // plus reference chips; the full editor is the document schema (headings, lists, marks …).
+  const activeSchema = simple ? simpleSchema : schema;
+  const parse = (md: string): Node | undefined =>
+    simple ? parseSimple(md) : md ? parser.parse(md) ?? undefined : undefined;
+  const serialize = (d: Node): string => (simple ? serializeSimple(d) : serializer.serialize(d));
 
-  const doc = initialMarkdown ? parser.parse(initialMarkdown) ?? undefined : undefined;
+  const doc = parse(initialMarkdown);
   // Order matters: input rules and the autocomplete menu must see keys before the base
   // keymap so Enter/Tab/Backspace can be intercepted while a menu or rule is in play.
-  const plugins: Plugin[] = [
-    history(),
-    commonmarkInputRules(schema),
-    wikilinkInputRules(),
-    taskCheckboxPlugin(),
-    // Native delegates `[[` to a host modal; web/desktop use the in-editor DOM popup.
-    ...(hostAutocomplete
-      ? [wikilinkHostAutocomplete(hostAutocomplete)]
-      : linkSource
-        ? [wikilinkAutocomplete(linkSource)]
-        : []),
-    keymap({ "Mod-z": undo, "Mod-y": redo, "Shift-Mod-z": redo }),
-    // List editing (before baseKeymap so Enter/Tab are intercepted inside a list): Enter
-    // splits the item, or leaves the list when the item is empty; Tab / Shift-Tab nest.
-    keymap({
-      Enter: chainCommands(splitListItemKeepingType(schema.nodes.list_item), liftListItem(schema.nodes.list_item)),
-      Tab: sinkListItem(schema.nodes.list_item),
-      "Shift-Tab": liftListItem(schema.nodes.list_item),
-    }),
-    keymap(baseKeymap),
-  ];
-  const state = EditorState.create({ schema, doc, plugins });
+  const autocompletePlugins = hostAutocomplete
+    ? [wikilinkHostAutocomplete(hostAutocomplete, activeSchema)]
+    : linkSource
+      ? [wikilinkAutocomplete(linkSource, activeSchema)]
+      : [];
+  const plugins: Plugin[] = simple
+    ? [
+        history(),
+        wikilinkInputRules(activeSchema),
+        // Native delegates `[[` to a host modal; web/desktop use the in-editor DOM popup.
+        ...autocompletePlugins,
+        keymap({ "Mod-z": undo, "Mod-y": redo, "Shift-Mod-z": redo }),
+        ...(options.placeholder ? [placeholderPlugin(options.placeholder)] : []),
+        // Composer send: Enter submits, Shift-Enter drops to a new paragraph. Without an
+        // onSubmit (task notes), Enter falls through to baseKeymap and splits normally.
+        ...(options.onSubmit
+          ? [
+              keymap({
+                Enter: (state) => {
+                  options.onSubmit!(serialize(state.doc));
+                  return true;
+                },
+                "Shift-Enter": splitBlock,
+              }),
+            ]
+          : []),
+        keymap(baseKeymap),
+      ]
+    : [
+        history(),
+        commonmarkInputRules(schema),
+        wikilinkInputRules(activeSchema),
+        taskCheckboxPlugin(),
+        // Native delegates `[[` to a host modal; web/desktop use the in-editor DOM popup.
+        ...autocompletePlugins,
+        keymap({ "Mod-z": undo, "Mod-y": redo, "Shift-Mod-z": redo }),
+        // List editing (before baseKeymap so Enter/Tab are intercepted inside a list): Enter
+        // splits the item, or leaves the list when the item is empty; Tab / Shift-Tab nest.
+        keymap({
+          Enter: chainCommands(splitListItemKeepingType(schema.nodes.list_item), liftListItem(schema.nodes.list_item)),
+          Tab: sinkListItem(schema.nodes.list_item),
+          "Shift-Tab": liftListItem(schema.nodes.list_item),
+        }),
+        keymap(baseKeymap),
+      ];
+  const state = EditorState.create({ schema: activeSchema, doc, plugins });
 
   // Live task chips register here so refreshLinks() can re-hydrate them on demand.
   const linkViews = new Set<WikilinkView>();
@@ -153,7 +219,7 @@ export function createEditor(
       const { from, to } = view.state.selection;
       const insert = (type: string, alias: string | null) => {
         try {
-          view.dispatch(view.state.tr.replaceRangeWith(from, to, wikilinkNode({ type, id: text, alias })).scrollIntoView());
+          view.dispatch(view.state.tr.replaceRangeWith(from, to, wikilinkNode(activeSchema, { type, id: text, alias })).scrollIntoView());
         } catch {
           /* view torn down before the async resolve landed */
         }
@@ -172,11 +238,23 @@ export function createEditor(
       const next = view.state.apply(tr);
       view.updateState(next);
       if (tr.docChanged) {
-        pending = serializer.serialize(next.doc);
+        pending = serialize(next.doc);
         if (!timer) timer = setTimeout(flush, debounceMs);
       }
     },
   });
+
+  // Swap the whole document for freshly parsed content, off the undo history. Emits a
+  // change like any edit (the composer's onChange resets its draft).
+  const setContent = (markdown: string) => {
+    const parsed = parse(markdown);
+    const content = parsed ? parsed.content : activeSchema.topNodeType.createAndFill()!.content;
+    try {
+      view.dispatch(view.state.tr.replaceWith(0, view.state.doc.content.size, content).setMeta("addToHistory", false));
+    } catch {
+      /* view torn down */
+    }
+  };
 
   return {
     destroy() {
@@ -186,6 +264,10 @@ export function createEditor(
     },
     refreshLinks() {
       linkViews.forEach((v) => v.rehydrate());
+    },
+    setContent,
+    clear() {
+      setContent("");
     },
   };
 }

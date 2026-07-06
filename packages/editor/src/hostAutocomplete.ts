@@ -1,5 +1,6 @@
 import { Plugin } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
+import type { Schema } from "prosemirror-model";
 import { wikilinkNode } from "./wikilink";
 import { detectTrigger, triggerKey as key, type Trigger } from "./wikilinkTrigger";
 
@@ -28,7 +29,7 @@ interface RefWindow {
   __cancelRef?: () => void;
 }
 
-export function wikilinkHostAutocomplete(bridge: HostAutocompleteBridge): Plugin {
+export function wikilinkHostAutocomplete(bridge: HostAutocompleteBridge, schema: Schema): Plugin {
   // The recorded `[[` range (null when the picker was opened from the toolbar button, i.e.
   // "insert at the cursor"). Kept outside plugin state because the editor is blurred while
   // the modal is up, so no transactions arrive to carry it.
@@ -38,7 +39,7 @@ export function wikilinkHostAutocomplete(bridge: HostAutocompleteBridge): Plugin
 
   const insert = (payload: InsertRefPayload) => {
     if (!view) return;
-    const node = wikilinkNode({
+    const node = wikilinkNode(schema, {
       type: payload.type,
       id: payload.id,
       alias: payload.title ?? null,

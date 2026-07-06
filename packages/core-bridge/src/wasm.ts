@@ -5,10 +5,35 @@ interface GoHandle {
   invoke(method: string, payloadJson: string): Promise<string>;
   close(): void;
 }
+/** Synchronous secret store the wasm core reads LLM API keys from (PLAN §6.8). */
+interface JsSecretStore {
+  get(ref: string): string | null;
+  set(ref: string, value: string): void;
+  delete(ref: string): void;
+}
 type CompanionInit = (opts: {
   sqlite: SqliteDriver;
   onEvent: (name: string, payloadJson: string) => void;
+  secrets: JsSecretStore;
 }) => Promise<GoHandle>;
+
+/** localStorageSecrets keeps LLM keys in localStorage under a namespaced prefix. The browser
+ *  has no OS keychain; this is the web equivalent (cleared with site data). */
+function localStorageSecrets(): JsSecretStore {
+  const prefix = "companion.secret.";
+  const ls = (): Storage | null => {
+    try {
+      return typeof localStorage !== "undefined" ? localStorage : null;
+    } catch {
+      return null; // storage disabled (private mode / blocked)
+    }
+  };
+  return {
+    get: (ref) => ls()?.getItem(prefix + ref) ?? null,
+    set: (ref, value) => ls()?.setItem(prefix + ref, value),
+    delete: (ref) => ls()?.removeItem(prefix + ref),
+  };
+}
 
 // wasm_exec.js (loaded via <script>) defines globalThis.Go; main() registers
 // __companionInit.
@@ -56,7 +81,7 @@ export async function createWasmBridge(opts: WasmBridgeOptions): Promise<CoreBri
     for (const cb of set) cb(payload);
   };
 
-  const handle = await g.__companionInit({ sqlite: opts.sqlite, onEvent });
+  const handle = await g.__companionInit({ sqlite: opts.sqlite, onEvent, secrets: localStorageSecrets() });
 
   return {
     async invoke<T>(method: string, payload?: unknown): Promise<T> {

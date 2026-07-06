@@ -1,8 +1,9 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTasks, TaskEditor, MembershipPicker, ConfirmDialog } from '@companion/app';
+import type { LinkRef } from '@companion/editor';
 import { Center, Icon, IconButton, Text, colors, space } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
 
@@ -21,6 +22,15 @@ export function TaskEditorScreen() {
   // header callback stable.
   const storeRef = useRef(store);
   storeRef.current = store;
+
+  // Clicking a chip in the notes pushes its target onto the stack (tasks and notes have screens).
+  const onOpenRef = useCallback(
+    (ref: LinkRef) => {
+      if (ref.type === 'task') nav.push('TaskEditor', { id: ref.id });
+      else if (ref.type === 'note') nav.push('NoteEditor', { id: ref.id });
+    },
+    [nav],
+  );
 
   useLayoutEffect(() => {
     nav.setOptions({
@@ -51,7 +61,7 @@ export function TaskEditorScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surfaceCard }}>
-      <TaskEditor task={task} save={store.update} showToolbar={false} />
+      <TaskEditor task={task} save={store.update} showToolbar={false} onOpenRef={onOpenRef} />
       {showProjects ? (
         <MembershipPicker entityType="task" entityId={taskId} onClose={() => setShowProjects(false)} />
       ) : null}

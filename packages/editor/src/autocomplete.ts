@@ -1,5 +1,6 @@
 import { Plugin } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
+import type { Schema } from "prosemirror-model";
 import { wikilinkNode } from "./wikilink";
 import { detectTrigger, triggerKey as key, type Trigger } from "./wikilinkTrigger";
 import type { LinkSource, LinkSuggestion, LinkType } from "./types";
@@ -19,7 +20,7 @@ const TYPES: { value: LinkType | "all"; label: string }[] = [
   { value: "project", label: "Projects" },
 ];
 
-export function wikilinkAutocomplete(linkSource: LinkSource): Plugin {
+export function wikilinkAutocomplete(linkSource: LinkSource, schema: Schema): Plugin {
   const ui = {
     root: null as HTMLElement | null,
     input: null as HTMLInputElement | null,
@@ -243,7 +244,7 @@ export function wikilinkAutocomplete(linkSource: LinkSource): Plugin {
     const view = ui.view;
     if (!item || !range || !view) return;
     // Bake the resolved title in as the chip's alias so it reads as a title, not a raw id.
-    const node = wikilinkNode({ type: item.type, id: item.id, alias: item.title, embed: range.embed });
+    const node = wikilinkNode(schema, { type: item.type, id: item.id, alias: item.title, embed: range.embed });
     try {
       view.dispatch(view.state.tr.replaceRangeWith(range.from, range.to, node).scrollIntoView());
     } catch {

@@ -34,6 +34,12 @@ declare module "react-native" {
   }
   interface TextProps extends ViewProps {
     numberOfLines?: number;
+    onPress?: (event: GestureResponderEvent) => void;
+  }
+  // Loose stand-in for RN's key event. On web the nativeEvent is the DOM KeyboardEvent.
+  export interface TextInputKeyPressEvent {
+    nativeEvent: { key: string; shiftKey?: boolean; [key: string]: unknown };
+    preventDefault?: () => void;
   }
   interface TextInputProps {
     style?: StyleProp<TextStyle>;
@@ -42,11 +48,13 @@ declare module "react-native" {
     placeholder?: string;
     placeholderTextColor?: string;
     multiline?: boolean;
+    editable?: boolean;
     autoFocus?: boolean;
     secureTextEntry?: boolean;
     autoCapitalize?: "none" | "sentences" | "words" | "characters";
     keyboardType?: string;
     onChangeText?: (text: string) => void;
+    onKeyPress?: (event: TextInputKeyPressEvent) => void;
     onFocus?: () => void;
     onBlur?: () => void;
     onSubmitEditing?: () => void;

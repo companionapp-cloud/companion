@@ -13,6 +13,8 @@ import { TaskEditorScreen } from './screens/TaskEditorScreen';
 import { TaskGraphScreen } from './screens/TaskGraphScreen';
 import { NoteGraphScreen } from './screens/NoteGraphScreen';
 import { GraphScreen } from './screens/GraphScreen';
+import { ChatScreen } from './screens/ChatScreen';
+import { ChatListScreen } from './screens/ChatListScreen';
 import { PlaceholderScreen } from './screens/PlaceholderScreen';
 import { ProjectScreen } from './screens/ProjectScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
@@ -28,6 +30,7 @@ export type RootStackParamList = {
   Home: undefined;
   // Global (all-items) section screens.
   Chat: undefined;
+  ChatConversation: { chatId: string };
   Notes: undefined;
   Tasks: undefined;
   Habits: undefined;
@@ -97,7 +100,8 @@ export function MobileShell() {
         }}
       >
         <RootStack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
-        <RootStack.Screen name="Chat" component={PlaceholderScreen} options={{ title: 'Chat' }} />
+        <RootStack.Screen name="Chat" component={ChatListScreen} options={{ title: 'Chat' }} />
+        <RootStack.Screen name="ChatConversation" component={ChatScreen} options={{ title: '' }} />
         <RootStack.Screen name="Notes" component={NotesListScreen} options={{ title: 'All notes' }} />
         <RootStack.Screen name="Tasks" component={TasksListScreen} options={{ title: 'All tasks' }} />
         <RootStack.Screen name="Habits" component={PlaceholderScreen} options={{ title: 'Habits' }} />

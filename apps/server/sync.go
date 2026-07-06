@@ -45,6 +45,8 @@ func (s *Server) handlers() map[string]*entityHandler {
 			protocol.EntityArea:          areaHandler,
 			protocol.EntityProject:       projectHandler,
 			protocol.EntityProjectMember: memberHandler,
+			protocol.EntityChat:          chatHandler,
+			protocol.EntityChatMessage:   chatMessageHandler,
 		}
 	}
 	return s.entities

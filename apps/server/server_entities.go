@@ -479,3 +479,169 @@ func parseTimes(createdAt, updatedAt string, deletedAt sql.NullString, created, 
 	}
 	return nil
 }
+
+// ---- chats ---------------------------------------------------------------
+
+const chatCols = `id, title, config_id, created_at, updated_at, deleted_at, version, server_seq`
+
+var chatHandler = &entityHandler{
+	typ:   protocol.EntityChat,
+	table: "chats",
+	upsert: func(s *Server, tx *sql.Tx, uid string, raw []byte, updatedAt time.Time, version, seq int64) error {
+		var c domain.Chat
+		if err := json.Unmarshal(raw, &c); err != nil {
+			return err
+		}
+		var deletedAt any
+		if c.DeletedAt != nil {
+			deletedAt = c.DeletedAt.UTC().Format(timeFormat)
+		}
+		_, err := tx.Exec(s.rebind(
+			`INSERT INTO chats (id, user_id, title, config_id, created_at, updated_at, deleted_at, version, server_seq)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT (id) DO UPDATE SET
+			   title = excluded.title, config_id = excluded.config_id,
+			   updated_at = excluded.updated_at, deleted_at = excluded.deleted_at,
+			   version = excluded.version, server_seq = excluded.server_seq;`),
+			c.ID, uid, c.Title, c.ConfigID,
+			c.CreatedAt.UTC().Format(timeFormat), updatedAt.Format(timeFormat), deletedAt, version, seq)
+		return err
+	},
+	loadRaw: func(s *Server, tx *sql.Tx, uid, id string) ([]byte, error) {
+		row := tx.QueryRow(s.rebind(`SELECT `+chatCols+` FROM chats WHERE id = ? AND user_id = ?;`), id, uid)
+		c, _, err := scanServerChat(row)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(c)
+	},
+	pull: func(s *Server, uid string, cursor, limit int64) ([]seqRow, error) {
+		rows, err := s.query(`SELECT `+chatCols+` FROM chats WHERE user_id = ? AND server_seq > ? ORDER BY server_seq ASC LIMIT ?;`, uid, cursor, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var out []seqRow
+		for rows.Next() {
+			c, seq, err := scanServerChat(rows)
+			if err != nil {
+				return nil, err
+			}
+			body, err := json.Marshal(c)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, seqRow{seq, protocol.PullChange{EntityType: protocol.EntityChat, Row: body, ServerSeq: seq}})
+		}
+		return out, rows.Err()
+	},
+}
+
+func scanServerChat(sc rowScanner) (*domain.Chat, int64, error) {
+	var (
+		c                    domain.Chat
+		configID, deletedAt  sql.NullString
+		createdAt, updatedAt string
+		seq                  int64
+	)
+	if err := sc.Scan(&c.ID, &c.Title, &configID, &createdAt, &updatedAt, &deletedAt, &c.Version, &seq); err != nil {
+		return nil, 0, err
+	}
+	if configID.Valid {
+		c.ConfigID = &configID.String
+	}
+	if err := parseTimes(createdAt, updatedAt, deletedAt, &c.CreatedAt, &c.UpdatedAt, &c.DeletedAt); err != nil {
+		return nil, 0, err
+	}
+	return &c, seq, nil
+}
+
+// ---- chat messages -------------------------------------------------------
+
+const chatMessageCols = `id, chat_id, seq, role, text, tool_calls, tool_results, created_at, updated_at, deleted_at, version, server_seq`
+
+var chatMessageHandler = &entityHandler{
+	typ:   protocol.EntityChatMessage,
+	table: "chat_messages",
+	upsert: func(s *Server, tx *sql.Tx, uid string, raw []byte, updatedAt time.Time, version, seq int64) error {
+		var m domain.ChatMessage
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return err
+		}
+		var deletedAt any
+		if m.DeletedAt != nil {
+			deletedAt = m.DeletedAt.UTC().Format(timeFormat)
+		}
+		_, err := tx.Exec(s.rebind(
+			`INSERT INTO chat_messages (id, user_id, chat_id, seq, role, text, tool_calls, tool_results, created_at, updated_at, deleted_at, version, server_seq)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT (id) DO UPDATE SET
+			   chat_id = excluded.chat_id, seq = excluded.seq, role = excluded.role, text = excluded.text,
+			   tool_calls = excluded.tool_calls, tool_results = excluded.tool_results,
+			   updated_at = excluded.updated_at, deleted_at = excluded.deleted_at,
+			   version = excluded.version, server_seq = excluded.server_seq;`),
+			m.ID, uid, m.ChatID, m.Seq, m.Role, m.Text, rawStrOrNil(m.ToolCalls), rawStrOrNil(m.ToolResults),
+			m.CreatedAt.UTC().Format(timeFormat), updatedAt.Format(timeFormat), deletedAt, version, seq)
+		return err
+	},
+	loadRaw: func(s *Server, tx *sql.Tx, uid, id string) ([]byte, error) {
+		row := tx.QueryRow(s.rebind(`SELECT `+chatMessageCols+` FROM chat_messages WHERE id = ? AND user_id = ?;`), id, uid)
+		m, _, err := scanServerChatMessage(row)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(m)
+	},
+	pull: func(s *Server, uid string, cursor, limit int64) ([]seqRow, error) {
+		rows, err := s.query(`SELECT `+chatMessageCols+` FROM chat_messages WHERE user_id = ? AND server_seq > ? ORDER BY server_seq ASC LIMIT ?;`, uid, cursor, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var out []seqRow
+		for rows.Next() {
+			m, seq, err := scanServerChatMessage(rows)
+			if err != nil {
+				return nil, err
+			}
+			body, err := json.Marshal(m)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, seqRow{seq, protocol.PullChange{EntityType: protocol.EntityChatMessage, Row: body, ServerSeq: seq}})
+		}
+		return out, rows.Err()
+	},
+}
+
+func scanServerChatMessage(sc rowScanner) (*domain.ChatMessage, int64, error) {
+	var (
+		m                      domain.ChatMessage
+		toolCalls, toolResults sql.NullString
+		deletedAt              sql.NullString
+		createdAt, updatedAt   string
+		seq                    int64
+	)
+	if err := sc.Scan(&m.ID, &m.ChatID, &m.Seq, &m.Role, &m.Text, &toolCalls, &toolResults,
+		&createdAt, &updatedAt, &deletedAt, &m.Version, &seq); err != nil {
+		return nil, 0, err
+	}
+	if toolCalls.Valid {
+		m.ToolCalls = json.RawMessage(toolCalls.String)
+	}
+	if toolResults.Valid {
+		m.ToolResults = json.RawMessage(toolResults.String)
+	}
+	if err := parseTimes(createdAt, updatedAt, deletedAt, &m.CreatedAt, &m.UpdatedAt, &m.DeletedAt); err != nil {
+		return nil, 0, err
+	}
+	return &m, seq, nil
+}
+
+// rawStrOrNil converts a possibly-empty json.RawMessage to a nullable text column value.
+func rawStrOrNil(r json.RawMessage) any {
+	if len(r) == 0 {
+		return nil
+	}
+	return string(r)
+}

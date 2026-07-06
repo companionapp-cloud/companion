@@ -18,6 +18,10 @@ type Store struct {
 	Projects       *ProjectsRepo
 	ProjectMembers *ProjectMembersRepo
 	Links          *LinksRepo
+	Search         *SearchRepo
+	LLMConfigs     *LLMConfigsRepo
+	Chats          *ChatsRepo
+	ChatMessages   *ChatMessagesRepo
 }
 
 // New builds a Store over an already-open Driver, applying pending migrations. A nil
@@ -43,6 +47,14 @@ func New(d Driver, clock domain.Clock) (*Store, error) {
 	s.Projects = &ProjectsRepo{db: d, clock: clock}
 	// Project membership mirrors into the link index as authored 'member' edges.
 	s.ProjectMembers = &ProjectMembersRepo{db: d, clock: clock, links: s.Links}
+	// Full-text search reads the trigger-maintained notes_fts / tasks_fts indexes; it backs
+	// the LLM search_notes retrieval tool (PLAN §6.8).
+	s.Search = &SearchRepo{db: d}
+	// LLM provider configs (device-local + account-scoped) back the chat assistant (§6.8).
+	s.LLMConfigs = &LLMConfigsRepo{db: d, clock: clock}
+	// Chats + their messages persist and sync conversations across devices (§6.8).
+	s.Chats = &ChatsRepo{db: d, clock: clock}
+	s.ChatMessages = &ChatMessagesRepo{db: d, clock: clock}
 	return s, nil
 }
 

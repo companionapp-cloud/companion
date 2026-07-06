@@ -6,7 +6,7 @@ import type { EditorProps } from "./types";
 // Web/desktop editor: ProseMirror mounted straight into the DOM (react-native-web is
 // real DOM, so no WebView is needed — Vite resolves this via .web.tsx). It grows to
 // its content; the note view's ScrollView provides the scroll and document column.
-export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, linkRevision }: EditorProps) {
+export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, linkRevision, variant, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs }: EditorProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<EditorHandle | null>(null);
   const onChangeRef = useRef(onChangeMarkdown);
@@ -17,6 +17,8 @@ export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, link
   linkSourceRef.current = linkSource;
   const onOpenRefRef = useRef(onOpenRef);
   onOpenRefRef.current = onOpenRef;
+  const onSubmitRef = useRef(onSubmit);
+  onSubmitRef.current = onSubmit;
 
   useEffect(() => {
     ensureEditorStyles();
@@ -24,6 +26,10 @@ export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, link
     if (!mount) return;
     const handle = createEditor(mount, initialMarkdown, (md) => onChangeRef.current(md), {
       flushOnDestroy: true,
+      variant,
+      placeholder,
+      debounceMs,
+      onSubmit: onSubmit ? (md) => onSubmitRef.current?.(md) : undefined,
       linkSource: linkSourceRef.current
         ? {
             search: (q, type) => linkSourceRef.current!.search(q, type),
@@ -52,5 +58,21 @@ export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, link
     handleRef.current?.refreshLinks();
   }, [linkRevision]);
 
-  return <div ref={mountRef} className="companion-editor" />;
+  // Empty the editor when the host bumps clearSignal (chat composer, post-send). Skips mount.
+  const firstClear = useRef(true);
+  useEffect(() => {
+    if (firstClear.current) {
+      firstClear.current = false;
+      return;
+    }
+    handleRef.current?.clear();
+  }, [clearSignal]);
+
+  // The simple field hugs its content; cap it at maxHeight (scrolling past it) and reserve
+  // minHeight so an empty composer/note still has a comfortable tap target.
+  const style =
+    variant === "simple"
+      ? { minHeight, maxHeight, overflowY: maxHeight ? ("auto" as const) : undefined }
+      : undefined;
+  return <div ref={mountRef} className={variant === "simple" ? "companion-editor pm-simple" : "companion-editor"} style={style} />;
 }

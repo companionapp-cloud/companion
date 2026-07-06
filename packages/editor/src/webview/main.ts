@@ -10,8 +10,13 @@ declare global {
     ReactNativeWebView?: { postMessage(message: string): void };
     __INITIAL_MARKDOWN__?: string;
     __HAS_LINK_SOURCE__?: boolean;
+    __EDITOR_VARIANT__?: "full" | "simple";
+    __PLACEHOLDER__?: string;
+    __SUBMIT_ON_ENTER__?: boolean;
+    __DEBOUNCE_MS__?: number;
     __resolveLink?: (requestId: number, payload: unknown) => void;
     __refreshLinks?: () => void;
+    __clear?: () => void;
   }
 }
 
@@ -51,7 +56,14 @@ function init(): void {
   const mount = document.getElementById("editor");
   if (!mount) return;
   const hasLinks = !!window.__HAS_LINK_SOURCE__;
+  const simple = window.__EDITOR_VARIANT__ === "simple";
   const handle = createEditor(mount, window.__INITIAL_MARKDOWN__ ?? "", (markdown) => post("change", markdown), {
+    variant: simple ? "simple" : "full",
+    placeholder: window.__PLACEHOLDER__,
+    debounceMs: window.__DEBOUNCE_MS__,
+    // In the composer, Enter sends: post the exact content so the host sends what's shown.
+    // Task notes leave this off (Enter makes a new paragraph).
+    onSubmit: window.__SUBMIT_ON_ENTER__ ? (md) => post("submit", md) : undefined,
     // linkSource still resolves pasted UUIDs; `[[` delegates to the native modal, which
     // posts linkTrigger/linkTriggerEnd and injects window.__insertRef / __cancelRef.
     linkSource: hasLinks ? bridgedLinkSource() : undefined,
@@ -67,6 +79,17 @@ function init(): void {
   });
   // The host injects __refreshLinks() to re-hydrate task chips after task data changes.
   window.__refreshLinks = () => handle.refreshLinks();
+  // The host injects __clear() to empty the composer after a send.
+  window.__clear = () => handle.clear();
+
+  // The simple editor is an inline field (task note / composer), not a full-screen page, so
+  // report its content height and let the host size the WebView to it (bounded by the host's
+  // min/max). The full editor fills the screen and ignores this.
+  if (simple) {
+    const report = () => post("height", document.body.scrollHeight);
+    report();
+    if (typeof ResizeObserver !== "undefined") new ResizeObserver(report).observe(document.body);
+  }
   post("ready", null);
 }
 

@@ -7,7 +7,10 @@ import { createElement } from "react";
 // the core compiled to wasm, then mount the shared React Native UI via RNW.
 async function boot() {
   const sqlite = await createWaSqliteDriver({ dbName: "companion" });
-  const core = await createWasmBridge({ sqlite, wasmUrl: "/core.wasm" });
+  // core.wasm is an unhashed public asset, so bust the browser disk cache in dev — otherwise
+  // a rebuilt core silently keeps serving the stale binary. Production serves it plainly.
+  const wasmUrl = import.meta.env.DEV ? `/core.wasm?t=${Date.now()}` : "/core.wasm";
+  const core = await createWasmBridge({ sqlite, wasmUrl });
 
   // Reminder notifications (PLAN §6.4, web W3). The SW routes notification *clicks* back to
   // the app; the in-tab scheduler shows fires through its registration so a click can

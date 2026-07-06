@@ -195,7 +195,7 @@ const styles = {
     paddingLeft: space.sm,
     paddingRight: space.xs,
     height: 28,
-    marginTop: space.sm,
+    marginTop: space.xl,
   },
   areaHeader: {
     flexDirection: "row" as const,

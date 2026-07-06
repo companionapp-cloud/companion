@@ -185,6 +185,10 @@ func New(st *store.Store, t Transport, clock domain.Clock) *Engine {
 	e.register(newRepoSyncer[*domain.Area](st.Areas, clock))
 	e.register(newRepoSyncer[*domain.Project](st.Projects, clock))
 	e.register(newRepoSyncer[*domain.ProjectMember](st.ProjectMembers, clock))
+	// Chats + their messages sync so a conversation continues across devices (§6.8). Messages
+	// reference their chat by id; a message arriving before its chat is a tolerated dangle.
+	e.register(newRepoSyncer[*domain.Chat](st.Chats, clock))
+	e.register(newRepoSyncer[*domain.ChatMessage](st.ChatMessages, clock))
 	return e
 }
 

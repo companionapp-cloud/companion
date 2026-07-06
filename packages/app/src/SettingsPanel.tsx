@@ -2,6 +2,9 @@ import { useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import { Button, Icon, IconButton, Input, Text, colors, radius, shadow, space } from "@companion/design-system";
 import { useSync, type AuthMode } from "./SyncProvider";
+import { LlmSettings } from "./LlmSettings";
+
+type SettingsTab = "sync" | "ai";
 
 /** A modal-ish overlay to connect to a sync server and see sync status. Reached from
  * the rail's Settings item — the polish that makes sync manually testable. */
@@ -12,6 +15,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<SettingsTab>("sync");
 
   const connect = async (mode: AuthMode) => {
     setBusy(true);
@@ -31,15 +35,23 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       <Pressable style={styles.scrimFill} onPress={onClose} aria-label="Close settings" />
       <View style={styles.card}>
         <View style={styles.header}>
-          <Text variant="title">Sync</Text>
+          <View style={styles.tabs}>
+            <TabPill label="Sync" active={tab === "sync"} onPress={() => setTab("sync")} />
+            <TabPill label="AI" active={tab === "ai"} onPress={() => setTab("ai")} />
+          </View>
           <View style={{ flex: 1 }} />
           <IconButton label="Close" size="sm" onPress={onClose}>
             <Icon name="close" size={16} color={colors.textSecondary} />
           </IconButton>
         </View>
 
-        <ScrollView contentContainerStyle={styles.body}>
-          {sync.connected ? (
+        {tab === "ai" ? (
+          <ScrollView contentContainerStyle={styles.body}>
+            <LlmSettings />
+          </ScrollView>
+        ) : (
+          <ScrollView contentContainerStyle={styles.body}>
+            {sync.connected ? (
             <>
               <Field label="Signed in">
                 <Text tone="secondary">
@@ -79,9 +91,20 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               </Text>
             </>
           )}
-        </ScrollView>
+          </ScrollView>
+        )}
       </View>
     </View>
+  );
+}
+
+function TabPill({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} aria-label={label} style={[styles.tabPill, active && styles.tabPillActive]}>
+      <Text variant="title" tone={active ? undefined : "tertiary"}>
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -140,4 +163,7 @@ const styles = {
   },
   body: { padding: space.xl, gap: space.lg },
   row: { flexDirection: "row" as const, gap: space.md, alignItems: "center" as const },
+  tabs: { flexDirection: "row" as const, gap: space.xs },
+  tabPill: { paddingHorizontal: space.md, paddingVertical: space.xs, borderRadius: radius.md },
+  tabPillActive: { backgroundColor: colors.surfaceSunken },
 };

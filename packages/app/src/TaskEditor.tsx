@@ -2,7 +2,10 @@ import { useRef, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import type { Task, UpdateTaskInput } from "@companion/core-bridge";
 import { Icon, IconButton, Input, Text, TextField, colors, layout, radius, space, type IconName, type PressState } from "@companion/design-system";
+import { Editor, type LinkRef } from "@companion/editor";
 import { useCore } from "./CoreContext";
+import { useTasks } from "./TasksProvider";
+import { useLinkSource } from "./useLinkSource";
 import { DateTimeInput } from "./DateTimeInput";
 import { TaskGraph } from "./TaskGraph";
 import { MembershipPicker } from "./MembershipPicker";
@@ -17,14 +20,18 @@ export interface TaskEditorProps {
   /** Render the built-in sub-toolbar (projects + delete) and its overlays. Desktop keeps
    *  it; mobile turns it off and hosts those actions in the nav header instead. */
   showToolbar?: boolean;
+  /** Open a wikilink chip the reader clicked in the notes (e.g. `[[note:…]]`). Omit and chips
+   *  only select. */
+  onOpenRef?: (ref: LinkRef) => void;
 }
 
 /** The detail editor for a single task (PLAN §6.4): a status checkbox, title, quick due /
  *  reminder presets, freeform notes (markdown — scanned for wikilinks), and project
  *  membership. Keyed by task id upstream so each task gets a fresh instance. */
-export function TaskEditor({ task, save, onDelete, showToolbar = true }: TaskEditorProps) {
+export function TaskEditor({ task, save, onDelete, showToolbar = true, onOpenRef }: TaskEditorProps) {
+  const tasks = useTasks();
+  const linkSource = useLinkSource();
   const [title, setTitle] = useState(task.title);
-  const [notes, setNotes] = useState(task.notesMd);
   const [showProjects, setShowProjects] = useState(false);
   const [showGraph, setShowGraph] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -128,16 +135,20 @@ export function TaskEditor({ task, save, onDelete, showToolbar = true }: TaskEdi
           </View>
         ) : null}
 
-        <TextField
-          variant="prose"
-          multiline
-          value={notes}
-          placeholder="Notes… use [[ to link a note."
-          onChangeText={(t) => {
-            setNotes(t);
-            debouncedSave("notes", { notesMd: t });
-          }}
-        />
+        {/* Notes read as a rounded input, left-aligned with the due / reminder fields above. */}
+        <View style={styles.notesField}>
+          <Editor
+            variant="simple"
+            markdown={task.notesMd}
+            placeholder="Notes… use [[ to link a note."
+            onChangeMarkdown={(md) => debouncedSave("notes", { notesMd: md })}
+            linkSource={linkSource}
+            onOpenRef={onOpenRef}
+            // `tasks.tasks` gets a fresh identity when any task changes, re-hydrating chips.
+            linkRevision={tasks.tasks}
+            minHeight={110}
+          />
+        </View>
       </ScrollView>
       )}
 
@@ -398,6 +409,17 @@ const styles = {
   // Chips + their expanded editors sit indented under the title (past the checkbox).
   metaRow: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: space.sm, marginTop: space.md, marginLeft: 22 + space.md },
   metaEditor: { marginLeft: 22 + space.md, marginTop: space.xs, marginBottom: space.xs },
+  // The notes editor as a rounded input, left-aligned with the metadata column above it.
+  notesField: {
+    marginLeft: 22 + space.md,
+    marginTop: space.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surfaceApp,
+  },
   metaChip: {
     flexDirection: "row" as const,
     alignItems: "center" as const,

@@ -41,6 +41,23 @@ export { syncApi } from "./sync";
 export type { SyncApi } from "./sync";
 export { graphApi } from "./graph";
 export type { GraphApi, Graph, GraphNode, GraphEdge } from "./graph";
+export { chatsApi } from "./chats";
+export type { ChatsApi, Chat, ChatDetail, StoredChatMessage, ChatChangedEvent, ChatWorkingEvent } from "./chats";
+export { llmApi } from "./llm";
+export type {
+  LlmApi,
+  LLMConfig,
+  LLMScope,
+  LLMProvider,
+  CreateLLMConfigInput,
+  UpdateLLMConfigInput,
+  ChatMessage,
+  ToolCall,
+  ToolResult,
+  LLMTokenEvent,
+  LLMToolEvent,
+  LLMErrorEvent,
+} from "./llm";
 export { createSyncNotifier } from "./notifier";
 export type { SyncNotifier } from "./notifier";
 export { createNativeSyncNotifier } from "./notifier.native";

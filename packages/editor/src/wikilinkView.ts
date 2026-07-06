@@ -35,6 +35,9 @@ export class WikilinkView implements NodeView {
   private attrs: Attrs;
   // A lookup token so a slow response for a stale node (after update()) is ignored.
   private token = 0;
+  // Whether the referenced target no longer exists (lookup resolved to null). Cached so a
+  // re-render can restore the broken visual immediately, before the re-check resolves.
+  private broken = false;
   private unregister?: () => void;
 
   constructor(
@@ -55,11 +58,11 @@ export class WikilinkView implements NodeView {
     return this.attrs.type === "task";
   }
 
-  // Re-fetch a task chip's state from the host. Called when task data changed elsewhere
-  // (e.g. its done state toggled in another tab) so an open note reflects it. No-op for
-  // non-task chips, whose label is fixed by the doc.
+  // Re-verify the chip against the host. Called when data changed elsewhere (e.g. a task's
+  // done state toggled, or a referenced note deleted, in another tab) so an open editor
+  // reflects it — refreshing task status/dates and flipping the broken state either way.
   rehydrate(): void {
-    if (this.isTask()) this.hydrateTask();
+    if (this.deps.linkSource) this.hydrate();
   }
 
   private render(): void {
@@ -86,11 +89,21 @@ export class WikilinkView implements NodeView {
       const meta = document.createElement("span");
       meta.className = "pm-wikilink-meta";
       el.appendChild(meta);
-      this.hydrateTask();
     }
+
+    // Restore the last-known broken visual immediately (no flash on re-render), then re-check
+    // that the target still exists (and, for tasks, refresh status/dates) against the host.
+    if (this.broken) this.applyBroken(true);
+    if (this.deps.linkSource) this.hydrate();
   }
 
-  // Fetch the task's done state + dates and fill in the status dot and the meta chips.
+  private hydrate(): void {
+    if (this.isTask()) this.hydrateTask();
+    else this.hydrateLink();
+  }
+
+  // Fetch the task's done state + dates and fill in the status dot and the meta chips. A null
+  // lookup means the task was deleted — mark the chip broken.
   private hydrateTask(): void {
     const src = this.deps.linkSource;
     if (!src) return;
@@ -99,7 +112,13 @@ export class WikilinkView implements NodeView {
     src
       .lookup(id)
       .then((hit) => {
-        if (token !== this.token || !hit || hit.type !== "task") return;
+        if (token !== this.token) return;
+        if (!hit) {
+          this.applyBroken(true);
+          return;
+        }
+        this.applyBroken(false);
+        if (hit.type !== "task") return;
         const done = hit.status === "done";
         this.dom.setAttribute("data-status", done ? "done" : "open");
         const meta = this.dom.querySelector(".pm-wikilink-meta");
@@ -109,8 +128,35 @@ export class WikilinkView implements NodeView {
         if (hit.remindAt) meta.appendChild(metaChip("pm-wikilink-remind", "⏰ " + formatReminder(hit.remindAt)));
       })
       .catch(() => {
-        /* leave the chip in its un-hydrated (label-only) state */
+        /* transient error: leave the chip as it is */
       });
+  }
+
+  // Non-task chips carry a static label, so we only confirm the target still exists; a null
+  // lookup (deleted note / habit / project) marks the chip broken.
+  private hydrateLink(): void {
+    const src = this.deps.linkSource;
+    if (!src) return;
+    const token = ++this.token;
+    src
+      .lookup(this.attrs.id)
+      .then((hit) => {
+        if (token !== this.token) return;
+        this.applyBroken(!hit);
+      })
+      .catch(() => {
+        /* transient error: leave the chip as it is */
+      });
+  }
+
+  // Toggle the broken-reference visual: a leading unlink icon plus the muted, struck-through
+  // chip styling (see styles.ts). Idempotent against the current DOM so it survives re-render.
+  private applyBroken(broken: boolean): void {
+    this.broken = broken;
+    this.dom.classList.toggle("pm-wikilink-broken", broken);
+    const existing = this.dom.querySelector(".pm-wikilink-brokenicon");
+    if (broken && !existing) this.dom.insertBefore(brokenIcon(), this.dom.firstChild);
+    else if (!broken && existing) existing.remove();
   }
 
   // First click selects the chip; a click on the already-selected chip opens the target.
@@ -167,6 +213,21 @@ function metaChip(className: string, text: string): HTMLElement {
   const span = document.createElement("span");
   span.className = className;
   span.textContent = text;
+  return span;
+}
+
+// A small "unlink" glyph (feather-style) shown when a chip's target no longer exists.
+function brokenIcon(): HTMLElement {
+  const span = document.createElement("span");
+  span.className = "pm-wikilink-brokenicon";
+  span.setAttribute("aria-label", "Broken reference");
+  span.setAttribute("title", "This reference no longer exists");
+  span.innerHTML =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M18.84 12.25l1.72-1.71a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>' +
+    '<path d="M5.17 11.75l-1.71 1.71a5 5 0 0 0 7.07 7.07l1.71-1.71"/>' +
+    '<line x1="8" y1="2" x2="8" y2="5"/><line x1="2" y1="8" x2="5" y2="8"/>' +
+    '<line x1="16" y1="19" x2="16" y2="22"/><line x1="19" y1="16" x2="22" y2="16"/></svg>';
   return span;
 }
 

@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 
 	"companion/core/bridge"
+	"companion/core/secrets"
 	"companion/core/store"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -44,6 +45,9 @@ func main() {
 	core := bridge.New(st)
 	handler := newBridgeHandler(core)
 	core.SetEventHandler(handler)
+	// LLM API keys (PLAN §6.8): stored beside the database in a 0600 file (keychain is the
+	// later hardening upgrade). Local Ollama configs need no key and work without this.
+	core.SetSecretStore(secrets.NewFileStore(filepath.Join(filepath.Dir(dbPath), "secrets.json")))
 
 	// Reminder delivery (PLAN §6.4): the Wails notifications service registers real OS
 	// notifications for the plan core computes. Registering it as a service runs its

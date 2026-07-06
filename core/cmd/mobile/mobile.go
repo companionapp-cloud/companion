@@ -11,7 +11,10 @@
 package mobile
 
 import (
+	"path/filepath"
+
 	"companion/core/bridge"
+	"companion/core/secrets"
 	"companion/core/store"
 )
 
@@ -35,7 +38,11 @@ func New(dbPath string) (*Core, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Core{inner: bridge.New(st), store: st}, nil
+	core := bridge.New(st)
+	// LLM API keys (PLAN §6.8): stored beside the database in the app's documents dir.
+	// SecureStore is the intended hardening upgrade; local Ollama needs no key.
+	core.SetSecretStore(secrets.NewFileStore(filepath.Join(filepath.Dir(dbPath), "secrets.json")))
+	return &Core{inner: core, store: st}, nil
 }
 
 // Invoke dispatches a core method: JSON-encoded payload in, JSON-encoded result out.

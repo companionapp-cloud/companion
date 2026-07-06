@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 
 	"companion/core/store"
 )
@@ -21,20 +22,41 @@ type EventHandler interface {
 	OnEvent(name string, payload []byte)
 }
 
+// SecretStore is the platform-provided keychain the core reads LLM API keys from at chat
+// time (PLAN §6.8): keychain on macOS, SecureStore on mobile, DPAPI on Windows. Keys are
+// referenced by an opaque handle (llm_configs.api_key_ref); the values never touch SQLite.
+// The shell injects an implementation via SetSecretStore; when absent, cloud LLM configs
+// that need a key error clearly rather than sending an empty credential.
+type SecretStore interface {
+	GetSecret(ref string) (string, error)
+	SetSecret(ref, value string) error
+	DeleteSecret(ref string) error
+}
+
 // Core is the shared application core. It is safe to construct once per process.
 type Core struct {
 	store   *store.Store
 	handler EventHandler
 	sync    syncConfig
+	secrets SecretStore
+
+	// Chat runs execute on background goroutines so an answer keeps generating (and is saved)
+	// even when the user navigates away (§6.8). working tracks the chats with a live run, so
+	// lists can show a spinner; guarded by chatMu.
+	chatMu  sync.Mutex
+	working map[string]bool
 }
 
 // New builds a Core over an already-open store.
 func New(st *store.Store) *Core {
-	return &Core{store: st}
+	return &Core{store: st, working: map[string]bool{}}
 }
 
 // SetEventHandler registers the sink for events emitted by the core.
 func (c *Core) SetEventHandler(h EventHandler) { c.handler = h }
+
+// SetSecretStore registers the platform keychain used for LLM API keys (§6.8).
+func (c *Core) SetSecretStore(s SecretStore) { c.secrets = s }
 
 // emit fans an event out to the registered handler, if any. payload is the
 // already-marshalled JSON body for the event.
@@ -147,6 +169,30 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.graphLookup(payload)
 	case "graph.rebuild":
 		return c.graphRebuild()
+	case "llm.configs.list":
+		return c.llmConfigsList()
+	case "llm.configs.create":
+		return c.llmConfigsCreate(payload)
+	case "llm.configs.update":
+		return c.llmConfigsUpdate(payload)
+	case "llm.configs.delete":
+		return c.llmConfigsDelete(payload)
+	case "llm.configs.setDefault":
+		return c.llmConfigsSetDefault(payload)
+	case "chats.list":
+		return c.chatsList()
+	case "chats.get":
+		return c.chatsGet(payload)
+	case "chats.create":
+		return c.chatsCreate(payload)
+	case "chats.rename":
+		return c.chatsRename(payload)
+	case "chats.delete":
+		return c.chatsDelete(payload)
+	case "chats.send":
+		return c.chatsSend(payload)
+	case "chats.working":
+		return c.chatsWorking()
 	default:
 		return nil, fmt.Errorf("unknown method %q", method)
 	}

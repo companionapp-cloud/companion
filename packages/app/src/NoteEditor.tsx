@@ -1,10 +1,10 @@
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Platform, ScrollView, View } from "react-native";
 import type { Note } from "@companion/core-bridge";
 import { Badge, Icon, IconButton, Text, TextField, colors, layout, space } from "@companion/design-system";
-import { Editor, type LinkRef, type LinkSource } from "@companion/editor";
-import { useCore } from "./CoreContext";
+import { Editor, type LinkRef } from "@companion/editor";
 import { useTasks } from "./TasksProvider";
+import { useLinkSource } from "./useLinkSource";
 import { NoteGraph } from "./NoteGraph";
 import { MembershipPicker } from "./MembershipPicker";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -35,32 +35,11 @@ export interface NoteEditorProps {
  * the title, and a ProseMirror body (from @companion/editor). App-level chrome stays in
  * the app toolbar. Keyed by note id upstream, so each note gets a fresh instance. */
 export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote, onOpenRef }: NoteEditorProps) {
-  const { graph } = useCore();
-  // Task metadata for chip hydration, via a ref so the memoized linkSource always reads the
-  // latest tasks without changing identity (which would reload the editor).
+  // Task metadata (for `[[task:…]]` chip hydration) also refreshes the chips; `tasks.tasks`
+  // identity changes on any task edit, which we pass as linkRevision below.
   const tasks = useTasks();
-  const tasksRef = useRef(tasks);
-  tasksRef.current = tasks;
-  // Wikilink autocomplete ([[) and pasted-UUID resolution search the object graph; a task
-  // lookup also carries its done state + dates so a `[[task:…]]` chip renders like a todo.
-  const linkSource = useMemo<LinkSource>(
-    () => ({
-      search: async (q, type) =>
-        (await graph.search(q, type)).map((n) => ({ type: n.type, id: n.id, title: n.title })),
-      lookup: async (id) => {
-        const n = await graph.lookup(id);
-        if (!n) return null;
-        const base = { type: n.type, id: n.id, title: n.title };
-        if (n.type === "task") {
-          const t = tasksRef.current.byId(id);
-          if (t) return { ...base, status: t.status, dueAt: t.dueAt, remindAt: t.remindAt };
-          return { ...base, status: n.status ?? null };
-        }
-        return base;
-      },
-    }),
-    [graph],
-  );
+  // Wikilink autocomplete ([[) and pasted-UUID resolution search the object graph.
+  const linkSource = useLinkSource();
   const [title, setTitle] = useState(note.title);
   // Seed the editor from `seed.content`; it owns its content thereafter and reports edits
   // back out. `seed.key` remounts it when the sync guard silently adopts a server version

@@ -122,6 +122,36 @@ CREATE TABLE IF NOT EXISTS project_members (
 );
 CREATE INDEX IF NOT EXISTS idx_project_members_user_seq ON project_members (user_id, server_seq);
 
+CREATE TABLE IF NOT EXISTS chats (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  title      TEXT NOT NULL DEFAULT '',
+  config_id  TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  version    BIGINT NOT NULL DEFAULT 1,
+  server_seq BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chats_user_seq ON chats (user_id, server_seq);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL,
+  chat_id      TEXT NOT NULL,
+  seq          BIGINT NOT NULL,
+  role         TEXT NOT NULL,
+  text         TEXT NOT NULL DEFAULT '',
+  tool_calls   TEXT,
+  tool_results TEXT,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL,
+  deleted_at   TEXT,
+  version      BIGINT NOT NULL DEFAULT 1,
+  server_seq   BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_user_seq ON chat_messages (user_id, server_seq);
+
 CREATE TABLE IF NOT EXISTS user_secrets (
   user_id    TEXT NOT NULL,
   key        TEXT NOT NULL,

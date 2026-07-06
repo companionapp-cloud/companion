@@ -35,6 +35,7 @@ func initCore(_ js.Value, args []js.Value) any {
 	opts := args[0]
 	sqlite := opts.Get("sqlite")
 	onEvent := opts.Get("onEvent")
+	secrets := opts.Get("secrets")
 
 	return newPromise(func(resolve, reject func(any)) {
 		go func() {
@@ -45,6 +46,11 @@ func initCore(_ js.Value, args []js.Value) any {
 			}
 			core := bridge.New(st)
 			core.SetEventHandler(jsEventHandler{onEvent: onEvent})
+			// LLM API keys (PLAN §6.8): the browser has no OS keychain, so the shell injects
+			// a localStorage-backed secrets object. Absent it, only local (no-key) providers work.
+			if secrets.Type() == js.TypeObject {
+				core.SetSecretStore(jsSecretStore{secrets: secrets})
+			}
 
 			handle := js.Global().Get("Object").New()
 			handle.Set("invoke", js.FuncOf(func(_ js.Value, a []js.Value) any {
@@ -68,6 +74,28 @@ func initCore(_ js.Value, args []js.Value) any {
 			resolve(handle)
 		}()
 	})
+}
+
+// jsSecretStore bridges bridge.SecretStore to a JS object with synchronous get/set/delete
+// (localStorage-backed on web). js.Value calls from the invoke goroutine are safe.
+type jsSecretStore struct{ secrets js.Value }
+
+func (s jsSecretStore) GetSecret(ref string) (string, error) {
+	v := s.secrets.Call("get", ref)
+	if v.Type() != js.TypeString {
+		return "", nil
+	}
+	return v.String(), nil
+}
+
+func (s jsSecretStore) SetSecret(ref, value string) error {
+	s.secrets.Call("set", ref, value)
+	return nil
+}
+
+func (s jsSecretStore) DeleteSecret(ref string) error {
+	s.secrets.Call("delete", ref)
+	return nil
 }
 
 // jsEventHandler forwards core events to the JS onEvent callback.

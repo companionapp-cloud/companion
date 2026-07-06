@@ -15,6 +15,25 @@ export interface EditorProps {
    * mounts, so a task edited elsewhere while the note stays open would look stale. Only
    * touches already-rendered chips; the document itself is unchanged. */
   linkRevision?: unknown;
+  /** "full" is the document editor (headings, lists, task items, marks …). "simple" is a
+   * plain-text-plus-references editor for task notes and the chat composer. Default "full". */
+  variant?: "full" | "simple";
+  /** Placeholder shown while the document is empty (simple variant). */
+  placeholder?: string;
+  /** When set, Enter submits (calls this with the current content) instead of a newline, and
+   * Shift-Enter makes a new paragraph — the chat composer's send behavior. Simple variant only. */
+  onSubmit?: (markdown: string) => void;
+  /** Change this value's identity to empty the editor (e.g. the chat composer after a send).
+   * Skips the initial mount. */
+  clearSignal?: unknown;
+  /** Simple variant only. The field hugs its content; these bound how far it grows. On native
+   * the WebView is sized to its content between these; on web the wrapper caps + scrolls at
+   * maxHeight. Ignored by the full editor. */
+  minHeight?: number;
+  maxHeight?: number;
+  /** How often edits are reported back (ms). Defaults to 400. The chat composer lowers it so
+   * the send button reflects typing promptly. */
+  debounceMs?: number;
 }
 
 /** A reference to open — the payload of {@link EditorProps.onOpenRef}. */

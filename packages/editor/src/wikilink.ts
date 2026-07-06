@@ -14,15 +14,20 @@ import { Plugin } from "prosemirror-state";
 // the link index parses.
 export const LINK_TYPES = new Set(["note", "task", "habit", "project"]);
 
-/** Build a wikilink node from a resolved target. Used by the autocomplete menu and the
- * UUID-paste handler so every inserted chip is shaped the same way. */
-export function wikilinkNode(attrs: {
-  type: string;
-  id: string;
-  alias?: string | null;
-  embed?: boolean;
-}) {
-  return schema.nodes.wikilink.create({
+/** Build a wikilink node from a resolved target, in the given schema. Used by the
+ * autocomplete menu and the UUID-paste handler so every inserted chip is shaped the same
+ * way. The schema is passed in because the full and simple editors each own a distinct
+ * `wikilink` node type, and a node made in one schema can't be inserted into the other. */
+export function wikilinkNode(
+  targetSchema: Schema,
+  attrs: {
+    type: string;
+    id: string;
+    alias?: string | null;
+    embed?: boolean;
+  },
+) {
+  return targetSchema.nodes.wikilink.create({
     embed: attrs.embed ?? false,
     type: attrs.type,
     id: attrs.id,
@@ -35,9 +40,10 @@ export function wikilinkNode(attrs: {
 const BODY_RE = /^\s*([a-zA-Z]+)\s*:\s*([^\]|]+?)\s*(?:\|\s*([^\]]*?)\s*)?$/;
 
 // ---------------------------------------------------------------------------
-// Schema: an inline, atomic chip node carrying the parsed target.
+// Schema: an inline, atomic chip node carrying the parsed target. Exported so the
+// simple (plain-text) schema can reuse the exact same chip node (see simpleSchema.ts).
 // ---------------------------------------------------------------------------
-const wikilink: NodeSpec = {
+export const wikilinkSpec: NodeSpec = {
   inline: true,
   group: "inline",
   atom: true,
@@ -111,7 +117,7 @@ const listItem: NodeSpec = {
 };
 
 export const schema = new Schema({
-  nodes: baseSchema.spec.nodes.update("list_item", listItem).addToEnd("wikilink", wikilink),
+  nodes: baseSchema.spec.nodes.update("list_item", listItem).addToEnd("wikilink", wikilinkSpec),
   marks: baseSchema.spec.marks,
 });
 
@@ -256,7 +262,7 @@ export const serializer = new MarkdownSerializer(
 // ---------------------------------------------------------------------------
 const INPUT_RE = /(!?)\[\[\s*([a-zA-Z]+)\s*:\s*([^\]|]+?)\s*(?:\|\s*([^\]]*?)\s*)?\]\]$/;
 
-export function wikilinkInputRules(): Plugin {
+export function wikilinkInputRules(targetSchema: Schema): Plugin {
   return new Plugin({
     props: {
       handleTextInput(view, from, _to, text) {
@@ -273,7 +279,7 @@ export function wikilinkInputRules(): Plugin {
         if (!m || !LINK_TYPES.has(m[2])) return false;
         const matchStart = from - (m[0].length - text.length);
         if (matchStart < blockStart) return false;
-        const node = schema.nodes.wikilink.create({
+        const node = targetSchema.nodes.wikilink.create({
           embed: m[1] === "!",
           type: m[2],
           id: m[3],

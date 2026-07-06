@@ -31,6 +31,22 @@ export const EDITOR_CSS = `
 .pm-wrap { max-width: 760px; margin: 0 auto; width: 100%; padding: 40px 44px 120px; box-sizing: border-box; }
 @media (max-width: 640px) { .pm-wrap { padding: 16px 20px 96px; } }
 
+/* Simple variant (task notes, chat composer): an inline field, not a full page. Drop the
+   tall min-height and the roomy document column; the field hugs its content. .pm-simple
+   is the web wrapper; .pm-compact is the native WebView mount. */
+.pm-simple .ProseMirror, .pm-compact .ProseMirror { min-height: 1.65em; }
+.pm-compact { padding: 4px 0; }
+
+/* Placeholder over an empty document: the placeholder plugin tags the empty paragraph with
+   .pm-empty + data-placeholder; render it via ::before so it doesn't enter the doc. */
+.ProseMirror p.pm-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: #9a9a92;
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
 /* Task list items: a round checkbox todo ([ ] / [x]) the reader can click. */
 .ProseMirror li.pm-task-item {
   list-style: none;
@@ -142,6 +158,28 @@ export const EDITOR_CSS = `
   white-space: nowrap;
 }
 .pm-wikilink-task .pm-wikilink-meta:empty { display: none; }
+
+/* Broken reference: the target no longer exists. A leading unlink icon plus a muted, struck
+   label; the TYPE badge and any task status / meta are suppressed. */
+.pm-wikilink-broken {
+  background: #f4ecea;
+  color: #9a5a4a;
+  border-color: #e6d2cc;
+  cursor: default;
+}
+.pm-wikilink-broken::before { content: none; }
+.pm-wikilink-broken .pm-wikilink-status,
+.pm-wikilink-broken .pm-wikilink-meta { display: none; }
+.pm-wikilink-broken .pm-wikilink-label {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+.pm-wikilink-brokenicon {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.pm-wikilink-brokenicon svg { width: 0.9em; height: 0.9em; }
 
 /* Floating [[ autocomplete picker (appended to <body>, positioned at the caret). */
 .pm-wikilink-menu {

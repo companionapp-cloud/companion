@@ -17,6 +17,8 @@ const (
 	EntityArea          = "area"
 	EntityProject       = "project"
 	EntityProjectMember = "project_member"
+	EntityChat          = "chat"
+	EntityChatMessage   = "chat_message"
 )
 
 // Push statuses.

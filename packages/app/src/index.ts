@@ -10,6 +10,8 @@ export { NoteConflictDialog } from "./NoteConflictDialog";
 export { useNoteSyncGuard } from "./useNoteSyncGuard";
 export type { NoteSyncGuard, NoteConflictKind } from "./useNoteSyncGuard";
 export { GraphScreen } from "./GraphScreen";
+export { ChatView, ChatList, ChatsScreen } from "./ChatScreen";
+export { LlmSettings } from "./LlmSettings";
 export { NoteGraph } from "./NoteGraph";
 export { GraphCanvas } from "./GraphCanvas";
 export type { GraphCanvasProps } from "./GraphCanvas";

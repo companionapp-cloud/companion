@@ -39,6 +39,7 @@ import { AppToolbar } from "./AppToolbar";
 import { WorkspaceScreen } from "./WorkspaceScreen";
 import { GraphScreen } from "./GraphScreen";
 import { TrashScreen } from "./TrashScreen";
+import { ChatsScreen } from "./ChatScreen";
 import { DndProvider, useDnd } from "./DndContext";
 import { SettingsPanel } from "./SettingsPanel";
 import { useSync } from "./SyncProvider";
@@ -58,10 +59,9 @@ const NAV: { id: ViewId; label: string; icon: IconName }[] = [
   { id: "trash", label: "Trash", icon: "trash" },
 ];
 
-type PlaceholderView = "chat" | "calendar" | "tasks" | "habits";
+type PlaceholderView = "calendar" | "tasks" | "habits";
 
 const PLACEHOLDER: Record<PlaceholderView, string> = {
-  chat: "Chat lands here soon. For now, your notes are just to the left.",
   calendar: "A calendar is coming. Time keeps happening in the meantime.",
   tasks: "Tasks are on the way. Until then, a note that says “do the thing” works.",
   habits: "Habits, streaks, and gentle nudges are on the way.",
@@ -398,7 +398,7 @@ export function AppShell({ topInset = 0, notificationScheduler }: AppShellProps)
         <ProjectsProvider>
           <NavigationContainer linking={linking} documentTitle={{ enabled: false }}>
             <Nav.Navigator initialRouteName="notes" topInset={topInset}>
-              <Nav.Screen name="chat" component={ViewScreen} />
+              <Nav.Screen name="chat" component={ChatsScreen} />
               <Nav.Screen name="calendar" component={ViewScreen} />
               <Nav.Screen name="notes" component={NotesRouteScreen} />
               <Nav.Screen name="tasks" component={TasksRouteScreen} />
