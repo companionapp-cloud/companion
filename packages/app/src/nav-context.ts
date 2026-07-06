@@ -8,9 +8,11 @@ export type ProjectSection = "notes" | "tasks" | "calendars" | "habits";
 /** A document open in a workspace tab. */
 export type TabRef = { kind: "note" | "task"; id: string };
 
-/** One workspace tab slot: a stable uid plus its (possibly empty) document. Notes and
- *  tasks share one strip; an empty slot renders as "Nothing selected". */
-export type Tab = { uid: string; ref: TabRef | null };
+/** One workspace tab slot: a stable uid, its (possibly empty) document, and that tab's own
+ *  selection history. Notes and tasks share one strip; an empty slot renders as "Nothing
+ *  selected". `back`/`fwd` (oldest→newest) drive per-tab Back/Forward — each tab remembers
+ *  the documents it has shown, independent of the browser/route history. */
+export type Tab = { uid: string; ref: TabRef | null; back: TabRef[]; fwd: TabRef[] };
 
 /** The current navigable location, derived from the React Navigation route. The workspace
  * sections (notes/tasks) only pick which list the left column browses — the content area
@@ -44,6 +46,8 @@ export interface Navigator {
   openNote: (id: string) => void;
   /** Set the active tab's document to this task. */
   openTask: (id: string) => void;
+  /** Open a document in a new tab and make it active (e.g. following a link chip). */
+  openInNewTab: (ref: TabRef) => void;
   /** Add a new empty tab and make it active. */
   addTab: () => void;
   /** Make the tab at `index` active. */

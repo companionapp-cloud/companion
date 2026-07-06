@@ -3,6 +3,7 @@ import { Icon, IconButton, Tab, Toolbar, colors, space } from "@companion/design
 import { useNav } from "./nav-context";
 import { useNotes } from "./NotesProvider";
 import { useTasks } from "./TasksProvider";
+import { Draggable } from "./DndContext";
 
 /** The app's top toolbar: back/forward history, the shared workspace tab strip (notes and
  * tasks together — each tab is a document or empty), a "+" to add a tab, and the
@@ -49,9 +50,8 @@ export function AppToolbar() {
       >
         {nav.tabs.map((tab, i) => {
           const ref = tab.ref;
-          return (
+          const el = (
             <Tab
-              key={tab.uid}
               label={ref ? labelFor(ref.kind, ref.id) : "Nothing selected"}
               active={i === nav.activeIndex}
               icon={ref ? <Icon name={ref.kind === "task" ? "tasks" : "file"} size={13} color={colors.textTertiary} /> : undefined}
@@ -59,6 +59,14 @@ export function AppToolbar() {
               onExpand={ref ? () => nav.expandTab(i) : undefined}
               onClose={() => nav.closeTab(i)}
             />
+          );
+          // A tab holding a document can be dragged onto a project to add it there.
+          return ref ? (
+            <Draggable key={tab.uid} payload={{ kind: ref.kind, id: ref.id, label: labelFor(ref.kind, ref.id) }}>
+              {el}
+            </Draggable>
+          ) : (
+            <View key={tab.uid}>{el}</View>
           );
         })}
         <IconButton label="New tab" size="sm" onPress={nav.addTab}>

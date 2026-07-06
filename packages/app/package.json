@@ -16,7 +16,8 @@
     "@companion/design-system": "*",
     "@companion/editor": "*",
     "@react-navigation/native": "7.3.7",
-    "@xyflow/react": "12.8.6"
+    "@xyflow/react": "12.8.6",
+    "d3-force": "3.0.0"
   },
   "peerDependencies": {
     "react": "*",
@@ -32,6 +33,7 @@
     }
   },
   "devDependencies": {
+    "@types/d3-force": "3.0.10",
     "@types/react": "19.2.2",
     "esbuild": "0.28.1",
     "react": "19.2.3",

@@ -20,6 +20,7 @@ declare module "react-native" {
     style?: StyleProp<ViewStyle>;
     children?: ReactNode;
     ref?: Ref<unknown>;
+    pointerEvents?: "auto" | "none" | "box-none" | "box-only";
     onPointerEnter?: () => void;
     onPointerLeave?: () => void;
     onPointerDown?: (event: { clientX?: number; nativeEvent?: { clientX?: number } }) => void;

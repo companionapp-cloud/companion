@@ -12,6 +12,7 @@ import {
 } from "@react-navigation/native";
 import {
   Avatar,
+  BrandMark,
   Frame,
   Icon,
   IconButton,
@@ -20,16 +21,17 @@ import {
   colors,
   dragRegion,
   layout,
-  radius,
   space,
   transition,
   type IconName,
 } from "@companion/design-system";
 import { NavContext, useNav, type NavLocation, type Navigator, type ProjectSection, type Tab, type TabRef, type ViewId } from "./nav-context";
+import { useCore } from "./CoreContext";
+import { setReminderActivationHandler } from "./reminderNav";
 import { openFocusWindow } from "./focus";
 import { NotesProvider } from "./NotesProvider";
 import { TasksProvider } from "./TasksProvider";
-import { RemindersProvider } from "./RemindersProvider";
+import { RemindersProvider, type NotificationScheduler } from "./RemindersProvider";
 import { ProjectsProvider } from "./ProjectsProvider";
 import { ProjectsSidebar } from "./ProjectsSidebar";
 import { ProjectView } from "./ProjectView";
@@ -37,13 +39,14 @@ import { AppToolbar } from "./AppToolbar";
 import { WorkspaceScreen } from "./WorkspaceScreen";
 import { GraphScreen } from "./GraphScreen";
 import { TrashScreen } from "./TrashScreen";
+import { DndProvider, useDnd } from "./DndContext";
 import { SettingsPanel } from "./SettingsPanel";
 import { useSync } from "./SyncProvider";
 
 // Monotonic tab uid so React keys are stable across reorders/overwrites even when two
 // tabs hold the same document.
 let tabSeq = 0;
-const freshTab = (): Tab => ({ uid: `tab${++tabSeq}`, ref: null });
+const freshTab = (): Tab => ({ uid: `tab${++tabSeq}`, ref: null, back: [], fwd: [] });
 
 const NAV: { id: ViewId; label: string; icon: IconName }[] = [
   { id: "chat", label: "Chat", icon: "chat" },
@@ -66,6 +69,9 @@ const PLACEHOLDER: Record<PlaceholderView, string> = {
 
 export interface AppShellProps {
   topInset?: number;
+  /** Per-platform reminder scheduler (PLAN §6.4); passed straight to RemindersProvider.
+   *  When omitted it uses the best-effort web `Notification` scheduler. */
+  notificationScheduler?: NotificationScheduler;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,11 +90,11 @@ function webLinking(): LinkingOptions<ParamListBase> | undefined {
       screens: {
         chat: "chat",
         calendar: "calendar",
-        // notes/tasks are the two workspace browse lists; open documents live in session
-        // tabs (not the URL). A specific document is deep-linked via focus mode (?note= /
-        // ?task=), which the expand/pop-out action opens.
-        notes: "notes",
-        tasks: "tasks",
+        // notes/tasks are the workspace browse lists; the active tab's open document is
+        // carried in the URL (/notes/:id, /tasks/:id) so it's bookmarkable. Other open tabs
+        // stay session-only.
+        notes: "notes/:id?",
+        tasks: "tasks/:id?",
         habits: "habits",
         graph: "graph",
         trash: "trash",
@@ -176,14 +182,23 @@ function NavBridge({
   topInset: number;
   children: ReactNode;
 }) {
+  const route = state.routes[state.index];
+  const routeName = route.name;
+  const inWorkspace = routeName === "notes" || routeName === "tasks";
+
   // The workspace tab strip: notes and tasks share one set of slots (always ≥ 1). Tabs are
-  // session state, not in the URL; the route only tracks which list is browsed.
-  const [tabs, setTabs] = useState<Tab[]>(() => [freshTab()]);
+  // session state; only the *active* tab's document is mirrored to the URL. Seed the first
+  // tab from a bookmarked /notes/:id or /tasks/:id so the link opens that document.
+  const [tabs, setTabs] = useState<Tab[]>(() => {
+    const first = freshTab();
+    const id = route.params?.id;
+    const kind = routeName === "notes" ? "note" : routeName === "tasks" ? "task" : null;
+    if (id && kind) first.ref = { kind, id };
+    return [first];
+  });
   const [activeIndex, setActiveIndex] = useState(0);
   const [forwardStack, setForwardStack] = useState<{ name: string; params?: RouteParams }[]>([]);
 
-  const route = state.routes[state.index];
-  const routeName = route.name;
   const current: NavLocation =
     routeName === "project"
       ? {
@@ -200,20 +215,64 @@ function NavBridge({
 
   const active = Math.min(activeIndex, tabs.length - 1);
   const activeTab = tabs[active];
+  const activeRef = activeTab.ref;
+
+  // Mirror the active tab's document into the URL as /notes/:id or /tasks/:id (bookmarkable),
+  // but only while its kind matches the browsed section. `replace` keeps this out of the
+  // route history — per-tab selection history (below) owns document navigation.
+  useEffect(() => {
+    if (!inWorkspace) return;
+    const matches =
+      activeRef &&
+      ((activeRef.kind === "note" && routeName === "notes") || (activeRef.kind === "task" && routeName === "tasks"));
+    const wantId = matches ? activeRef!.id : undefined;
+    if ((route.params?.id ?? undefined) !== wantId) {
+      navigation.dispatch(StackActions.replace(routeName, wantId ? { id: wantId } : {}));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inWorkspace, routeName, activeRef?.kind, activeRef?.id]);
 
   const nav = useMemo<Navigator>(() => {
     const goto = (name: string, params?: RouteParams) => {
       setForwardStack([]);
       navigation.dispatch(StackActions.push(name, params));
     };
-    // Ensure the workspace for `kind` is on screen (so a doc opened from elsewhere — the
-    // graph, a project — becomes visible), without stacking history when already there.
-    const ensureRoute = (name: string) => {
-      if (routeName !== name) goto(name);
+    // Put the workspace section for `name` on screen. Entering from another view (graph,
+    // project) pushes — so route Back returns there; switching sections *within* the
+    // workspace replaces, so document selections never grow route history (the per-tab
+    // history handles those). The :id param is filled by the effect above.
+    const ensureSection = (name: "notes" | "tasks") => {
+      if (routeName === name) return;
+      if (inWorkspace) navigation.dispatch(StackActions.replace(name));
+      else goto(name);
     };
-    // Overwrite the active tab's document. Opening a note/task shows its matching list.
-    const setActiveRef = (ref: TabRef) => {
-      setTabs((t) => t.map((tab, i) => (i === active ? { ...tab, ref } : tab)));
+    // Point the active tab at a document, remembering the one it replaces for per-tab Back.
+    const selectRef = (ref: TabRef) => {
+      setTabs((ts) =>
+        ts.map((tab, i) => {
+          if (i !== active) return tab;
+          if (tab.ref && tab.ref.kind === ref.kind && tab.ref.id === ref.id) return tab; // re-select: no-op
+          return { ...tab, ref, back: tab.ref ? [...tab.back, tab.ref] : tab.back, fwd: [] };
+        }),
+      );
+    };
+    // Restore a document from the active tab's Back (dir -1) or Forward (dir +1) stack.
+    const stepTab = (dir: -1 | 1): boolean => {
+      const tab = tabs[active];
+      const from = dir === -1 ? tab.back : tab.fwd;
+      if (!from.length) return false;
+      const target = from[from.length - 1];
+      setTabs((ts) =>
+        ts.map((t, i) => {
+          if (i !== active) return t;
+          if (dir === -1) {
+            return { ...t, ref: target, back: t.back.slice(0, -1), fwd: t.ref ? [...t.fwd, t.ref] : t.fwd };
+          }
+          return { ...t, ref: target, fwd: t.fwd.slice(0, -1), back: t.ref ? [...t.back, t.ref] : t.back };
+        }),
+      );
+      ensureSection(target.kind === "note" ? "notes" : "tasks");
+      return true;
     };
     // Close a tab, keeping at least one (empty) slot and a valid active index.
     const removeTab = (index: number) => {
@@ -228,14 +287,18 @@ function NavBridge({
     return {
       current,
       activeView: routeName === "project" ? "project" : (routeName as ViewId),
-      canBack: state.index > 0,
-      canForward: forwardStack.length > 0,
+      // In the workspace, Back/Forward walk the active tab's selection history first, then
+      // fall back to the route history (to leave the workspace to where you came from).
+      canBack: inWorkspace ? activeTab.back.length > 0 || state.index > 0 : state.index > 0,
+      canForward: inWorkspace ? activeTab.fwd.length > 0 || forwardStack.length > 0 : forwardStack.length > 0,
       back: () => {
+        if (inWorkspace && stepTab(-1)) return;
         const top = state.routes[state.index];
         setForwardStack((f) => [...f, { name: top.name, params: top.params }]);
         navigation.goBack();
       },
       forward: () => {
+        if (inWorkspace && stepTab(1)) return;
         setForwardStack((f) => {
           if (!f.length) return f;
           const r = f[f.length - 1];
@@ -252,18 +315,29 @@ function NavBridge({
       activeIndex: active,
       activeTab,
       openNote: (id) => {
-        setActiveRef({ kind: "note", id });
-        ensureRoute("notes");
+        selectRef({ kind: "note", id });
+        ensureSection("notes");
       },
       openTask: (id) => {
-        setActiveRef({ kind: "task", id });
-        ensureRoute("tasks");
+        selectRef({ kind: "task", id });
+        ensureSection("tasks");
+      },
+      openInNewTab: (ref) => {
+        // Append a tab already holding the document and focus it. Done in one shot (not
+        // addTab + openTask) so it doesn't depend on the active index updating first.
+        setTabs((t) => [...t, { ...freshTab(), ref }]);
+        setActiveIndex(tabs.length);
+        ensureSection(ref.kind === "note" ? "notes" : "tasks");
       },
       addTab: () => {
         setActiveIndex(tabs.length);
         setTabs((t) => [...t, freshTab()]);
       },
-      selectTab: (index) => setActiveIndex(index),
+      selectTab: (index) => {
+        setActiveIndex(index);
+        const ref = tabs[index]?.ref;
+        if (ref) ensureSection(ref.kind === "note" ? "notes" : "tasks");
+      },
       closeTab: (index) => removeTab(index),
       expandTab: (index) => {
         const ref = tabs[index]?.ref;
@@ -277,21 +351,50 @@ function NavBridge({
       openProjectSection: (projectId, section) => goto("project", { projectId, section }),
       openProjectItem: (projectId, section, itemId) => goto("project", { projectId, section, itemId }),
     };
-  }, [current, tabs, active, activeTab, routeName, state, forwardStack, navigation]);
+  }, [current, tabs, active, activeTab, routeName, inWorkspace, state, forwardStack, navigation]);
 
   return (
     <NavContext.Provider value={nav}>
-      <Shell topInset={topInset}>{children}</Shell>
+      <ReminderNavigationBridge />
+      <DndProvider>
+        <Shell topInset={topInset}>{children}</Shell>
+      </DndProvider>
     </NavContext.Provider>
   );
 }
 
-export function AppShell({ topInset = 0 }: AppShellProps) {
+/** Bridges a tapped reminder to navigation (PLAN §6.4). Mounted inside the navigator so it
+ *  can drive it. Two triggers converge here: the web `Notification` onclick (via the shared
+ *  activateReminder registry) and the desktop shell's native tap, relayed from the Go side
+ *  as a `notify.activate` core event over the bridge's event stream. */
+function ReminderNavigationBridge() {
+  const nav = useNav();
+  const { core } = useCore();
+  useEffect(() => {
+    const open = (taskId: string) => {
+      if (!taskId) return;
+      nav.goView("tasks");
+      nav.openTask(taskId);
+    };
+    setReminderActivationHandler(({ taskId }) => open(taskId));
+    const off = core.on("notify.activate", (payload) => {
+      const taskId = (payload as { taskId?: string } | null)?.taskId;
+      if (taskId) open(taskId);
+    });
+    return () => {
+      setReminderActivationHandler(null);
+      off();
+    };
+  }, [nav, core]);
+  return null;
+}
+
+export function AppShell({ topInset = 0, notificationScheduler }: AppShellProps) {
   const linking = useMemo(webLinking, []);
   return (
     <NotesProvider>
       <TasksProvider>
-       <RemindersProvider>
+       <RemindersProvider scheduler={notificationScheduler}>
         <ProjectsProvider>
           <NavigationContainer linking={linking} documentTitle={{ enabled: false }}>
             <Nav.Navigator initialRouteName="notes" topInset={topInset}>
@@ -319,10 +422,12 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
   // The notes/tasks workspace is shown for both those sections (it's one shared thing).
   const inWorkspace = nav.current.kind === "notes" || nav.current.kind === "tasks";
   const sync = useSync();
+  const dnd = useDnd();
   const [open, setOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pinned, setPinned] = usePersistentBoolean("companion.sidebar.pinned", false);
-  const expanded = open || pinned;
+  // Reveal the rail while dragging a document, so projects are available as drop targets.
+  const expanded = open || pinned || dnd.dragging != null;
   const activeProjectId = nav.current.kind === "project" ? nav.current.projectId : null;
 
   // Sync on navigation (§5.4). Key on the location + active tab so param-only changes fire.
@@ -437,10 +542,9 @@ function ComingSoon({ view }: { view: PlaceholderView }) {
 }
 
 function Mark({ size = 26 }: { size?: number }) {
-  const dot = Math.round(size * 0.3);
   return (
-    <View style={{ width: size, height: size, borderRadius: radius.lg, backgroundColor: colors.accent, flexShrink: 0 }}>
-      <View style={{ position: "absolute", width: dot, height: dot, borderRadius: radius.full, backgroundColor: colors.gray0, top: Math.round(size * 0.2), left: Math.round(size * 0.2) }} />
+    <View style={{ flexShrink: 0 }}>
+      <BrandMark size={size} />
     </View>
   );
 }

@@ -61,6 +61,8 @@ function init(): void {
         }
       : undefined,
     onFocusChange: (focused) => post("focus", focused),
+    // Opening a referenced entity is the shell's job; hand the ref up over the bridge.
+    onOpenRef: (ref) => post("openRef", ref),
   });
   post("ready", null);
 }

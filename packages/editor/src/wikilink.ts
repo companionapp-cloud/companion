@@ -81,8 +81,37 @@ const wikilink: NodeSpec = {
   ],
 };
 
+// ---------------------------------------------------------------------------
+// Task list items: `list_item` gains a `checked` attr (null = a plain bullet;
+// true/false = a todo). It round-trips as GFM `- [ ]` / `- [x]` and renders with a
+// round checkbox the reader can click (see createEditor's taskCheckboxPlugin).
+// ---------------------------------------------------------------------------
+const baseListItem = baseSchema.spec.nodes.get("list_item") as NodeSpec;
+const listItem: NodeSpec = {
+  ...baseListItem,
+  attrs: { checked: { default: null } },
+  toDOM(node) {
+    if (node.attrs.checked === null) return ["li", 0];
+    return [
+      "li",
+      { class: "pm-task-item", "data-checked": node.attrs.checked ? "true" : "false" },
+      ["span", { class: "pm-task-checkbox", contenteditable: "false" }],
+      ["div", { class: "pm-task-body" }, 0],
+    ];
+  },
+  parseDOM: [
+    {
+      tag: "li",
+      getAttrs(dom) {
+        const c = (dom as HTMLElement).getAttribute("data-checked");
+        return { checked: c === null ? null : c === "true" };
+      },
+    },
+  ],
+};
+
 export const schema = new Schema({
-  nodes: baseSchema.spec.nodes.addToEnd("wikilink", wikilink),
+  nodes: baseSchema.spec.nodes.update("list_item", listItem).addToEnd("wikilink", wikilink),
   marks: baseSchema.spec.marks,
 });
 
@@ -127,14 +156,58 @@ function wikilinkRule(state: InlineState, silent: boolean): boolean {
 type RulerBefore = typeof defaultMarkdownParser.tokenizer.inline.ruler.before;
 const tokenizer = defaultMarkdownParser.tokenizer as typeof defaultMarkdownParser.tokenizer & {
   __wikilinkRule?: boolean;
+  __taskListRule?: boolean;
 };
 if (!tokenizer.__wikilinkRule) {
   tokenizer.inline.ruler.before("link", "wikilink", wikilinkRule as unknown as Parameters<RulerBefore>[2]);
   tokenizer.__wikilinkRule = true;
 }
 
+// Task-list marker: after inline parsing, find list items whose first line starts with
+// `[ ]`/`[x]`, record the checked state on the list_item token, and strip the marker so
+// the paragraph keeps clean text. Mirrors markdown-it-task-lists (not a dependency).
+interface CoreToken {
+  type: string;
+  content: string;
+  children: { type: string; content: string }[] | null;
+  attrSet(name: string, value: string): void;
+  attrGet(name: string): string | null;
+}
+function taskListCoreRule(state: { tokens: CoreToken[] }): void {
+  const { tokens } = state;
+  for (let i = 2; i < tokens.length; i++) {
+    const inline = tokens[i];
+    if (inline.type !== "inline") continue;
+    if (tokens[i - 1].type !== "paragraph_open" || tokens[i - 2].type !== "list_item_open") continue;
+    const m = /^\[([ xX])\]\s/.exec(inline.content);
+    if (!m) continue;
+    tokens[i - 2].attrSet("checked", m[1] === "x" || m[1] === "X" ? "true" : "false");
+    inline.content = inline.content.slice(m[0].length);
+    const child = inline.children?.[0];
+    if (child && child.type === "text") child.content = child.content.slice(m[0].length);
+  }
+}
+if (!tokenizer.__taskListRule) {
+  (
+    defaultMarkdownParser.tokenizer as unknown as {
+      core: { ruler: { after(anchor: string, name: string, fn: (s: { tokens: CoreToken[] }) => void): void } };
+    }
+  ).core.ruler.after("inline", "companion_task_list", taskListCoreRule);
+  tokenizer.__taskListRule = true;
+}
+
+function parseChecked(v: string | null | undefined): boolean | null {
+  if (v === "true") return true;
+  if (v === "false") return false;
+  return null;
+}
+
 export const parser = new MarkdownParser(schema, defaultMarkdownParser.tokenizer, {
   ...defaultMarkdownParser.tokens,
+  list_item: {
+    block: "list_item",
+    getAttrs: (tok) => ({ checked: parseChecked((tok as unknown as CoreToken).attrGet("checked")) }),
+  },
   wikilink: {
     node: "wikilink",
     getAttrs: (tok) => {
@@ -160,6 +233,11 @@ export const parser = new MarkdownParser(schema, defaultMarkdownParser.tokenizer
 export const serializer = new MarkdownSerializer(
   {
     ...defaultMarkdownSerializer.nodes,
+    list_item(state, node) {
+      // A todo writes its GFM marker before the item's content; plain bullets are unchanged.
+      if (node.attrs.checked !== null) state.write(node.attrs.checked ? "[x] " : "[ ] ");
+      state.renderContent(node);
+    },
     wikilink(state, node) {
       const { embed, type, id, alias } = node.attrs as {
         embed: boolean;

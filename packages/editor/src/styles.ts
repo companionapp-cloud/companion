@@ -31,6 +31,45 @@ export const EDITOR_CSS = `
 .pm-wrap { max-width: 760px; margin: 0 auto; width: 100%; padding: 40px 44px 120px; box-sizing: border-box; }
 @media (max-width: 640px) { .pm-wrap { padding: 16px 20px 96px; } }
 
+/* Task list items: a round checkbox todo ([ ] / [x]) the reader can click. */
+.ProseMirror li.pm-task-item {
+  list-style: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.ProseMirror .pm-task-checkbox {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-top: 0.2em;
+  border: 2px solid #a7a7a1;
+  border-radius: 999px;
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.ProseMirror li.pm-task-item[data-checked="true"] .pm-task-checkbox {
+  background: #2e9e5b;
+  border-color: #2e9e5b;
+}
+.ProseMirror li.pm-task-item[data-checked="true"] .pm-task-checkbox::after {
+  content: "";
+  display: block;
+  width: 4px;
+  height: 8px;
+  margin: 2px auto 0;
+  border: solid #ffffff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.ProseMirror .pm-task-body { flex: 1 1 auto; min-width: 0; }
+.ProseMirror .pm-task-body p { margin: 0; }
+.ProseMirror li.pm-task-item[data-checked="true"] .pm-task-body {
+  color: #7b7b75;
+  text-decoration: line-through;
+}
+
 /* Wikilink chip: an inline pill rendered for [[type:id]] / ![[type:id|alias]]. */
 .pm-wikilink {
   display: inline-flex;
@@ -57,6 +96,52 @@ export const EDITOR_CSS = `
 }
 .pm-wikilink-embed { background: #e7f0fb; color: #1f5fb0; border-color: #cfe0f5; }
 .pm-wikilink.ProseMirror-selectednode { outline: 2px solid #f76808; outline-offset: 1px; }
+
+/* Task chip: a referenced task rendered like a todo — a round status box, the title, and
+   its due / reminder dates. Neutral (not accent) so it reads as a task, not a link. */
+.pm-wikilink-task {
+  gap: 5px;
+  background: #f5f5f3;
+  color: #3e3e3a;
+  border-color: #e0e0dc;
+  cursor: pointer;
+}
+.pm-wikilink-task::before { content: none; } /* no TYPE badge; the status box leads instead */
+.pm-wikilink-task .pm-wikilink-status {
+  align-self: center;
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  border: 1.5px solid #a7a7a1;
+  border-radius: 999px;
+  box-sizing: border-box;
+}
+.pm-wikilink-task[data-status="done"] .pm-wikilink-status {
+  background: #2e9e5b;
+  border-color: #2e9e5b;
+  position: relative;
+}
+.pm-wikilink-task[data-status="done"] .pm-wikilink-status::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 3px;
+  height: 6px;
+  border: solid #ffffff;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+.pm-wikilink-task[data-status="done"] .pm-wikilink-label { text-decoration: line-through; color: #7b7b75; }
+.pm-wikilink-task .pm-wikilink-meta { display: inline-flex; align-items: center; gap: 5px; }
+.pm-wikilink-task .pm-wikilink-due,
+.pm-wikilink-task .pm-wikilink-remind {
+  font-size: 0.82em;
+  font-weight: 500;
+  color: #7b7b75;
+  white-space: nowrap;
+}
+.pm-wikilink-task .pm-wikilink-meta:empty { display: none; }
 
 /* Floating [[ autocomplete picker (appended to <body>, positioned at the caret). */
 .pm-wikilink-menu {

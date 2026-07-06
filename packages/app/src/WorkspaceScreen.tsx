@@ -7,6 +7,7 @@ import { useNotes } from "./NotesProvider";
 import { useTasks } from "./TasksProvider";
 import { NoteEditor } from "./NoteEditor";
 import { TaskEditor, TaskRow } from "./TaskEditor";
+import { Draggable } from "./DndContext";
 
 /** The web/desktop workspace: a persistent split of a browse list (notes or tasks, chosen
  * by the rail) and a shared tab strip. Notes and tasks share one set of tabs (in the
@@ -85,6 +86,10 @@ function NoteTabBody({ id, onDelete }: { id: string; onDelete: () => void }) {
         onDelete();
       }}
       onCreatedNote={(nid) => nav.openNote(nid)}
+      onOpenRef={(ref) => {
+        // Clicking a chip opens its target in a new tab, leaving this note put.
+        if (ref.type === "task" || ref.type === "note") nav.openInNewTab({ kind: ref.type, id: ref.id });
+      }}
     />
   );
 }
@@ -150,14 +155,15 @@ function NotesList() {
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.md, gap: 2 }}>
         {filtered.length ? (
           filtered.map((n) => (
-            <ListRow
-              key={n.id}
-              icon={<Icon name="file" size={17} color={n.id === activeId ? colors.accentHover : colors.textTertiary} />}
-              title={n.title || "Untitled"}
-              subtitle={notePreview(n)}
-              selected={n.id === activeId}
-              onPress={() => nav.openNote(n.id)}
-            />
+            <Draggable key={n.id} payload={{ kind: "note", id: n.id, label: n.title || "Untitled" }}>
+              <ListRow
+                icon={<Icon name="file" size={17} color={n.id === activeId ? colors.accentHover : colors.textTertiary} />}
+                title={n.title || "Untitled"}
+                subtitle={notePreview(n)}
+                selected={n.id === activeId}
+                onPress={() => nav.openNote(n.id)}
+              />
+            </Draggable>
           ))
         ) : (
           <Text tone="tertiary" variant="caption" style={styles.empty}>
@@ -215,7 +221,9 @@ function TasksList() {
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.md, gap: 2 }}>
         {open.length ? (
           open.map((t) => (
-            <TaskRow key={t.id} task={t} selected={t.id === activeId} onPress={() => nav.openTask(t.id)} onToggle={() => void store.setStatus(t.id, "done")} />
+            <Draggable key={t.id} payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }}>
+              <TaskRow task={t} selected={t.id === activeId} onPress={() => nav.openTask(t.id)} onToggle={() => void store.setStatus(t.id, "done")} />
+            </Draggable>
           ))
         ) : (
           <Text tone="tertiary" variant="caption" style={styles.empty}>
@@ -228,7 +236,9 @@ function TasksList() {
               COMPLETED · {done.length}
             </Text>
             {done.map((t) => (
-              <TaskRow key={t.id} task={t} selected={t.id === activeId} onPress={() => nav.openTask(t.id)} onToggle={() => void store.setStatus(t.id, "open")} />
+              <Draggable key={t.id} payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }}>
+                <TaskRow task={t} selected={t.id === activeId} onPress={() => nav.openTask(t.id)} onToggle={() => void store.setStatus(t.id, "open")} />
+              </Draggable>
             ))}
           </>
         ) : null}

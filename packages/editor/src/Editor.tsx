@@ -57,11 +57,13 @@ interface PickerState {
   embed: boolean;
 }
 
-export function Editor({ markdown, onChangeMarkdown, linkSource }: EditorProps) {
+export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef }: EditorProps) {
   const onChangeRef = useRef(onChangeMarkdown);
   onChangeRef.current = onChangeMarkdown;
   const linkSourceRef = useRef<LinkSource | undefined>(linkSource);
   linkSourceRef.current = linkSource;
+  const onOpenRefRef = useRef(onOpenRef);
+  onOpenRefRef.current = onOpenRef;
   const webRef = useRef<WebView>(null);
 
   const [editorFocused, setEditorFocused] = useState(false);
@@ -104,6 +106,9 @@ export function Editor({ markdown, onChangeMarkdown, linkSource }: EditorProps) 
           break;
         case "linkTriggerEnd":
           setPicker((p) => (p.fromTrigger ? { ...p, open: false } : p));
+          break;
+        case "openRef":
+          if (msg.payload?.type && msg.payload?.id) onOpenRefRef.current?.(msg.payload);
           break;
         case "linkSearch": {
           const src = linkSourceRef.current;

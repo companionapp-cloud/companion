@@ -1,22 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, AppState, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { Paths } from 'expo-file-system';
 import { StatusBar } from 'expo-status-bar';
 import EventSource from 'react-native-sse';
-import { CoreProvider, NotesProvider, TasksProvider, RemindersProvider, ProjectsProvider, SyncProvider } from '@companion/app';
-import { createNativeBridge } from '@companion/core-bridge/native';
+import { CoreProvider, NotesProvider, TasksProvider, RemindersProvider, ProjectsProvider, SyncProvider, type NotificationScheduler } from '@companion/app';
 import { createNativeSyncNotifier, type CoreBridge, type SyncNotifier } from '@companion/core-bridge';
-import CompanionCore from './modules/companion-core';
 import { MobileShell } from './src/MobileShell';
+import { openCore } from './src/core';
+import { createMobileNotificationScheduler, REMINDER_HORIZON_DAYS } from './src/notifications';
+import { registerReminderRefresh } from './src/backgroundReminders';
 import { nativeSyncStorage } from './src/syncStorage';
 
-// gomobile's Core.New wants a filesystem path, not a file:// URI.
-function toFsPath(uri: string): string {
-  return decodeURIComponent(uri.replace(/^file:\/\//, ''));
-}
-
-// Opens the on-device SQLite database via the native core module, wraps it in the
+// Opens the on-device SQLite database via the shared core singleton, wraps it in the
 // shared CoreBridge, then mounts the shared data layer (Core/Sync/Notes providers)
 // under a mobile-native shell. The desktop AppShell is intentionally NOT used here.
 function Root() {
@@ -31,17 +26,28 @@ function Root() {
     [],
   );
 
+  // Reminder scheduling (PLAN §6.4): expo-notifications local notifications, injected so the
+  // shared RemindersProvider stays react-native-free. Taps deep-link inside MobileShell.
+  const notificationScheduler = useMemo<NotificationScheduler>(
+    () => createMobileNotificationScheduler(),
+    [],
+  );
+
   useEffect(() => {
-    let created: CoreBridge | null = null;
     try {
-      const dbPath = `${toFsPath(Paths.document.uri).replace(/\/$/, '')}/companion.db`;
-      CompanionCore.initialize(dbPath);
-      created = createNativeBridge({ module: CompanionCore, emitter: CompanionCore });
-      setBridge(created);
+      // Shared with the background reminder task; don't close on unmount (the OS reclaims
+      // the core on process teardown, and closing would break a task running in this
+      // process).
+      setBridge(openCore());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-    return () => created?.close();
+  }, []);
+
+  // Register the periodic background refresh that keeps reminders (incl. ones created on
+  // other devices) armed while the app is closed (PLAN §6.4, Option B). Best-effort.
+  useEffect(() => {
+    void registerReminderRefresh();
   }, []);
 
   if (error) {
@@ -63,7 +69,7 @@ function Root() {
       <SyncProvider storage={nativeSyncStorage} notifier={notifier}>
         <NotesProvider>
           <TasksProvider>
-            <RemindersProvider>
+            <RemindersProvider scheduler={notificationScheduler} horizonDays={REMINDER_HORIZON_DAYS}>
               <ProjectsProvider>
                 <MobileShell />
               </ProjectsProvider>

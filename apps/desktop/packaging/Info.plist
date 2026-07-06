@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS .app bundle metadata for Companion (PLAN §6.4). A bundle identifier is what
+  the Wails v3 notifications service and Autostart (SMAppService) key off; without a
+  bundled .app carrying one, both silently no-op. The `make desktop-app` target drops
+  this in Contents/Info.plist and ad-hoc signs the bundle.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>Companion</string>
+	<key>CFBundleDisplayName</key>
+	<string>Companion</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.companion.desktop</string>
+	<key>CFBundleExecutable</key>
+	<string>companion-desktop</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>11.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<!-- Dock / Finder / app-switcher icon. The `make desktop-app` target drops
+	     AppIcon.icns into Contents/Resources alongside this key. -->
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<!-- Regular activation: keep the Dock icon. Closing the window hides it to the menu
+	     bar (see main.go) rather than quitting, so reminders keep firing. -->
+	<key>LSUIElement</key>
+	<false/>
+</dict>
+</plist>

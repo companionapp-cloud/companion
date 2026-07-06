@@ -2,9 +2,9 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useCore, useNotes, MembershipPicker, ConfirmDialog, NoteConflictDialog, useNoteSyncGuard } from '@companion/app';
+import { useCore, useNotes, useTasks, MembershipPicker, ConfirmDialog, NoteConflictDialog, useNoteSyncGuard } from '@companion/app';
 import { Center, Icon, IconButton, Text, TextField, colors, space } from '@companion/design-system';
-import { Editor, type LinkSource } from '@companion/editor';
+import { Editor, type LinkRef, type LinkSource } from '@companion/editor';
 import type { RootStackParamList } from '../MobileShell';
 
 // Full-screen editor for one note (pushed above the tab bar): a native title field
@@ -53,27 +53,54 @@ export function NoteEditorScreen() {
   });
 
   // Wikilink autocomplete ([[) + pasted-UUID resolution search the object graph. Stable
-  // identity (graph is memoized on the core) so it doesn't reload the WebView.
+  // identity (graph is memoized on the core) so it doesn't reload the WebView. A task
+  // lookup also carries its done state + dates so a `[[task:…]]` chip renders like a todo;
+  // tasks come through a ref so fresher data doesn't change the linkSource identity.
   const { graph } = useCore();
+  const tasks = useTasks();
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
   const linkSource = useMemo<LinkSource>(
     () => ({
       search: async (q, type) =>
         (await graph.search(q, type)).map((n) => ({ type: n.type, id: n.id, title: n.title })),
       lookup: async (id) => {
         const n = await graph.lookup(id);
-        return n ? { type: n.type, id: n.id, title: n.title } : null;
+        if (!n) return null;
+        const base = { type: n.type, id: n.id, title: n.title };
+        if (n.type === 'task') {
+          const t = tasksRef.current.byId(id);
+          if (t) return { ...base, status: t.status, dueAt: t.dueAt, remindAt: t.remindAt };
+          return { ...base, status: n.status ?? null };
+        }
+        return base;
       },
     }),
     [graph],
+  );
+
+  // Clicking a chip pushes its target onto the stack (tasks and notes have screens).
+  const onOpenRef = useCallback(
+    (ref: LinkRef) => {
+      if (ref.type === 'task') nav.push('TaskEditor', { id: ref.id });
+      else if (ref.type === 'note') nav.push('NoteEditor', { id: ref.id });
+    },
+    [nav],
   );
 
   // Memoized so parent re-renders (title state, optimistic store updates) don't reload
   // the WebView; it's built once from the initial content and reports edits back out.
   const body = useMemo(
     () => (
-      <Editor key={seed.key} markdown={seed.content} onChangeMarkdown={onChangeMarkdown} linkSource={linkSource} />
+      <Editor
+        key={seed.key}
+        markdown={seed.content}
+        onChangeMarkdown={onChangeMarkdown}
+        linkSource={linkSource}
+        onOpenRef={onOpenRef}
+      />
     ),
-    [seed.key, seed.content, onChangeMarkdown, linkSource],
+    [seed.key, seed.content, onChangeMarkdown, linkSource, onOpenRef],
   );
 
   // Deps exclude note/store so content edits don't re-run setOptions; only the title

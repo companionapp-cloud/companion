@@ -8,6 +8,7 @@ import {
   Position,
   useEdgesState,
   useNodesState,
+  useReactFlow,
   useStore,
   type Edge,
   type Node,
@@ -16,6 +17,17 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import {
+  forceCollide,
+  forceLink,
+  forceManyBody,
+  forceSimulation,
+  forceX,
+  forceY,
+  type Simulation,
+  type SimulationLinkDatum,
+  type SimulationNodeDatum,
+} from "d3-force";
 import { Icon, colors, type IconName } from "@companion/design-system";
 import type { Graph, GraphNode } from "@companion/core-bridge";
 
@@ -24,10 +36,9 @@ import type { Graph, GraphNode } from "@companion/core-bridge";
 export type OpenNodeHandler = (type: string, id: string, newTab: boolean) => void;
 const GraphOpenContext = createContext<OpenNodeHandler>(() => {});
 
-/** True when the canvas is in dense mode (large graph, many nodes on screen). Read by
- * each node so captions can drop/return as the user zooms without rebuilding the node
- * array. Provided by GraphCanvas from the live viewport. */
-const GraphDenseContext = createContext<boolean>(false);
+/** Report which node the pointer is over (its key, or null on leave) up to GraphCanvas so
+ * the edge layers can highlight that node's connections. */
+const GraphHoverContext = createContext<(id: string | null) => void>(() => {});
 
 // The React Flow renderer shared by the full knowledgebase graph (GraphScreen) and the
 // per-note neighborhood (NoteGraph). React Flow is DOM-only, so this whole module is
@@ -35,6 +46,15 @@ const GraphDenseContext = createContext<boolean>(false);
 // ids/titles/edges only — layout, sizing, and ghost synthesis happen here. Nodes render
 // as circles whose size grows with their connection count; hovering one reveals a popup
 // with its title and a chevron that opens the item.
+//
+// Layout is a live force-directed simulation (d3-force), the same model as Obsidian's
+// graph: every node repels every other (charge), links act as springs pulling connected
+// notes together (link force + resting distance), and a gentle pull toward the origin
+// keeps orphans from drifting off. Positions are an emergent equilibrium the sim relaxes
+// into over a few hundred ticks and then damps to rest; dragging a node or changing the
+// graph re-heats it. There are no fixed coordinates — densely linked notes settle into
+// tight clusters, hubs land in the middle of their neighborhood, and sparsely linked
+// notes get pushed to the edges.
 
 type GhostAware = GraphNode & { ghost?: boolean };
 
@@ -46,7 +66,8 @@ interface CircleData extends Record<string, unknown> {
   ghost: boolean;
   focus: boolean;
   size: number;
-  /** Undirected connection count — ranks nodes when the render budget forces a choice. */
+  /** Undirected connection count — sizes the node and ranks it when the render budget
+   * forces a choice. */
   degree: number;
 }
 type CircleNode = Node<CircleData, "circle">;
@@ -54,7 +75,34 @@ type CircleNode = Node<CircleData, "circle">;
 const MIN_SIZE = 32;
 const MAX_SIZE = 72;
 const FOCUS_MIN_SIZE = 52;
-const RING_GAP = 190;
+
+// ── Force-simulation knobs (Obsidian's "Forces" sliders) ────────────────────────────────
+// LINK_DISTANCE — a spring's resting length, the preferred gap between two linked nodes.
+// CHARGE_STRENGTH — how hard every node repels every other (negative = repel); this is
+//   what spreads the graph out instead of collapsing it to a point. Weaker on big graphs
+//   so a thousand-node vault doesn't explode off-screen.
+// CHARGE_DISTANCE_MAX — cap the repulsion range so far-apart nodes stop pushing (keeps
+//   clusters coherent and the Barnes-Hut sum cheap).
+// CENTER_STRENGTH — the gentle pull toward the origin so disconnected bits stay in frame.
+// COLLIDE_PAD — extra spacing added to each node's radius so circles don't overlap.
+// SEED_SPREAD — radius scale for the deterministic phyllotaxis seed the sim relaxes from.
+// These are scaled for our node sizes (32–72px circles), not d3's default unit nodes. The
+// balance we want: connected notes sit close (short, stiff link springs) while unconnected
+// notes shove hard apart (strong, long-range charge) — so clusters read as tight knots
+// separated by real gaps instead of one even hairball. LINK_STRENGTH stiffens the springs so
+// linked nodes stay pulled together even against the strong repulsion.
+const LINK_DISTANCE = 30;
+const LINK_STRENGTH = 0.9;
+const CHARGE_STRENGTH = -2400;
+const CHARGE_STRENGTH_LARGE = -1200;
+const CHARGE_DISTANCE_MAX = 2400;
+const CHARGE_DISTANCE_MAX_LARGE = 1600;
+const CENTER_STRENGTH = 0.05;
+const COLLIDE_PAD = 22;
+const SEED_SPREAD = 90;
+// Golden angle (~137.5°) — used only to seed initial positions in a spiral so the sim
+// starts from an evenly-spread, deterministic state rather than a random pile.
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 
 // Above this total node count the canvas is treated as "large": edges render in their
 // cheap form (straight, no animation, no invisible interaction path) and node culling
@@ -62,17 +110,15 @@ const RING_GAP = 190;
 // at once. A 1000-node graph otherwise crashes the mobile WebView.
 const LARGE_GRAPH_THRESHOLD = 250;
 
-// On a large graph, "dense" mode (captions off, interaction off) is toggled by how many
-// nodes are actually rendered — not the total. Once the user zooms in far enough that
-// fewer than this many nodes are on screen, captions and selection come back.
-const DENSE_VISIBLE_LIMIT = 100;
-
-// Hard cap on nodes handed to React Flow at once (level-of-detail budget). React Flow is
-// DOM-based and bogs down / crashes the tab past a few hundred simultaneous nodes, so when
-// more than this many fall within the viewport we render only the highest-degree ones (the
-// hubs). Zooming into a region shrinks the viewport until every node there fits under the
-// budget, so detail is never permanently lost — it's revealed by zoom.
-const RENDER_BUDGET = 300;
+// Level-of-detail gate for large graphs. React Flow is DOM-based and bogs down / crashes the
+// tab past a few hundred simultaneous interactive nodes, so on a large graph we mount NO
+// interactive DOM nodes while the view is zoomed out — the canvas base layer draws the whole
+// graph as dots + lines instead. Only once the user has zoomed in far enough that this many
+// or fewer nodes fall within the viewport do those visible nodes get mounted as real,
+// interactive cards. Zoom in → the viewport shrinks → the visible count drops below the
+// limit → interactivity appears; zoom out → it hands back to the canvas overview. Kept
+// comfortably under React Flow's DOM ceiling so the mounted set is always safe to render.
+const INTERACTIVE_VISIBLE_LIMIT = 200;
 
 // The viewport is padded by this fraction on each side when selecting nodes to render, so a
 // little is preloaded beyond the edges and panning doesn't immediately reveal blank space.
@@ -206,7 +252,7 @@ function withGhosts(graph: Graph): GhostAware[] {
   return [...byKey.values()];
 }
 
-/** Undirected connection count per node — drives both circle size and layout order. */
+/** Undirected connection count per node — drives circle size and the render budget. */
 function degreesOf(edges: Graph["edges"]): Map<string, number> {
   const degree = new Map<string, number>();
   const bump = (k: string) => degree.set(k, (degree.get(k) ?? 0) + 1);
@@ -220,164 +266,43 @@ function degreesOf(edges: Graph["edges"]): Map<string, number> {
 // A node's diameter scales with its degree, clamped to [MIN_SIZE, MAX_SIZE].
 const sizeForDegree = (degree: number) => Math.round(Math.min(MAX_SIZE, MIN_SIZE + degree * 6));
 
-// Local packing radius for a cluster of a given member count, and the gap between the
-// centers of separate clusters. CLUSTER_GAP is kept comfortably larger than the biggest
-// local radius so distinct clusters read as visually separate blobs.
-const clusterRadius = (count: number) => (count <= 1 ? 0 : Math.max(120, count * 34));
-const CLUSTER_GAP = 520;
-
-/** Deterministic clustered layout — connected nodes are packed together into visually
- * distinct blobs instead of being spread evenly around one ring. Used for the
- * whole-knowledgebase view.
- *
- * Nodes are split into connected components (BFS over the undirected edges); each component
- * becomes a cluster. Cluster centers are placed around a big ring, and within each cluster
- * the highest-degree node sits at the center with the rest packed in a small local ring —
- * so the busiest hub anchors its neighborhood and links stay short. */
-function radialLayout(nodes: GhostAware[], degree: Map<string, number>, edges: Graph["edges"]) {
-  const adj = new Map<string, Set<string>>();
-  const link = (a: string, b: string) => {
-    if (!adj.has(a)) adj.set(a, new Set());
-    adj.get(a)!.add(b);
-  };
-  for (const e of edges) {
-    const s = nodeKey(e.sourceType, e.sourceId);
-    const t = nodeKey(e.targetType, e.targetId);
-    link(s, t);
-    link(t, s);
-  }
-
-  // Group node keys into connected components. Isolated nodes (no edges) each form their
-  // own single-member cluster.
-  const byKey = new Map<string, GhostAware>();
-  for (const n of nodes) byKey.set(nodeKey(n.type, n.id), n);
-  const seen = new Set<string>();
-  const clusters: string[][] = [];
-  for (const n of nodes) {
-    const start = nodeKey(n.type, n.id);
-    if (seen.has(start)) continue;
-    const component: string[] = [];
-    const queue = [start];
-    seen.add(start);
-    while (queue.length) {
-      const cur = queue.shift()!;
-      component.push(cur);
-      for (const nb of adj.get(cur) ?? []) {
-        if (!seen.has(nb) && byKey.has(nb)) {
-          seen.add(nb);
-          queue.push(nb);
-        }
-      }
-    }
-    clusters.push(component);
-  }
-
-  // Biggest, busiest clusters first so they get the roomier outer slots and small
-  // fragments tuck in between them.
-  const deg = (k: string) => degree.get(k) ?? 0;
-  clusters.sort((a, b) => b.length - a.length);
-  for (const c of clusters) c.sort((a, b) => deg(b) - deg(a));
-
-  // Ring the cluster centers around the canvas; a lone cluster sits at the origin.
-  const ringRadius =
-    clusters.length <= 1 ? 0 : Math.max(CLUSTER_GAP, (clusters.length * CLUSTER_GAP) / (Math.PI * 2));
-  const positions = new Map<string, { x: number; y: number }>();
-  clusters.forEach((component, ci) => {
-    const angle = (ci / Math.max(1, clusters.length)) * Math.PI * 2;
-    const cx = Math.cos(angle) * ringRadius;
-    const cy = Math.sin(angle) * ringRadius;
-    const local = clusterRadius(component.length);
-    // Highest-degree member anchors the cluster center; the rest fan out around it.
-    component.forEach((key, i) => {
-      if (i === 0 || local === 0) {
-        positions.set(key, { x: cx, y: cy });
-        return;
-      }
-      const a = ((i - 1) / (component.length - 1)) * Math.PI * 2;
-      positions.set(key, { x: cx + Math.cos(a) * local, y: cy + Math.sin(a) * local });
-    });
-  });
-  return positions;
+// ── Simulation data types ────────────────────────────────────────────────────────────────
+// d3-force mutates these in place: x/y (current position, a node's *center*), vx/vy
+// (velocity), and fx/fy (a fixed position while dragging). We never read positions from
+// React state — the sim owns them and the render pulls the live values each frame.
+interface SimNode extends SimulationNodeDatum {
+  id: string;
+  size: number;
+  data: CircleData;
+}
+interface SimLink extends SimulationLinkDatum<SimNode> {
+  source: string | SimNode;
+  target: string | SimNode;
 }
 
-/** Focus layout — the focus node sits at the center and everything else fans out in
- * concentric rings by hop-distance (BFS over the undirected edges). Used for the
- * per-note neighborhood so the note's links paint around it. */
-function focusLayout(nodes: GhostAware[], edges: Graph["edges"], focusKey: string) {
-  const adj = new Map<string, Set<string>>();
-  const link = (a: string, b: string) => {
-    if (!adj.has(a)) adj.set(a, new Set());
-    adj.get(a)!.add(b);
-  };
-  for (const e of edges) {
-    const s = nodeKey(e.sourceType, e.sourceId);
-    const t = nodeKey(e.targetType, e.targetId);
-    link(s, t);
-    link(t, s);
-  }
-
-  // BFS hop-distance from the focus.
-  const depth = new Map<string, number>([[focusKey, 0]]);
-  const queue = [focusKey];
-  while (queue.length) {
-    const cur = queue.shift()!;
-    const d = depth.get(cur)!;
-    for (const nb of adj.get(cur) ?? []) {
-      if (!depth.has(nb)) {
-        depth.set(nb, d + 1);
-        queue.push(nb);
-      }
-    }
-  }
-
-  // Group node keys by ring; anything unreachable (shouldn't happen for a neighborhood
-  // result) lands one ring past the deepest known.
-  let maxDepth = 0;
-  for (const d of depth.values()) maxDepth = Math.max(maxDepth, d);
-  const rings = new Map<number, string[]>();
-  for (const n of nodes) {
-    const key = nodeKey(n.type, n.id);
-    const d = depth.get(key) ?? maxDepth + 1;
-    if (!rings.has(d)) rings.set(d, []);
-    rings.get(d)!.push(key);
-  }
-
-  const positions = new Map<string, { x: number; y: number }>();
-  for (const [d, keys] of rings) {
-    if (d === 0) {
-      positions.set(keys[0], { x: 0, y: 0 });
-      continue;
-    }
-    const radius = d * RING_GAP;
-    // Offset each ring's start angle a little so nodes don't line up radially.
-    const offset = d * 0.6;
-    keys.forEach((key, i) => {
-      const angle = (i / keys.length) * Math.PI * 2 + offset;
-      positions.set(key, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius });
-    });
-  }
-  return positions;
-}
-
-function toFlowNodes(
+/** Turn the core's graph into simulation nodes + links. Nodes are seeded on a deterministic
+ * phyllotaxis spiral so the sim relaxes from an even spread (no random pile, no per-open
+ * jitter); the focus node, if any, is pinned at the origin so its neighborhood paints
+ * around it. Links carry endpoint keys — d3-force resolves them to node objects when the
+ * link force initializes. */
+function buildSimGraph(
   nodes: GhostAware[],
-  positions: Map<string, { x: number; y: number }>,
   degree: Map<string, number>,
   focusKey: string | null,
-): CircleNode[] {
-  return nodes.map((n) => {
+): { simNodes: SimNode[]; simLinks: SimLink[] } {
+  const simNodes = nodes.map((n, i): SimNode => {
     const key = nodeKey(n.type, n.id);
     const focus = key === focusKey;
     const deg = degree.get(key) ?? 0;
     const size = focus ? Math.max(FOCUS_MIN_SIZE, sizeForDegree(deg)) : sizeForDegree(deg);
-    return {
+    // Spiral seed (index 0 at the center); the focus node overrides to a hard pin.
+    const r = SEED_SPREAD * Math.sqrt(i);
+    const a = i * GOLDEN_ANGLE;
+    const node: SimNode = {
       id: key,
-      type: "circle",
-      position: positions.get(key) ?? { x: 0, y: 0 },
-      // Explicit dimensions so React Flow treats nodes as already-measured and shows
-      // them immediately (its ResizeObserver measurement is unreliable in the RNW host).
-      width: size,
-      height: size,
+      size,
+      x: focus ? 0 : Math.cos(a) * r,
+      y: focus ? 0 : Math.sin(a) * r,
       data: {
         entityType: n.type,
         entityId: n.id,
@@ -388,7 +313,29 @@ function toFlowNodes(
         degree: deg,
       },
     };
+    if (focus) {
+      node.fx = 0;
+      node.fy = 0;
+    }
+    return node;
   });
+  return { simNodes, simLinks: [] };
+}
+
+/** React Flow node from a sim node — position is top-left, so offset the sim's center by
+ * half the diameter. Called only for the (budgeted) interactive subset each frame. */
+function toCircleNode(n: SimNode): CircleNode {
+  const size = n.size;
+  return {
+    id: n.id,
+    type: "circle",
+    position: { x: (n.x ?? 0) - size / 2, y: (n.y ?? 0) - size / 2 },
+    // Explicit dimensions so React Flow treats nodes as already-measured and shows them
+    // immediately (its ResizeObserver measurement is unreliable in the RNW host).
+    width: size,
+    height: size,
+    data: n.data,
+  };
 }
 
 function toFlowEdges(edges: Graph["edges"], large: boolean): Edge[] {
@@ -412,13 +359,102 @@ function toFlowEdges(edges: Graph["edges"], large: boolean): Edge[] {
   });
 }
 
+// Restyle a small graph's edges so the ones touching the hovered node light up (accent,
+// solid, thicker). The lit edges are moved to the end of the array so they paint over the
+// other edges — but we deliberately don't raise their zIndex, which would lift them above
+// the nodes; edges must stay in React Flow's edge layer, beneath the node circles.
+function highlightEdges(edges: Edge[], hoveredId: string | null): Edge[] {
+  if (!hoveredId) return edges;
+  const normal: Edge[] = [];
+  const lit: Edge[] = [];
+  for (const e of edges) {
+    if (e.source === hoveredId || e.target === hoveredId) {
+      lit.push({ ...e, style: { ...e.style, stroke: colors.accent, strokeWidth: 2, strokeDasharray: undefined } });
+    } else {
+      normal.push(e);
+    }
+  }
+  return [...normal, ...lit];
+}
+
+/** Owns the d3-force simulation for a graph. Rebuilds (and re-heats from the seed) whenever
+ * the node/link set changes. Bumps `frame` once per animation frame while the sim is live
+ * so consumers can re-read the mutated positions; flips `running` false when it damps to
+ * rest. Returns the sim handle so drag handlers can pin nodes (fx/fy) and re-heat. */
+function useForceLayout(simNodes: SimNode[], simLinks: SimLink[], large: boolean) {
+  const [frame, setFrame] = useState(0);
+  const [running, setRunning] = useState(true);
+  const simRef = useRef<Simulation<SimNode, SimLink> | null>(null);
+
+  useEffect(() => {
+    const sim = forceSimulation<SimNode>(simNodes)
+      .force(
+        "charge",
+        forceManyBody<SimNode>()
+          .strength(large ? CHARGE_STRENGTH_LARGE : CHARGE_STRENGTH)
+          .distanceMax(large ? CHARGE_DISTANCE_MAX_LARGE : CHARGE_DISTANCE_MAX),
+      )
+      .force(
+        "link",
+        forceLink<SimNode, SimLink>(simLinks)
+          .id((d) => d.id)
+          .distance(LINK_DISTANCE)
+          .strength(LINK_STRENGTH),
+      )
+      .force("x", forceX<SimNode>(0).strength(CENTER_STRENGTH))
+      .force("y", forceY<SimNode>(0).strength(CENTER_STRENGTH))
+      .force("collide", forceCollide<SimNode>().radius((d) => d.size / 2 + COLLIDE_PAD))
+      .velocityDecay(large ? 0.5 : 0.4)
+      .alphaDecay(large ? 0.045 : 0.0228);
+    simRef.current = sim;
+    setRunning(true);
+
+    // The sim runs its own d3-timer (~60fps) and fires "tick" each frame; coalesce those
+    // into a single React re-render per animation frame.
+    let raf = 0;
+    sim.on("tick", () => {
+      if (!raf) raf = requestAnimationFrame(() => { raf = 0; setFrame((f) => f + 1); });
+    });
+    sim.on("end", () => {
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      setFrame((f) => f + 1);
+      setRunning(false);
+    });
+
+    return () => {
+      sim.on("tick", null);
+      sim.on("end", null);
+      sim.stop();
+      if (raf) cancelAnimationFrame(raf);
+      simRef.current = null;
+    };
+  }, [simNodes, simLinks, large]);
+
+  const reheat = useCallback(() => {
+    const sim = simRef.current;
+    if (!sim) return;
+    setRunning(true);
+    sim.alpha(Math.max(sim.alpha(), 0.4)).restart();
+  }, []);
+
+  return { frame, running, reheat, simRef };
+}
+
 /** A circular graph node with a centered type icon and a hover popup (title + chevron)
  * that opens the item. Size comes from data.size; the focus node gets a persistent halo
  * and is not itself navigable (you're already on it). */
-function CircleNode({ data }: NodeProps<CircleNode>) {
+function CircleNode({ id, data }: NodeProps<CircleNode>) {
   const onOpenNode = useContext(GraphOpenContext);
-  const dense = useContext(GraphDenseContext);
+  const onHover = useContext(GraphHoverContext);
   const [hover, setHover] = useState(false);
+  const enter = useCallback(() => {
+    setHover(true);
+    onHover(id);
+  }, [onHover, id]);
+  const leave = useCallback(() => {
+    setHover(false);
+    onHover(null);
+  }, [onHover]);
   const accent = data.ghost ? colors.textTertiary : typeColor(data.entityType);
   const iconName = TYPE_ICON[data.entityType] ?? "dot";
   const iconSize = Math.round(data.size * 0.5);
@@ -439,16 +475,11 @@ function CircleNode({ data }: NodeProps<CircleNode>) {
       ? `0 0 0 4px ${colors.surfaceActive}`
       : "none";
 
-  // In dense mode (zoomed-out overview) draw the node as a solid dot that matches the
-  // canvas base layer, so the interactive DOM nodes blend into the full-graph picture and
-  // the per-node icon SVG is skipped. Zoomed in (not dense), the full circle + icon return.
-  const dot = dense && !data.focus;
-
   return (
     <div
       style={{ position: "relative", width: data.size, height: data.size }}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
+      onMouseEnter={enter}
+      onMouseLeave={leave}
     >
       {/* Hidden, centered handles so edges route to the circle's center. */}
       <Handle type="target" position={Position.Top} isConnectable={false} style={handleStyle} />
@@ -463,33 +494,21 @@ function CircleNode({ data }: NodeProps<CircleNode>) {
           alignItems: "center",
           justifyContent: "center",
           boxSizing: "border-box",
-          background: dot
-            ? data.ghost
-              ? "transparent"
-              : accent
-            : data.ghost
-              ? "transparent"
-              : colors.surfaceCard,
-          border: dot
-            ? data.ghost
-              ? `1px dashed ${accent}`
-              : "none"
-            : `${data.focus ? 3 : 2}px ${data.ghost ? "dashed" : "solid"} ${accent}`,
-          opacity: data.ghost ? (dot ? 0.4 : 0.65) : dot ? 0.9 : 1,
+          background: data.ghost ? "transparent" : colors.surfaceCard,
+          border: `${data.focus ? 3 : 2}px ${data.ghost ? "dashed" : "solid"} ${accent}`,
+          opacity: data.ghost ? 0.65 : 1,
           boxShadow: halo,
           transition: "box-shadow 120ms ease",
           cursor: navigable ? "pointer" : "default",
         }}
         onClick={open}
       >
-        {dot ? null : <Icon name={iconName} size={iconSize} color={accent} />}
+        <Icon name={iconName} size={iconSize} color={accent} />
       </div>
 
-      {dense ? null : (
-        <div style={data.ghost ? { ...nodeLabelStyle, color: colors.textTertiary } : nodeLabelStyle}>
-          {truncateLabel(data.label)}
-        </div>
-      )}
+      <div style={data.ghost ? { ...nodeLabelStyle, color: colors.textTertiary } : nodeLabelStyle}>
+        {truncateLabel(data.label)}
+      </div>
 
       {hover ? (
         <button type="button" style={popupStyle} onClick={open} disabled={!navigable}>
@@ -507,7 +526,8 @@ const nodeTypes: NodeTypes = { circle: CircleNode };
 
 export interface GraphViewProps {
   graph: Graph;
-  /** When set (e.g. "note:<id>"), that node is centered and the rest fan out in rings. */
+  /** When set (e.g. "note:<id>"), that node is pinned at the center and the rest settle
+   * around it. */
   focusKey?: string | null;
   /** Invoked when a node is opened (only notes are navigable today). */
   onOpenNode?: OpenNodeHandler;
@@ -530,38 +550,69 @@ function viewportBounds(
   return { x0: x0 - mx, y0: y0 - my, x1: x1 + mx, y1: y1 + my };
 }
 
-/** Choose which nodes get a real (interactive) DOM node. Everything inside `bounds` (or
- * all nodes when bounds is null, i.e. before the first move) is a candidate; if that
- * exceeds RENDER_BUDGET we keep the highest-degree candidates so the busiest hubs survive
- * a zoomed-out overview. Edges and the non-chosen nodes are still drawn — on the canvas
- * base layer — so nothing visually disappears; only interactivity is budgeted. */
+/** Flow-space bounding box of every node (center ± radius), or null when there are none.
+ * Used to frame the whole graph on load without relying on React Flow's mounted node set. */
+function simContentBounds(nodes: SimNode[]): { x: number; y: number; width: number; height: number } | null {
+  if (!nodes.length) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const n of nodes) {
+    const x = n.x ?? 0;
+    const y = n.y ?? 0;
+    const r = n.size / 2;
+    if (x - r < minX) minX = x - r;
+    if (y - r < minY) minY = y - r;
+    if (x + r > maxX) maxX = x + r;
+    if (y + r > maxY) maxY = y + r;
+  }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+/** Choose which sim nodes get a real (interactive) DOM node on a large graph — a
+ * zoom-driven level of detail. Nothing is mounted until the user has zoomed in far enough
+ * that at most INTERACTIVE_VISIBLE_LIMIT nodes fall within the viewport; until then (no
+ * viewport yet, or still too many visible) we return none and let the canvas base layer
+ * carry the overview. Once under the limit, every visible node is mounted as a full
+ * interactive card — the count is already bounded, so no degree culling is needed. Edges and
+ * off-screen nodes stay on the canvas, so nothing visually disappears. */
 function selectRender(
-  allNodes: CircleNode[],
+  allNodes: SimNode[],
   bounds: { x0: number; y0: number; x1: number; y1: number } | null,
-): CircleNode[] {
-  const inView = bounds
-    ? allNodes.filter(
-        (n) => n.position.x >= bounds.x0 && n.position.x <= bounds.x1 && n.position.y >= bounds.y0 && n.position.y <= bounds.y1,
-      )
-    : allNodes;
-  if (inView.length <= RENDER_BUDGET) return inView;
-  return [...inView]
-    .sort((a, b) => b.data.degree - a.data.degree || (a.id < b.id ? -1 : 1))
-    .slice(0, RENDER_BUDGET);
+): SimNode[] {
+  // No viewport measured yet → zoomed-out overview; the canvas has it covered.
+  if (!bounds) return [];
+  const inView = allNodes.filter((n) => {
+    const x = n.x ?? 0;
+    const y = n.y ?? 0;
+    return x >= bounds.x0 && x <= bounds.x1 && y >= bounds.y0 && y <= bounds.y1;
+  });
+  // Still zoomed out too far to interact with individual nodes — keep the overview.
+  if (inView.length > INTERACTIVE_VISIBLE_LIMIT) return [];
+  return inView;
 }
 
 /** Draws the entire graph — every node as a dot and every edge as a line — onto a single
- * <canvas> kept in sync with the React Flow viewport. This is the "show everything" layer:
- * one DOM element regardless of node count, so connections are never hidden. React Flow's
- * budgeted DOM nodes render on top of it for interaction; their edges are left to this
- * canvas so nothing is drawn twice. */
-function GraphBaseLayer({ nodes, edges }: { nodes: CircleNode[]; edges: Edge[] }) {
+ * <canvas> kept in sync with the React Flow viewport, re-read from the live sim positions
+ * each frame. This is the "show everything" layer: one DOM element regardless of node
+ * count, so connections are never hidden. React Flow's budgeted DOM nodes render on top of
+ * it for interaction; their edges are left to this canvas so nothing is drawn twice. */
+function GraphBaseLayer({
+  nodes,
+  links,
+  frame,
+  hoveredId,
+}: {
+  nodes: SimNode[];
+  links: SimLink[];
+  frame: number;
+  hoveredId: string | null;
+}) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const transform = useStore((s) => s.transform);
   const width = useStore((s) => s.width);
   const height = useStore((s) => s.height);
-  // Rebuilt only when the graph changes, not per pan/zoom frame.
-  const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -581,34 +632,50 @@ function GraphBaseLayer({ nodes, edges }: { nodes: CircleNode[]; edges: Edge[] }
     ctx.clearRect(0, 0, bw, bh);
     ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, tx * dpr, ty * dpr);
 
-    const cx = (n: CircleNode) => n.position.x + n.data.size / 2;
-    const cy = (n: CircleNode) => n.position.y + n.data.size / 2;
-
-    // Edges first, batched into one stroke (all share a color).
+    // Edges first, batched into one stroke (all share a color). d3-force resolves each
+    // link's source/target to the node object, so read their live centers directly.
     ctx.lineWidth = 1 / zoom;
     ctx.strokeStyle = colors.borderStrong;
     ctx.globalAlpha = 0.45;
     ctx.beginPath();
-    for (const e of edges) {
-      const s = byId.get(e.source);
-      const t = byId.get(e.target);
-      if (!s || !t) continue;
-      ctx.moveTo(cx(s), cy(s));
-      ctx.lineTo(cx(t), cy(t));
+    for (const e of links) {
+      const s = e.source as SimNode;
+      const t = e.target as SimNode;
+      if (!s || !t || typeof s !== "object" || typeof t !== "object") continue;
+      ctx.moveTo(s.x ?? 0, s.y ?? 0);
+      ctx.lineTo(t.x ?? 0, t.y ?? 0);
     }
     ctx.stroke();
     ctx.globalAlpha = 1;
 
+    // Light up the hovered node's connections: a second, brighter accent pass over just the
+    // edges that touch it, drawn on top of the base edges.
+    if (hoveredId) {
+      ctx.lineWidth = 2 / zoom;
+      ctx.strokeStyle = colors.accent;
+      ctx.beginPath();
+      for (const e of links) {
+        const s = e.source as SimNode;
+        const t = e.target as SimNode;
+        if (!s || !t || typeof s !== "object" || typeof t !== "object") continue;
+        if (s.id !== hoveredId && t.id !== hoveredId) continue;
+        ctx.moveTo(s.x ?? 0, s.y ?? 0);
+        ctx.lineTo(t.x ?? 0, t.y ?? 0);
+      }
+      ctx.stroke();
+    }
+
     // Nodes as filled dots, colored by type (ghosts muted).
     for (const n of nodes) {
       ctx.beginPath();
-      ctx.arc(cx(n), cy(n), n.data.size / 2, 0, Math.PI * 2);
+      ctx.arc(n.x ?? 0, n.y ?? 0, n.size / 2, 0, Math.PI * 2);
       ctx.fillStyle = n.data.ghost ? colors.textTertiary : typeColor(n.data.entityType);
       ctx.globalAlpha = n.data.ghost ? 0.4 : 0.9;
       ctx.fill();
     }
     ctx.globalAlpha = 1;
-  }, [transform, width, height, nodes, edges, byId]);
+    // `frame` is a dependency so the canvas repaints as the sim moves nodes.
+  }, [transform, width, height, frame, nodes, links, hoveredId]);
 
   return (
     <canvas
@@ -623,116 +690,184 @@ function GraphBaseLayer({ nodes, edges }: { nodes: CircleNode[]; edges: Edge[] }
  * ReactFlowProvider so GraphCanvas can read the live viewport at the same level it
  * configures <ReactFlow>. */
 export function GraphView({ graph, focusKey = null, onOpenNode }: GraphViewProps) {
-  const { flowNodes, flowEdges, large } = useMemo(() => {
+  const { simNodes, simLinks, flowEdges, large } = useMemo(() => {
     const nodes = withGhosts(graph);
     const degree = degreesOf(graph.edges);
     const large = nodes.length > LARGE_GRAPH_THRESHOLD;
-    const positions =
-      focusKey && nodes.some((n) => nodeKey(n.type, n.id) === focusKey)
-        ? focusLayout(nodes, graph.edges, focusKey)
-        : radialLayout(nodes, degree, graph.edges);
-    return {
-      flowNodes: toFlowNodes(nodes, positions, degree, focusKey),
-      flowEdges: toFlowEdges(graph.edges, large),
-      large,
-    };
+    const focused = focusKey && nodes.some((n) => nodeKey(n.type, n.id) === focusKey) ? focusKey : null;
+    const { simNodes } = buildSimGraph(nodes, degree, focused);
+    // Links reference endpoint keys; d3-force swaps them for node objects on init.
+    const simLinks: SimLink[] = graph.edges.map((e) => ({
+      source: nodeKey(e.sourceType, e.sourceId),
+      target: nodeKey(e.targetType, e.targetId),
+    }));
+    return { simNodes, simLinks, flowEdges: toFlowEdges(graph.edges, large), large };
   }, [graph, focusKey]);
 
   return (
     <GraphOpenContext.Provider value={onOpenNode ?? noop}>
       <ReactFlowProvider>
-        <GraphCanvas flowNodes={flowNodes} flowEdges={flowEdges} large={large} />
+        <GraphCanvas simNodes={simNodes} simLinks={simLinks} flowEdges={flowEdges} large={large} />
       </ReactFlowProvider>
     </GraphOpenContext.Provider>
   );
 }
 
 function GraphCanvas({
-  flowNodes,
+  simNodes,
+  simLinks,
   flowEdges,
   large,
 }: {
-  flowNodes: CircleNode[];
+  simNodes: SimNode[];
+  simLinks: SimLink[];
   flowEdges: Edge[];
   large: boolean;
 }) {
+  const { setViewport } = useReactFlow();
+  const { frame, simRef } = useForceLayout(simNodes, simLinks, large);
+
   // React Flow is controlled here, so it needs the change handlers from these hooks to
-  // write back internal updates. On a large graph `nodes` holds only the budgeted subset;
-  // it's re-selected on move-end and whenever the derived graph changes.
+  // write back internal updates (selection, drag). On a large graph `nodes` holds only the
+  // budgeted subset; positions come from the sim and are refreshed every frame.
   const [nodes, setNodes, onNodesChange] = useNodesState<CircleNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [width, height] = useStore((s): [number, number] => [s.width, s.height], (a, b) => a[0] === b[0] && a[1] === b[1]);
   // Last viewport seen from onMoveEnd; null until the user first pans/zooms, when the whole
-  // graph is a candidate (budgeted to the top hubs for the overview).
+  // graph is a candidate (budgeted to the top hubs for the overview). A version counter
+  // forces reselection on move-end even when the sim has stopped bumping `frame`.
   const viewportRef = useRef<Viewport | null>(null);
+  const [selectionVersion, setSelectionVersion] = useState(0);
+  // Key of the node the pointer is over (or null) — lifted out of the nodes so both edge
+  // layers (React Flow edges here, the canvas base layer for large graphs) can light up the
+  // hovered node's connections.
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const byId = useMemo(() => new Map(simNodes.map((n) => [n.id, n])), [simNodes]);
 
-  const reselect = useCallback(() => {
+  // Sync React Flow's node set from the live sim positions. Runs every frame while the sim
+  // moves, and on pan/zoom (selectionVersion) once it's at rest.
+  useEffect(() => {
     if (!large) {
-      setNodes(flowNodes);
-      setEdges(flowEdges);
+      setNodes(simNodes.map(toCircleNode));
       return;
     }
     const bounds = viewportRef.current ? viewportBounds(viewportRef.current, width, height) : null;
-    setNodes(selectRender(flowNodes, bounds));
-    // Edges (and every non-budgeted node) are painted by GraphBaseLayer instead, so React
-    // Flow only carries the interactive subset.
-    setEdges([]);
-  }, [flowNodes, flowEdges, large, width, height, setNodes, setEdges]);
+    setNodes(selectRender(simNodes, bounds).map(toCircleNode));
+  }, [frame, selectionVersion, simNodes, large, width, height, setNodes]);
 
+  // Edges: large graphs paint them on the canvas base layer, so React Flow only carries
+  // edges for small graphs. Re-styled when the hovered node changes so its links light up.
   useEffect(() => {
-    reselect();
-  }, [reselect]);
+    setEdges(large ? [] : highlightEdges(flowEdges, hoveredId));
+  }, [flowEdges, hoveredId, large, setEdges]);
 
-  const onMoveEnd = useCallback(
-    (_: unknown, vp: Viewport) => {
-      viewportRef.current = vp;
-      reselect();
+  // Keep the whole graph framed while it loads: re-fit every frame as the layout relaxes so
+  // the expanding graph stays fully visible, and stop the moment the user pans, zooms, or
+  // drags a node (so we never fight their navigation). `frame` only advances while the sim is
+  // live, so this naturally settles once the layout is at rest. We compute the box from the
+  // sim's own positions rather than React Flow's fitView, since on a large graph the
+  // zoomed-out overview has no mounted nodes for fitView to measure.
+  const userMovedRef = useRef(false);
+  useEffect(() => {
+    userMovedRef.current = false;
+  }, [simNodes]);
+  useEffect(() => {
+    if (userMovedRef.current || !width || !height) return;
+    const b = simContentBounds(simNodes);
+    if (!b) return;
+    const pad = 0.12;
+    const zoom = Math.max(0.05, Math.min(1.4, Math.min(width / (b.width * (1 + pad)), height / (b.height * (1 + pad)))));
+    setViewport({ x: width / 2 - (b.x + b.width / 2) * zoom, y: height / 2 - (b.y + b.height / 2) * zoom, zoom });
+  }, [frame, simNodes, width, height, setViewport]);
+
+  const onMoveEnd = useCallback((_: unknown, vp: Viewport) => {
+    viewportRef.current = vp;
+    setSelectionVersion((v) => v + 1);
+  }, []);
+
+  // A move started by the user (event is non-null; our own setViewport passes null) turns off
+  // the load-time auto-fit so it stops re-centering under them.
+  const onMoveStart = useCallback((e: MouseEvent | TouchEvent | null) => {
+    if (e) userMovedRef.current = true;
+  }, []);
+
+  // Dragging drives the sim: pin the grabbed node to the pointer (fx/fy) and keep the sim
+  // warm (alphaTarget) so its neighbors get out of the way, then release on drop. This is
+  // the standard d3-force drag, adapted to React Flow's drag events.
+  const onNodeDragStart = useCallback(
+    (_: unknown, node: Node) => {
+      const s = byId.get(node.id);
+      if (!s) return;
+      // Grabbing a node counts as taking over navigation — stop the load-time auto-fit.
+      userMovedRef.current = true;
+      s.fx = s.x;
+      s.fy = s.y;
+      // alphaTarget keeps the sim from decaying to rest while dragging; restart() resumes
+      // the tick loop (and thus the frame bumps) even if it had already settled.
+      simRef.current?.alphaTarget(0.3).restart();
     },
-    [reselect],
+    [byId, simRef],
+  );
+  const onNodeDrag = useCallback(
+    (_: unknown, node: Node) => {
+      const s = byId.get(node.id);
+      if (!s) return;
+      // node.position is top-left; the sim tracks centers.
+      s.fx = node.position.x + s.size / 2;
+      s.fy = node.position.y + s.size / 2;
+    },
+    [byId],
+  );
+  const onNodeDragStop = useCallback(
+    (_: unknown, node: Node) => {
+      const s = byId.get(node.id);
+      simRef.current?.alphaTarget(0);
+      if (s && !s.data.focus) {
+        s.fx = null;
+        s.fy = null;
+      }
+    },
+    [byId, simRef],
   );
 
-  // Dense (captions/interaction off) whenever the rendered set is still crowded. Because
-  // the budget caps the count, zooming into a sparse region drops it below the limit and
-  // brings captions + selection back.
-  const dense = large && nodes.length > DENSE_VISIBLE_LIMIT;
-
   return (
-    <GraphDenseContext.Provider value={dense}>
+    <GraphHoverContext.Provider value={setHoveredId}>
       {/* Fill the RNW parent View (which is position:relative) with an absolutely-sized
           box so React Flow measures a real height — a plain height:100% collapses to 0 in
           the flex layout and leaves nodes hidden. */}
       <div style={fillStyle}>
         {/* The full graph (every node + edge) as one canvas behind React Flow. React Flow
             is stacked above it (zIndex 1) and kept transparent so the canvas shows through
-            everywhere except under the interactive DOM nodes. */}
-        {large ? <GraphBaseLayer nodes={flowNodes} edges={flowEdges} /> : null}
+            everywhere except under the interactive DOM nodes. On a large graph those DOM
+            nodes only exist once zoomed in (selectRender), so the canvas is the sole layer
+            in the zoomed-out overview. */}
+        {large ? <GraphBaseLayer nodes={simNodes} links={simLinks} frame={frame} hoveredId={hoveredId} /> : null}
         <ReactFlow
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
+          onMoveStart={onMoveStart}
           onMoveEnd={large ? onMoveEnd : undefined}
-          fitView
+          onNodeDragStart={onNodeDragStart}
+          onNodeDrag={onNodeDrag}
+          onNodeDragStop={onNodeDragStop}
+          // The whole-graph framing is done manually on settle (see the fit effect), since
+          // React Flow's fitView can't see the sim nodes that aren't mounted on a large graph.
           proOptions={{ hideAttribution: true }}
           minZoom={0.05}
           nodesConnectable={false}
-          nodesDraggable={!dense}
-          // Cull anything off-screen among the already-budgeted set as you pan/zoom.
+          // Cull anything off-screen among the mounted set as you pan/zoom.
           onlyRenderVisibleElements={large}
-          // Trim per-element event wiring and selection re-renders while the view is dense;
-          // they come back once zoomed in (nodes still open via their own click handler).
-          elementsSelectable={!dense}
-          nodesFocusable={!dense}
           edgesFocusable={false}
-          disableKeyboardA11y={dense}
           style={large ? { background: "transparent", position: "relative", zIndex: 1 } : undefined}
         >
           <Background color={colors.borderSubtle} gap={24} />
           <Controls showInteractive={false} />
         </ReactFlow>
       </div>
-    </GraphDenseContext.Provider>
+    </GraphHoverContext.Provider>
   );
 }
 

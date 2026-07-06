@@ -7,6 +7,7 @@ import { createElement } from "react";
 import { AppRegistry } from "react-native";
 import { App, setFocusWindowOpener } from "@companion/app";
 import { createHttpBridge } from "@companion/core-bridge";
+import { desktopNotificationScheduler } from "./notifications";
 
 // Double-clicking the window chrome (any `--wails-draggable: drag` region, e.g. the
 // toolbar or rail) zooms the window, matching native macOS titlebar behaviour. The
@@ -36,7 +37,14 @@ setFocusWindowOpener(({ kind, id }) => {
 const isMac = /mac/i.test(navigator.platform || navigator.userAgent);
 const topInset = isMac ? 28 : 0;
 
+// Reminders (PLAN §6.4): register OS notifications via the Go notifications service
+// rather than the shared web fallback, which the Wails webview can't honour.
+const notificationScheduler = desktopNotificationScheduler();
+
 const rootTag = document.getElementById("root")!;
 rootTag.innerHTML = "";
-AppRegistry.registerComponent("Companion", () => () => createElement(App, { core, topInset }));
+AppRegistry.registerComponent(
+  "Companion",
+  () => () => createElement(App, { core, topInset, notificationScheduler }),
+);
 AppRegistry.runApplication("Companion", { rootTag });

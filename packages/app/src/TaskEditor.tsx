@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import type { Task, UpdateTaskInput } from "@companion/core-bridge";
-import { Icon, IconButton, Input, Text, TextField, colors, layout, radius, space, type PressState } from "@companion/design-system";
+import { Icon, IconButton, Input, Text, TextField, colors, layout, radius, space, type IconName, type PressState } from "@companion/design-system";
 import { useCore } from "./CoreContext";
 import { DateTimeInput } from "./DateTimeInput";
 import { TaskGraph } from "./TaskGraph";
@@ -28,6 +28,9 @@ export function TaskEditor({ task, save, onDelete, showToolbar = true }: TaskEdi
   const [showProjects, setShowProjects] = useState(false);
   const [showGraph, setShowGraph] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Which metadata field has its full editor expanded (Reminders-style: the chips are the
+  // resting state; tapping one reveals the natural-language / preset / picker controls).
+  const [expanded, setExpanded] = useState<null | "due" | "reminder">(null);
   const done = task.status === "done";
 
   // Debounce text saves so every keystroke doesn't hit the store (and churn sync).
@@ -80,36 +83,56 @@ export function TaskEditor({ task, save, onDelete, showToolbar = true }: TaskEdi
           </View>
         </View>
 
-        <Text variant="caption" tone="tertiary" style={styles.groupLabel}>
-          DUE
-        </Text>
-        <DateRow
-          value={task.dueAt}
-          onSet={(iso) => save(task.id, { dueAt: iso })}
-          onClear={() => save(task.id, { clearDueAt: true })}
-          presets={duePresets()}
-          nlPlaceholder="Type a date, e.g. next friday"
-        />
+        {/* Metadata reads as a row of chips under the title; a chip expands its editor. */}
+        <View style={styles.metaRow}>
+          <MetaChip
+            icon="calendar"
+            label="Add due date"
+            display={task.dueAt ? formatDue(task.dueAt) : null}
+            tone={overdue(task) ? "accent" : "default"}
+            active={expanded === "due"}
+            onPress={() => setExpanded((e) => (e === "due" ? null : "due"))}
+            onClear={task.dueAt ? () => save(task.id, { clearDueAt: true }) : undefined}
+          />
+          <MetaChip
+            icon="bell"
+            label="Add reminder"
+            display={task.remindAt ? formatReminder(task.remindAt) : null}
+            active={expanded === "reminder"}
+            onPress={() => setExpanded((e) => (e === "reminder" ? null : "reminder"))}
+            onClear={task.remindAt ? () => save(task.id, { clearRemindAt: true }) : undefined}
+          />
+        </View>
 
-        <Text variant="caption" tone="tertiary" style={styles.groupLabel}>
-          REMINDER
-        </Text>
-        <DateRow
-          value={task.remindAt}
-          onSet={(iso) => save(task.id, { remindAt: iso })}
-          onClear={() => save(task.id, { clearRemindAt: true })}
-          presets={reminderPresets()}
-          nlPlaceholder="Type a time, e.g. tomorrow at 9am"
-        />
+        {expanded === "due" ? (
+          <View style={styles.metaEditor}>
+            <DateRow
+              value={task.dueAt}
+              onSet={(iso) => save(task.id, { dueAt: iso })}
+              onClear={() => save(task.id, { clearDueAt: true })}
+              presets={duePresets()}
+              nlPlaceholder="Type a date, e.g. next friday"
+            />
+          </View>
+        ) : null}
 
-        <Text variant="caption" tone="tertiary" style={styles.groupLabel}>
-          NOTES
-        </Text>
+        {expanded === "reminder" ? (
+          <View style={styles.metaEditor}>
+            <DateRow
+              value={task.remindAt}
+              onSet={(iso) => save(task.id, { remindAt: iso })}
+              onClear={() => save(task.id, { clearRemindAt: true })}
+              presets={reminderPresets()}
+              nlPlaceholder="Type a time, e.g. tomorrow at 9am"
+            />
+          </View>
+        ) : null}
+
         <TextField
           variant="prose"
           multiline
           value={notes}
-          placeholder="Add details… use [[ to link a note."
+          placeholder="Notes… use [[ to link a note."
           onChangeText={(t) => {
             setNotes(t);
             debouncedSave("notes", { notesMd: t });
@@ -140,6 +163,52 @@ export function Checkbox({ checked, onPress, size = 22 }: { checked: boolean; on
   return (
     <Pressable onPress={onPress} aria-label={checked ? "Mark not done" : "Mark done"} style={[styles.check, { width: size, height: size }, checked ? styles.checkOn : null]}>
       {checked ? <Icon name="check" size={size - 8} color={colors.gray0} /> : null}
+    </Pressable>
+  );
+}
+
+/** A metadata chip under the task title (Reminders-style). Empty shows a ghost "Add …"
+ *  affordance; set shows the value with a clear (✕) button. Tapping the body expands the
+ *  field's full editor upstream. */
+function MetaChip({
+  icon,
+  label,
+  display,
+  tone = "default",
+  active,
+  onPress,
+  onClear,
+}: {
+  icon: IconName;
+  label: string;
+  display: string | null;
+  tone?: "default" | "accent";
+  active: boolean;
+  onPress: () => void;
+  onClear?: () => void;
+}) {
+  const filled = display !== null;
+  const accent = filled && tone === "accent";
+  const iconColor = accent ? colors.accentHover : filled ? colors.textSecondary : colors.textTertiary;
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ hovered }: PressState) => [
+        styles.metaChip,
+        filled ? styles.metaChipFilled : null,
+        active ? styles.metaChipActive : null,
+        hovered ? styles.metaChipHover : null,
+      ]}
+    >
+      <Icon name={icon} size={13} color={iconColor} />
+      <Text variant="caption" tone={accent ? "accent" : filled ? "secondary" : "tertiary"}>
+        {display ?? label}
+      </Text>
+      {filled && onClear ? (
+        <Pressable onPress={onClear} aria-label="Clear" style={styles.metaChipClear}>
+          <Icon name="close" size={11} color={colors.textTertiary} />
+        </Pressable>
+      ) : null}
     </Pressable>
   );
 }
@@ -187,6 +256,22 @@ function formatDueShort(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/** Chip label for a due date — "Jul 5" (adds the year when it isn't the current one). */
+function formatDue(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+  return d.toLocaleDateString(undefined, opts);
+}
+
+/** Chip label for a reminder — the due date plus a time ("Jul 5, 9:00 AM"). */
+function formatReminder(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${formatDue(iso)}, ${d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
 }
 
 /** The full date control: current value, a natural-language field (parsed in core via
@@ -310,12 +395,30 @@ const styles = {
   doc: { maxWidth: layout.contentMax, width: "100%" as const, marginHorizontal: "auto" as const, padding: space.xxl, gap: space.sm },
   titleRow: { flexDirection: "row" as const, alignItems: "flex-start" as const, gap: space.md },
   groupLabel: { fontWeight: "600" as const, letterSpacing: 0.5, marginTop: space.lg },
+  // Chips + their expanded editors sit indented under the title (past the checkbox).
+  metaRow: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: space.sm, marginTop: space.md, marginLeft: 22 + space.md },
+  metaEditor: { marginLeft: 22 + space.md, marginTop: space.xs, marginBottom: space.xs },
+  metaChip: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: space.xs,
+    paddingHorizontal: space.md,
+    paddingVertical: 5,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: "transparent" as const,
+  },
+  metaChipFilled: { backgroundColor: colors.gray50, borderColor: colors.borderSubtle },
+  metaChipActive: { backgroundColor: colors.accentSoft, borderColor: colors.accentSoftBorder },
+  metaChipHover: { borderColor: colors.borderDefault },
+  metaChipClear: { marginLeft: 1, padding: 3, marginVertical: -3, marginRight: -3 },
   inputRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.sm },
   clearBtn: { padding: 2 },
   presets: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: space.sm },
   chip: { paddingHorizontal: space.md, paddingVertical: space.xs, borderRadius: radius.full, borderWidth: 1, borderColor: colors.borderDefault },
   check: {
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
     borderWidth: 2,
     borderColor: colors.borderStrong,
     alignItems: "center" as const,

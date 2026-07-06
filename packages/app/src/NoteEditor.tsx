@@ -2,8 +2,9 @@ import { useMemo, useRef, useState } from "react";
 import { Platform, ScrollView, View } from "react-native";
 import type { Note } from "@companion/core-bridge";
 import { Badge, Icon, IconButton, Text, TextField, colors, layout, space } from "@companion/design-system";
-import { Editor, type LinkSource } from "@companion/editor";
+import { Editor, type LinkRef, type LinkSource } from "@companion/editor";
 import { useCore } from "./CoreContext";
+import { useTasks } from "./TasksProvider";
 import { NoteGraph } from "./NoteGraph";
 import { MembershipPicker } from "./MembershipPicker";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -25,21 +26,37 @@ export interface NoteEditorProps {
   /** Called with the id of a note created from "save my changes as a new note" during a
    *  sync-conflict resolution, so the host can open it. */
   onCreatedNote?: (id: string) => void;
+  /** Open a wikilink target the reader clicked (e.g. a `[[task:…]]` chip) — the host puts
+   *  it in a new workspace tab. */
+  onOpenRef?: (ref: LinkRef) => void;
 }
 
 /** The document-style editor for a single note: a sub-toolbar of note-scoped actions,
  * the title, and a ProseMirror body (from @companion/editor). App-level chrome stays in
  * the app toolbar. Keyed by note id upstream, so each note gets a fresh instance. */
-export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote }: NoteEditorProps) {
+export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote, onOpenRef }: NoteEditorProps) {
   const { graph } = useCore();
-  // Wikilink autocomplete ([[) and pasted-UUID resolution search the object graph.
+  // Task metadata for chip hydration, via a ref so the memoized linkSource always reads the
+  // latest tasks without changing identity (which would reload the editor).
+  const tasks = useTasks();
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
+  // Wikilink autocomplete ([[) and pasted-UUID resolution search the object graph; a task
+  // lookup also carries its done state + dates so a `[[task:…]]` chip renders like a todo.
   const linkSource = useMemo<LinkSource>(
     () => ({
       search: async (q, type) =>
         (await graph.search(q, type)).map((n) => ({ type: n.type, id: n.id, title: n.title })),
       lookup: async (id) => {
         const n = await graph.lookup(id);
-        return n ? { type: n.type, id: n.id, title: n.title } : null;
+        if (!n) return null;
+        const base = { type: n.type, id: n.id, title: n.title };
+        if (n.type === "task") {
+          const t = tasksRef.current.byId(id);
+          if (t) return { ...base, status: t.status, dueAt: t.dueAt, remindAt: t.remindAt };
+          return { ...base, status: n.status ?? null };
+        }
+        return base;
       },
     }),
     [graph],
@@ -127,6 +144,7 @@ export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote }
               onChange(note.id, { contentMd: md });
             }}
             linkSource={linkSource}
+            onOpenRef={onOpenRef}
           />
         </ScrollView>
       )}

@@ -7,6 +7,15 @@ export interface EditorProps {
   /** Optional provider for wikilink autocomplete (`[[`) and pasted-UUID resolution.
    * Omit it and those features stay dormant (input rules + chips still work). */
   linkSource?: LinkSource;
+  /** Called when the reader opens a wikilink chip (select it, then click again). The host
+   * decides how — e.g. open the target in a new workspace tab. Omit and chips only select. */
+  onOpenRef?: (ref: LinkRef) => void;
+}
+
+/** A reference to open — the payload of {@link EditorProps.onOpenRef}. */
+export interface LinkRef {
+  type: LinkType;
+  id: string;
 }
 
 /** A link target the editor can offer or resolve — a slim projection, never a body. */
@@ -14,6 +23,11 @@ export interface LinkSuggestion {
   type: "note" | "task" | "habit" | "project";
   id: string;
   title: string;
+  /** Task-only extras, so a `[[task:…]]` chip can render like a todo (done state + dates).
+   * Left undefined for other types (and for hosts that don't supply them). */
+  status?: string | null;
+  dueAt?: string | null;
+  remindAt?: string | null;
 }
 
 /** The entity types the `[[` menu can scope its search to. */

@@ -2,6 +2,8 @@ export * from "./tokens";
 export { dragRegion, noDragRegion, opensInNewTab, transition, type PressState } from "./platform";
 export { Icon } from "./Icon";
 export type { IconProps, IconName } from "./iconPaths";
+export { BrandMark } from "./BrandMark";
+export type { BrandMarkProps } from "./BrandMark";
 export { Text } from "./Text";
 export type { TextProps, TextVariant, TextTone } from "./Text";
 export { Button } from "./Button";

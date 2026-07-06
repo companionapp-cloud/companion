@@ -50,12 +50,18 @@ export function useNoteSyncGuard({
   const conflictRef = useRef<NoteConflictKind | null>(null);
   conflictRef.current = conflict;
   const baseVersionRef = useRef<number | null>(null);
+  // The content of the version the editor is currently based on. We treat the editor as
+  // "clean" only while its live buffer still equals this — the store's `dirty` flag lags
+  // the buffer (edits debounce before persisting), so relying on it can clobber in-flight
+  // typing when a just-synced version echoes back.
+  const baseContentRef = useRef<{ title: string; contentMd: string } | null>(null);
   const cbs = useRef({ getEditorContent, onReseed, onGone, onCreatedNote });
   cbs.current = { getEditorContent, onReseed, onGone, onCreatedNote };
 
   // Hold the note for the editor's lifetime.
   useEffect(() => {
     baseVersionRef.current = null;
+    baseContentRef.current = null;
     setConflict(null);
     void notes.hold(noteId);
     return () => {
@@ -83,21 +89,34 @@ export function useNoteSyncGuard({
         cbs.current.onGone?.();
         return;
       }
+      const rebase = (n: Note) => {
+        baseVersionRef.current = n.version;
+        baseContentRef.current = { title: n.title, contentMd: n.contentMd };
+      };
       if (baseVersionRef.current === null) {
-        baseVersionRef.current = fresh.version; // first observation: establish the base
+        rebase(fresh); // first observation: establish the base
         return;
       }
       if (fresh.version === baseVersionRef.current) return;
       const cur = cbs.current.getEditorContent();
       if (fresh.contentMd === cur.contentMd && fresh.title === cur.title) {
-        baseVersionRef.current = fresh.version; // our own edit echoing back from the server
+        rebase(fresh); // our own edit echoing back from the server
         return;
       }
-      if (!fresh.dirty) {
-        baseVersionRef.current = fresh.version;
+      // The editor is clean only while its live buffer still matches the base version — not
+      // merely when the store reports `!fresh.dirty`. During typing the buffer runs ahead of
+      // the last-persisted content, and a just-synced version echoing back would otherwise
+      // look "clean" and remount the editor, discarding the in-flight keystrokes.
+      const base = baseContentRef.current;
+      const editorClean =
+        base !== null && cur.contentMd === base.contentMd && cur.title === base.title;
+      if (editorClean && !fresh.dirty) {
+        rebase(fresh);
         cbs.current.onReseed(fresh); // clean remote change: adopt silently
       }
-      // else: dirty local edits differ — the conflict arrives via notes.conflict.
+      // else: the editor has (possibly un-persisted) local edits that differ. If they're a
+      // real conflict the store raises notes.conflict; otherwise they're in-flight edits and
+      // we leave the buffer alone for the next echo to reconcile.
     };
 
     const offConflict = core.on("notes.conflict", (payload) => {
@@ -119,6 +138,7 @@ export function useNoteSyncGuard({
     try {
       const fresh = await notes.get(noteId);
       baseVersionRef.current = fresh.version;
+      baseContentRef.current = { title: fresh.title, contentMd: fresh.contentMd };
       cbs.current.onReseed(fresh);
     } catch {
       cbs.current.onGone?.();

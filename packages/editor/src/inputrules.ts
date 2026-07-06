@@ -153,6 +153,29 @@ export function markInputRule(regexp: RegExp, markType: MarkType): InputRule {
   });
 }
 
+/** "[] " / "[ ] " / "[x] " at the start of a block → wrap it in a checkbox list item. */
+function taskListInputRule(bulletList: NodeType, listItem: NodeType): InputRule {
+  return new InputRule(/^\[([ xX]?)\]\s$/, (state, match, start, end) => {
+    const checked = match[1] === "x" || match[1] === "X";
+    let tr = state.tr.delete(start, end);
+    const $start = tr.doc.resolve(start);
+    const range = $start.blockRange();
+    const wrapping = range && findWrapping(range, bulletList);
+    if (!wrapping) return null;
+    tr = tr.wrap(range!, wrapping);
+    // The block we typed in is now wrapped as bullet_list > list_item > paragraph; flip
+    // that list_item into a todo.
+    const $item = tr.doc.resolve(tr.mapping.map(start));
+    for (let d = $item.depth; d > 0; d--) {
+      if ($item.node(d).type === listItem) {
+        tr = tr.setNodeMarkup($item.before(d), undefined, { ...$item.node(d).attrs, checked });
+        break;
+      }
+    }
+    return tr;
+  });
+}
+
 // --- The CommonMark rule set ---------------------------------------------------------
 
 export function commonmarkInputRules(schema: Schema): Plugin {
@@ -169,6 +192,11 @@ export function commonmarkInputRules(schema: Schema): Plugin {
   if (nodes.blockquote) rules.push(wrappingInputRule(/^\s*>\s$/, nodes.blockquote));
   // Fenced code block: "```".
   if (nodes.code_block) rules.push(textblockTypeInputRule(/^```$/, nodes.code_block));
+  // Task list item: "[] ", "[ ] ", "[x] " at line start → a checkbox todo. Registered
+  // before the bullet rule so "- [ ] " (a bullet then a marker) still becomes a todo.
+  if (nodes.bullet_list && nodes.list_item) {
+    rules.push(taskListInputRule(nodes.bullet_list, nodes.list_item));
+  }
   // Bullet list: "- ", "* ", or "+ ".
   if (nodes.bullet_list) rules.push(wrappingInputRule(/^\s*([-+*])\s$/, nodes.bullet_list));
   // Ordered list: "1. " (continue the surrounding list's numbering when joining).

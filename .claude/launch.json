@@ -7,6 +7,20 @@
       "runtimeArgs": ["run", "dev", "-w", "@companion/web", "--", "--port", "5299", "--strictPort"],
       "port": 5299,
       "autoPort": false
+    },
+    {
+      "name": "web-verify",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "-w", "@companion/web", "--", "--port", "5301", "--strictPort"],
+      "port": 5301,
+      "autoPort": false
+    },
+    {
+      "name": "web-verify-2",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "-w", "@companion/web", "--", "--port", "5312", "--strictPort"],
+      "port": 5312,
+      "autoPort": false
     }
   ]
 }

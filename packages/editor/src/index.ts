@@ -1,2 +1,2 @@
 export { Editor } from "./Editor";
-export type { EditorProps, LinkSource, LinkSuggestion } from "./types";
+export type { EditorProps, LinkRef, LinkSource, LinkSuggestion } from "./types";

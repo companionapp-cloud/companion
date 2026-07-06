@@ -4,6 +4,7 @@ import type { SidebarArea, SidebarProject } from "@companion/core-bridge";
 import { Icon, IconButton, Input, ProgressRing, Text, colors, radius, space, type PressState } from "@companion/design-system";
 import { useProjects } from "./ProjectsProvider";
 import { SortableList } from "./SortableList";
+import { useDropTarget } from "./DndContext";
 
 /** The areas → projects tree in the expanded rail (PLAN §6.6): area headings, project
  * nav items with a task-completion ring (hidden until member tasks exist), an
@@ -139,22 +140,30 @@ function ProjectRow({
   dragging?: boolean;
   onPress?: () => void;
 }) {
+  const { addMember } = useProjects();
+  // A project is a drop target: dropping a dragged note/task adds it to this project.
+  const { ref, isOver } = useDropTarget(project.id, (p) => void addMember(project.id, p.kind, p.id));
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ hovered }: PressState) => [
-        styles.projectRow,
-        { backgroundColor: active ? colors.accentSoft : dragging ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent" },
-      ]}
-    >
-      <View style={[styles.projectDot, { backgroundColor: project.color ?? colors.borderStrong }]} />
-      <Text variant="label" tone={active ? "accent" : "secondary"} numberOfLines={1} style={{ flex: 1 }}>
-        {project.name}
-      </Text>
-      {project.taskProgress != null ? (
-        <ProgressRing value={project.taskProgress} size={14} stroke={2.5} />
-      ) : null}
-    </Pressable>
+    <View ref={ref}>
+      <Pressable
+        onPress={onPress}
+        style={({ hovered }: PressState) => [
+          styles.projectRow,
+          {
+            backgroundColor: isOver || active ? colors.accentSoft : dragging ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent",
+            borderColor: isOver ? colors.accent : "transparent",
+          },
+        ]}
+      >
+        <View style={[styles.projectDot, { backgroundColor: project.color ?? colors.borderStrong }]} />
+        <Text variant="label" tone={active || isOver ? "accent" : "secondary"} numberOfLines={1} style={{ flex: 1 }}>
+          {project.name}
+        </Text>
+        {project.taskProgress != null ? (
+          <ProgressRing value={project.taskProgress} size={14} stroke={2.5} />
+        ) : null}
+      </Pressable>
+    </View>
   );
 }
 
@@ -206,6 +215,9 @@ const styles = {
     paddingRight: space.md,
     marginLeft: space.sm,
     borderRadius: radius.md,
+    // Always a 1px border (transparent by default) so the drop-target highlight can color
+    // it without shifting layout.
+    borderWidth: 1,
   },
   projectDot: { width: 8, height: 8, borderRadius: radius.full, flexShrink: 0 },
 };

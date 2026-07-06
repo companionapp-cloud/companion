@@ -6,7 +6,7 @@ import type { EditorProps } from "./types";
 // Web/desktop editor: ProseMirror mounted straight into the DOM (react-native-web is
 // real DOM, so no WebView is needed — Vite resolves this via .web.tsx). It grows to
 // its content; the note view's ScrollView provides the scroll and document column.
-export function Editor({ markdown, onChangeMarkdown, linkSource }: EditorProps) {
+export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef }: EditorProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const onChangeRef = useRef(onChangeMarkdown);
   onChangeRef.current = onChangeMarkdown;
@@ -14,6 +14,8 @@ export function Editor({ markdown, onChangeMarkdown, linkSource }: EditorProps) 
   // Kept in a ref so the editor (built once) always calls the latest provider.
   const linkSourceRef = useRef(linkSource);
   linkSourceRef.current = linkSource;
+  const onOpenRefRef = useRef(onOpenRef);
+  onOpenRefRef.current = onOpenRef;
 
   useEffect(() => {
     ensureEditorStyles();
@@ -27,6 +29,7 @@ export function Editor({ markdown, onChangeMarkdown, linkSource }: EditorProps) 
             lookup: (id) => linkSourceRef.current!.lookup(id),
           }
         : undefined,
+      onOpenRef: (ref) => onOpenRefRef.current?.(ref),
     });
     return () => handle.destroy();
     // Mount once; the note view keys this by note id, so a different note remounts it.

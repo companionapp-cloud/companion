@@ -5,6 +5,7 @@ import { NotesProvider } from "./NotesProvider";
 import { TasksProvider } from "./TasksProvider";
 import { ProjectsProvider } from "./ProjectsProvider";
 import { AppShell } from "./AppShell";
+import type { NotificationScheduler } from "./RemindersProvider";
 import { FocusView } from "./FocusView";
 import { focusTarget } from "./focus";
 
@@ -15,7 +16,17 @@ import { focusTarget } from "./focus";
  * ?note=<id> or ?task=<id>, the app renders that document in chrome-less focus mode
  * (wrapped in the data providers so its editor — membership picker, dates, etc. — works).
  */
-export function App({ core, topInset }: { core: CoreBridge; topInset?: number }) {
+export function App({
+  core,
+  topInset,
+  notificationScheduler,
+}: {
+  core: CoreBridge;
+  topInset?: number;
+  /** Platform reminder scheduler (PLAN §6.4). Desktop/mobile shells inject a native
+   *  one; omitted, RemindersProvider falls back to the best-effort web scheduler. */
+  notificationScheduler?: NotificationScheduler;
+}) {
   const target = focusTarget();
   return (
     <CoreProvider core={core}>
@@ -29,7 +40,7 @@ export function App({ core, topInset }: { core: CoreBridge; topInset?: number })
             </TasksProvider>
           </NotesProvider>
         ) : (
-          <AppShell topInset={topInset} />
+          <AppShell topInset={topInset} notificationScheduler={notificationScheduler} />
         )}
       </SyncProvider>
     </CoreProvider>

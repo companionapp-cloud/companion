@@ -1,6 +1,7 @@
 import { useEffect, useMemo, type ReactNode } from "react";
 import type { TaskNotification } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
+import { activateReminder } from "./reminderNav";
 
 /** A per-platform notification scheduler. The plan is computed in core (PLAN §6.4); the
  *  scheduler turns it into real OS fires. `reconcile` is cancel-and-reschedule: it is
@@ -12,17 +13,40 @@ export interface NotificationScheduler {
 }
 
 /** Reconciles task reminders into scheduled notifications after every task change or sync
- *  (PLAN §6.4). Mount once inside CoreProvider. */
-export function RemindersProvider({ scheduler, children }: { scheduler?: NotificationScheduler; children: ReactNode }) {
+ *  (PLAN §6.4). Mount once inside CoreProvider.
+ *
+ *  `horizonDays` controls how far ahead fires are scheduled. Web/desktop keep the app
+ *  running, so a 1-day horizon (the default) suffices — the plan re-arms as reminders
+ *  approach. Mobile schedules OS-owned local notifications that fire while the app is
+ *  killed, so it passes a longer horizon to cover reminders it may not reopen in time to
+ *  arm (bounded by the scheduler's own cap, e.g. iOS's 64-notification limit). */
+export function RemindersProvider({
+  scheduler,
+  horizonDays = 1,
+  children,
+}: {
+  scheduler?: NotificationScheduler;
+  horizonDays?: number;
+  children: ReactNode;
+}) {
   const { core, notify } = useCore();
   const sched = useMemo(() => scheduler ?? webNotificationScheduler(), [scheduler]);
 
   useEffect(() => {
     let cancelled = false;
     const reconcile = async () => {
-      // A 1-day horizon: only near-term fires are scheduled while the app is running; the
-      // plan is recomputed whenever tasks change, so later reminders arm as they approach.
-      const plan = await notify.plan(1).catch(() => [] as TaskNotification[]);
+      // Only fires within the horizon are scheduled; the plan is recomputed whenever tasks
+      // change (and, on mobile, from a background refresh), so later reminders arm as they
+      // approach.
+      let plan: TaskNotification[];
+      try {
+        plan = await notify.plan(horizonDays);
+      } catch {
+        // Transient failure computing the plan: leave whatever is already scheduled in
+        // place. Reconciling with [] here would tell a native scheduler to cancel every
+        // pending OS notification — dropping a valid reminder over a momentary hiccup.
+        return;
+      }
       if (!cancelled) sched.reconcile(plan);
     };
     void reconcile();
@@ -34,17 +58,29 @@ export function RemindersProvider({ scheduler, children }: { scheduler?: Notific
       offData();
       sched.reconcile([]); // clear on unmount
     };
-  }, [core, notify, sched]);
+  }, [core, notify, sched, horizonDays]);
 
   return <>{children}</>;
 }
 
 /** Best-effort web scheduler: fires the browser `Notification` API via setTimeout while a
- *  tab is open (PLAN §6.4). No-ops on platforms without the API (e.g. React Native), so it
- *  is a safe default everywhere — native shells inject their own scheduler instead. */
-export function webNotificationScheduler(): NotificationScheduler {
+ *  tab is open (PLAN §6.4). The timers live in the page, so this only fires while a tab of
+ *  the app is open — the web platform can't reliably deliver a local notification once the
+ *  browser is closed. Multiple open tabs each schedule, but the `tag` collapses them to one
+ *  visible notification per reminder.
+ *
+ *  When a service-worker `registration` is provided (the web shell registers one), fires go
+ *  through `registration.showNotification` so a click is handled by the SW's
+ *  `notificationclick` — which can refocus or reopen the app even if the tab that scheduled
+ *  it has since closed — and routed back to `activateReminder` via a postMessage the shell
+ *  wires up. Without a registration it falls back to `new Notification` + an inline onclick.
+ *
+ *  No-ops on platforms without the Notification API (e.g. React Native), so it stays a safe
+ *  default everywhere — native shells inject their own scheduler instead. */
+export function webNotificationScheduler(options?: { registration?: ServiceWorkerRegistration | null }): NotificationScheduler {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const NotificationCtor = typeof globalThis !== "undefined" ? (globalThis as { Notification?: typeof Notification }).Notification : undefined;
+  const registration = options?.registration ?? null;
   const DAY_MS = 24 * 60 * 60 * 1000;
 
   return {
@@ -62,7 +98,20 @@ export function webNotificationScheduler(): NotificationScheduler {
         timers.set(
           key,
           setTimeout(() => {
-            if (NotificationCtor.permission === "granted") new NotificationCtor(n.title, { body: n.body });
+            if (NotificationCtor.permission !== "granted") return;
+            if (registration) {
+              // Shown by the SW so its notificationclick can reopen/focus the app; the SW
+              // relays the taskId back to activateReminder (PLAN §6.4).
+              void registration.showNotification(n.title, { body: n.body, tag: n.taskId, data: { taskId: n.taskId } });
+              return;
+            }
+            const notification = new NotificationCtor(n.title, { body: n.body, tag: n.taskId });
+            // Tapping surfaces the tab and opens the reminder's task (PLAN §6.4).
+            notification.onclick = () => {
+              if (typeof window !== "undefined" && typeof window.focus === "function") window.focus();
+              activateReminder({ taskId: n.taskId });
+              notification.close();
+            };
           }, delay),
         );
       }

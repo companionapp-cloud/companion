@@ -1,6 +1,9 @@
-import { NavigationContainer } from '@react-navigation/native';
+import { useCallback, useEffect } from 'react';
+import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import * as Notifications from 'expo-notifications';
 import { colors } from '@companion/design-system';
+import { taskIdFromResponse } from './notifications';
 import { TrashScreen } from '@companion/app';
 import { HomeScreen } from './screens/HomeScreen';
 import { NotesListScreen } from './screens/NotesListScreen';
@@ -52,8 +55,39 @@ export type ProjectTabParamList = {
 const RootStack = createNativeStackNavigator<RootStackParamList>();
 
 export function MobileShell() {
+  const navigationRef = useNavigationContainerRef<RootStackParamList>();
+
+  // Deep-link a tapped reminder to its task (PLAN §6.4). navigate() is safe to call once the
+  // container is ready; guard because a cold-start tap can resolve before that.
+  const openTask = useCallback(
+    (taskId: string) => {
+      if (navigationRef.isReady()) navigationRef.navigate('TaskEditor', { id: taskId });
+    },
+    [navigationRef],
+  );
+
+  // Warm taps (app already running/backgrounded).
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const taskId = taskIdFromResponse(response);
+      if (taskId) openTask(taskId);
+    });
+    return () => sub.remove();
+  }, [openTask]);
+
+  // Cold start: app launched by tapping a reminder. Checked on container ready so navigate()
+  // lands on the mounted navigator.
+  const handleReady = useCallback(() => {
+    Notifications.getLastNotificationResponseAsync()
+      .then((response) => {
+        const taskId = taskIdFromResponse(response);
+        if (taskId) openTask(taskId);
+      })
+      .catch(() => {});
+  }, [openTask]);
+
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef} onReady={handleReady}>
       <RootStack.Navigator
         screenOptions={{
           headerStyle: { backgroundColor: colors.surfaceApp },
