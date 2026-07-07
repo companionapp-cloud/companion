@@ -62,6 +62,13 @@ type GhostAware = GraphNode & { ghost?: boolean };
 interface CircleData extends Record<string, unknown> {
   entityType: string;
   entityId: string;
+  /** Archetype id (PLAN §6.3); when set, the node is colored by type so archetyped nodes
+   *  cluster visually by color in the graph (PLAN §5.3). */
+  objectTypeId: string | null;
+  /** The archetype's chosen color / icon, resolved upstream (useStyledGraph). When present
+   *  they override the palette color and the entity-type icon so objects render distinctly. */
+  objectColor: string | null;
+  objectIcon: string | null;
   label: string;
   ghost: boolean;
   focus: boolean;
@@ -233,6 +240,26 @@ function typeColor(type: string): string {
   }
 }
 
+// A small categorical palette for archetypes: nodes sharing an object type get the same
+// color, so archetyped nodes read as a cluster in the graph (PLAN §5.3). Keyed by a stable
+// hash of the type id so the mapping is deterministic without a lookup table.
+const OBJECT_TYPE_PALETTE = ["#8b5cf6", "#ec4899", "#f59e0b", "#14b8a6", "#6366f1", "#ef4444", "#10b981", "#eab308"];
+
+function hashString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+/** The node fill: an archetype's own chosen color wins; otherwise archetyped nodes fall
+ *  back to a stable palette color keyed on the type (still clustering by type), and plain
+ *  nodes use their entity-type color. */
+function nodeColor(entityType: string, objectTypeId: string | null, objectColor?: string | null): string {
+  if (objectColor) return objectColor;
+  if (objectTypeId) return OBJECT_TYPE_PALETTE[hashString(objectTypeId) % OBJECT_TYPE_PALETTE.length];
+  return typeColor(entityType);
+}
+
 /** Build the render node set: real nodes plus ghosts synthesized from any edge endpoint
  * that has no node (a link to something not yet created or synced — PLAN §5.1). */
 function withGhosts(graph: Graph): GhostAware[] {
@@ -306,6 +333,9 @@ function buildSimGraph(
       data: {
         entityType: n.type,
         entityId: n.id,
+        objectTypeId: n.objectTypeId ?? null,
+        objectColor: n.objectColor ?? null,
+        objectIcon: n.objectIcon ?? null,
         label: n.title || "Untitled",
         ghost: !!n.ghost,
         focus,
@@ -341,6 +371,9 @@ function toCircleNode(n: SimNode): CircleNode {
 function toFlowEdges(edges: Graph["edges"], large: boolean): Edge[] {
   return edges.map((e, i) => {
     const embed = e.kind === "embed";
+    // Reference-prop edges are labeled with the field name (PLAN §5.3): kind "prop:author"
+    // → "author". Only on small graphs, where labels are legible and cheap.
+    const propField = e.kind.startsWith("prop:") ? e.kind.slice("prop:".length) : null;
     return {
       id: `e${i}`,
       source: nodeKey(e.sourceType, e.sourceId),
@@ -351,9 +384,13 @@ function toFlowEdges(edges: Graph["edges"], large: boolean): Edge[] {
       animated: embed && !large,
       type: large ? "straight" : undefined,
       interactionWidth: large ? 0 : undefined,
+      label: propField && !large ? propField : undefined,
+      labelStyle: propField ? { fill: colors.textTertiary, fontSize: 10 } : undefined,
+      labelBgStyle: propField ? { fill: colors.surfaceApp } : undefined,
       style: {
         stroke: colors.borderStrong,
-        strokeDasharray: embed ? undefined : "4 4",
+        // Solid for embeds, dotted for prop edges, dashed for plain refs.
+        strokeDasharray: embed ? undefined : propField ? "1 3" : "4 4",
       },
     };
   });
@@ -404,8 +441,8 @@ function useForceLayout(simNodes: SimNode[], simLinks: SimLink[], large: boolean
       .force("x", forceX<SimNode>(0).strength(CENTER_STRENGTH))
       .force("y", forceY<SimNode>(0).strength(CENTER_STRENGTH))
       .force("collide", forceCollide<SimNode>().radius((d) => d.size / 2 + COLLIDE_PAD))
-      .velocityDecay(large ? 0.5 : 0.4)
-      .alphaDecay(large ? 0.045 : 0.0228);
+      .velocityDecay(large ? 0.6 : 0.5)
+      .alphaDecay(large ? 0.08 : 0.06);
     simRef.current = sim;
     setRunning(true);
 
@@ -455,8 +492,9 @@ function CircleNode({ id, data }: NodeProps<CircleNode>) {
     setHover(false);
     onHover(null);
   }, [onHover]);
-  const accent = data.ghost ? colors.textTertiary : typeColor(data.entityType);
-  const iconName = TYPE_ICON[data.entityType] ?? "dot";
+  const accent = data.ghost ? colors.textTertiary : nodeColor(data.entityType, data.objectTypeId, data.objectColor);
+  // An archetype's chosen icon marks its nodes; otherwise fall back to the entity-type icon.
+  const iconName = ((data.objectIcon as IconName | null) ?? TYPE_ICON[data.entityType] ?? "dot") as IconName;
   const iconSize = Math.round(data.size * 0.5);
   // Notes, tasks, and projects open; the focus node (you're already on it) and ghosts
   // (unresolved link targets) don't.
@@ -669,7 +707,7 @@ function GraphBaseLayer({
     for (const n of nodes) {
       ctx.beginPath();
       ctx.arc(n.x ?? 0, n.y ?? 0, n.size / 2, 0, Math.PI * 2);
-      ctx.fillStyle = n.data.ghost ? colors.textTertiary : typeColor(n.data.entityType);
+      ctx.fillStyle = n.data.ghost ? colors.textTertiary : nodeColor(n.data.entityType, n.data.objectTypeId, n.data.objectColor);
       ctx.globalAlpha = n.data.ghost ? 0.4 : 0.9;
       ctx.fill();
     }

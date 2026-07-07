@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -17,9 +18,10 @@ var ErrNotFound = errors.New("not found")
 
 // NotesRepo is the CRUD repository for notes.
 type NotesRepo struct {
-	db    Driver
-	clock domain.Clock
-	links *LinksRepo
+	db          Driver
+	clock       domain.Clock
+	links       *LinksRepo
+	objectTypes *ObjectTypesRepo
 
 	// Held-note conflict interception (editor UX): when the UI has a note open for
 	// editing it "holds" it, so a conflicting server version is stashed for the user to
@@ -30,18 +32,25 @@ type NotesRepo struct {
 	heldConflict *domain.Note
 }
 
-// CreateNoteInput carries the client-supplied fields for a new note.
+// CreateNoteInput carries the client-supplied fields for a new note. ObjectTypeID/Props
+// archetype the note (PLAN §6.3); both are optional (a plain note has neither).
 type CreateNoteInput struct {
-	Title     string  `json:"title"`
-	ContentMD string  `json:"contentMd"`
-	Date      *string `json:"date,omitempty"`
+	Title        string          `json:"title"`
+	ContentMD    string          `json:"contentMd"`
+	Date         *string         `json:"date,omitempty"`
+	ObjectTypeID *string         `json:"objectTypeId,omitempty"`
+	Props        json.RawMessage `json:"props,omitempty"`
 }
 
-// UpdateNoteInput carries partial updates; nil fields are left unchanged.
+// UpdateNoteInput carries partial updates; nil fields are left unchanged. ClearObjectType
+// removes the archetype (JSON can't distinguish "absent" from "set to null" on a pointer).
 type UpdateNoteInput struct {
-	Title     *string `json:"title,omitempty"`
-	ContentMD *string `json:"contentMd,omitempty"`
-	Date      *string `json:"date,omitempty"`
+	Title           *string          `json:"title,omitempty"`
+	ContentMD       *string          `json:"contentMd,omitempty"`
+	Date            *string          `json:"date,omitempty"`
+	ObjectTypeID    *string          `json:"objectTypeId,omitempty"`
+	ClearObjectType bool             `json:"clearObjectType,omitempty"`
+	Props           *json.RawMessage `json:"props,omitempty"`
 }
 
 const timeFormat = time.RFC3339Nano
@@ -51,7 +60,7 @@ const timeFormat = time.RFC3339Nano
 // collector tombstones rows once that instant passes (PLAN §7.6).
 const TrashRetention = 30 * 24 * time.Hour
 
-const noteColumns = `id, title, content_md, date, created_at, updated_at, deleting_at, deleted_at, version, dirty`
+const noteColumns = `id, title, content_md, date, object_type_id, props_json, created_at, updated_at, deleting_at, deleted_at, version, dirty`
 
 // Create inserts a new note with a client-generated UUIDv7 id (time-ordered),
 // stamped created_at/updated_at, version 0 and dirty=1 (unsynced local edit).
@@ -62,28 +71,35 @@ func (r *NotesRepo) Create(in CreateNoteInput) (*domain.Note, error) {
 	}
 	now := r.clock.Now().UTC()
 	n := &domain.Note{
-		ID:        id.String(),
-		Title:     in.Title,
-		ContentMD: in.ContentMD,
-		Date:      in.Date,
-		CreatedAt: now,
-		UpdatedAt: now,
-		Version:   0,
-		Dirty:     true,
+		ID:           id.String(),
+		Title:        in.Title,
+		ContentMD:    in.ContentMD,
+		Date:         in.Date,
+		ObjectTypeID: in.ObjectTypeID,
+		Props:        json.RawMessage(normalizeProps(in.Props)),
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		Version:      0,
+		Dirty:        true,
 	}
 	if err := n.Validate(); err != nil {
 		return nil, err
 	}
+	// Props must satisfy the archetype's schema — the same Go validation the server runs
+	// on push (PLAN §6.3). A dangling type is tolerated (validation skipped).
+	if err := r.objectTypes.ValidateEntityProps(n.ObjectTypeID, n.Props); err != nil {
+		return nil, err
+	}
 	_, err = r.db.Exec(
-		`INSERT INTO notes (id, title, content_md, date, created_at, updated_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
-		n.ID, n.Title, n.ContentMD, n.Date,
+		`INSERT INTO notes (id, title, content_md, date, object_type_id, props_json, created_at, updated_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		n.ID, n.Title, n.ContentMD, n.Date, n.ObjectTypeID, string(n.Props),
 		n.CreatedAt.Format(timeFormat), n.UpdatedAt.Format(timeFormat), n.Version, boolToInt(n.Dirty),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert note: %w", err)
 	}
-	if err := r.links.SyncSource(domain.NodeNote, n.ID, n.ContentMD); err != nil {
+	if err := r.links.SyncEntitySource(domain.NodeNote, n.ID, n.ContentMD, n.ObjectTypeID, string(n.Props)); err != nil {
 		return nil, err
 	}
 	return n, nil
@@ -142,15 +158,27 @@ func (r *NotesRepo) Update(id string, in UpdateNoteInput) (*domain.Note, error) 
 	if in.Date != nil {
 		n.Date = in.Date
 	}
+	if in.ClearObjectType {
+		n.ObjectTypeID = nil
+	} else if in.ObjectTypeID != nil {
+		n.ObjectTypeID = in.ObjectTypeID
+	}
+	if in.Props != nil {
+		n.Props = json.RawMessage(normalizeProps(*in.Props))
+	}
 	n.UpdatedAt = r.clock.Now().UTC()
 	n.Dirty = true
 	if err := n.Validate(); err != nil {
 		return nil, err
 	}
+	if err := r.objectTypes.ValidateEntityProps(n.ObjectTypeID, n.Props); err != nil {
+		return nil, err
+	}
 	res, err := r.db.Exec(
-		`UPDATE notes SET title = ?, content_md = ?, date = ?, updated_at = ?, dirty = 1
+		`UPDATE notes SET title = ?, content_md = ?, date = ?, object_type_id = ?, props_json = ?,
+		   updated_at = ?, dirty = 1
 		 WHERE id = ? AND deleted_at IS NULL AND deleting_at IS NULL;`,
-		n.Title, n.ContentMD, n.Date, n.UpdatedAt.Format(timeFormat), id,
+		n.Title, n.ContentMD, n.Date, n.ObjectTypeID, string(normalizeProps(n.Props)), n.UpdatedAt.Format(timeFormat), id,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update note: %w", err)
@@ -158,7 +186,7 @@ func (r *NotesRepo) Update(id string, in UpdateNoteInput) (*domain.Note, error) 
 	if affected, _ := res.RowsAffected(); affected == 0 {
 		return nil, ErrNotFound
 	}
-	if err := r.links.SyncSource(domain.NodeNote, n.ID, n.ContentMD); err != nil {
+	if err := r.links.SyncEntitySource(domain.NodeNote, n.ID, n.ContentMD, n.ObjectTypeID, string(normalizeProps(n.Props))); err != nil {
 		return nil, err
 	}
 	return n, nil
@@ -239,7 +267,7 @@ func (r *NotesRepo) Restore(id string) error {
 		return ErrNotFound
 	}
 	// Re-index the note as a live graph source now that it's back.
-	if err := r.links.SyncSource(domain.NodeNote, n.ID, n.ContentMD); err != nil {
+	if err := r.links.SyncEntitySource(domain.NodeNote, n.ID, n.ContentMD, n.ObjectTypeID, string(normalizeProps(n.Props))); err != nil {
 		return err
 	}
 	return nil
@@ -267,17 +295,22 @@ func (r *NotesRepo) ListTrash() ([]*domain.Note, error) {
 
 func scanNote(rows Rows) (*domain.Note, error) {
 	var (
-		n                           domain.Note
-		date, deletingAt, deletedAt sql.NullString
-		createdAt, updatedAt        string
-		dirty                       int
+		n                                         domain.Note
+		date, objectTypeID, deletingAt, deletedAt sql.NullString
+		propsJSON                                 sql.NullString
+		createdAt, updatedAt                      string
+		dirty                                     int
 	)
-	if err := rows.Scan(&n.ID, &n.Title, &n.ContentMD, &date, &createdAt, &updatedAt, &deletingAt, &deletedAt, &n.Version, &dirty); err != nil {
+	if err := rows.Scan(&n.ID, &n.Title, &n.ContentMD, &date, &objectTypeID, &propsJSON, &createdAt, &updatedAt, &deletingAt, &deletedAt, &n.Version, &dirty); err != nil {
 		return nil, fmt.Errorf("scan note: %w", err)
 	}
 	if date.Valid {
 		n.Date = &date.String
 	}
+	if objectTypeID.Valid {
+		n.ObjectTypeID = &objectTypeID.String
+	}
+	n.Props = json.RawMessage(normalizeProps([]byte(propsJSON.String)))
 	var err error
 	if n.CreatedAt, err = time.Parse(timeFormat, createdAt); err != nil {
 		return nil, fmt.Errorf("parse created_at: %w", err)

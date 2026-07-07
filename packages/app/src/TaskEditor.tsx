@@ -9,6 +9,7 @@ import { useLinkSource } from "./useLinkSource";
 import { DateTimeInput } from "./DateTimeInput";
 import { TaskGraph } from "./TaskGraph";
 import { MembershipPicker } from "./MembershipPicker";
+import { ArchetypeSection } from "./ArchetypeSection";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 export interface TaskEditorProps {
@@ -134,6 +135,18 @@ export function TaskEditor({ task, save, onDelete, showToolbar = true, onOpenRef
             />
           </View>
         ) : null}
+
+        {/* Archetype + structured props (PLAN §6.3), aligned with the metadata column. */}
+        <View style={styles.archetype}>
+          <ArchetypeSection
+            kind="task"
+            objectTypeId={task.objectTypeId}
+            props={task.props}
+            onSetType={(typeId) => save(task.id, { objectTypeId: typeId })}
+            onClearType={() => save(task.id, { clearObjectType: true, props: {} })}
+            onChangeProps={(next) => save(task.id, { props: next })}
+          />
+        </View>
 
         {/* Notes read as a rounded input, left-aligned with the due / reminder fields above. */}
         <View style={styles.notesField}>
@@ -409,6 +422,7 @@ const styles = {
   // Chips + their expanded editors sit indented under the title (past the checkbox).
   metaRow: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: space.sm, marginTop: space.md, marginLeft: 22 + space.md },
   metaEditor: { marginLeft: 22 + space.md, marginTop: space.xs, marginBottom: space.xs },
+  archetype: { marginLeft: 22 + space.md, marginTop: space.md },
   // The notes editor as a rounded input, left-aligned with the metadata column above it.
   notesField: {
     marginLeft: 22 + space.md,

@@ -17,6 +17,12 @@ export type {
   SidebarProject,
   TrashItem,
   TrashEntityType,
+  ObjectProps,
+  ObjectType,
+  ObjectSchema,
+  ObjectField,
+  ObjectFieldType,
+  AppliesTo,
 } from "./types";
 export { notesApi } from "./notes";
 export type { NotesApi, CreateNoteInput, UpdateNoteInput, NoteConflict, NoteConflictAction } from "./notes";
@@ -28,6 +34,8 @@ export { datesApi } from "./dates";
 export type { DatesApi, ParsedDate } from "./dates";
 export { trashApi } from "./trash";
 export type { TrashApi } from "./trash";
+export { objectTypesApi } from "./objecttypes";
+export type { ObjectTypesApi, CreateObjectTypeInput, UpdateObjectTypeInput } from "./objecttypes";
 export { projectsApi } from "./projects";
 export type {
   ProjectsApi,

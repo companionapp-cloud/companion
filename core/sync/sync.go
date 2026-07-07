@@ -180,6 +180,10 @@ func New(st *store.Store, t Transport, clock domain.Clock) *Engine {
 	// Push/pull order across types follows registration; foreign-key-ish dependencies
 	// (a project's area, a member's project) are tolerated because dangling references
 	// are expected and resolve as rows arrive (PLAN §5.1, §6.6).
+	// Object types (archetypes) register first so a type's schema reaches the server before
+	// the notes/tasks that reference it, letting server-side prop validation resolve it
+	// (PLAN §6.3). A note/task that still outruns its type is tolerated as a dangle.
+	e.register(newRepoSyncer[*domain.ObjectType](st.ObjectTypes, clock))
 	e.register(newRepoSyncer[*domain.Note](st.Notes, clock))
 	e.register(newRepoSyncer[*domain.Task](st.Tasks, clock))
 	e.register(newRepoSyncer[*domain.Area](st.Areas, clock))

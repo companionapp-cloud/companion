@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -28,8 +29,11 @@ type Task struct {
 	CompletedAt  *time.Time `json:"completedAt,omitempty"`
 	RepeatRule   *string    `json:"repeatRule,omitempty"`
 	RepeatSeedID *string    `json:"repeatSeedId,omitempty"`
-	CreatedAt    time.Time  `json:"createdAt"`
-	UpdatedAt    time.Time  `json:"updatedAt"`
+	// ObjectTypeID / Props archetype the task (PLAN §6.3), exactly as on notes.
+	ObjectTypeID *string         `json:"objectTypeId,omitempty"`
+	Props        json.RawMessage `json:"props,omitempty"`
+	CreatedAt    time.Time       `json:"createdAt"`
+	UpdatedAt    time.Time       `json:"updatedAt"`
 	// DeletingAt is the Trash marker (PLAN §4.3), like notes: a trashed task is hidden
 	// from every query but the Trash and still syncs until the server purges it.
 	DeletingAt *time.Time `json:"deletingAt,omitempty"`

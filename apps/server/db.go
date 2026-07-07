@@ -43,17 +43,19 @@ CREATE TABLE IF NOT EXISTS user_seq (
 );
 
 CREATE TABLE IF NOT EXISTS notes (
-  id          TEXT PRIMARY KEY,
-  user_id     TEXT NOT NULL,
-  title       TEXT NOT NULL DEFAULT '',
-  content_md  TEXT NOT NULL DEFAULT '',
-  date        TEXT,
-  created_at  TEXT NOT NULL,
-  updated_at  TEXT NOT NULL,
-  deleting_at TEXT,                          -- Trash: due-to-be-purged instant (PLAN §4.3)
-  deleted_at  TEXT,
-  version     BIGINT NOT NULL DEFAULT 1,
-  server_seq  BIGINT NOT NULL
+  id             TEXT PRIMARY KEY,
+  user_id        TEXT NOT NULL,
+  title          TEXT NOT NULL DEFAULT '',
+  content_md     TEXT NOT NULL DEFAULT '',
+  date           TEXT,
+  object_type_id TEXT,                          -- archetype (PLAN §6.3); NULL = plain note
+  props_json     TEXT NOT NULL DEFAULT '{}',    -- schema-validated structured metadata
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL,
+  deleting_at    TEXT,                          -- Trash: due-to-be-purged instant (PLAN §4.3)
+  deleted_at     TEXT,
+  version        BIGINT NOT NULL DEFAULT 1,
+  server_seq     BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_notes_user_seq ON notes (user_id, server_seq);
 
@@ -68,6 +70,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   completed_at   TEXT,
   repeat_rule    TEXT,
   repeat_seed_id TEXT,
+  object_type_id TEXT,
+  props_json     TEXT NOT NULL DEFAULT '{}',
   created_at     TEXT NOT NULL,
   updated_at     TEXT NOT NULL,
   deleting_at    TEXT,
@@ -76,6 +80,21 @@ CREATE TABLE IF NOT EXISTS tasks (
   server_seq     BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_user_seq ON tasks (user_id, server_seq);
+
+CREATE TABLE IF NOT EXISTS object_types (
+  id             TEXT PRIMARY KEY,
+  user_id        TEXT NOT NULL,
+  name           TEXT NOT NULL,
+  applies_to     TEXT NOT NULL,
+  schema_version BIGINT NOT NULL DEFAULT 1,
+  schema_json    TEXT NOT NULL DEFAULT '{}',
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL,
+  deleted_at     TEXT,
+  version        BIGINT NOT NULL DEFAULT 1,
+  server_seq     BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_object_types_user_seq ON object_types (user_id, server_seq);
 
 CREATE TABLE IF NOT EXISTS areas (
   id         TEXT PRIMARY KEY,
@@ -196,6 +215,11 @@ func migrate(db *sql.DB, dialect string) error {
 		`ALTER TABLE sessions ADD COLUMN expires_at TEXT`,
 		// Trash marker on notes (PLAN §4.3), retrofitted onto pre-Trash dev DBs.
 		`ALTER TABLE notes ADD COLUMN deleting_at TEXT`,
+		// Archetype columns (PLAN §6.3), retrofitted onto pre-Objects dev DBs.
+		`ALTER TABLE notes ADD COLUMN object_type_id TEXT`,
+		`ALTER TABLE notes ADD COLUMN props_json TEXT NOT NULL DEFAULT '{}'`,
+		`ALTER TABLE tasks ADD COLUMN object_type_id TEXT`,
+		`ALTER TABLE tasks ADD COLUMN props_json TEXT NOT NULL DEFAULT '{}'`,
 	}
 	for _, alter := range alters {
 		if dialect == "postgres" {

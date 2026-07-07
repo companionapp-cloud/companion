@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Graph } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
 import { useNav } from "./nav-context";
+import { useStyledGraph } from "./useStyledGraph";
 // Explicit .web specifier: GraphView is a React Flow (DOM-only) module with no native
 // counterpart, so it is only ever imported by other .web files. The suffix lets tsc and
 // Vite resolve it while native bundlers never reach it.
@@ -13,6 +14,7 @@ export function GraphScreen() {
   const { core, graph: graphApi } = useCore();
   const nav = useNav();
   const [graph, setGraph] = useState<Graph>({ nodes: [], edges: [] });
+  const styledGraph = useStyledGraph(graph);
   const [loaded, setLoaded] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -37,7 +39,7 @@ export function GraphScreen() {
 
   return (
     <GraphView
-      graph={graph}
+      graph={styledGraph}
       onOpenNode={(type, id) => {
         if (type === "note") nav.openNote(id);
         else if (type === "task") nav.openTask(id);

@@ -17,6 +17,7 @@ type Store struct {
 	Areas          *AreasRepo
 	Projects       *ProjectsRepo
 	ProjectMembers *ProjectMembersRepo
+	ObjectTypes    *ObjectTypesRepo
 	Links          *LinksRepo
 	Search         *SearchRepo
 	LLMConfigs     *LLMConfigsRepo
@@ -37,12 +38,19 @@ func New(d Driver, clock domain.Clock) (*Store, error) {
 	}
 	s := &Store{db: d, clock: clock}
 	s.Links = &LinksRepo{db: d}
+	// Object types (archetypes) define the schemas that validate note/task props and drive
+	// the reference-prop edges the link extractor resolves (PLAN §6.3). Wire it into the
+	// link index as the schema resolver so prop:<field> edges derive identically on every
+	// device, on both local writes and sync-apply.
+	s.ObjectTypes = &ObjectTypesRepo{db: d, clock: clock}
+	s.Links.schemas = s.ObjectTypes
 	// Notes extract wikilinks into the shared index on every write and sync-apply, so
-	// the graph stays current without re-parsing the knowledgebase (PLAN §5.1).
-	s.Notes = &NotesRepo{db: d, clock: clock, links: s.Links}
+	// the graph stays current without re-parsing the knowledgebase (PLAN §5.1). They also
+	// validate their props against their archetype's schema (PLAN §6.3).
+	s.Notes = &NotesRepo{db: d, clock: clock, links: s.Links, objectTypes: s.ObjectTypes}
 	// Tasks extract wikilinks from their notes into the shared index too, so a task is a
 	// first-class graph node the moment it exists (PLAN §5.1, §6.4).
-	s.Tasks = &TasksRepo{db: d, clock: clock, links: s.Links}
+	s.Tasks = &TasksRepo{db: d, clock: clock, links: s.Links, objectTypes: s.ObjectTypes}
 	s.Areas = &AreasRepo{db: d, clock: clock}
 	s.Projects = &ProjectsRepo{db: d, clock: clock}
 	// Project membership mirrors into the link index as authored 'member' edges.

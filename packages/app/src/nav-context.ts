@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 
-export type ViewId = "chat" | "calendar" | "notes" | "tasks" | "habits" | "graph" | "trash";
+export type ViewId = "chat" | "calendar" | "notes" | "tasks" | "habits" | "graph" | "trash" | "settings";
 
 /** The content types a project drills into (its sub-nav). */
 export type ProjectSection = "notes" | "tasks" | "calendars" | "habits";

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -9,12 +10,17 @@ import (
 // Note is a markdown note. Its canonical storage format is the markdown text in
 // ContentMD; ProseMirror / editor state is an editor-local concern (see PLAN §6.1).
 type Note struct {
-	ID        string     `json:"id"`
-	Title     string     `json:"title"`
-	ContentMD string     `json:"contentMd"`
-	Date      *string    `json:"date,omitempty"` // optional 'YYYY-MM-DD'; surfaces on calendar
-	CreatedAt time.Time  `json:"createdAt"`
-	UpdatedAt time.Time  `json:"updatedAt"`
+	ID        string  `json:"id"`
+	Title     string  `json:"title"`
+	ContentMD string  `json:"contentMd"`
+	Date      *string `json:"date,omitempty"` // optional 'YYYY-MM-DD'; surfaces on calendar
+	// ObjectTypeID archetypes the note (PLAN §6.3): NULL is a plain note; otherwise it
+	// selects an object_types row whose schema validates Props. A dangling id (type not
+	// synced yet) is tolerated — validation is skipped until the type arrives.
+	ObjectTypeID *string         `json:"objectTypeId,omitempty"`
+	Props        json.RawMessage `json:"props,omitempty"` // schema-validated structured metadata
+	CreatedAt    time.Time       `json:"createdAt"`
+	UpdatedAt    time.Time       `json:"updatedAt"`
 	// DeletingAt is the Trash marker (PLAN §4.3): the instant the note is due to be
 	// permanently deleted (now + 30d when trashed; nil otherwise). A note with a non-nil
 	// DeletingAt is hidden from every query but the Trash query, yet still syncs normally.

@@ -1,15 +1,22 @@
-import type { CoreBridge, Note } from "./types";
+import type { CoreBridge, Note, ObjectProps } from "./types";
 
 export interface CreateNoteInput {
   title: string;
   contentMd?: string;
   date?: string | null;
+  /** Archetype the note (PLAN §6.3): an object type id plus its schema-validated props. */
+  objectTypeId?: string | null;
+  props?: ObjectProps;
 }
 
 export interface UpdateNoteInput {
   title?: string;
   contentMd?: string;
   date?: string | null;
+  objectTypeId?: string | null;
+  /** Remove the archetype (JSON can't distinguish absent from null on a pointer). */
+  clearObjectType?: boolean;
+  props?: ObjectProps;
 }
 
 /** A conflicting server version stashed for a note the UI holds open (PLAN §7.3 / editor

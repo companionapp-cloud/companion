@@ -151,6 +151,16 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.projectsMembers(payload)
 	case "projects.forEntity":
 		return c.projectsForEntity(payload)
+	case "objectTypes.list":
+		return c.objectTypesList()
+	case "objectTypes.get":
+		return c.objectTypesGet(payload)
+	case "objectTypes.create":
+		return c.objectTypesCreate(payload)
+	case "objectTypes.update":
+		return c.objectTypesUpdate(payload)
+	case "objectTypes.delete":
+		return c.objectTypesDelete(payload)
 	case "nav.sidebar":
 		return c.navSidebar()
 	case "sync.configure":

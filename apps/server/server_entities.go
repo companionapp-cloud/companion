@@ -17,7 +17,7 @@ import (
 
 // ---- notes ---------------------------------------------------------------
 
-const noteCols = `id, title, content_md, date, created_at, updated_at, deleting_at, deleted_at, version, server_seq`
+const noteCols = `id, title, content_md, date, object_type_id, props_json, created_at, updated_at, deleting_at, deleted_at, version, server_seq`
 
 var noteHandler = &entityHandler{
 	typ:   protocol.EntityNote,
@@ -25,6 +25,11 @@ var noteHandler = &entityHandler{
 	upsert: func(s *Server, tx *sql.Tx, uid string, raw []byte, updatedAt time.Time, version, seq int64) error {
 		var n domain.Note
 		if err := json.Unmarshal(raw, &n); err != nil {
+			return err
+		}
+		// Props are validated with the identical Go code the client runs (PLAN §6.3). A
+		// dangling type (not yet pushed) is tolerated — validation is skipped.
+		if err := s.validateEntityProps(tx, uid, n.ObjectTypeID, n.Props); err != nil {
 			return err
 		}
 		var deletingAt, deletedAt any
@@ -35,14 +40,15 @@ var noteHandler = &entityHandler{
 			deletedAt = n.DeletedAt.UTC().Format(timeFormat)
 		}
 		_, err := tx.Exec(s.rebind(
-			`INSERT INTO notes (id, user_id, title, content_md, date, created_at, updated_at, deleting_at, deleted_at, version, server_seq)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO notes (id, user_id, title, content_md, date, object_type_id, props_json, created_at, updated_at, deleting_at, deleted_at, version, server_seq)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT (id) DO UPDATE SET
 			   title = excluded.title, content_md = excluded.content_md, date = excluded.date,
+			   object_type_id = excluded.object_type_id, props_json = excluded.props_json,
 			   updated_at = excluded.updated_at, deleting_at = excluded.deleting_at,
 			   deleted_at = excluded.deleted_at,
 			   version = excluded.version, server_seq = excluded.server_seq;`),
-			n.ID, uid, n.Title, n.ContentMD, n.Date,
+			n.ID, uid, n.Title, n.ContentMD, n.Date, n.ObjectTypeID, propsOrDefault(n.Props),
 			n.CreatedAt.UTC().Format(timeFormat), updatedAt.Format(timeFormat), deletingAt, deletedAt, version, seq)
 		return err
 	},
@@ -78,16 +84,23 @@ var noteHandler = &entityHandler{
 
 func scanServerNote(sc rowScanner) (*domain.Note, int64, error) {
 	var (
-		n                           domain.Note
-		date, deletingAt, deletedAt sql.NullString
-		createdAt, updatedAt        string
-		seq                         int64
+		n                                         domain.Note
+		date, objectTypeID, deletingAt, deletedAt sql.NullString
+		propsJSON                                 sql.NullString
+		createdAt, updatedAt                      string
+		seq                                       int64
 	)
-	if err := sc.Scan(&n.ID, &n.Title, &n.ContentMD, &date, &createdAt, &updatedAt, &deletingAt, &deletedAt, &n.Version, &seq); err != nil {
+	if err := sc.Scan(&n.ID, &n.Title, &n.ContentMD, &date, &objectTypeID, &propsJSON, &createdAt, &updatedAt, &deletingAt, &deletedAt, &n.Version, &seq); err != nil {
 		return nil, 0, err
 	}
 	if date.Valid {
 		n.Date = &date.String
+	}
+	if objectTypeID.Valid {
+		n.ObjectTypeID = &objectTypeID.String
+	}
+	if propsJSON.Valid {
+		n.Props = json.RawMessage(propsJSON.String)
 	}
 	if err := parseTimes(createdAt, updatedAt, deletedAt, &n.CreatedAt, &n.UpdatedAt, &n.DeletedAt); err != nil {
 		return nil, 0, err
@@ -104,7 +117,7 @@ func scanServerNote(sc rowScanner) (*domain.Note, int64, error) {
 
 // ---- tasks ---------------------------------------------------------------
 
-const taskCols = `id, title, notes_md, status, due_at, remind_at, completed_at, repeat_rule, repeat_seed_id, created_at, updated_at, deleting_at, deleted_at, version, server_seq`
+const taskCols = `id, title, notes_md, status, due_at, remind_at, completed_at, repeat_rule, repeat_seed_id, object_type_id, props_json, created_at, updated_at, deleting_at, deleted_at, version, server_seq`
 
 var taskHandler = &entityHandler{
 	typ:   protocol.EntityTask,
@@ -114,17 +127,22 @@ var taskHandler = &entityHandler{
 		if err := json.Unmarshal(raw, &t); err != nil {
 			return err
 		}
+		if err := s.validateEntityProps(tx, uid, t.ObjectTypeID, t.Props); err != nil {
+			return err
+		}
 		_, err := tx.Exec(s.rebind(
-			`INSERT INTO tasks (id, user_id, title, notes_md, status, due_at, remind_at, completed_at, repeat_rule, repeat_seed_id, created_at, updated_at, deleting_at, deleted_at, version, server_seq)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO tasks (id, user_id, title, notes_md, status, due_at, remind_at, completed_at, repeat_rule, repeat_seed_id, object_type_id, props_json, created_at, updated_at, deleting_at, deleted_at, version, server_seq)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT (id) DO UPDATE SET
 			   title = excluded.title, notes_md = excluded.notes_md, status = excluded.status,
 			   due_at = excluded.due_at, remind_at = excluded.remind_at, completed_at = excluded.completed_at,
 			   repeat_rule = excluded.repeat_rule, repeat_seed_id = excluded.repeat_seed_id,
+			   object_type_id = excluded.object_type_id, props_json = excluded.props_json,
 			   updated_at = excluded.updated_at, deleting_at = excluded.deleting_at,
 			   deleted_at = excluded.deleted_at, version = excluded.version, server_seq = excluded.server_seq;`),
 			t.ID, uid, t.Title, t.NotesMD, t.Status,
 			fmtTime(t.DueAt), fmtTime(t.RemindAt), fmtTime(t.CompletedAt), t.RepeatRule, t.RepeatSeedID,
+			t.ObjectTypeID, propsOrDefault(t.Props),
 			t.CreatedAt.UTC().Format(timeFormat), updatedAt.Format(timeFormat),
 			fmtTime(t.DeletingAt), fmtTime(t.DeletedAt), version, seq)
 		return err
@@ -165,14 +183,21 @@ func scanServerTask(sc rowScanner) (*domain.Task, int64, error) {
 		notesMD                                           sql.NullString
 		dueAt, remindAt, completedAt, deletingAt, deleted sql.NullString
 		repeatRule, repeatSeedID                          sql.NullString
+		objectTypeID, propsJSON                           sql.NullString
 		createdAt, updatedAt                              string
 		seq                                               int64
 	)
 	if err := sc.Scan(&t.ID, &t.Title, &notesMD, &t.Status, &dueAt, &remindAt, &completedAt,
-		&repeatRule, &repeatSeedID, &createdAt, &updatedAt, &deletingAt, &deleted, &t.Version, &seq); err != nil {
+		&repeatRule, &repeatSeedID, &objectTypeID, &propsJSON, &createdAt, &updatedAt, &deletingAt, &deleted, &t.Version, &seq); err != nil {
 		return nil, 0, err
 	}
 	t.NotesMD = notesMD.String
+	if objectTypeID.Valid {
+		t.ObjectTypeID = &objectTypeID.String
+	}
+	if propsJSON.Valid {
+		t.Props = json.RawMessage(propsJSON.String)
+	}
 	var err error
 	if t.CreatedAt, err = time.Parse(timeFormat, createdAt); err != nil {
 		return nil, 0, err
@@ -644,4 +669,119 @@ func rawStrOrNil(r json.RawMessage) any {
 		return nil
 	}
 	return string(r)
+}
+
+// propsOrDefault renders a note/task props blob for storage, defaulting empty/null to the
+// empty object so the NOT NULL props_json column is always valid JSON.
+func propsOrDefault(r json.RawMessage) string {
+	s := string(r)
+	if len(r) == 0 || s == "null" {
+		return "{}"
+	}
+	return s
+}
+
+// ---- object types --------------------------------------------------------
+
+const objectTypeCols = `id, name, applies_to, schema_version, schema_json, created_at, updated_at, deleted_at, version, server_seq`
+
+var objectTypeHandler = &entityHandler{
+	typ:   protocol.EntityObjectType,
+	table: "object_types",
+	upsert: func(s *Server, tx *sql.Tx, uid string, raw []byte, updatedAt time.Time, version, seq int64) error {
+		var o domain.ObjectType
+		if err := json.Unmarshal(raw, &o); err != nil {
+			return err
+		}
+		// Validate the schema itself with the same Go code the client runs (PLAN §6.3).
+		if o.DeletedAt == nil {
+			if err := o.Validate(); err != nil {
+				return err
+			}
+		}
+		var deletedAt any
+		if o.DeletedAt != nil {
+			deletedAt = o.DeletedAt.UTC().Format(timeFormat)
+		}
+		_, err := tx.Exec(s.rebind(
+			`INSERT INTO object_types (id, user_id, name, applies_to, schema_version, schema_json, created_at, updated_at, deleted_at, version, server_seq)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT (id) DO UPDATE SET
+			   name = excluded.name, applies_to = excluded.applies_to,
+			   schema_version = excluded.schema_version, schema_json = excluded.schema_json,
+			   updated_at = excluded.updated_at, deleted_at = excluded.deleted_at,
+			   version = excluded.version, server_seq = excluded.server_seq;`),
+			o.ID, uid, o.Name, o.AppliesTo, o.SchemaVersion, propsOrDefault(o.SchemaJSON),
+			o.CreatedAt.UTC().Format(timeFormat), updatedAt.Format(timeFormat), deletedAt, version, seq)
+		return err
+	},
+	loadRaw: func(s *Server, tx *sql.Tx, uid, id string) ([]byte, error) {
+		row := tx.QueryRow(s.rebind(`SELECT `+objectTypeCols+` FROM object_types WHERE id = ? AND user_id = ?;`), id, uid)
+		o, _, err := scanServerObjectType(row)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(o)
+	},
+	pull: func(s *Server, uid string, cursor, limit int64) ([]seqRow, error) {
+		rows, err := s.query(`SELECT `+objectTypeCols+` FROM object_types WHERE user_id = ? AND server_seq > ? ORDER BY server_seq ASC LIMIT ?;`, uid, cursor, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var out []seqRow
+		for rows.Next() {
+			o, seq, err := scanServerObjectType(rows)
+			if err != nil {
+				return nil, err
+			}
+			body, err := json.Marshal(o)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, seqRow{seq, protocol.PullChange{EntityType: protocol.EntityObjectType, Row: body, ServerSeq: seq}})
+		}
+		return out, rows.Err()
+	},
+}
+
+func scanServerObjectType(sc rowScanner) (*domain.ObjectType, int64, error) {
+	var (
+		o                    domain.ObjectType
+		schemaJSON           string
+		deletedAt            sql.NullString
+		createdAt, updatedAt string
+		seq                  int64
+	)
+	if err := sc.Scan(&o.ID, &o.Name, &o.AppliesTo, &o.SchemaVersion, &schemaJSON, &createdAt, &updatedAt, &deletedAt, &o.Version, &seq); err != nil {
+		return nil, 0, err
+	}
+	o.SchemaJSON = json.RawMessage(schemaJSON)
+	if err := parseTimes(createdAt, updatedAt, deletedAt, &o.CreatedAt, &o.UpdatedAt, &o.DeletedAt); err != nil {
+		return nil, 0, err
+	}
+	return &o, seq, nil
+}
+
+// validateEntityProps checks an archetyped note/task's props against its type's schema on
+// push (PLAN §6.3) — the identical Go rules the client ran. A nil/empty type is a plain
+// entity; a type not yet stored (dangling, arriving in the same or a later push) is
+// tolerated and validation is deferred.
+func (s *Server) validateEntityProps(tx *sql.Tx, uid string, objectTypeID *string, props json.RawMessage) error {
+	if objectTypeID == nil || *objectTypeID == "" {
+		return nil
+	}
+	var schemaJSON string
+	row := tx.QueryRow(s.rebind(`SELECT schema_json FROM object_types WHERE id = ? AND user_id = ? AND deleted_at IS NULL;`), *objectTypeID, uid)
+	if err := row.Scan(&schemaJSON); err != nil {
+		if err == sql.ErrNoRows {
+			return nil // dangling type: tolerate, like a dangling wikilink
+		}
+		return err
+	}
+	schema, err := domain.ParseSchema(json.RawMessage(schemaJSON))
+	if err != nil {
+		return err
+	}
+	return domain.ValidateProps(props, schema)
 }

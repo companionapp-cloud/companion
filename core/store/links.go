@@ -8,12 +8,22 @@ import (
 	"companion/core/domain"
 )
 
+// schemaResolver resolves an object type's parsed schema by id, for extracting the
+// prop:<field> reference edges an archetyped note/task carries (PLAN §5.1, §6.3). The
+// ObjectTypesRepo implements it; it is injected after construction (store.New) to avoid a
+// repo-ordering cycle. A missing type (not synced yet) reports ok=false and extraction
+// falls back to markdown-only, tolerating the dangle.
+type schemaResolver interface {
+	SchemaFor(objectTypeID string) (domain.ObjectSchema, bool, error)
+}
+
 // LinksRepo owns the derived link index (PLAN §5). It is written only as a side effect
 // of entity writes (SyncSource / DeleteSource, called from the note repo on both local
 // mutations and sync-apply) and read by the graph.* bridge methods. Because the table
 // holds no user-authored data, Rebuild can reconstruct it from scratch at any time.
 type LinksRepo struct {
-	db Driver
+	db      Driver
+	schemas schemaResolver
 }
 
 // graphNodeColumns is the slim projection order used everywhere nodes are scanned.
@@ -25,10 +35,46 @@ const graphNodeColumns = `id, type, title, object_type_id, status`
 // matching the store's per-write style (PLAN §5.1); a partial failure only leaves a
 // stale index that graph.rebuild repairs.
 func (r *LinksRepo) SyncSource(sourceType, sourceID, markdown string) error {
+	return r.replaceSource(sourceType, sourceID, domain.ParseRefs(markdown))
+}
+
+// SyncEntitySource replaces the outgoing links for an archetypable source (note/task)
+// with those parsed from BOTH its markdown and its reference-typed props (PLAN §5.1,
+// §6.3). The prop edges (kind prop:<field>) need the object type's schema, resolved
+// through the injected resolver; if the type is absent (not synced yet) only markdown
+// edges are indexed. Called from the note/task write path — local mutations and
+// sync-apply alike — so the index stays identical on every device.
+func (r *LinksRepo) SyncEntitySource(sourceType, sourceID, markdown string, objectTypeID *string, propsJSON string) error {
+	refs := domain.ParseRefs(markdown)
+	if propRefs, err := r.propRefs(objectTypeID, propsJSON); err != nil {
+		return err
+	} else {
+		refs = append(refs, propRefs...)
+	}
+	return r.replaceSource(sourceType, sourceID, refs)
+}
+
+// propRefs resolves the reference-prop edges for a source, or nil when it has no
+// archetype, no resolver, or an unresolved (dangling) type.
+func (r *LinksRepo) propRefs(objectTypeID *string, propsJSON string) ([]domain.Ref, error) {
+	if objectTypeID == nil || *objectTypeID == "" || r.schemas == nil || propsJSON == "" {
+		return nil, nil
+	}
+	schema, ok, err := r.schemas.SchemaFor(*objectTypeID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	return domain.PropRefs([]byte(propsJSON), schema), nil
+}
+
+// replaceSource swaps a source's outgoing edges for the given ref set (delete + insert).
+func (r *LinksRepo) replaceSource(sourceType, sourceID string, refs []domain.Ref) error {
 	if err := r.DeleteSource(sourceType, sourceID); err != nil {
 		return err
 	}
-	refs := domain.ParseRefs(markdown)
 	for _, ref := range refs {
 		if _, err := r.db.Exec(
 			`INSERT OR IGNORE INTO links
@@ -163,10 +209,10 @@ func (r *LinksRepo) Rebuild() (nodeCount, edgeCount int, err error) {
 	if _, err = r.db.Exec(`DELETE FROM links;`); err != nil {
 		return 0, 0, fmt.Errorf("truncate links: %w", err)
 	}
-	if err = r.extractAll(`SELECT id, content_md FROM notes WHERE deleted_at IS NULL AND deleting_at IS NULL;`, domain.NodeNote); err != nil {
+	if err = r.extractAll(`SELECT id, content_md, object_type_id, props_json FROM notes WHERE deleted_at IS NULL AND deleting_at IS NULL;`, domain.NodeNote); err != nil {
 		return 0, 0, err
 	}
-	if err = r.extractAll(`SELECT id, notes_md FROM tasks WHERE deleted_at IS NULL AND deleting_at IS NULL;`, domain.NodeTask); err != nil {
+	if err = r.extractAll(`SELECT id, notes_md, object_type_id, props_json FROM tasks WHERE deleted_at IS NULL AND deleting_at IS NULL;`, domain.NodeTask); err != nil {
 		return 0, 0, err
 	}
 	// Re-mirror authored edges: project_members → 'member' edges (PLAN §5.1). Safe to
@@ -287,24 +333,33 @@ func (r *LinksRepo) rebuildMemberEdges() error {
 	return nil
 }
 
-// extractAll parses refs for every (id, markdown) row of a source query and replaces
-// that source's links.
+// extractAll parses refs for every (id, markdown, object_type_id, props_json) row of a
+// source query and replaces that source's links, including reference-prop edges (PLAN
+// §5.1). Used by Rebuild for notes and tasks.
 func (r *LinksRepo) extractAll(query, sourceType string) error {
 	rows, err := r.db.Query(query)
 	if err != nil {
 		return fmt.Errorf("scan sources: %w", err)
 	}
-	type row struct{ id, md string }
+	type row struct {
+		id, md       string
+		objectTypeID *string
+		props        string
+	}
 	var batch []row
 	func() {
 		defer rows.Close()
 		for rows.Next() {
 			var id string
-			var md sql.NullString
-			if err = rows.Scan(&id, &md); err != nil {
+			var md, objectTypeID, props sql.NullString
+			if err = rows.Scan(&id, &md, &objectTypeID, &props); err != nil {
 				return
 			}
-			batch = append(batch, row{id, md.String})
+			b := row{id: id, md: md.String, props: props.String}
+			if objectTypeID.Valid {
+				b.objectTypeID = &objectTypeID.String
+			}
+			batch = append(batch, b)
 		}
 		err = rows.Err()
 	}()
@@ -312,7 +367,7 @@ func (r *LinksRepo) extractAll(query, sourceType string) error {
 		return err
 	}
 	for _, b := range batch {
-		if err := r.SyncSource(sourceType, b.id, b.md); err != nil {
+		if err := r.SyncEntitySource(sourceType, b.id, b.md, b.objectTypeID, b.props); err != nil {
 			return err
 		}
 	}

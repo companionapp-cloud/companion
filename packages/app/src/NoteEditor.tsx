@@ -4,6 +4,8 @@ import type { Note } from "@companion/core-bridge";
 import { Badge, Icon, IconButton, Text, TextField, colors, layout, space } from "@companion/design-system";
 import { Editor, type LinkRef } from "@companion/editor";
 import { useTasks } from "./TasksProvider";
+import { useNotes } from "./NotesProvider";
+import { ArchetypeSection } from "./ArchetypeSection";
 import { useLinkSource } from "./useLinkSource";
 import { NoteGraph } from "./NoteGraph";
 import { MembershipPicker } from "./MembershipPicker";
@@ -38,6 +40,7 @@ export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote, 
   // Task metadata (for `[[task:…]]` chip hydration) also refreshes the chips; `tasks.tasks`
   // identity changes on any task edit, which we pass as linkRevision below.
   const tasks = useTasks();
+  const notes = useNotes();
   // Wikilink autocomplete ([[) and pasted-UUID resolution search the object graph.
   const linkSource = useLinkSource();
   const [title, setTitle] = useState(note.title);
@@ -112,9 +115,19 @@ export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote, 
               onChange(note.id, { title: t });
             }}
           />
-          <Text variant="mono" tone="tertiary" style={{ marginTop: space.md, marginBottom: space.xl }}>
+          <Text variant="mono" tone="tertiary" style={{ marginTop: space.md, marginBottom: space.lg }}>
             Edited {new Date(note.updatedAt).toLocaleString()}
           </Text>
+          <View style={{ marginBottom: space.lg }}>
+            <ArchetypeSection
+              kind="note"
+              objectTypeId={note.objectTypeId}
+              props={note.props}
+              onSetType={(typeId) => void notes.update(note.id, { objectTypeId: typeId })}
+              onClearType={() => void notes.update(note.id, { clearObjectType: true, props: {} })}
+              onChangeProps={(next) => void notes.update(note.id, { props: next })}
+            />
+          </View>
           <Editor
             key={seed.key}
             markdown={seed.content}

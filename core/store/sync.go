@@ -107,14 +107,15 @@ func (r *NotesRepo) Apply(n *domain.Note) error {
 		deletedAt = n.DeletedAt.UTC().Format(timeFormat)
 	}
 	_, err := r.db.Exec(
-		`INSERT INTO notes (id, title, content_md, date, created_at, updated_at, deleting_at, deleted_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+		`INSERT INTO notes (id, title, content_md, date, object_type_id, props_json, created_at, updated_at, deleting_at, deleted_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 		 ON CONFLICT(id) DO UPDATE SET
 		   title = excluded.title, content_md = excluded.content_md, date = excluded.date,
+		   object_type_id = excluded.object_type_id, props_json = excluded.props_json,
 		   created_at = excluded.created_at, updated_at = excluded.updated_at,
 		   deleting_at = excluded.deleting_at, deleted_at = excluded.deleted_at,
 		   version = excluded.version, dirty = 0;`,
-		n.ID, n.Title, n.ContentMD, n.Date,
+		n.ID, n.Title, n.ContentMD, n.Date, n.ObjectTypeID, normalizeProps(n.Props),
 		n.CreatedAt.UTC().Format(timeFormat), n.UpdatedAt.UTC().Format(timeFormat), deletingAt, deletedAt, n.Version,
 	)
 	if err != nil {
@@ -126,7 +127,7 @@ func (r *NotesRepo) Apply(n *domain.Note) error {
 	if n.DeletedAt != nil || n.DeletingAt != nil {
 		return r.links.DeleteSource(domain.NodeNote, n.ID)
 	}
-	return r.links.SyncSource(domain.NodeNote, n.ID, n.ContentMD)
+	return r.links.SyncEntitySource(domain.NodeNote, n.ID, n.ContentMD, n.ObjectTypeID, normalizeProps(n.Props))
 }
 
 // MarkPushed clears the dirty flag and records the server version after a successful
@@ -153,25 +154,27 @@ func (r *NotesRepo) CreateConflictedCopy(from *domain.Note, suffix string) (*dom
 		title = "Untitled"
 	}
 	copy := &domain.Note{
-		ID:        id.String(),
-		Title:     title + " " + suffix,
-		ContentMD: from.ContentMD,
-		Date:      from.Date,
-		CreatedAt: now,
-		UpdatedAt: now,
-		Version:   0,
-		Dirty:     true,
+		ID:           id.String(),
+		Title:        title + " " + suffix,
+		ContentMD:    from.ContentMD,
+		Date:         from.Date,
+		ObjectTypeID: from.ObjectTypeID,
+		Props:        json.RawMessage(normalizeProps(from.Props)),
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		Version:      0,
+		Dirty:        true,
 	}
 	_, err = r.db.Exec(
-		`INSERT INTO notes (id, title, content_md, date, created_at, updated_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, 0, 1);`,
-		copy.ID, copy.Title, copy.ContentMD, copy.Date,
+		`INSERT INTO notes (id, title, content_md, date, object_type_id, props_json, created_at, updated_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1);`,
+		copy.ID, copy.Title, copy.ContentMD, copy.Date, copy.ObjectTypeID, string(copy.Props),
 		copy.CreatedAt.Format(timeFormat), copy.UpdatedAt.Format(timeFormat),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert conflicted copy: %w", err)
 	}
-	if err := r.links.SyncSource(domain.NodeNote, copy.ID, copy.ContentMD); err != nil {
+	if err := r.links.SyncEntitySource(domain.NodeNote, copy.ID, copy.ContentMD, copy.ObjectTypeID, string(copy.Props)); err != nil {
 		return nil, err
 	}
 	return copy, nil
@@ -198,6 +201,9 @@ func (r *NotesRepo) MeaningfulDiff(a, b *domain.Note) bool {
 		return true
 	}
 	if derefStr(a.Date) != derefStr(b.Date) {
+		return true
+	}
+	if derefStr(a.ObjectTypeID) != derefStr(b.ObjectTypeID) || normalizeProps(a.Props) != normalizeProps(b.Props) {
 		return true
 	}
 	// Trashing/restoring (deleting_at) and tombstoning (deleted_at) are both meaningful

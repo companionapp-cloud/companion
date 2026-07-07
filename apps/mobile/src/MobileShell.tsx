@@ -17,7 +17,8 @@ import { ChatScreen } from './screens/ChatScreen';
 import { ChatListScreen } from './screens/ChatListScreen';
 import { PlaceholderScreen } from './screens/PlaceholderScreen';
 import { ProjectScreen } from './screens/ProjectScreen';
-import { SettingsScreen } from './screens/SettingsScreen';
+import { SettingsScreen, SettingsSectionScreen } from './screens/SettingsScreen';
+import type { SettingsSectionId } from '@companion/app';
 
 // Mobile navigation. The root is a list (HomeScreen): the global sections
 // (Chat/Notes/Tasks/Calendar) plus the areas → projects tree. Global sections open as
@@ -45,6 +46,7 @@ export type RootStackParamList = {
   NoteGraph: { id: string };
   TaskGraph: { id: string };
   Settings: undefined;
+  SettingsSection: { section: SettingsSectionId };
 };
 
 // The tabs shown inside a project (PLAN §6.6). Notes works today; Tasks and Calendar
@@ -113,11 +115,8 @@ export function MobileShell() {
         <RootStack.Screen name="TaskEditor" component={TaskEditorScreen} options={{ title: 'Task' }} />
         <RootStack.Screen name="NoteGraph" component={NoteGraphScreen} options={{ title: 'Graph' }} />
         <RootStack.Screen name="TaskGraph" component={TaskGraphScreen} options={{ title: 'Graph' }} />
-        <RootStack.Screen
-          name="Settings"
-          component={SettingsScreen}
-          options={{ presentation: 'modal', title: 'Settings' }}
-        />
+        <RootStack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
+        <RootStack.Screen name="SettingsSection" component={SettingsSectionScreen} options={{ title: 'Settings' }} />
       </RootStack.Navigator>
     </NavigationContainer>
   );

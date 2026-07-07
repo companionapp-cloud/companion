@@ -17,33 +17,40 @@ import (
 // note's body, so tasks join the graph for free (PLAN §5.1). Trash semantics mirror notes
 // (PLAN §4.3).
 type TasksRepo struct {
-	db    Driver
-	clock domain.Clock
-	links *LinksRepo
+	db          Driver
+	clock       domain.Clock
+	links       *LinksRepo
+	objectTypes *ObjectTypesRepo
 }
 
-const taskColumns = `id, title, notes_md, status, due_at, remind_at, completed_at, repeat_rule, repeat_seed_id, created_at, updated_at, deleting_at, deleted_at, version, dirty`
+const taskColumns = `id, title, notes_md, status, due_at, remind_at, completed_at, repeat_rule, repeat_seed_id, object_type_id, props_json, created_at, updated_at, deleting_at, deleted_at, version, dirty`
 
-// CreateTaskInput carries the client-supplied fields for a new task.
+// CreateTaskInput carries the client-supplied fields for a new task. ObjectTypeID/Props
+// archetype the task (PLAN §6.3).
 type CreateTaskInput struct {
-	Title    string     `json:"title"`
-	NotesMD  string     `json:"notesMd"`
-	Status   string     `json:"status"` // defaults to open when empty
-	DueAt    *time.Time `json:"dueAt,omitempty"`
-	RemindAt *time.Time `json:"remindAt,omitempty"`
+	Title        string          `json:"title"`
+	NotesMD      string          `json:"notesMd"`
+	Status       string          `json:"status"` // defaults to open when empty
+	DueAt        *time.Time      `json:"dueAt,omitempty"`
+	RemindAt     *time.Time      `json:"remindAt,omitempty"`
+	ObjectTypeID *string         `json:"objectTypeId,omitempty"`
+	Props        json.RawMessage `json:"props,omitempty"`
 }
 
 // UpdateTaskInput carries partial updates; nil fields are unchanged. The nullable dueAt /
 // remindAt need an explicit Clear flag because JSON can't distinguish "absent" from "set
-// to null" on a pointer.
+// to null" on a pointer; likewise ClearObjectType for the archetype.
 type UpdateTaskInput struct {
-	Title         *string    `json:"title,omitempty"`
-	NotesMD       *string    `json:"notesMd,omitempty"`
-	Status        *string    `json:"status,omitempty"`
-	DueAt         *time.Time `json:"dueAt,omitempty"`
-	ClearDueAt    bool       `json:"clearDueAt,omitempty"`
-	RemindAt      *time.Time `json:"remindAt,omitempty"`
-	ClearRemindAt bool       `json:"clearRemindAt,omitempty"`
+	Title           *string          `json:"title,omitempty"`
+	NotesMD         *string          `json:"notesMd,omitempty"`
+	Status          *string          `json:"status,omitempty"`
+	DueAt           *time.Time       `json:"dueAt,omitempty"`
+	ClearDueAt      bool             `json:"clearDueAt,omitempty"`
+	RemindAt        *time.Time       `json:"remindAt,omitempty"`
+	ClearRemindAt   bool             `json:"clearRemindAt,omitempty"`
+	ObjectTypeID    *string          `json:"objectTypeId,omitempty"`
+	ClearObjectType bool             `json:"clearObjectType,omitempty"`
+	Props           *json.RawMessage `json:"props,omitempty"`
 }
 
 // Create inserts a new task (client UUIDv7, version 0, dirty), defaulting status to open,
@@ -61,20 +68,24 @@ func (r *TasksRepo) Create(in CreateTaskInput) (*domain.Task, error) {
 	t := &domain.Task{
 		ID: id.String(), Title: in.Title, NotesMD: in.NotesMD, Status: status,
 		DueAt: in.DueAt, RemindAt: in.RemindAt,
+		ObjectTypeID: in.ObjectTypeID, Props: json.RawMessage(normalizeProps(in.Props)),
 		CreatedAt: now, UpdatedAt: now, Version: 0, Dirty: true,
 	}
 	if err := t.Validate(); err != nil {
 		return nil, err
 	}
+	if err := r.objectTypes.ValidateEntityProps(t.ObjectTypeID, t.Props); err != nil {
+		return nil, err
+	}
 	if _, err := r.db.Exec(
-		`INSERT INTO tasks (id, title, notes_md, status, due_at, remind_at, created_at, updated_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-		t.ID, t.Title, t.NotesMD, t.Status, nullTime(t.DueAt), nullTime(t.RemindAt),
+		`INSERT INTO tasks (id, title, notes_md, status, due_at, remind_at, object_type_id, props_json, created_at, updated_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		t.ID, t.Title, t.NotesMD, t.Status, nullTime(t.DueAt), nullTime(t.RemindAt), t.ObjectTypeID, string(t.Props),
 		t.CreatedAt.Format(timeFormat), t.UpdatedAt.Format(timeFormat), t.Version, boolToInt(t.Dirty),
 	); err != nil {
 		return nil, fmt.Errorf("insert task: %w", err)
 	}
-	if err := r.links.SyncSource(domain.NodeTask, t.ID, t.NotesMD); err != nil {
+	if err := r.links.SyncEntitySource(domain.NodeTask, t.ID, t.NotesMD, t.ObjectTypeID, string(t.Props)); err != nil {
 		return nil, err
 	}
 	return t, nil
@@ -152,17 +163,28 @@ func (r *TasksRepo) Update(id string, in UpdateTaskInput) (*domain.Task, error) 
 	} else if in.ClearRemindAt {
 		t.RemindAt = nil
 	}
+	if in.ClearObjectType {
+		t.ObjectTypeID = nil
+	} else if in.ObjectTypeID != nil {
+		t.ObjectTypeID = in.ObjectTypeID
+	}
+	if in.Props != nil {
+		t.Props = json.RawMessage(normalizeProps(*in.Props))
+	}
 	t.UpdatedAt = r.clock.Now().UTC()
 	t.Dirty = true
 	if err := t.Validate(); err != nil {
 		return nil, err
 	}
+	if err := r.objectTypes.ValidateEntityProps(t.ObjectTypeID, t.Props); err != nil {
+		return nil, err
+	}
 	res, err := r.db.Exec(
 		`UPDATE tasks SET title = ?, notes_md = ?, status = ?, due_at = ?, remind_at = ?,
-		   completed_at = ?, updated_at = ?, dirty = 1
+		   completed_at = ?, object_type_id = ?, props_json = ?, updated_at = ?, dirty = 1
 		 WHERE id = ? AND deleted_at IS NULL AND deleting_at IS NULL;`,
 		t.Title, t.NotesMD, t.Status, nullTime(t.DueAt), nullTime(t.RemindAt),
-		nullTime(t.CompletedAt), t.UpdatedAt.Format(timeFormat), id,
+		nullTime(t.CompletedAt), t.ObjectTypeID, string(normalizeProps(t.Props)), t.UpdatedAt.Format(timeFormat), id,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update task: %w", err)
@@ -170,7 +192,7 @@ func (r *TasksRepo) Update(id string, in UpdateTaskInput) (*domain.Task, error) 
 	if affected, _ := res.RowsAffected(); affected == 0 {
 		return nil, ErrNotFound
 	}
-	if err := r.links.SyncSource(domain.NodeTask, t.ID, t.NotesMD); err != nil {
+	if err := r.links.SyncEntitySource(domain.NodeTask, t.ID, t.NotesMD, t.ObjectTypeID, string(normalizeProps(t.Props))); err != nil {
 		return nil, err
 	}
 	return t, nil
@@ -234,7 +256,7 @@ func (r *TasksRepo) Restore(id string) error {
 	if affected, _ := res.RowsAffected(); affected == 0 {
 		return ErrNotFound
 	}
-	return r.links.SyncSource(domain.NodeTask, t.ID, t.NotesMD)
+	return r.links.SyncEntitySource(domain.NodeTask, t.ID, t.NotesMD, t.ObjectTypeID, string(normalizeProps(t.Props)))
 }
 
 // ListTrash returns every trashed task, soonest-to-be-purged first (PLAN §4.3).
@@ -294,17 +316,18 @@ func (r *TasksRepo) GetAny(id string) (*domain.Task, error) {
 
 func (r *TasksRepo) Apply(t *domain.Task) error {
 	_, err := r.db.Exec(
-		`INSERT INTO tasks (id, title, notes_md, status, due_at, remind_at, completed_at, repeat_rule, repeat_seed_id, created_at, updated_at, deleting_at, deleted_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+		`INSERT INTO tasks (id, title, notes_md, status, due_at, remind_at, completed_at, repeat_rule, repeat_seed_id, object_type_id, props_json, created_at, updated_at, deleting_at, deleted_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 		 ON CONFLICT(id) DO UPDATE SET
 		   title = excluded.title, notes_md = excluded.notes_md, status = excluded.status,
 		   due_at = excluded.due_at, remind_at = excluded.remind_at, completed_at = excluded.completed_at,
 		   repeat_rule = excluded.repeat_rule, repeat_seed_id = excluded.repeat_seed_id,
+		   object_type_id = excluded.object_type_id, props_json = excluded.props_json,
 		   created_at = excluded.created_at, updated_at = excluded.updated_at,
 		   deleting_at = excluded.deleting_at, deleted_at = excluded.deleted_at,
 		   version = excluded.version, dirty = 0;`,
 		t.ID, t.Title, t.NotesMD, t.Status, nullTime(t.DueAt), nullTime(t.RemindAt), nullTime(t.CompletedAt),
-		t.RepeatRule, t.RepeatSeedID,
+		t.RepeatRule, t.RepeatSeedID, t.ObjectTypeID, normalizeProps(t.Props),
 		t.CreatedAt.UTC().Format(timeFormat), t.UpdatedAt.UTC().Format(timeFormat),
 		nullTime(t.DeletingAt), nullTime(t.DeletedAt), t.Version,
 	)
@@ -315,7 +338,7 @@ func (r *TasksRepo) Apply(t *domain.Task) error {
 	if t.DeletedAt != nil || t.DeletingAt != nil {
 		return r.links.DeleteSource(domain.NodeTask, t.ID)
 	}
-	return r.links.SyncSource(domain.NodeTask, t.ID, t.NotesMD)
+	return r.links.SyncEntitySource(domain.NodeTask, t.ID, t.NotesMD, t.ObjectTypeID, normalizeProps(t.Props))
 }
 
 func (r *TasksRepo) MarkPushed(id string, version int64) error {
@@ -330,6 +353,9 @@ func (r *TasksRepo) MeaningfulDiff(a, b *domain.Task) bool {
 		return true
 	}
 	if !sameTime(a.DueAt, b.DueAt) || !sameTime(a.RemindAt, b.RemindAt) {
+		return true
+	}
+	if derefStr(a.ObjectTypeID) != derefStr(b.ObjectTypeID) || normalizeProps(a.Props) != normalizeProps(b.Props) {
 		return true
 	}
 	if (a.DeletingAt == nil) != (b.DeletingAt == nil) {
@@ -358,14 +384,15 @@ func (r *TasksRepo) ConflictedCopy(local *domain.Task, suffix string) error {
 		title = "Untitled"
 	}
 	if _, err := r.db.Exec(
-		`INSERT INTO tasks (id, title, notes_md, status, due_at, remind_at, created_at, updated_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1);`,
+		`INSERT INTO tasks (id, title, notes_md, status, due_at, remind_at, object_type_id, props_json, created_at, updated_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1);`,
 		id.String(), title+" "+suffix, local.NotesMD, local.Status, nullTime(local.DueAt), nullTime(local.RemindAt),
+		local.ObjectTypeID, normalizeProps(local.Props),
 		now.Format(timeFormat), now.Format(timeFormat),
 	); err != nil {
 		return fmt.Errorf("insert conflicted task: %w", err)
 	}
-	return r.links.SyncSource(domain.NodeTask, id.String(), local.NotesMD)
+	return r.links.SyncEntitySource(domain.NodeTask, id.String(), local.NotesMD, local.ObjectTypeID, normalizeProps(local.Props))
 }
 
 // nullTime formats a nullable timestamp for binding, or nil for a NULL column.
@@ -390,16 +417,21 @@ func scanTask(rows Rows) (*domain.Task, error) {
 		notesMD                                             sql.NullString
 		dueAt, remindAt, completedAt, deletingAt, deletedAt sql.NullString
 		repeatRule, repeatSeedID                            sql.NullString
+		objectTypeID, propsJSON                             sql.NullString
 		createdAt, updatedAt                                string
 		dirty                                               int
 	)
 	if err := rows.Scan(
 		&t.ID, &t.Title, &notesMD, &t.Status, &dueAt, &remindAt, &completedAt,
-		&repeatRule, &repeatSeedID, &createdAt, &updatedAt, &deletingAt, &deletedAt, &t.Version, &dirty,
+		&repeatRule, &repeatSeedID, &objectTypeID, &propsJSON, &createdAt, &updatedAt, &deletingAt, &deletedAt, &t.Version, &dirty,
 	); err != nil {
 		return nil, fmt.Errorf("scan task: %w", err)
 	}
 	t.NotesMD = notesMD.String
+	if objectTypeID.Valid {
+		t.ObjectTypeID = &objectTypeID.String
+	}
+	t.Props = json.RawMessage(normalizeProps([]byte(propsJSON.String)))
 	var err error
 	if t.CreatedAt, err = time.Parse(timeFormat, createdAt); err != nil {
 		return nil, fmt.Errorf("parse created_at: %w", err)

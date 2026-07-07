@@ -1,4 +1,4 @@
-import type { CoreBridge, Task, TaskStatus } from "./types";
+import type { CoreBridge, ObjectProps, Task, TaskStatus } from "./types";
 
 export interface CreateTaskInput {
   title?: string;
@@ -7,6 +7,9 @@ export interface CreateTaskInput {
   /** ISO timestamp. */
   dueAt?: string | null;
   remindAt?: string | null;
+  /** Archetype the task (PLAN §6.3): an object type id plus its schema-validated props. */
+  objectTypeId?: string | null;
+  props?: ObjectProps;
 }
 
 export interface UpdateTaskInput {
@@ -18,6 +21,9 @@ export interface UpdateTaskInput {
   clearDueAt?: boolean;
   remindAt?: string | null;
   clearRemindAt?: boolean;
+  objectTypeId?: string | null;
+  clearObjectType?: boolean;
+  props?: ObjectProps;
 }
 
 /** Typed wrappers over the tasks.* core methods (PLAN §6.4). Deleting a task moves it to

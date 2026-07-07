@@ -3,6 +3,7 @@ import { StyleSheet, View } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import type { Graph } from "@companion/core-bridge";
 import { GRAPH_CSS, GRAPH_JS } from "./graphBundle.generated";
+import { useStyledGraph } from "./useStyledGraph";
 
 // Native graph canvas: the exact same React Flow renderer the web app uses, hosted in a
 // WebView (React Flow is DOM-only) so the UX is identical on mobile. The bundle is built
@@ -37,8 +38,11 @@ function buildHtml(focusKey: string | null): string {
 export function GraphCanvas({ graph, focusKey = null, onOpenNode }: GraphCanvasProps) {
   const webRef = useRef<WebView>(null);
   const readyRef = useRef(false);
-  const graphRef = useRef(graph);
-  graphRef.current = graph;
+  // Enrich here (native side, in the provider tree) so the archetype color/icon travels to
+  // the isolated WebView through the existing graph channel — the bundle has no providers.
+  const styledGraph = useStyledGraph(graph);
+  const graphRef = useRef(styledGraph);
+  graphRef.current = styledGraph;
 
   // Built once; the focus node never changes for a given canvas, and graph data flows in
   // via injectJavaScript so the WebView never reloads.
@@ -55,7 +59,7 @@ export function GraphCanvas({ graph, focusKey = null, onOpenNode }: GraphCanvasP
   useEffect(() => {
     if (readyRef.current) pushGraph();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph]);
+  }, [styledGraph]);
 
   const onMessage = (event: WebViewMessageEvent) => {
     try {

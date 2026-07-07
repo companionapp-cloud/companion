@@ -1024,23 +1024,27 @@ Done:
    (global Tasks splitview, project Tasks section, mobile list + editor); due/reminder via
    natural-language parsing (`core/dates` over `olebedev/when`) + a concrete date/time
    picker + quick presets.
+9.  **LLM** — provider configs (device vs account scope), secrets sync, chat with
+    local retrieval tools (including graph + project tools), streaming UI.
+10.  ✅ **Objects** — `object_types` entity + sync (`core/domain/objecttype.go`,
+    `core/store/objecttypes.go`, server `objectTypeHandler`); `object_type_id`/`props_json`
+    on notes and tasks; Go schema + props validation (`domain.Validate`/`ValidateProps`,
+    run identically on the client write path and the server push); TS form renderer
+    (`ObjectForm`/`ArchetypeSection`) + type management UI (`ObjectTypeSettings`, an Objects
+    settings tab); `prop:<field>` reference edges derived on every write and sync-apply
+    (`links.SyncEntitySource`, so extraction still equals `graph.rebuild`); graph nodes
+    colored/clustered by `object_type_id` with labeled `prop:*` edges.
+
 
 Next:
-9. **Embedded tasks** — `taskRef` NodeView + `![[task:id]]` serialization; editor
-   data-provider prop; `[]` and `[[` input rules; live refresh via `data.changed`.
-10. **Objects** — `object_types` entity + sync; `object_type_id`/`props_json` on
-    notes and tasks; Go validation; TS form renderer; `prop:*` edges; graph
-    clustering by type.
-11. **Repeating tasks** — RRULE on seeds, server cron materialization, regeneration
+11.  **Repeating tasks** — RRULE on seeds, server cron materialization, regeneration
     on rule edit (occurrences reach other devices instantly via SSE → sync).
-12. **Habits** — cadence kinds + polarity + streak math + streak-health; entries UI;
+12.  **Habits** — cadence kinds + polarity + streak math + streak-health; entries UI;
     `habit_links` stacking + suggestions; `stack` edges in the graph; habit
     membership; the sidebar fire icon goes live; notification schedules; geofence
     registration on mobile.
-13. **Calendar** — feeds, server ICS fetcher, event clone, merged calendar view.
-14. **LLM** — provider configs (device vs account scope), secrets sync, chat with
-    local retrieval tools (including graph + project tools), streaming UI.
-15. **Polish** — silent push (APNs/FCM) as the background complement to SSE,
+13.  **Calendar** — feeds, server ICS fetcher, event clone, merged calendar view.
+14.  **Polish** — silent push (APNs/FCM) as the background complement to SSE,
     tombstone retention + full-resync path, E2E-encrypted secrets, bulk
     re-validation on schema edits, import/export.
 

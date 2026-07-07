@@ -24,12 +24,20 @@ export interface SqliteDriver {
   close(): Promise<void>;
 }
 
+/** Structured object metadata (mirrors a note/task props_json blob). Keys are field
+ *  keys from the archetype's schema; values are field-type dependent. */
+export type ObjectProps = Record<string, unknown>;
+
 /** A note as returned by the core (mirrors core/domain.Note). */
 export interface Note {
   id: string;
   title: string;
   contentMd: string;
   date?: string | null;
+  /** Archetype id (PLAN §6.3): null/absent is a plain note; otherwise selects an
+   *  ObjectType whose schema validates `props`. */
+  objectTypeId?: string | null;
+  props?: ObjectProps;
   createdAt: string;
   updatedAt: string;
   /** Trash marker (PLAN §4.3): when set, the note is in the Trash, due to be permanently
@@ -55,9 +63,67 @@ export interface Task {
   completedAt?: string | null;
   repeatRule?: string | null;
   repeatSeedId?: string | null;
+  objectTypeId?: string | null;
+  props?: ObjectProps;
   createdAt: string;
   updatedAt: string;
   deletingAt?: string | null;
+  deletedAt?: string | null;
+  version: number;
+  dirty: boolean;
+}
+
+/** Which entity kinds an object type can archetype (mirrors core/domain AppliesTo*). */
+export type AppliesTo = "note" | "task" | "both";
+
+/** A field's declared type in an object schema (mirrors core/domain Field* constants). */
+export type ObjectFieldType =
+  | "text"
+  | "number"
+  | "date"
+  | "select"
+  | "multi_select"
+  | "reference"
+  | "checkbox"
+  | "url";
+
+/** One flat field definition in an object schema (mirrors core/domain.ObjectField). */
+export interface ObjectField {
+  key: string;
+  type: ObjectFieldType;
+  label?: string;
+  required?: boolean;
+  /** Choices for select / multi_select. */
+  options?: string[];
+  /** Target node type for a reference field ("note" | "task" | "habit"). */
+  to?: string;
+}
+
+/** The parsed schema envelope (mirrors core/domain.ObjectSchema). `fields` drives
+ *  validation + the form; `icon`/`color` are display config used to render archetyped
+ *  notes/tasks (e.g. in the graph). rules/steps/layout are reserved for later (PLAN §6.3). */
+export interface ObjectSchema {
+  fields: ObjectField[];
+  /** A design-system IconName; how this archetype's nodes are marked. */
+  icon?: string;
+  /** A hex color; how this archetype's nodes are tinted. */
+  color?: string;
+  rules?: unknown;
+  steps?: unknown;
+  layout?: unknown;
+}
+
+/** An object type / archetype definition (mirrors core/domain.ObjectType). `schemaJson`
+ *  crosses the wire as a JSON object (Go json.RawMessage), so it's already the parsed
+ *  schema envelope. */
+export interface ObjectType {
+  id: string;
+  name: string;
+  appliesTo: AppliesTo;
+  schemaVersion: number;
+  schemaJson: ObjectSchema;
+  createdAt: string;
+  updatedAt: string;
   deletedAt?: string | null;
   version: number;
   dirty: boolean;

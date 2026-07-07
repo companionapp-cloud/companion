@@ -17,6 +17,7 @@ const (
 	EntityArea          = "area"
 	EntityProject       = "project"
 	EntityProjectMember = "project_member"
+	EntityObjectType    = "object_type"
 	EntityChat          = "chat"
 	EntityChatMessage   = "chat_message"
 )

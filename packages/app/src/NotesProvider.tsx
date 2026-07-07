@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { Note } from "@companion/core-bridge";
+import type { Note, UpdateNoteInput } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
 import { useSync } from "./SyncProvider";
 
@@ -11,6 +11,8 @@ export interface NotesStore {
   remove: (id: string) => Promise<void>;
   /** Debounced, optimistic field save (per note). */
   save: (id: string, fields: { title?: string; contentMd?: string }) => void;
+  /** Immediate update for non-text fields (archetype, props — PLAN §6.3). */
+  update: (id: string, fields: UpdateNoteInput) => Promise<Note>;
 }
 
 const NotesCtx = createContext<NotesStore | null>(null);
@@ -70,6 +72,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     [api, syncTrigger],
   );
 
+  const update = useCallback(
+    async (id: string, fields: UpdateNoteInput) => {
+      const updated = await api.update(id, fields);
+      setNotes((prev) => prev.map((n) => (n.id === id ? updated : n)));
+      syncTrigger();
+      return updated;
+    },
+    [api, syncTrigger],
+  );
+
   const remove = useCallback(
     async (id: string) => {
       await api.remove(id);
@@ -87,8 +99,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       create,
       remove,
       save,
+      update,
     }),
-    [notes, loading, create, remove, save],
+    [notes, loading, create, remove, save, update],
   );
 
   return <NotesCtx.Provider value={value}>{children}</NotesCtx.Provider>;

@@ -3,7 +3,7 @@ import { ActivityIndicator, AppState, StyleSheet, Text, View } from 'react-nativ
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import EventSource from 'react-native-sse';
-import { CoreProvider, NotesProvider, TasksProvider, RemindersProvider, ProjectsProvider, SyncProvider, type NotificationScheduler } from '@companion/app';
+import { CoreProvider, NotesProvider, TasksProvider, RemindersProvider, ProjectsProvider, ObjectTypesProvider, SyncProvider, type NotificationScheduler } from '@companion/app';
 import { createNativeSyncNotifier, type CoreBridge, type SyncNotifier } from '@companion/core-bridge';
 import { MobileShell } from './src/MobileShell';
 import { openCore } from './src/core';
@@ -71,7 +71,9 @@ function Root() {
           <TasksProvider>
             <RemindersProvider scheduler={notificationScheduler} horizonDays={REMINDER_HORIZON_DAYS}>
               <ProjectsProvider>
-                <MobileShell />
+                <ObjectTypesProvider>
+                  <MobileShell />
+                </ObjectTypesProvider>
               </ProjectsProvider>
             </RemindersProvider>
           </TasksProvider>

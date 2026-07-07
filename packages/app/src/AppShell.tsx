@@ -33,6 +33,7 @@ import { NotesProvider } from "./NotesProvider";
 import { TasksProvider } from "./TasksProvider";
 import { RemindersProvider, type NotificationScheduler } from "./RemindersProvider";
 import { ProjectsProvider } from "./ProjectsProvider";
+import { ObjectTypesProvider } from "./ObjectTypesProvider";
 import { ProjectsSidebar } from "./ProjectsSidebar";
 import { ProjectView } from "./ProjectView";
 import { AppToolbar } from "./AppToolbar";
@@ -41,7 +42,7 @@ import { GraphScreen } from "./GraphScreen";
 import { TrashScreen } from "./TrashScreen";
 import { ChatsScreen } from "./ChatScreen";
 import { DndProvider, useDnd } from "./DndContext";
-import { SettingsPanel } from "./SettingsPanel";
+import { SettingsScreen } from "./SettingsScreen";
 import { useSync } from "./SyncProvider";
 
 // Monotonic tab uid so React keys are stable across reorders/overwrites even when two
@@ -98,6 +99,7 @@ function webLinking(): LinkingOptions<ParamListBase> | undefined {
         habits: "habits",
         graph: "graph",
         trash: "trash",
+        settings: "settings",
         // Deep-linkable project drill-down: /project/<id>[/<section>[/<itemId>]].
         project: "project/:projectId/:section?/:itemId?",
       },
@@ -396,6 +398,7 @@ export function AppShell({ topInset = 0, notificationScheduler }: AppShellProps)
       <TasksProvider>
        <RemindersProvider scheduler={notificationScheduler}>
         <ProjectsProvider>
+         <ObjectTypesProvider>
           <NavigationContainer linking={linking} documentTitle={{ enabled: false }}>
             <Nav.Navigator initialRouteName="notes" topInset={topInset}>
               <Nav.Screen name="chat" component={ChatsScreen} />
@@ -405,9 +408,11 @@ export function AppShell({ topInset = 0, notificationScheduler }: AppShellProps)
               <Nav.Screen name="habits" component={ViewScreen} />
               <Nav.Screen name="graph" component={GraphScreen} />
               <Nav.Screen name="trash" component={TrashScreen} />
+              <Nav.Screen name="settings" component={SettingsScreen} />
               <Nav.Screen name="project" component={ProjectView} />
             </Nav.Navigator>
           </NavigationContainer>
+         </ObjectTypesProvider>
         </ProjectsProvider>
        </RemindersProvider>
       </TasksProvider>
@@ -424,7 +429,6 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
   const sync = useSync();
   const dnd = useDnd();
   const [open, setOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [pinned, setPinned] = usePersistentBoolean("companion.sidebar.pinned", false);
   // Reveal the rail while dragging a document, so projects are available as drop targets.
   const expanded = open || pinned || dnd.dragging != null;
@@ -497,11 +501,11 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
 
         <View style={{ gap: space.sm, paddingTop: space.md }}>
           <RailItem
-            icon={<Icon name="settings" size={18} color={settingsOpen ? colors.accentHover : colors.textSecondary} />}
+            icon={<Icon name="settings" size={18} color={nav.activeView === "settings" ? colors.accentHover : colors.textSecondary} />}
             label="Settings"
-            active={settingsOpen}
+            active={nav.activeView === "settings"}
             expanded={expanded}
-            onPress={() => setSettingsOpen(true)}
+            onPress={() => nav.goView("settings")}
           />
           <View style={{ flexDirection: "row", alignItems: "center", gap: space.lg, paddingHorizontal: space.sm, height: 32 }}>
             <Avatar name="You" size="sm" />
@@ -525,8 +529,6 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
           {inWorkspace ? null : children}
         </Frame>
       </View>
-
-      {settingsOpen ? <SettingsPanel onClose={() => setSettingsOpen(false)} /> : null}
     </View>
   );
 }

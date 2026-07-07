@@ -4,6 +4,7 @@ import { SyncProvider } from "./SyncProvider";
 import { NotesProvider } from "./NotesProvider";
 import { TasksProvider } from "./TasksProvider";
 import { ProjectsProvider } from "./ProjectsProvider";
+import { ObjectTypesProvider } from "./ObjectTypesProvider";
 import { AppShell } from "./AppShell";
 import type { NotificationScheduler } from "./RemindersProvider";
 import { FocusView } from "./FocusView";
@@ -35,7 +36,9 @@ export function App({
           <NotesProvider>
             <TasksProvider>
               <ProjectsProvider>
-                <FocusView target={target} topInset={topInset} />
+                <ObjectTypesProvider>
+                  <FocusView target={target} topInset={topInset} />
+                </ObjectTypesProvider>
               </ProjectsProvider>
             </TasksProvider>
           </NotesProvider>

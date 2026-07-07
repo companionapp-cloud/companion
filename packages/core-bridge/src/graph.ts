@@ -7,7 +7,15 @@ export interface GraphNode {
   title: string;
   objectTypeId?: string | null;
   status?: string | null;
+  /** Client-side display enrichment (not from core): the archetype's chosen color / icon,
+   *  resolved from its object type so the renderer can mark objects distinctly. */
+  objectColor?: string | null;
+  objectIcon?: string | null;
 }
+
+/** A derived edge in the link index. Beyond the fixed kinds, reference-typed object props
+ *  produce dynamic `prop:<field>` kinds (PLAN §4.1, §6.3). */
+export type GraphEdgeKind = "ref" | "embed" | "stack" | "member" | `prop:${string}`;
 
 /** A derived edge in the link index. */
 export interface GraphEdge {
@@ -15,7 +23,7 @@ export interface GraphEdge {
   sourceId: string;
   targetType: string;
   targetId: string;
-  kind: "ref" | "embed" | "stack" | "member";
+  kind: GraphEdgeKind;
 }
 
 export interface Graph {
