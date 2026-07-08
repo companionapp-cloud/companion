@@ -310,8 +310,11 @@ const styles = {
     paddingHorizontal: space.lg,
     paddingTop: space.lg,
     paddingBottom: space.md,
+    // Sit above the search row so the filter dropdown, which overflows the
+    // header, paints over the sibling input instead of behind it.
+    zIndex: 2,
   },
-  search: { paddingHorizontal: space.md, paddingBottom: space.md },
+  search: { paddingHorizontal: space.md, paddingBottom: space.md, zIndex: 1 },
   empty: { padding: space.xxl, textAlign: "center" as const, lineHeight: 20 },
   doneLabel: { fontWeight: "600" as const, letterSpacing: 0.5, paddingHorizontal: space.md, paddingTop: space.lg, paddingBottom: space.xs },
   detail: { flex: 1, minWidth: 0, backgroundColor: colors.surfaceCard },

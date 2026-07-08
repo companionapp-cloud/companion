@@ -34,6 +34,42 @@ func TestPlanTasks(t *testing.T) {
 	}
 }
 
+func TestFeedTasks(t *testing.T) {
+	now := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
+	at := func(d time.Duration) *time.Time { v := now.Add(d); return &v }
+
+	tasks := []*domain.Task{
+		{ID: "fired-recent", Title: "Call bank", Status: domain.TaskOpen, RemindAt: at(-2 * time.Hour)},
+		{ID: "fired-older", Title: "Water plants", Status: domain.TaskOpen, RemindAt: at(-48 * time.Hour)},
+		{ID: "fired-done", Title: "Done", Status: domain.TaskDone, RemindAt: at(-time.Hour)},          // settled: kept, flagged
+		{ID: "fired-stale", Title: "Stale", Status: domain.TaskOpen, RemindAt: at(-15 * 24 * time.Hour)}, // beyond lookback
+		{ID: "upcoming", Title: "Future", Status: domain.TaskOpen, RemindAt: at(time.Hour)},           // hasn't fired
+		{ID: "trashed", Title: "Trashed", Status: domain.TaskOpen, RemindAt: at(-time.Hour), DeletingAt: at(0)},
+		{ID: "due-fired", Title: "Ship it", Status: domain.TaskOpen, DueAt: at(-3 * time.Hour)}, // due, no reminder
+		{ID: "no-time", Title: "Someday", Status: domain.TaskOpen},
+	}
+
+	got := FeedTasks(tasks, now, 14*24*time.Hour)
+	wantOrder := []string{"fired-done", "fired-recent", "due-fired", "fired-older"} // newest first
+	if len(got) != len(wantOrder) {
+		t.Fatalf("feed has %d items, want %d: %+v", len(got), len(wantOrder), got)
+	}
+	for i, id := range wantOrder {
+		if got[i].TaskID != id {
+			t.Errorf("feed[%d] = %q, want %q (feed %+v)", i, got[i].TaskID, id, got)
+		}
+	}
+	for _, item := range got {
+		wantSettled := item.TaskID == "fired-done"
+		if item.Settled != wantSettled {
+			t.Errorf("%s settled = %v, want %v", item.TaskID, item.Settled, wantSettled)
+		}
+	}
+	if got[2].Kind != KindDue {
+		t.Errorf("due-fired kind = %q, want %q", got[2].Kind, KindDue)
+	}
+}
+
 func TestSettledReminderIDs(t *testing.T) {
 	now := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
 	at := func(d time.Duration) *time.Time { v := now.Add(d); return &v }

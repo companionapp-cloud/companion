@@ -193,6 +193,8 @@ func New(st *store.Store, t Transport, clock domain.Clock) *Engine {
 	// reference their chat by id; a message arriving before its chat is a tolerated dangle.
 	e.register(newRepoSyncer[*domain.Chat](st.Chats, clock))
 	e.register(newRepoSyncer[*domain.ChatMessage](st.ChatMessages, clock))
+	// Notification read receipts (§6.4): deterministic ids make cross-device reads converge.
+	e.register(newRepoSyncer[*domain.NotificationRead](st.NotificationReads, clock))
 	return e
 }
 

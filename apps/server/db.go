@@ -176,6 +176,20 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_chat_messages_user_seq ON chat_messages (user_id, server_seq);
 
+CREATE TABLE IF NOT EXISTS notification_reads (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  task_id    TEXT NOT NULL,
+  fire_at    TEXT NOT NULL,
+  read_at    TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  version    BIGINT NOT NULL DEFAULT 1,
+  server_seq BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notification_reads_user_seq ON notification_reads (user_id, server_seq);
+
 CREATE TABLE IF NOT EXISTS user_secrets (
   user_id    TEXT NOT NULL,
   key        TEXT NOT NULL,

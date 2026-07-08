@@ -153,6 +153,15 @@ export interface TaskNotification {
   body: string;
 }
 
+/** One entry in the in-app notification feed (mirrors bridge notificationFeedItem): a
+ *  fire that already happened, its task's settled state, and whether the user read it. */
+export interface NotificationFeedItem extends TaskNotification {
+  /** The task is done/cancelled — show the entry muted. */
+  settled: boolean;
+  /** The user read this notification (synced across devices). */
+  read: boolean;
+}
+
 /** The kinds of entity that can be trashed (mirrors the server's trashable tables). */
 export type TrashEntityType = "note" | "task" | "habit";
 

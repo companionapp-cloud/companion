@@ -9,6 +9,7 @@ import { HomeScreen } from './screens/HomeScreen';
 import { NotesListScreen } from './screens/NotesListScreen';
 import { NoteEditorScreen } from './screens/NoteEditorScreen';
 import { TasksListScreen } from './screens/TasksListScreen';
+import { NotificationsScreen } from './screens/NotificationsScreen';
 import { TaskEditorScreen } from './screens/TaskEditorScreen';
 import { TaskGraphScreen } from './screens/TaskGraphScreen';
 import { NoteGraphScreen } from './screens/NoteGraphScreen';
@@ -38,6 +39,7 @@ export type RootStackParamList = {
   Calendar: undefined;
   Graph: undefined;
   Trash: undefined;
+  Notifications: undefined;
   // A project and its scoped tab bar.
   Project: { projectId: string };
   // Shared detail/overlay screens.
@@ -110,6 +112,7 @@ export function MobileShell() {
         <RootStack.Screen name="Calendar" component={PlaceholderScreen} options={{ title: 'Calendar' }} />
         <RootStack.Screen name="Graph" component={GraphScreen} options={{ title: 'Graph' }} />
         <RootStack.Screen name="Trash" component={TrashScreen} options={{ title: 'Trash' }} />
+        <RootStack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifications' }} />
         <RootStack.Screen name="Project" component={ProjectScreen} />
         <RootStack.Screen name="NoteEditor" component={NoteEditorScreen} options={{ title: '' }} />
         <RootStack.Screen name="TaskEditor" component={TaskEditorScreen} options={{ title: 'Task' }} />

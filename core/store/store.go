@@ -23,6 +23,9 @@ type Store struct {
 	LLMConfigs     *LLMConfigsRepo
 	Chats          *ChatsRepo
 	ChatMessages   *ChatMessagesRepo
+	// NotificationReads marks in-app notifications read; the feed itself is derived
+	// from tasks (PLAN §6.4).
+	NotificationReads *NotificationReadsRepo
 }
 
 // New builds a Store over an already-open Driver, applying pending migrations. A nil
@@ -63,6 +66,8 @@ func New(d Driver, clock domain.Clock) (*Store, error) {
 	// Chats + their messages persist and sync conversations across devices (§6.8).
 	s.Chats = &ChatsRepo{db: d, clock: clock}
 	s.ChatMessages = &ChatMessagesRepo{db: d, clock: clock}
+	// Read receipts for the in-app notification feed (PLAN §6.4).
+	s.NotificationReads = &NotificationReadsRepo{db: d, clock: clock}
 	return s, nil
 }
 

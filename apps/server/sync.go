@@ -60,8 +60,9 @@ func (s *Server) handlers() map[string]*entityHandler {
 			protocol.EntityProject:       projectHandler,
 			protocol.EntityProjectMember: memberHandler,
 			protocol.EntityObjectType:    objectTypeHandler,
-			protocol.EntityChat:          chatHandler,
-			protocol.EntityChatMessage:   chatMessageHandler,
+			protocol.EntityChat:             chatHandler,
+			protocol.EntityChatMessage:      chatMessageHandler,
+			protocol.EntityNotificationRead: notificationReadHandler,
 		}
 	}
 	return s.entities

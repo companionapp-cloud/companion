@@ -123,6 +123,12 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.notifyPlan(payload)
 	case "notify.dismissed":
 		return c.notifyDismissed(payload)
+	case "notify.feed":
+		return c.notifyFeed(payload)
+	case "notify.markRead":
+		return c.notifyMarkRead(payload)
+	case "notify.markAllRead":
+		return c.notifyMarkAllRead(payload)
 	case "dates.parse":
 		return c.datesParse(payload)
 	case "trash.list":

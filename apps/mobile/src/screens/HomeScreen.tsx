@@ -4,7 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { SidebarProject } from '@companion/core-bridge';
-import { useNotes, useProjects, useTasks, useCore, SortableList } from '@companion/app';
+import { useNotes, useProjects, useTasks, useCore, useNotifications, SortableList } from '@companion/app';
 import { Icon, IconButton, Input, ProgressRing, Text, colors, font, radius, space, type IconName } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
 import { Card, CardRow, CountPill, IconTile, SectionLabel } from '../ui/native';
@@ -66,6 +66,7 @@ export function HomeScreen() {
           </Text>
           <Text style={styles.greeting}>What's new today?</Text>
         </View>
+        <BellButton onPress={() => nav.navigate('Notifications')} />
         <Pressable onPress={() => setEditing((v) => !v)} style={styles.editBtn} aria-label={editing ? 'Done reordering' : 'Edit'}>
           <Text variant="label" style={{ color: colors.accent, fontWeight: font.weight.semibold }}>
             {editing ? 'Done' : 'Edit'}
@@ -514,6 +515,21 @@ function dateLabel(): string {
   return `${weekday} · ${month} ${d.getDate()}`.toUpperCase();
 }
 
+/** Header bell: opens the notifications feed, with an unread-count badge (PLAN §6.4). */
+function BellButton({ onPress }: { onPress: () => void }) {
+  const { unreadCount } = useNotifications();
+  return (
+    <Pressable onPress={onPress} style={styles.bellBtn} aria-label="Notifications">
+      <Icon name="bell" size={20} color={colors.textSecondary} />
+      {unreadCount > 0 ? (
+        <View style={styles.bellBadge} pointerEvents="none">
+          <Text style={styles.bellBadgeLabel}>{unreadCount > 9 ? '9+' : String(unreadCount)}</Text>
+        </View>
+      ) : null}
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.surfaceApp },
   header: {
@@ -530,6 +546,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.md,
     justifyContent: 'center',
   },
+  bellBtn: {
+    minHeight: 40,
+    paddingHorizontal: space.sm,
+    justifyContent: 'center',
+  },
+  bellBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 0,
+    minWidth: 15,
+    height: 15,
+    paddingHorizontal: 3,
+    borderRadius: radius.full,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bellBadgeLabel: { color: colors.onAccent, fontSize: 9, lineHeight: 11, fontWeight: font.weight.bold },
   scroll: { paddingHorizontal: space.xl, paddingTop: space.xs },
   areasHeader: { flexDirection: 'row', alignItems: 'center', marginTop: space.xl },
   moreSection: { marginTop: space.lg },

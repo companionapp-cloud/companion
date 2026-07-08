@@ -32,6 +32,8 @@ import { openFocusWindow } from "./focus";
 import { NotesProvider } from "./NotesProvider";
 import { TasksProvider } from "./TasksProvider";
 import { RemindersProvider, type NotificationScheduler } from "./RemindersProvider";
+import { NotificationsProvider } from "./NotificationsProvider";
+import { NotificationsScreen } from "./NotificationsScreen";
 import { ProjectsProvider } from "./ProjectsProvider";
 import { ObjectTypesProvider } from "./ObjectTypesProvider";
 import { ProjectsSidebar } from "./ProjectsSidebar";
@@ -100,6 +102,7 @@ function webLinking(): LinkingOptions<ParamListBase> | undefined {
         graph: "graph",
         trash: "trash",
         settings: "settings",
+        notifications: "notifications",
         // Deep-linkable project drill-down: /project/<id>[/<section>[/<itemId>]].
         project: "project/:projectId/:section?/:itemId?",
       },
@@ -115,6 +118,13 @@ function NotesRouteScreen() {
 }
 function TasksRouteScreen() {
   return null;
+}
+
+// Adapts the navigator-free NotificationsScreen to this shell: opening an entry's task
+// selects it in the workspace tab strip.
+function NotificationsRouteScreen() {
+  const nav = useNav();
+  return <NotificationsScreen onOpenTask={nav.openTask} />;
 }
 
 function ViewScreen() {
@@ -397,6 +407,7 @@ export function AppShell({ topInset = 0, notificationScheduler }: AppShellProps)
     <NotesProvider>
       <TasksProvider>
        <RemindersProvider scheduler={notificationScheduler}>
+        <NotificationsProvider>
         <ProjectsProvider>
          <ObjectTypesProvider>
           <NavigationContainer linking={linking} documentTitle={{ enabled: false }}>
@@ -409,11 +420,13 @@ export function AppShell({ topInset = 0, notificationScheduler }: AppShellProps)
               <Nav.Screen name="graph" component={GraphScreen} />
               <Nav.Screen name="trash" component={TrashScreen} />
               <Nav.Screen name="settings" component={SettingsScreen} />
+              <Nav.Screen name="notifications" component={NotificationsRouteScreen} />
               <Nav.Screen name="project" component={ProjectView} />
             </Nav.Navigator>
           </NavigationContainer>
          </ObjectTypesProvider>
         </ProjectsProvider>
+        </NotificationsProvider>
        </RemindersProvider>
       </TasksProvider>
     </NotesProvider>

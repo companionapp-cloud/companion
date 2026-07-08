@@ -64,6 +64,54 @@ func PlanTasks(tasks []*domain.Task, now time.Time, horizon time.Duration) []Not
 	return out
 }
 
+// FeedItem is one entry in the in-app notification feed: a fire that already happened,
+// plus whether its task has since settled (done/cancelled) so the UI can mute it.
+type FeedItem struct {
+	Notification
+	Settled bool `json:"settled"`
+}
+
+// FeedTasks returns the fires that already happened in the trailing window [now-lookback,
+// now], newest first — the in-app notification feed (the mirror image of PlanTasks, which
+// looks forward). Trashed/deleted tasks drop out entirely; settled (done/cancelled) tasks
+// keep their past fires as history, flagged Settled. The reminder-over-due precedence
+// matches PlanTasks so the feed lists exactly what the OS surfaced.
+func FeedTasks(tasks []*domain.Task, now time.Time, lookback time.Duration) []FeedItem {
+	start := now.Add(-lookback)
+	out := []FeedItem{}
+	for _, t := range tasks {
+		if t == nil || t.DeletedAt != nil || t.DeletingAt != nil {
+			continue
+		}
+		title := t.Title
+		if title == "" {
+			title = "Untitled task"
+		}
+		settled := t.Status != domain.TaskOpen
+		// (start, now] — a fire exactly at `now` has happened; one older than the lookback
+		// has aged out of the feed.
+		switch {
+		case t.RemindAt != nil && inWindow(*t.RemindAt, start, now):
+			out = append(out, FeedItem{Settled: settled, Notification: Notification{
+				TaskID: t.ID, Kind: KindReminder, FireAt: t.RemindAt.UTC(),
+				Title: title, Body: reminderBody(t),
+			}})
+		case t.RemindAt == nil && t.DueAt != nil && inWindow(*t.DueAt, start, now):
+			out = append(out, FeedItem{Settled: settled, Notification: Notification{
+				TaskID: t.ID, Kind: KindDue, FireAt: t.DueAt.UTC(),
+				Title: title, Body: "Due now",
+			}})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].FireAt.Equal(out[j].FireAt) {
+			return out[i].TaskID < out[j].TaskID
+		}
+		return out[i].FireAt.After(out[j].FireAt)
+	})
+	return out
+}
+
 // SettledReminderIDs returns the ids of tasks whose reminder/due notification has already
 // fired but that are now **settled** — completed, cancelled, trashed, or deleted — so the
 // shell can dismiss any notification still sitting in the tray for them (PLAN §6.4). Cancelling

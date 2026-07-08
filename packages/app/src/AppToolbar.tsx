@@ -3,6 +3,7 @@ import { Icon, IconButton, Tab, Toolbar, colors, space } from "@companion/design
 import { useNav } from "./nav-context";
 import { useNotes } from "./NotesProvider";
 import { useTasks } from "./TasksProvider";
+import { NotificationsBell } from "./NotificationsBell";
 import { Draggable } from "./DndContext";
 
 /** The app's top toolbar: back/forward history, the shared workspace tab strip (notes and
@@ -76,6 +77,7 @@ export function AppToolbar() {
         <View style={{ flex: 1, alignSelf: "stretch" }} />
       </ScrollView>
 
+      <NotificationsBell />
       {inNotes || inTasks ? (
         <IconButton label={inTasks ? "New task" : "New note"} onPress={onCreate}>
           <Icon name="plus" color={colors.textSecondary} />

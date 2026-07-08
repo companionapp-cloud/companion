@@ -9,6 +9,7 @@ export type {
   Task,
   TaskStatus,
   TaskNotification,
+  NotificationFeedItem,
   RepeatingTask,
   RepeatPreview,
   Area,

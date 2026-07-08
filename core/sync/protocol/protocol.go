@@ -20,6 +20,8 @@ const (
 	EntityObjectType    = "object_type"
 	EntityChat          = "chat"
 	EntityChatMessage   = "chat_message"
+	// A read receipt for one in-app notification fire (PLAN §6.4).
+	EntityNotificationRead = "notification_read"
 )
 
 // Push statuses.

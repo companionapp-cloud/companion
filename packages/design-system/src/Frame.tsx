@@ -42,6 +42,9 @@ const styles = StyleSheet.create({
     height: layout.toolbarH,
     paddingHorizontal: space.xxl,
     flexShrink: 0,
+    // Above the content card (a later sibling), so toolbar popovers (e.g. the
+    // notifications bell) overlay it instead of sliding underneath.
+    zIndex: 10,
   },
   title: { flexDirection: "row", alignItems: "center", gap: space.md, minWidth: 0 },
   card: {

@@ -663,6 +663,87 @@ func scanServerChatMessage(sc rowScanner) (*domain.ChatMessage, int64, error) {
 	return &m, seq, nil
 }
 
+// ---- notification reads ----------------------------------------------------
+
+const notificationReadCols = `id, task_id, fire_at, read_at, created_at, updated_at, deleted_at, version, server_seq`
+
+var notificationReadHandler = &entityHandler{
+	typ:   protocol.EntityNotificationRead,
+	table: "notification_reads",
+	upsert: func(s *Server, tx *sql.Tx, uid string, raw []byte, updatedAt time.Time, version, seq int64) error {
+		var n domain.NotificationRead
+		if err := json.Unmarshal(raw, &n); err != nil {
+			return err
+		}
+		var deletedAt any
+		if n.DeletedAt != nil {
+			deletedAt = n.DeletedAt.UTC().Format(timeFormat)
+		}
+		_, err := tx.Exec(s.rebind(
+			`INSERT INTO notification_reads (id, user_id, task_id, fire_at, read_at, created_at, updated_at, deleted_at, version, server_seq)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT (id) DO UPDATE SET
+			   task_id = excluded.task_id, fire_at = excluded.fire_at, read_at = excluded.read_at,
+			   updated_at = excluded.updated_at, deleted_at = excluded.deleted_at,
+			   version = excluded.version, server_seq = excluded.server_seq;`),
+			n.ID, uid, n.TaskID, n.FireAt.UTC().Format(timeFormat), n.ReadAt.UTC().Format(timeFormat),
+			n.CreatedAt.UTC().Format(timeFormat), updatedAt.Format(timeFormat), deletedAt, version, seq)
+		return err
+	},
+	loadRaw: func(s *Server, tx *sql.Tx, uid, id string) ([]byte, error) {
+		row := tx.QueryRow(s.rebind(`SELECT `+notificationReadCols+` FROM notification_reads WHERE id = ? AND user_id = ?;`), id, uid)
+		n, _, err := scanServerNotificationRead(row)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(n)
+	},
+	pull: func(s *Server, uid string, cursor, limit int64) ([]seqRow, error) {
+		rows, err := s.query(`SELECT `+notificationReadCols+` FROM notification_reads WHERE user_id = ? AND server_seq > ? ORDER BY server_seq ASC LIMIT ?;`, uid, cursor, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var out []seqRow
+		for rows.Next() {
+			n, seq, err := scanServerNotificationRead(rows)
+			if err != nil {
+				return nil, err
+			}
+			body, err := json.Marshal(n)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, seqRow{seq, protocol.PullChange{EntityType: protocol.EntityNotificationRead, Row: body, ServerSeq: seq}})
+		}
+		return out, rows.Err()
+	},
+}
+
+func scanServerNotificationRead(sc rowScanner) (*domain.NotificationRead, int64, error) {
+	var (
+		n                    domain.NotificationRead
+		fireAt, readAt       string
+		deletedAt            sql.NullString
+		createdAt, updatedAt string
+		seq                  int64
+	)
+	if err := sc.Scan(&n.ID, &n.TaskID, &fireAt, &readAt, &createdAt, &updatedAt, &deletedAt, &n.Version, &seq); err != nil {
+		return nil, 0, err
+	}
+	var err error
+	if n.FireAt, err = time.Parse(timeFormat, fireAt); err != nil {
+		return nil, 0, err
+	}
+	if n.ReadAt, err = time.Parse(timeFormat, readAt); err != nil {
+		return nil, 0, err
+	}
+	if err := parseTimes(createdAt, updatedAt, deletedAt, &n.CreatedAt, &n.UpdatedAt, &n.DeletedAt); err != nil {
+		return nil, 0, err
+	}
+	return &n, seq, nil
+}
+
 // rawStrOrNil converts a possibly-empty json.RawMessage to a nullable text column value.
 func rawStrOrNil(r json.RawMessage) any {
 	if len(r) == 0 {

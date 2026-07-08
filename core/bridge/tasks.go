@@ -226,3 +226,96 @@ func (c *Core) notifyDismissed(payload []byte) ([]byte, error) {
 	ids := notify.SettledReminderIDs(tasks, time.Now().UTC(), time.Duration(args.HorizonDays)*24*time.Hour)
 	return json.Marshal(ids)
 }
+
+// notificationsChangedEvent signals the in-app notification feed to refresh after a
+// local read-state change (PLAN §6.4). Remote reads arrive via data.changed (sync pull).
+const notificationsChangedEvent = "notifications.changed"
+
+// notificationFeedItem is one wire row of the in-app feed: the derived fire plus whether
+// this user has read it (joined from the synced read receipts).
+type notificationFeedItem struct {
+	notify.FeedItem
+	Read bool `json:"read"`
+}
+
+// notifyFeed returns the in-app notification feed: fires from the trailing window (default
+// 14 days), newest first, each flagged read/unread (PLAN §6.4). The feed is derived live
+// from tasks; only the read receipts are stored.
+func (c *Core) notifyFeed(payload []byte) ([]byte, error) {
+	var args struct {
+		LookbackDays int `json:"lookbackDays"`
+	}
+	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	if args.LookbackDays <= 0 {
+		args.LookbackDays = 14
+	}
+	tasks, err := c.store.Tasks.List()
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	lookback := time.Duration(args.LookbackDays) * 24 * time.Hour
+	feed := notify.FeedTasks(tasks, now, lookback)
+	read, err := c.store.NotificationReads.ReadIDs(now.Add(-lookback))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]notificationFeedItem, 0, len(feed))
+	for _, f := range feed {
+		out = append(out, notificationFeedItem{FeedItem: f, Read: read[domain.NotificationReadID(f.TaskID, f.FireAt)]})
+	}
+	return json.Marshal(out)
+}
+
+// notifyMarkRead marks one feed item read (PLAN §6.4). The receipt row syncs, so the
+// notification reads as read on every device.
+func (c *Core) notifyMarkRead(payload []byte) ([]byte, error) {
+	var args struct {
+		TaskID string    `json:"taskId"`
+		FireAt time.Time `json:"fireAt"`
+	}
+	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	if _, err := c.store.NotificationReads.MarkRead(args.TaskID, args.FireAt); err != nil {
+		return nil, mapStoreErr(err)
+	}
+	c.emit(notificationsChangedEvent, nil)
+	return json.Marshal(map[string]bool{"ok": true})
+}
+
+// notifyMarkAllRead marks every currently-unread feed item read (PLAN §6.4).
+func (c *Core) notifyMarkAllRead(payload []byte) ([]byte, error) {
+	var args struct {
+		LookbackDays int `json:"lookbackDays"`
+	}
+	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	if args.LookbackDays <= 0 {
+		args.LookbackDays = 14
+	}
+	tasks, err := c.store.Tasks.List()
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	lookback := time.Duration(args.LookbackDays) * 24 * time.Hour
+	feed := notify.FeedTasks(tasks, now, lookback)
+	read, err := c.store.NotificationReads.ReadIDs(now.Add(-lookback))
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range feed {
+		if read[domain.NotificationReadID(f.TaskID, f.FireAt)] {
+			continue
+		}
+		if _, err := c.store.NotificationReads.MarkRead(f.TaskID, f.FireAt); err != nil {
+			return nil, mapStoreErr(err)
+		}
+	}
+	c.emit(notificationsChangedEvent, nil)
+	return json.Marshal(map[string]bool{"ok": true})
+}
