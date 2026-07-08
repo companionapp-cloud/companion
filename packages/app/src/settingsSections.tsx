@@ -3,8 +3,9 @@ import type { IconName } from "@companion/design-system";
 import { SyncSettings } from "./SyncSettings";
 import { LlmSettings } from "./LlmSettings";
 import { ObjectTypeSettings } from "./ObjectTypeSettings";
+import { ToolSettings } from "./ToolSettings";
 
-export type SettingsSectionId = "sync" | "ai" | "objects";
+export type SettingsSectionId = "sync" | "ai" | "objects" | "tools";
 
 /** One entry in the settings navigation list (PLAN §3.1 shell). Each section is a
  *  self-contained component that reads its own data through the app providers, so the
@@ -38,6 +39,13 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
     description: "Archetypes that give notes and tasks structured fields",
     icon: "file",
     Component: ObjectTypeSettings,
+  },
+  {
+    id: "tools",
+    label: "Tools",
+    description: "Which tools show in the sidebar on this device",
+    icon: "panelLeft",
+    Component: ToolSettings,
   },
 ];
 

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	neturl "net/url"
 	"strings"
 	"testing"
 )
@@ -74,6 +75,38 @@ func TestParseGoogleResults(t *testing.T) {
 	}
 }
 
+// TestPostSearchHTML checks the search POST helper: it must POST (not GET), form-encode the
+// query, and present a real browser User-Agent — the combination DuckDuckGo's HTML endpoint
+// requires to return results instead of an anti-bot challenge page.
+func TestPostSearchHTML(t *testing.T) {
+	var gotMethod, gotUA, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotUA = r.Header.Get("User-Agent")
+		r.ParseForm()
+		gotQuery = r.Form.Get("q")
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	body, err := postSearchHTML(context.Background(), srv.URL, neturl.Values{"q": {"go testing"}})
+	if err != nil {
+		t.Fatalf("postSearchHTML: %v", err)
+	}
+	if body != "ok" {
+		t.Errorf("body = %q", body)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %q, want POST", gotMethod)
+	}
+	if gotQuery != "go testing" {
+		t.Errorf("form q = %q", gotQuery)
+	}
+	if !strings.Contains(gotUA, "Mozilla/") || strings.Contains(gotUA, "CompanionBot") {
+		t.Errorf("expected a browser User-Agent, got %q", gotUA)
+	}
+}
+
 // TestParseDDGResults checks DuckDuckGo HTML parsing incl. uddg redirect decoding and
 // snippet pairing.
 func TestParseDDGResults(t *testing.T) {
@@ -92,5 +125,14 @@ func TestParseDDGResults(t *testing.T) {
 	}
 	if res[0].Snippet != "A short summary." {
 		t.Errorf("snippet = %q", res[0].Snippet)
+	}
+
+	// DuckDuckGo now also serves plain direct-target hrefs (no uddg redirect); those must
+	// parse straight through.
+	direct := `<a class="result__a" href="https://pkg.go.dev/testing">Package testing</a>
+	<a class="result__snippet" href="https://pkg.go.dev/testing">Provides support for tests.</a>`
+	dres := parseDDGResults(direct, 8)
+	if len(dres) != 1 || dres[0].URL != "https://pkg.go.dev/testing" || dres[0].Title != "Package testing" {
+		t.Fatalf("direct-link parse failed: %+v", dres)
 	}
 }

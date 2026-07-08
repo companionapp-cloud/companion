@@ -28,7 +28,7 @@ func (p *OpenAIProvider) Name() string { return "openai" }
 
 // oaMessage / oaTool are the wire shapes for the request body.
 type oaMessage struct {
-	Role       string       `json:"role"`
+	Role string `json:"role"`
 	// content is always emitted (no omitempty): an assistant message that carries only
 	// tool_calls has empty text, and dropping the field entirely makes strict servers (e.g.
 	// Ollama) reject it with "invalid message content type: <nil>". An empty string is
@@ -82,6 +82,44 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest, onDelta Delt
 		return nil, apiError(p.Name(), resp)
 	}
 	return p.readStream(resp.Body, onDelta)
+}
+
+// ListModels fetches the models the endpoint offers via GET /models (the OpenAI-compatible
+// listing, which Ollama, LM Studio, and OpenRouter all serve), returning their ids sorted.
+func (p *OpenAIProvider) ListModels(ctx context.Context) ([]string, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		strings.TrimRight(p.BaseURL, "/")+"/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Accept", "application/json")
+	if p.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.APIKey)
+	}
+	resp, err := p.httpClient().Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, apiError(p.Name(), resp)
+	}
+	var body struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, fmt.Errorf("%s: decode models: %w", p.Name(), err)
+	}
+	ids := make([]string, 0, len(body.Data))
+	for _, m := range body.Data {
+		if m.ID != "" {
+			ids = append(ids, m.ID)
+		}
+	}
+	sort.Strings(ids)
+	return ids, nil
 }
 
 // encodeMessages flattens the neutral transcript into OpenAI messages: the system prompt

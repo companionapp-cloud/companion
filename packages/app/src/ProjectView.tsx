@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
-import type { Note, ProjectMember, Task } from "@companion/core-bridge";
+import type { Note, ProjectMember, RepeatingTask, Task } from "@companion/core-bridge";
 import {
   Button,
   Center,
@@ -24,6 +24,7 @@ import { useTasks } from "./TasksProvider";
 import { NoteEditor } from "./NoteEditor";
 import { TaskEditor, TaskRow } from "./TaskEditor";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { repeatSubtitle } from "./repeat";
 
 const SECTIONS: { id: ProjectSection; label: string; icon: IconName }[] = [
   { id: "notes", label: "Notes", icon: "notes" },
@@ -68,8 +69,15 @@ export function ProjectView() {
     [noteMembers, notesStore],
   );
   const taskMembers = useMemo(() => members.filter((m) => m.entityType === "task"), [members]);
+  // Actionable member tasks. Repeating-task seeds are members too but live in `seeds`
+  // (excluded from the actionable list), so they're resolved separately below and shown in
+  // their own "Repeating" section — matching the root task list (§6.4).
   const tasks = useMemo(
     () => taskMembers.map((m) => tasksStore.byId(m.entityId)).filter((t): t is Task => !!t),
+    [taskMembers, tasksStore],
+  );
+  const seeds = useMemo(
+    () => taskMembers.map((m) => tasksStore.seedById(m.entityId)).filter((s): s is RepeatingTask => !!s),
     [taskMembers, tasksStore],
   );
 
@@ -84,7 +92,7 @@ export function ProjectView() {
   }
 
   return (
-    <SplitView storageKey="companion.project.listWidth" defaultWidth={layout.listW} minWidth={240} maxWidth={460} aside={<ListColumn notes={notes} tasks={tasks} noteCount={noteMembers.length} taskCount={taskMembers.length} />}>
+    <SplitView storageKey="companion.project.listWidth" defaultWidth={layout.listW} minWidth={240} maxWidth={460} aside={<ListColumn notes={notes} tasks={tasks} seeds={seeds} noteCount={noteMembers.length} taskCount={taskMembers.length} />}>
       <DetailPane notes={notes} />
     </SplitView>
   );
@@ -92,7 +100,7 @@ export function ProjectView() {
 
 /** The list column: a two-level push sub-nav. Level 0 shows the section menu; pressing
  * a section pushes to that section's item list (with a back to the menu). */
-function ListColumn({ notes, tasks, noteCount, taskCount }: { notes: Note[]; tasks: Task[]; noteCount: number; taskCount: number }) {
+function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note[]; tasks: Task[]; seeds: RepeatingTask[]; noteCount: number; taskCount: number }) {
   const nav = useNav();
   const notesStore = useNotes();
   const tasksStore = useTasks();
@@ -152,16 +160,35 @@ function ListColumn({ notes, tasks, noteCount, taskCount }: { notes: Note[]; tas
               </Text>
             )
           ) : section === "tasks" ? (
-            tasks.length ? (
-              tasks.map((t) => (
-                <TaskRow
-                  key={t.id}
-                  task={t}
-                  selected={t.id === itemId}
-                  onPress={() => nav.openProjectItem(projectId, "tasks", t.id)}
-                  onToggle={() => void tasksStore.setStatus(t.id, t.status === "done" ? "open" : "done")}
-                />
-              ))
+            tasks.length || seeds.length ? (
+              <>
+                {tasks.map((t) => (
+                  <TaskRow
+                    key={t.id}
+                    task={t}
+                    selected={t.id === itemId}
+                    onPress={() => nav.openProjectItem(projectId, "tasks", t.id)}
+                    onToggle={() => void tasksStore.setStatus(t.id, t.status === "done" ? "open" : "done")}
+                  />
+                ))}
+                {seeds.length ? (
+                  <>
+                    <Text variant="caption" tone="tertiary" style={styles.sectionLabel}>
+                      REPEATING · {seeds.length}
+                    </Text>
+                    {seeds.map((s) => (
+                      <ListRow
+                        key={s.id}
+                        icon={<Icon name="repeat" size={16} color={s.id === itemId ? colors.accentHover : colors.textTertiary} />}
+                        title={s.title || "Untitled task"}
+                        subtitle={repeatSubtitle(s.repeatRule, s.nextOccurrence)}
+                        selected={s.id === itemId}
+                        onPress={() => nav.openProjectItem(projectId, "tasks", s.id)}
+                      />
+                    ))}
+                  </>
+                ) : null}
+              </>
             ) : (
               <Text tone="tertiary" variant="caption" style={styles.empty}>
                 No tasks yet. Add one with ＋, or add existing tasks from a task’s “Projects” menu.
@@ -235,7 +262,7 @@ function DetailPane({ notes }: { notes: Note[] }) {
   }
 
   if (section === "tasks" && itemId) {
-    const task = tasksStore.byId(itemId);
+    const task = tasksStore.byId(itemId) ?? tasksStore.seedById(itemId);
     if (!task) {
       return (
         <Center>
@@ -373,6 +400,7 @@ const styles = {
     borderBottomColor: colors.borderSubtle,
   },
   empty: { padding: space.xl, lineHeight: 20, textAlign: "center" as const },
+  sectionLabel: { fontWeight: "600" as const, letterSpacing: 0.5, paddingHorizontal: space.md, paddingTop: space.lg, paddingBottom: space.xs },
   home: { maxWidth: layout.contentMax, width: "100%" as const, marginHorizontal: "auto" as const, padding: space.xxl, gap: space.lg },
   titleRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.md },
   dot: { width: 12, height: 12, borderRadius: radius.full, flexShrink: 0 },

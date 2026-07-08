@@ -47,7 +47,7 @@ func NewStoreRegistry(s *store.Store) *Registry {
 	r.Add(Tool{
 		Spec: ToolSpec{
 			Name:        "search_notes",
-			Description: "Full-text search the user's notes and tasks. Call this whenever the user refers to something they have written or asks a question that their own notes/tasks might answer. Returns matching notes and tasks with a snippet; follow up with get_neighborhood for related context.",
+			Description: "Full-text search the user's notes and tasks, across titles, bodies, AND structured object metadata (archetype props, e.g. a Person's email or a Book's author). Call this whenever the user refers to something they have written or asks a question that their own notes/tasks might answer, including searches by an object field value. Returns matching notes and tasks with a snippet; follow up with get_neighborhood for related context.",
 			Schema: json.RawMessage(`{
 				"type":"object",
 				"additionalProperties":false,
@@ -127,6 +127,41 @@ func NewStoreRegistry(s *store.Store) *Registry {
 				return "", err
 			}
 			return jsonResult(projects)
+		},
+	})
+
+	r.Add(Tool{
+		Spec: ToolSpec{
+			Name:        "query_objects",
+			Description: "List the user's structured objects of one type (archetype), optionally filtered by their data fields. Call this to enumerate or query objects by their fields — e.g. \"list all my Books\", \"which People live in Berlin\", \"recipes whose cuisine is Thai\". Prefer this over search_notes whenever the user pins a type or a field value. First call list_object_types to get the objectTypeId and its field keys. Each filter matches a field's value case-insensitively as a substring, and ALL filters must match. Returns each matching note/task with its id, title, and props (all field values); use get_note/get_task for the full body.",
+			Schema: json.RawMessage(`{
+				"type":"object",
+				"additionalProperties":false,
+				"properties":{
+					"objectTypeId":{"type":"string","description":"The archetype's id (from list_object_types)."},
+					"filters":{"type":"object","description":"Optional field-key -> value substring to match, e.g. {\"city\":\"Berlin\"}. Keys are the type's field keys. Omit to list every object of the type.","additionalProperties":{"type":"string"}},
+					"limit":{"type":"integer","description":"Max results (default 20, max 50)."}
+				},
+				"required":["objectTypeId"]
+			}`),
+		},
+		Handler: func(_ context.Context, args json.RawMessage) (string, error) {
+			var a struct {
+				ObjectTypeID string            `json:"objectTypeId"`
+				Filters      map[string]string `json:"filters"`
+				Limit        int               `json:"limit"`
+			}
+			if err := json.Unmarshal(args, &a); err != nil {
+				return "", err
+			}
+			if strings.TrimSpace(a.ObjectTypeID) == "" {
+				return "", fmt.Errorf("objectTypeId is required — call list_object_types to find it")
+			}
+			hits, err := s.Search.QueryObjects(a.ObjectTypeID, a.Filters, a.Limit)
+			if err != nil {
+				return "", err
+			}
+			return jsonResult(hits)
 		},
 	})
 

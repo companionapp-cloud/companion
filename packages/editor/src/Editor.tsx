@@ -1,19 +1,35 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import {
   FlatList,
   Keyboard,
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
+import { Icon, type IconName } from "@companion/design-system";
 import { EDITOR_JS } from "./editorBundle.generated";
 import { EDITOR_CSS } from "./styles";
-import type { EditorProps, LinkSource, LinkSuggestion, LinkType } from "./types";
+import type { FormatName, FormatState } from "./formatCommands";
+import type { EditorController, EditorProps, LinkSource, LinkSuggestion, LinkType } from "./types";
+
+// The formatting toolbar's buttons, in order. Each format button injects window.__format;
+// the reference button opens the native `[[` picker (it needs a linkSource).
+const FORMAT_BUTTONS: { name: FormatName; icon: IconName; label: string }[] = [
+  { name: "bold", icon: "bold", label: "Bold" },
+  { name: "italic", icon: "italic", label: "Italic" },
+  { name: "strike", icon: "strikethrough", label: "Strikethrough" },
+  { name: "code", icon: "code", label: "Code" },
+  { name: "codeBlock", icon: "codeBlock", label: "Code block" },
+  { name: "blockquote", icon: "quote", label: "Blockquote" },
+  { name: "bulletList", icon: "listBullet", label: "Bulleted list" },
+  { name: "orderedList", icon: "listOrdered", label: "Numbered list" },
+];
 
 // Native editor: ProseMirror hosted in a plain react-native-webview. The editor code is
 // bundled offline into EDITOR_JS (`npm run build:editor`) and embedded below. A raw
@@ -70,10 +86,15 @@ interface PickerState {
   embed: boolean;
 }
 
-export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, linkRevision, variant, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs }: EditorProps) {
+export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
+  { markdown, onChangeMarkdown, linkSource, onOpenRef, linkRevision, variant, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange },
+  ref,
+) {
   const simple = variant === "simple";
   const onChangeRef = useRef(onChangeMarkdown);
   onChangeRef.current = onChangeMarkdown;
+  const onFormatStateRef = useRef(onFormatStateChange);
+  onFormatStateRef.current = onFormatStateChange;
   const linkSourceRef = useRef<LinkSource | undefined>(linkSource);
   linkSourceRef.current = linkSource;
   const onOpenRefRef = useRef(onOpenRef);
@@ -85,6 +106,8 @@ export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, link
   const [editorFocused, setEditorFocused] = useState(false);
   const [kbHeight, setKbHeight] = useState(0);
   const [picker, setPicker] = useState<PickerState>({ open: false, fromTrigger: false, embed: false });
+  // Latest formatting snapshot from the WebView, so the toolbar can show active states.
+  const [formatState, setFormatState] = useState<FormatState | null>(null);
   // Simple variant: the WebView is sized to its reported content height, between the host's
   // min and (optional) max. Seed at the min so it never starts collapsed.
   const [contentHeight, setContentHeight] = useState(minHeight ?? 40);
@@ -132,6 +155,19 @@ export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, link
   }, [clearSignal]);
   const jsonArg = (v: unknown) => JSON.stringify(v).replace(/</g, "\\u003c");
 
+  // Host-driven controls (used by the shared shell; the on-screen toolbar below calls the
+  // same injected globals directly).
+  useImperativeHandle(
+    ref,
+    (): EditorController => ({
+      format: (name) => inject(`window.__format && window.__format(${jsonArg(name)});`),
+      insertReference: () => inject(`window.__insertReference && window.__insertReference();`),
+    }),
+    // `inject`/`jsonArg` read refs and are stable enough; rebuild is harmless.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   const resolve = (requestId: unknown, result: unknown) =>
     inject(`window.__resolveLink && window.__resolveLink(${Number(requestId)}, ${jsonArg(result)});`);
 
@@ -154,6 +190,12 @@ export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, link
           break;
         case "focus":
           setEditorFocused(!!msg.payload);
+          break;
+        case "format":
+          if (msg.payload && typeof msg.payload === "object") {
+            setFormatState(msg.payload as FormatState);
+            onFormatStateRef.current?.(msg.payload as FormatState);
+          }
           break;
         case "linkTrigger":
           setPicker({ open: true, fromTrigger: true, embed: !!msg.payload?.embed });
@@ -203,7 +245,7 @@ export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, link
 
   // The simple field types `[[` to open the native picker; its keyboard toolbar is skipped
   // (it's a screen-anchored overlay that assumes the full-screen editor's layout).
-  const showToolbar = !simple && editorFocused && kbHeight > 0 && !picker.open && !!linkSource;
+  const showToolbar = !simple && editorFocused && kbHeight > 0 && !picker.open;
 
   return (
     <View style={simple ? { height: contentHeight } : styles.root}>
@@ -222,12 +264,47 @@ export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, link
 
       {showToolbar ? (
         <View style={[styles.toolbar, { bottom: kbHeight }]}>
-          <Pressable
-            style={({ pressed }) => [styles.toolbarBtn, pressed && styles.toolbarBtnPressed]}
-            onPress={() => setPicker({ open: true, fromTrigger: false, embed: false })}
+          <ScrollView
+            horizontal
+            // Taps must not dismiss the keyboard / blur the document, so the toggles apply
+            // to the live selection (which the WebView re-focuses afterward).
+            keyboardShouldPersistTaps="always"
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.toolbarContent}
           >
-            <Text style={styles.toolbarBtnText}>＋ Insert reference</Text>
-          </Pressable>
+            {linkSource ? (
+              <>
+                <Pressable
+                  accessibilityLabel="Insert reference"
+                  style={({ pressed }) => [styles.fmtBtn, pressed && styles.fmtBtnPressed]}
+                  onPress={() => setPicker({ open: true, fromTrigger: false, embed: false })}
+                >
+                  <Icon name="link" size={20} color="#3e3e3a" />
+                </Pressable>
+                <View style={styles.toolbarDivider} />
+              </>
+            ) : null}
+            {FORMAT_BUTTONS.map((b) => {
+              const active = !!formatState?.active[b.name];
+              const disabled = !!formatState && !formatState.enabled[b.name];
+              return (
+                <Pressable
+                  key={b.name}
+                  accessibilityLabel={b.label}
+                  disabled={disabled}
+                  style={({ pressed }) => [
+                    styles.fmtBtn,
+                    active && styles.fmtBtnActive,
+                    pressed && styles.fmtBtnPressed,
+                    disabled && styles.fmtBtnDisabled,
+                  ]}
+                  onPress={() => inject(`window.__format && window.__format(${jsonArg(b.name)});`)}
+                >
+                  <Icon name={b.icon} size={20} color={active ? "#b7500a" : "#3e3e3a"} />
+                </Pressable>
+              );
+            })}
+          </ScrollView>
         </View>
       ) : null}
 
@@ -239,7 +316,7 @@ export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, link
       />
     </View>
   );
-}
+});
 
 // The native `[[` picker: a bottom sheet with a search field, a type filter, and results.
 function LinkPicker({
@@ -376,21 +453,34 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 48,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 10,
     backgroundColor: "#f7f7f5",
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: "#e0e0dc",
   },
-  toolbarBtn: {
-    paddingVertical: 7,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: "#fdece0",
+  toolbarContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    gap: 2,
+    height: 48,
   },
-  toolbarBtnPressed: { opacity: 0.6 },
-  toolbarBtnText: { color: "#b7500a", fontWeight: "600", fontSize: 15 },
+  toolbarDivider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: "stretch",
+    marginVertical: 10,
+    marginHorizontal: 6,
+    backgroundColor: "#d8d8d2",
+  },
+  fmtBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fmtBtnActive: { backgroundColor: "#fdece0" },
+  fmtBtnPressed: { backgroundColor: "#ececea" },
+  fmtBtnDisabled: { opacity: 0.35 },
 
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.25)" },
   sheet: {

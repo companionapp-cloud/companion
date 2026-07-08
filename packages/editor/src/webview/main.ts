@@ -3,6 +3,7 @@
 // markdown the host inlines, and reports edits back via postMessage. Kept separate
 // from Editor.tsx so the native app never bundles ProseMirror into its JS.
 import { createEditor } from "../createEditor";
+import type { FormatName } from "./../formatCommands";
 import type { LinkSource, LinkSuggestion } from "../types";
 
 declare global {
@@ -17,6 +18,8 @@ declare global {
     __resolveLink?: (requestId: number, payload: unknown) => void;
     __refreshLinks?: () => void;
     __clear?: () => void;
+    __format?: (name: FormatName) => void;
+    __insertReference?: () => void;
   }
 }
 
@@ -74,6 +77,8 @@ function init(): void {
         }
       : undefined,
     onFocusChange: (focused) => post("focus", focused),
+    // Report the formatting-toolbar snapshot so the native keyboard toolbar can reflect it.
+    onFormatStateChange: (state) => post("format", state),
     // Opening a referenced entity is the shell's job; hand the ref up over the bridge.
     onOpenRef: (ref) => post("openRef", ref),
   });
@@ -81,6 +86,9 @@ function init(): void {
   window.__refreshLinks = () => handle.refreshLinks();
   // The host injects __clear() to empty the composer after a send.
   window.__clear = () => handle.clear();
+  // The host's keyboard toolbar injects these to drive formatting / reference insertion.
+  window.__format = (name) => handle.format(name);
+  window.__insertReference = () => handle.insertReference();
 
   // The simple editor is an inline field (task note / composer), not a full-screen page, so
   // report its content height and let the host size the WebView to it (bounded by the host's

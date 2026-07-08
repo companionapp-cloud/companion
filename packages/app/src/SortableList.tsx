@@ -26,7 +26,7 @@ export interface SortableRenderInfo<T> {
 }
 
 export interface SortableListProps<T> {
-  items: T[];
+  items: readonly T[];
   keyExtractor: (item: T) => string;
   renderItem: (info: SortableRenderInfo<T>) => ReactNode;
   /** Called on drop with the new top-to-bottom id order. */

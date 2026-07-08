@@ -247,8 +247,8 @@ func TestStoreToolsSpecsDeterministic(t *testing.T) {
 	s := newTestStore(t)
 	r := NewStoreRegistry(s)
 	specs := r.Specs()
-	if len(specs) != 17 {
-		t.Fatalf("expected 17 tools, got %d", len(specs))
+	if len(specs) != 18 {
+		t.Fatalf("expected 18 tools, got %d", len(specs))
 	}
 	for i := 1; i < len(specs); i++ {
 		if specs[i-1].Name > specs[i].Name {

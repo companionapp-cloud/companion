@@ -8,7 +8,7 @@ import { useTasks } from "./TasksProvider";
 import { NoteEditor } from "./NoteEditor";
 import { TaskEditor, TaskRow } from "./TaskEditor";
 import { Draggable } from "./DndContext";
-import { repeatLabel } from "./repeat";
+import { repeatSubtitle } from "./repeat";
 import { ListFilterMenu } from "./ListFilterMenu";
 
 /** The web/desktop workspace: a persistent split of a browse list (notes or tasks, chosen
@@ -290,15 +290,6 @@ function TasksList() {
 function notePreview(n: Note): string {
   const body = n.contentMd.replace(/\s+/g, " ").trim();
   return body || "No additional text";
-}
-
-/** Subtitle for a repeating definition: its cadence plus the next occurrence date. */
-function repeatSubtitle(rule?: string | null, next?: string | null): string {
-  const cadence = repeatLabel(rule) ?? "Repeats";
-  if (!next) return cadence;
-  const d = new Date(next);
-  if (Number.isNaN(d.getTime())) return cadence;
-  return `${cadence} · next ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
 }
 
 const styles = {

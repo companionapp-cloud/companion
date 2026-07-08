@@ -225,6 +225,7 @@ export function commonmarkInputRules(schema: Schema): Plugin {
   if (marks.strong) rules.push(markInputRule(/\*\*([^*\s](?:[^*]*[^*\s])?)\*\*$/, marks.strong));
   if (marks.em) rules.push(markInputRule(/(?:^|[^*])\*([^*\s](?:[^*]*[^*\s])?)\*$/, marks.em));
   if (marks.code) rules.push(markInputRule(/`([^`]+)`$/, marks.code));
+  if (marks.strikethrough) rules.push(markInputRule(/~~([^~\s](?:[^~]*[^~\s])?)~~$/, marks.strikethrough));
 
   return inputRules(rules);
 }

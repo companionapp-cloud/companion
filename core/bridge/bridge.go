@@ -205,6 +205,8 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.llmConfigsDelete(payload)
 	case "llm.configs.setDefault":
 		return c.llmConfigsSetDefault(payload)
+	case "llm.models.list":
+		return c.llmModelsList(payload)
 	case "chats.list":
 		return c.chatsList()
 	case "chats.get":

@@ -3,13 +3,14 @@ import { ActivityIndicator, AppState, StyleSheet, Text, View } from 'react-nativ
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import EventSource from 'react-native-sse';
-import { CoreProvider, NotesProvider, TasksProvider, RemindersProvider, NotificationsProvider, ProjectsProvider, ObjectTypesProvider, SyncProvider, type NotificationScheduler } from '@companion/app';
+import { CoreProvider, NotesProvider, TasksProvider, RemindersProvider, NotificationsProvider, ProjectsProvider, ObjectTypesProvider, SyncProvider, ToolVisibilityProvider, type NotificationScheduler } from '@companion/app';
 import { createNativeSyncNotifier, type CoreBridge, type SyncNotifier } from '@companion/core-bridge';
 import { MobileShell } from './src/MobileShell';
 import { openCore } from './src/core';
 import { createMobileNotificationScheduler, REMINDER_HORIZON_DAYS } from './src/notifications';
 import { registerReminderRefresh } from './src/backgroundReminders';
 import { nativeSyncStorage } from './src/syncStorage';
+import { nativeToolsStorage } from './src/toolsStorage';
 
 // Opens the on-device SQLite database via the shared core singleton, wraps it in the
 // shared CoreBridge, then mounts the shared data layer (Core/Sync/Notes providers)
@@ -73,7 +74,9 @@ function Root() {
               <NotificationsProvider>
                 <ProjectsProvider>
                   <ObjectTypesProvider>
-                    <MobileShell />
+                    <ToolVisibilityProvider storage={nativeToolsStorage}>
+                      <MobileShell />
+                    </ToolVisibilityProvider>
                   </ObjectTypesProvider>
                 </ProjectsProvider>
               </NotificationsProvider>

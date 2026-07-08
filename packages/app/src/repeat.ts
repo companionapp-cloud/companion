@@ -64,6 +64,17 @@ export function repeatLabel(rule?: string | null): string | null {
   return freq ? every : "Repeats";
 }
 
+/** Subtitle for a repeating definition (seed): its cadence plus the next occurrence date,
+ *  e.g. "Every week · next Jul 12". Shared by the root task list and project task lists so
+ *  repeating tasks read the same everywhere. */
+export function repeatSubtitle(rule?: string | null, next?: string | null): string {
+  const cadence = repeatLabel(rule) ?? "Repeats";
+  if (!next) return cadence;
+  const d = new Date(next);
+  if (Number.isNaN(d.getTime())) return cadence;
+  return `${cadence} · next ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+}
+
 /** English ordinal suffix for a day-of-month number ("1"→"st", "22"→"nd"). */
 function ordinalSuffix(day: string): string {
   const n = Math.abs(Number(day));

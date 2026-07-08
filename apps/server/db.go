@@ -151,6 +151,7 @@ CREATE TABLE IF NOT EXISTS chats (
   user_id    TEXT NOT NULL,
   title      TEXT NOT NULL DEFAULT '',
   config_id  TEXT,
+  model      TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   deleted_at TEXT,
@@ -239,6 +240,8 @@ func migrate(db *sql.DB, dialect string) error {
 		`ALTER TABLE notes ADD COLUMN props_json TEXT NOT NULL DEFAULT '{}'`,
 		`ALTER TABLE tasks ADD COLUMN object_type_id TEXT`,
 		`ALTER TABLE tasks ADD COLUMN props_json TEXT NOT NULL DEFAULT '{}'`,
+		// Per-chat model selection (PLAN §6.8): the model moved out of llm_configs onto the chat.
+		`ALTER TABLE chats ADD COLUMN model TEXT`,
 	}
 	for _, alter := range alters {
 		if dialect == "postgres" {

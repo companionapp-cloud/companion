@@ -6,15 +6,16 @@ export type LLMScope = "device" | "account";
 /** Provider wire protocol. "openai-compatible" also covers Ollama / LM Studio. */
 export type LLMProvider = "openai-compatible" | "anthropic";
 
-/** A configured model the user can chat with (mirrors core/domain.LLMConfig). The API key
- *  never crosses this boundary — only its keychain handle (apiKeyRef). */
+/** A configured provider the user can chat with (mirrors core/domain.LLMConfig): an endpoint
+ *  plus, for cloud providers, credentials. The model is not part of the config — it is picked
+ *  at chat time (see `models.list`) and remembered per chat. The API key never crosses this
+ *  boundary — only its keychain handle (apiKeyRef). */
 export interface LLMConfig {
   id: string;
   scope: LLMScope;
   name: string;
   baseUrl: string;
   provider: LLMProvider;
-  model: string;
   apiKeyRef?: string | null;
   isDefault: boolean;
   createdAt: string;
@@ -29,7 +30,6 @@ export interface CreateLLMConfigInput {
   name: string;
   baseUrl: string;
   provider: LLMProvider;
-  model: string;
   isDefault?: boolean;
   /** Cloud key; written to the OS keychain by the core, never persisted in SQLite. */
   apiKey?: string;
@@ -38,7 +38,6 @@ export interface CreateLLMConfigInput {
 export interface UpdateLLMConfigInput {
   name?: string;
   baseUrl?: string;
-  model?: string;
   apiKey?: string;
 }
 
@@ -95,6 +94,11 @@ export function llmApi(core: CoreBridge) {
       update: (id: string, fields: UpdateLLMConfigInput) => core.invoke<LLMConfig>("llm.configs.update", { id, ...fields }),
       remove: (id: string) => core.invoke<{ ok: boolean }>("llm.configs.delete", { id }),
       setDefault: (id: string) => core.invoke<{ ok: boolean }>("llm.configs.setDefault", { id }),
+    },
+    models: {
+      /** Fetch the models a config's endpoint currently offers (Ollama installed models,
+       *  OpenAI/Anthropic model lists), for the composer's model picker. */
+      list: (configId: string) => core.invoke<string[]>("llm.models.list", { configId }),
     },
     onToken: (cb: (e: LLMTokenEvent) => void) => core.on("llm.token", (p) => cb(p as LLMTokenEvent)),
     onTool: (cb: (e: LLMToolEvent) => void) => core.on("llm.tool", (p) => cb(p as LLMToolEvent)),

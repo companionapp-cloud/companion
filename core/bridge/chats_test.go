@@ -20,7 +20,7 @@ func TestChatsBackgroundRun(t *testing.T) {
 	c.SetSecretStore(newFakeSecrets())
 	if _, err := c.Invoke("llm.configs.create", mustJSON(map[string]any{
 		"scope": "device", "name": "Local", "baseUrl": srv.URL + "/v1",
-		"provider": "openai-compatible", "model": "test", "isDefault": true,
+		"provider": "openai-compatible", "isDefault": true,
 	})); err != nil {
 		t.Fatalf("config: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestChatsBackgroundRun(t *testing.T) {
 	}
 	json.Unmarshal(chatOut, &chat)
 
-	sendOut, err := c.Invoke("chats.send", mustJSON(map[string]any{"chatId": chat.ID, "text": "add a task to buy milk"}))
+	sendOut, err := c.Invoke("chats.send", mustJSON(map[string]any{"chatId": chat.ID, "text": "add a task to buy milk", "model": "test"}))
 	if err != nil {
 		t.Fatalf("chats.send: %v", err)
 	}
@@ -78,6 +78,13 @@ func TestChatsBackgroundRun(t *testing.T) {
 	tasks, _ := c.store.Tasks.List()
 	if len(tasks) != 1 || tasks[0].Title != "Buy milk" {
 		t.Errorf("task not created by background run: %+v", tasks)
+	}
+
+	// The model passed to send is pinned on the chat, so the conversation continues on it.
+	if stored, err := c.store.Chats.Get(chat.ID); err != nil {
+		t.Fatalf("get chat: %v", err)
+	} else if stored.Model == nil || *stored.Model != "test" {
+		t.Errorf("chat model not persisted: %v", stored.Model)
 	}
 
 	// The chat is auto-titled from the first user message and no longer working.

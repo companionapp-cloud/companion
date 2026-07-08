@@ -30,8 +30,10 @@ const (
 	webFetchTimeout = 20 * time.Second
 	webMaxBytes     = 3 << 20 // cap the download at 3 MB
 	webMaxChars     = 12000   // cap the returned text (~a few thousand tokens)
-	// A browser-like User-Agent; many sites reject requests without one.
-	webUserAgent = "Mozilla/5.0 (compatible; CompanionBot/1.0; +https://companion.app)"
+	// A real desktop-browser User-Agent. Many sites — and, critically, DuckDuckGo's HTML
+	// search endpoint — reject or serve an anti-bot challenge page to requests advertising a
+	// bot UA, so we present as Chrome to get actual results back.
+	webUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
 var webClient = &http.Client{Timeout: webFetchTimeout}
@@ -162,7 +164,10 @@ func parseGoogleResults(body string, limit int) []searchResult {
 }
 
 func ddgSearch(ctx context.Context, query string, limit int) ([]searchResult, error) {
-	body, err := fetchSearchHTML(ctx, "https://html.duckduckgo.com/html/?q="+neturl.QueryEscape(query))
+	// DuckDuckGo's HTML endpoint only returns results for a POST with the form-encoded query
+	// and a browser UA; a GET (or a bot UA) is answered with a challenge/"anomaly" page that
+	// carries no results. POSTing the form is what keeps web search working.
+	body, err := postSearchHTML(ctx, "https://html.duckduckgo.com/html/", neturl.Values{"q": {query}})
 	if err != nil {
 		return nil, err
 	}
@@ -188,6 +193,11 @@ func parseDDGResults(body string, limit int) []searchResult {
 		if e != nil || (u.Scheme != "http" && u.Scheme != "https") {
 			continue
 		}
+		// Skip DuckDuckGo's own hosts: sponsored "y.js" ad links (and any undecoded
+		// redirect) point back at duckduckgo.com, not a real result.
+		if strings.Contains(strings.ToLower(u.Host), "duckduckgo.com") {
+			continue
+		}
 		snippet := ""
 		if i < len(snippets) {
 			snippet = stripInline(snippets[i][1])
@@ -202,12 +212,30 @@ func parseDDGResults(body string, limit int) []searchResult {
 
 // fetchSearchHTML GETs a search results page with a browser-like UA and returns the HTML.
 func fetchSearchHTML(ctx context.Context, url string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, webFetchTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
 	}
+	return doSearchRequest(ctx, req)
+}
+
+// postSearchHTML POSTs a form-encoded search query (some engines, e.g. DuckDuckGo's HTML
+// endpoint, only serve results to POST) with a browser-like UA and returns the HTML.
+func postSearchHTML(ctx context.Context, endpoint string, form neturl.Values) (string, error) {
+	req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return doSearchRequest(ctx, req)
+}
+
+// doSearchRequest sets the shared browser-like headers, applies the fetch timeout, executes
+// the request, and returns the (size-capped) response body.
+func doSearchRequest(ctx context.Context, req *http.Request) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, webFetchTimeout)
+	defer cancel()
+	req = req.WithContext(ctx)
 	req.Header.Set("User-Agent", webUserAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")

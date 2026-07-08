@@ -15,7 +15,7 @@ func TestLLMConfigsCRUDAndDefault(t *testing.T) {
 
 	local, err := s.LLMConfigs.Create(CreateLLMConfigInput{
 		Scope: domain.ScopeDevice, Name: "Local (Ollama)",
-		BaseURL: "http://localhost:11434/v1", Provider: domain.ProviderOpenAI, Model: "qwen2.5",
+		BaseURL: "http://localhost:11434/v1", Provider: domain.ProviderOpenAI,
 		IsDefault: true,
 	})
 	if err != nil {
@@ -28,7 +28,7 @@ func TestLLMConfigsCRUDAndDefault(t *testing.T) {
 	ref := "llm." + "cloud"
 	cloud, err := s.LLMConfigs.Create(CreateLLMConfigInput{
 		Scope: domain.ScopeAccount, Name: "Claude",
-		BaseURL: "https://api.anthropic.com", Provider: domain.ProviderAnthropic, Model: "claude-opus-4-8",
+		BaseURL: "https://api.anthropic.com", Provider: domain.ProviderAnthropic,
 		APIKeyRef: &ref, IsDefault: true,
 	})
 	if err != nil {
@@ -67,11 +67,11 @@ func TestLLMConfigsCRUDAndDefault(t *testing.T) {
 	}
 
 	// Update + soft delete.
-	if _, err := s.LLMConfigs.Update(cloud.ID, UpdateLLMConfigInput{Model: strptr("claude-sonnet-5")}); err != nil {
+	if _, err := s.LLMConfigs.Update(cloud.ID, UpdateLLMConfigInput{BaseURL: strptr("https://proxy.example.com")}); err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if u, _ := s.LLMConfigs.Get(cloud.ID); u.Model != "claude-sonnet-5" {
-		t.Errorf("model not updated: %q", u.Model)
+	if u, _ := s.LLMConfigs.Get(cloud.ID); u.BaseURL != "https://proxy.example.com" {
+		t.Errorf("base url not updated: %q", u.BaseURL)
 	}
 	if err := s.LLMConfigs.Delete(cloud.ID); err != nil {
 		t.Fatalf("delete: %v", err)
@@ -84,12 +84,12 @@ func TestLLMConfigsCRUDAndDefault(t *testing.T) {
 func TestLLMConfigsValidation(t *testing.T) {
 	s := newTestStore(t, nil)
 	if _, err := s.LLMConfigs.Create(CreateLLMConfigInput{
-		Scope: "bogus", Name: "x", BaseURL: "u", Provider: domain.ProviderOpenAI, Model: "m",
+		Scope: "bogus", Name: "x", BaseURL: "u", Provider: domain.ProviderOpenAI,
 	}); err == nil {
 		t.Error("expected scope validation error")
 	}
 	if _, err := s.LLMConfigs.Create(CreateLLMConfigInput{
-		Scope: domain.ScopeDevice, Name: "x", BaseURL: "u", Provider: "weird", Model: "m",
+		Scope: domain.ScopeDevice, Name: "x", BaseURL: "u", Provider: "weird",
 	}); err == nil {
 		t.Error("expected provider validation error")
 	}

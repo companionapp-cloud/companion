@@ -1,3 +1,13 @@
+import type { FormatName, FormatState } from "./formatCommands";
+
+/** Imperative handle exposed via `ref` on the {@link Editor}, letting the host's formatting
+ * toolbar drive the editor. On web it calls the DOM editor directly; on native it injects
+ * the equivalent call into the WebView. */
+export interface EditorController {
+  format(name: FormatName): void;
+  insertReference(): void;
+}
+
 // The editor's cross-platform contract. `markdown` seeds the editor once (the editor
 // owns its content thereafter); `onChangeMarkdown` reports serialized markdown back,
 // debounced. The editor fills its parent, so size it from the outside.
@@ -34,6 +44,9 @@ export interface EditorProps {
   /** How often edits are reported back (ms). Defaults to 400. The chat composer lowers it so
    * the send button reflects typing promptly. */
   debounceMs?: number;
+  /** Notified after every selection/content change with the formatting-toolbar snapshot. The
+   * host (web selection bar) renders its buttons from this. Full variant only. */
+  onFormatStateChange?: (state: FormatState) => void;
 }
 
 /** A reference to open — the payload of {@link EditorProps.onOpenRef}. */

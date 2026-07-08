@@ -1,12 +1,15 @@
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { createEditor, type EditorHandle } from "./createEditor";
 import { ensureEditorStyles } from "./styles";
-import type { EditorProps } from "./types";
+import type { EditorController, EditorProps } from "./types";
 
 // Web/desktop editor: ProseMirror mounted straight into the DOM (react-native-web is
 // real DOM, so no WebView is needed — Vite resolves this via .web.tsx). It grows to
 // its content; the note view's ScrollView provides the scroll and document column.
-export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, linkRevision, variant, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs }: EditorProps) {
+export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
+  { markdown, onChangeMarkdown, linkSource, onOpenRef, linkRevision, variant, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange },
+  ref,
+) {
   const mountRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<EditorHandle | null>(null);
   const onChangeRef = useRef(onChangeMarkdown);
@@ -19,6 +22,18 @@ export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, link
   onOpenRefRef.current = onOpenRef;
   const onSubmitRef = useRef(onSubmit);
   onSubmitRef.current = onSubmit;
+  const onFormatStateRef = useRef(onFormatStateChange);
+  onFormatStateRef.current = onFormatStateChange;
+
+  // The host's selection bar drives the editor through this ref.
+  useImperativeHandle(
+    ref,
+    (): EditorController => ({
+      format: (name) => handleRef.current?.format(name),
+      insertReference: () => handleRef.current?.insertReference(),
+    }),
+    [],
+  );
 
   useEffect(() => {
     ensureEditorStyles();
@@ -30,6 +45,7 @@ export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, link
       placeholder,
       debounceMs,
       onSubmit: onSubmit ? (md) => onSubmitRef.current?.(md) : undefined,
+      onFormatStateChange: (state) => onFormatStateRef.current?.(state),
       linkSource: linkSourceRef.current
         ? {
             search: (q, type) => linkSourceRef.current!.search(q, type),
@@ -75,4 +91,4 @@ export function Editor({ markdown, onChangeMarkdown, linkSource, onOpenRef, link
       ? { minHeight, maxHeight, overflowY: maxHeight ? ("auto" as const) : undefined }
       : undefined;
   return <div ref={mountRef} className={variant === "simple" ? "companion-editor pm-simple" : "companion-editor"} style={style} />;
-}
+});

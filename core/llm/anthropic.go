@@ -91,6 +91,45 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req ChatRequest, onDelta D
 	return decodeAnthropicSSE(resp.Body, onDelta)
 }
 
+// ListModels fetches the models the key can reach via GET /v1/models, returning their ids
+// sorted. Same auth headers as Chat (x-api-key + anthropic-version).
+func (p *AnthropicProvider) ListModels(ctx context.Context) ([]string, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL()+"/v1/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Accept", "application/json")
+	httpReq.Header.Set("anthropic-version", anthropicVersion)
+	httpReq.Header.Set("anthropic-dangerous-direct-browser-access", "true")
+	if p.APIKey != "" {
+		httpReq.Header.Set("x-api-key", p.APIKey)
+	}
+	resp, err := p.httpClient().Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, apiError(p.Name(), resp)
+	}
+	var body struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, fmt.Errorf("%s: decode models: %w", p.Name(), err)
+	}
+	ids := make([]string, 0, len(body.Data))
+	for _, m := range body.Data {
+		if m.ID != "" {
+			ids = append(ids, m.ID)
+		}
+	}
+	sort.Strings(ids)
+	return ids, nil
+}
+
 // encodeAnthropicMessages maps the neutral transcript to Anthropic's content-block form:
 // assistant turns carry text and tool_use blocks; a tool turn becomes a user message whose
 // content is tool_result blocks.

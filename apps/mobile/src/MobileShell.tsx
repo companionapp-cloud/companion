@@ -6,6 +6,7 @@ import { colors } from '@companion/design-system';
 import { taskIdFromResponse } from './notifications';
 import { TrashScreen } from '@companion/app';
 import { HomeScreen } from './screens/HomeScreen';
+import { TodayScreen } from './screens/TodayScreen';
 import { NotesListScreen } from './screens/NotesListScreen';
 import { NoteEditorScreen } from './screens/NoteEditorScreen';
 import { TasksListScreen } from './screens/TasksListScreen';
@@ -31,6 +32,7 @@ import type { SettingsSectionId } from '@companion/app';
 export type RootStackParamList = {
   Home: undefined;
   // Global (all-items) section screens.
+  Today: undefined;
   Chat: undefined;
   ChatConversation: { chatId: string };
   Notes: undefined;
@@ -104,6 +106,7 @@ export function MobileShell() {
         }}
       >
         <RootStack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
+        <RootStack.Screen name="Today" component={TodayScreen} options={{ title: 'Today' }} />
         <RootStack.Screen name="Chat" component={ChatListScreen} options={{ title: 'Chat' }} />
         <RootStack.Screen name="ChatConversation" component={ChatScreen} options={{ title: '' }} />
         <RootStack.Screen name="Notes" component={NotesListScreen} options={{ title: 'All notes' }} />

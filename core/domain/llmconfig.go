@@ -21,15 +21,16 @@ const (
 	ProviderAnthropic = "anthropic"
 )
 
-// LLMConfig is one configured model the user can chat with (PLAN §4.1). The API key itself
-// is never stored here — APIKeyRef is a handle into the OS keychain.
+// LLMConfig is one configured provider the user can chat with (PLAN §4.1): an endpoint plus
+// (for cloud providers) credentials. The model is not part of the config — it is chosen at
+// chat time and remembered per chat. The API key itself is never stored here — APIKeyRef is a
+// handle into the OS keychain.
 type LLMConfig struct {
 	ID        string     `json:"id"`
 	Scope     string     `json:"scope"`
 	Name      string     `json:"name"`
 	BaseURL   string     `json:"baseUrl"`
 	Provider  string     `json:"provider"`
-	Model     string     `json:"model"`
 	APIKeyRef *string    `json:"apiKeyRef,omitempty"`
 	IsDefault bool       `json:"isDefault"`
 	CreatedAt time.Time  `json:"createdAt"`
@@ -52,9 +53,6 @@ func (c *LLMConfig) Validate() error {
 	}
 	if strings.TrimSpace(c.BaseURL) == "" {
 		return errors.Join(ErrInvalidLLMConfig, errors.New("base url is required"))
-	}
-	if strings.TrimSpace(c.Model) == "" {
-		return errors.Join(ErrInvalidLLMConfig, errors.New("model is required"))
 	}
 	if c.Scope != ScopeDevice && c.Scope != ScopeAccount {
 		return errors.Join(ErrInvalidLLMConfig, errors.New("scope must be device or account"))

@@ -4,15 +4,16 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { SidebarProject } from '@companion/core-bridge';
-import { useNotes, useProjects, useTasks, useCore, useNotifications, SortableList } from '@companion/app';
+import { useNotes, useProjects, useTasks, useCore, useNotifications, useToolVisibility, SortableList, type ToolId } from '@companion/app';
 import { Icon, IconButton, Input, ProgressRing, Text, colors, font, radius, space, type IconName } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
 import { Card, CardRow, CountPill, IconTile, SectionLabel } from '../ui/native';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-type SectionRoute = 'Chat' | 'Notes' | 'Tasks' | 'Habits' | 'Calendar' | 'Graph' | 'Trash';
+type SectionRoute = 'Today' | 'Chat' | 'Notes' | 'Tasks' | 'Habits' | 'Calendar' | 'Graph' | 'Trash';
 const SECTIONS: { route: SectionRoute; label: string; subtitle: string; icon: IconName; accent?: boolean }[] = [
+  { route: 'Today', label: 'Today', subtitle: "Today's note and your month", icon: 'today' },
   { route: 'Chat', label: 'Chat', subtitle: 'Ask, capture, recall — anything', icon: 'chat', accent: true },
   { route: 'Notes', label: 'Notes', subtitle: 'Your graph of linked ideas', icon: 'notes' },
   { route: 'Tasks', label: 'Tasks', subtitle: 'What needs doing', icon: 'tasks' },
@@ -57,6 +58,16 @@ export function HomeScreen() {
 
   const openProject = (id: string) => nav.navigate('Project', { projectId: id });
 
+  // Per-device tool hiding + ordering (Settings › Tools): the home sections card is
+  // mobile's sidebar-equivalent, so hidden tools drop out of it and its rows follow the
+  // saved order. Reorder mode drags rows; the new order persists via `reorder`.
+  const { tools, hidden, reorder } = useToolVisibility();
+  const orderIndex = new Map(tools.map((t, i) => [t.id, i]));
+  const toolId = (route: SectionRoute): ToolId => route.toLowerCase() as ToolId;
+  const sections = SECTIONS.filter((s) => !hidden.has(toolId(s.route))).sort(
+    (a, b) => (orderIndex.get(toolId(a.route)) ?? 0) - (orderIndex.get(toolId(b.route)) ?? 0),
+  );
+
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + space.sm }]}>
@@ -80,21 +91,39 @@ export function HomeScreen() {
         scrollEnabled={!dragging}
       >
         <Card>
-          {SECTIONS.map((s, i) => (
-            <CardRow
-              key={s.route}
-              leading={
-                <IconTile variant={s.accent ? 'accent' : 'neutral'}>
-                  <Icon name={s.icon} size={20} color={s.accent ? colors.accent : colors.textSecondary} />
-                </IconTile>
-              }
-              title={s.label}
-              subtitle={s.subtitle}
-              trailing={s.route === 'Notes' ? <CountPill>{store.notes.length}</CountPill> : undefined}
-              isLast={i === SECTIONS.length - 1}
-              onPress={() => nav.navigate(s.route)}
-            />
-          ))}
+          <SortableList
+            items={sections}
+            keyExtractor={(s) => s.route}
+            enabled={editing}
+            activateOnStart
+            onDragActiveChange={setDragging}
+            onReorder={(routes) => void reorder(routes.map((r) => toolId(r as SectionRoute)))}
+            renderItem={({ item: s, index, drag }) => (
+              <CardRow
+                leading={
+                  <IconTile variant={s.accent ? 'accent' : 'neutral'}>
+                    <Icon name={s.icon} size={20} color={s.accent ? colors.accent : colors.textSecondary} />
+                  </IconTile>
+                }
+                title={s.label}
+                subtitle={s.subtitle}
+                trailing={
+                  editing ? (
+                    // The handle claims the touch so the ScrollView can't steal the pan;
+                    // the rest of the row is inert while reordering.
+                    <View {...drag} style={styles.dragHandle} aria-label={`Reorder ${s.label}`}>
+                      <Icon name="moreH" size={18} color={colors.textTertiary} />
+                    </View>
+                  ) : s.route === 'Notes' ? (
+                    <CountPill>{store.notes.length}</CountPill>
+                  ) : undefined
+                }
+                showChevron={!editing}
+                isLast={index === sections.length - 1}
+                onPress={editing ? undefined : () => nav.navigate(s.route)}
+              />
+            )}
+          />
         </Card>
 
         <View style={styles.areasHeader}>

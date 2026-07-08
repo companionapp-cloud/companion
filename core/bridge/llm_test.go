@@ -78,7 +78,7 @@ func TestLLMConfigStoresKeyInKeychain(t *testing.T) {
 
 	out, err := c.Invoke("llm.configs.create", mustJSON(map[string]any{
 		"scope": "account", "name": "Claude", "baseUrl": "https://api.anthropic.com",
-		"provider": "anthropic", "model": "claude-opus-4-8", "apiKey": "sk-secret",
+		"provider": "anthropic", "apiKey": "sk-secret",
 	}))
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -121,4 +121,41 @@ func mustJSON(v any) []byte {
 		panic(err)
 	}
 	return b
+}
+
+// TestLLMModelsList proves the bridge fetches a config's live model list from its endpoint,
+// so the composer can offer models without them being baked into the config.
+func TestLLMModelsList(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/models") {
+			http.Error(w, "wrong path", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[{"id":"qwen2.5"},{"id":"llama3.1"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c, _ := newTestCore(t)
+	out, err := c.Invoke("llm.configs.create", mustJSON(map[string]any{
+		"scope": "device", "name": "Local", "baseUrl": srv.URL + "/v1",
+		"provider": "openai-compatible", "isDefault": true,
+	}))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	var cfg struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal(out, &cfg)
+
+	got, err := c.Invoke("llm.models.list", mustJSON(map[string]any{"configId": cfg.ID}))
+	if err != nil {
+		t.Fatalf("models.list: %v", err)
+	}
+	var models []string
+	json.Unmarshal(got, &models)
+	if len(models) != 2 || models[0] != "llama3.1" || models[1] != "qwen2.5" {
+		t.Errorf("models = %v, want sorted [llama3.1 qwen2.5]", models)
+	}
 }

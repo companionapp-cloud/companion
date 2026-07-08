@@ -122,3 +122,33 @@ func TestAnthropicEncodesToolResultTurn(t *testing.T) {
 		t.Errorf("bad tool_use block: %v", asst[0])
 	}
 }
+
+// TestAnthropicListModels hits GET /v1/models with the auth + version headers and returns the
+// ids sorted.
+func TestAnthropicListModels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/v1/models") {
+			http.Error(w, "wrong path", http.StatusNotFound)
+			return
+		}
+		if got := r.Header.Get("x-api-key"); got != "sk-ant" {
+			t.Errorf("missing api key, got %q", got)
+		}
+		if got := r.Header.Get("anthropic-version"); got != anthropicVersion {
+			t.Errorf("missing version header, got %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[{"id":"claude-opus-4-8"},{"id":"claude-sonnet-5"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	p := &AnthropicProvider{BaseURL: srv.URL, APIKey: "sk-ant"}
+	got, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("list models: %v", err)
+	}
+	want := []string{"claude-opus-4-8", "claude-sonnet-5"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("models = %v, want %v", got, want)
+	}
+}

@@ -1,4 +1,4 @@
-import { Schema, type NodeSpec } from "prosemirror-model";
+import { Schema, type NodeSpec, type MarkSpec } from "prosemirror-model";
 import {
   schema as baseSchema,
   defaultMarkdownParser,
@@ -116,9 +116,18 @@ const listItem: NodeSpec = {
   ],
 };
 
+// Strikethrough (`~~text~~`) — the base prosemirror-markdown schema ships em/strong/code/link
+// but no strike, so add it and teach the parser/serializer below to round-trip it as GFM.
+const strikethroughSpec: MarkSpec = {
+  parseDOM: [{ tag: "s" }, { tag: "del" }, { tag: "strike" }, { style: "text-decoration=line-through" }],
+  toDOM() {
+    return ["s", 0];
+  },
+};
+
 export const schema = new Schema({
   nodes: baseSchema.spec.nodes.update("list_item", listItem).addToEnd("wikilink", wikilinkSpec),
-  marks: baseSchema.spec.marks,
+  marks: baseSchema.spec.marks.addToEnd("strikethrough", strikethroughSpec),
 });
 
 // ---------------------------------------------------------------------------
@@ -163,7 +172,15 @@ type RulerBefore = typeof defaultMarkdownParser.tokenizer.inline.ruler.before;
 const tokenizer = defaultMarkdownParser.tokenizer as typeof defaultMarkdownParser.tokenizer & {
   __wikilinkRule?: boolean;
   __taskListRule?: boolean;
+  __strikethrough?: boolean;
+  enable?(rules: string | string[], ignoreInvalid?: boolean): unknown;
 };
+// prosemirror-markdown's default tokenizer uses the CommonMark preset, which disables GFM
+// strikethrough. Re-enable it so `~~text~~` tokenizes (the parser maps its `s` token below).
+if (!tokenizer.__strikethrough) {
+  tokenizer.enable?.("strikethrough");
+  tokenizer.__strikethrough = true;
+}
 if (!tokenizer.__wikilinkRule) {
   tokenizer.inline.ruler.before("link", "wikilink", wikilinkRule as unknown as Parameters<RulerBefore>[2]);
   tokenizer.__wikilinkRule = true;
@@ -210,6 +227,8 @@ function parseChecked(v: string | null | undefined): boolean | null {
 
 export const parser = new MarkdownParser(schema, defaultMarkdownParser.tokenizer, {
   ...defaultMarkdownParser.tokens,
+  // markdown-it emits s_open/s_close for `~~…~~`; map it onto our strikethrough mark.
+  s: { mark: "strikethrough" },
   list_item: {
     block: "list_item",
     getAttrs: (tok) => ({ checked: parseChecked((tok as unknown as CoreToken).attrGet("checked")) }),
@@ -254,7 +273,10 @@ export const serializer = new MarkdownSerializer(
       state.write(`${embed ? "!" : ""}[[${type}:${id}${alias ? `|${alias}` : ""}]]`);
     },
   },
-  defaultMarkdownSerializer.marks,
+  {
+    ...defaultMarkdownSerializer.marks,
+    strikethrough: { open: "~~", close: "~~", mixable: true, expelEnclosingWhitespace: true },
+  },
 );
 
 // ---------------------------------------------------------------------------

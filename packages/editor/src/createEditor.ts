@@ -13,6 +13,7 @@ import { commonmarkInputRules } from "./inputrules";
 import { wikilinkAutocomplete } from "./autocomplete";
 import { wikilinkHostAutocomplete, type HostAutocompleteBridge } from "./hostAutocomplete";
 import { wikilinkNodeView, type WikilinkView } from "./wikilinkView";
+import { buildFormatCommands, computeFormatState, type FormatName, type FormatState } from "./formatCommands";
 import type { LinkRef, LinkSource } from "./types";
 
 // The shared ProseMirror setup — pure DOM, no framework. Used directly on web/desktop
@@ -28,6 +29,12 @@ export interface EditorHandle {
   setContent(markdown: string): void;
   /** Empty the document. Shorthand for `setContent("")`. */
   clear(): void;
+  /** Run a formatting toggle (bold, list, blockquote, …) on the current selection and
+   * refocus the editor. No-op in the simple variant (it has no marks/blocks). */
+  format(name: FormatName): void;
+  /** Open the `[[` reference picker at the cursor (inserts the trigger, which the
+   * autocomplete plugin turns into the web popup or the native host modal). */
+  insertReference(): void;
 }
 
 export interface CreateEditorOptions {
@@ -45,6 +52,9 @@ export interface CreateEditorOptions {
   /** Notified when the editor gains/loses focus. The native host uses it to show a
    * keyboard toolbar only while the document (not some other field) is focused. */
   onFocusChange?: (focused: boolean) => void;
+  /** Notified after every selection/content change with the formatting-toolbar snapshot
+   * (which actions apply / are active). Full variant only; the simple editor never emits. */
+  onFormatStateChange?: (state: FormatState) => void;
   /** Open a referenced entity when its chip is clicked (after it's selected). Wired to the
    * host's navigation (web opens a new tab; native posts the ref to the shell). */
   onOpenRef?: (ref: LinkRef) => void;
@@ -173,6 +183,14 @@ export function createEditor(
       ];
   const state = EditorState.create({ schema: activeSchema, doc, plugins });
 
+  // Formatting toggles for the toolbar (full editor only — the simple schema has no marks,
+  // lists, or blocks to toggle).
+  const formatCommands = simple ? null : buildFormatCommands(schema);
+  const emitFormatState = () => {
+    if (formatCommands && options.onFormatStateChange)
+      options.onFormatStateChange(computeFormatState(view.state, formatCommands, schema));
+  };
+
   // Live task chips register here so refreshLinks() can re-hydrate them on demand.
   const linkViews = new Set<WikilinkView>();
 
@@ -241,8 +259,13 @@ export function createEditor(
         pending = serialize(next.doc);
         if (!timer) timer = setTimeout(flush, debounceMs);
       }
+      // The toolbar tracks both content and selection changes (marks active, what's enabled).
+      if (tr.docChanged || tr.selectionSet) emitFormatState();
     },
   });
+
+  // Seed the toolbar with the initial selection's state.
+  emitFormatState();
 
   // Swap the whole document for freshly parsed content, off the undo history. Emits a
   // change like any edit (the composer's onChange resets its draft).
@@ -268,6 +291,21 @@ export function createEditor(
     setContent,
     clear() {
       setContent("");
+    },
+    format(name: FormatName) {
+      if (!formatCommands) return;
+      formatCommands[name](view.state, view.dispatch, view);
+      view.focus();
+    },
+    insertReference() {
+      // Insert the `[[` trigger at the cursor; the autocomplete plugin (web popup or native
+      // host modal) picks it up from there, exactly as if the user had typed it.
+      try {
+        view.dispatch(view.state.tr.insertText("[["));
+        view.focus();
+      } catch {
+        /* view torn down */
+      }
     },
   };
 }

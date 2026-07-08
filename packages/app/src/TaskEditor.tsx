@@ -11,7 +11,7 @@ import { useLinkSource } from "./useLinkSource";
 import { DateTimeInput } from "./DateTimeInput";
 import { TaskGraph } from "./TaskGraph";
 import { MembershipPicker } from "./MembershipPicker";
-import { ArchetypeSection } from "./ArchetypeSection";
+import { ArchetypeChip, ObjectMetadataPanel, MetadataSidePanel } from "./ArchetypeSection";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 export interface TaskEditorProps {
@@ -41,6 +41,9 @@ export function TaskEditor({ task, save, onDelete, showToolbar = true, onOpenRef
   const [showProjects, setShowProjects] = useState(false);
   const [showGraph, setShowGraph] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Toggle the object metadata side panel (desktop only — mobile shows it inline, since it
+  // has no sub-toolbar to host the toggle).
+  const [showMeta, setShowMeta] = useState(false);
   // Which metadata field has its full editor expanded (Reminders-style: the chips are the
   // resting state; tapping one reveals the natural-language / preset / picker controls).
   const [expanded, setExpanded] = useState<null | "due" | "reminder" | "repeat">(null);
@@ -66,6 +69,9 @@ export function TaskEditor({ task, save, onDelete, showToolbar = true, onOpenRef
           <IconButton label={showGraph ? "Show task" : "Show task graph"} size="sm" active={showGraph} onPress={() => setShowGraph((v) => !v)}>
             <Icon name="graph" size={16} color={showGraph ? colors.accentHover : colors.textTertiary} />
           </IconButton>
+          <IconButton label={showMeta ? "Hide metadata" : "Show metadata"} size="sm" active={showMeta} onPress={() => setShowMeta((v) => !v)}>
+            <Icon name="panelRight" size={16} color={showMeta ? colors.accentHover : colors.textTertiary} />
+          </IconButton>
           {onDelete ? (
             <IconButton label="Delete task" size="sm" onPress={() => setConfirmDelete(true)}>
               <Icon name="trash" size={16} color={colors.textTertiary} />
@@ -74,6 +80,8 @@ export function TaskEditor({ task, save, onDelete, showToolbar = true, onOpenRef
         </View>
       ) : null}
 
+      {/* Content and the metadata side panel sit side by side; the panel is toggled. */}
+      <View style={styles.body}>
       {showGraph ? (
         // RNW View is position:relative, giving the absolutely-filled graph canvas a size.
         <View style={{ flex: 1 }}>
@@ -123,6 +131,13 @@ export function TaskEditor({ task, save, onDelete, showToolbar = true, onOpenRef
             onPress={() => setExpanded((e) => (e === "repeat" ? null : "repeat"))}
             onClear={task.repeatRule ? () => save(task.id, { clearRepeatRule: true }) : undefined}
           />
+          {/* The archetype type is set/cleared inline; its fields live in the metadata panel. */}
+          <ArchetypeChip
+            kind="task"
+            objectTypeId={task.objectTypeId}
+            onSetType={(typeId) => save(task.id, { objectTypeId: typeId })}
+            onClearType={() => save(task.id, { clearObjectType: true, props: {} })}
+          />
         </View>
 
         {expanded === "due" ? (
@@ -159,17 +174,17 @@ export function TaskEditor({ task, save, onDelete, showToolbar = true, onOpenRef
           </View>
         ) : null}
 
-        {/* Archetype + structured props (PLAN §6.3), aligned with the metadata column. */}
-        <View style={styles.archetype}>
-          <ArchetypeSection
-            kind="task"
-            objectTypeId={task.objectTypeId}
-            props={task.props}
-            onSetType={(typeId) => save(task.id, { objectTypeId: typeId })}
-            onClearType={() => save(task.id, { clearObjectType: true, props: {} })}
-            onChangeProps={(next) => save(task.id, { props: next })}
-          />
-        </View>
+        {/* Structured props (PLAN §6.3). On desktop these live in the metadata side panel;
+            mobile has no sub-toolbar to toggle it, so once a type is set we show them inline. */}
+        {!showToolbar && task.objectTypeId ? (
+          <View style={styles.archetype}>
+            <ObjectMetadataPanel
+              objectTypeId={task.objectTypeId}
+              props={task.props}
+              onChangeProps={(next) => save(task.id, { props: next })}
+            />
+          </View>
+        ) : null}
 
         {/* Notes read as a rounded input, left-aligned with the due / reminder fields above. */}
         <View style={styles.notesField}>
@@ -188,6 +203,16 @@ export function TaskEditor({ task, save, onDelete, showToolbar = true, onOpenRef
       </ScrollView>
       )}
 
+        {showMeta && showToolbar ? (
+          <MetadataSidePanel
+            objectTypeId={task.objectTypeId}
+            props={task.props}
+            onChangeProps={(next) => save(task.id, { props: next })}
+            onClose={() => setShowMeta(false)}
+          />
+        ) : null}
+      </View>
+
       {showProjects ? (
         <MembershipPicker entityType="task" entityId={task.id} onClose={() => setShowProjects(false)} />
       ) : null}
@@ -205,10 +230,15 @@ export function TaskEditor({ task, save, onDelete, showToolbar = true, onOpenRef
   );
 }
 
-/** A checkbox that renders a task's done state. */
-export function Checkbox({ checked, onPress, size = 22 }: { checked: boolean; onPress: () => void; size?: number }) {
+/** A checkbox that renders a task's done state. `label` overrides the task-flavored
+ *  accessibility label for non-task uses (e.g. settings toggles). */
+export function Checkbox({ checked, onPress, size = 22, label }: { checked: boolean; onPress: () => void; size?: number; label?: string }) {
   return (
-    <Pressable onPress={onPress} aria-label={checked ? "Mark not done" : "Mark done"} style={[styles.check, { width: size, height: size }, checked ? styles.checkOn : null]}>
+    <Pressable
+      onPress={onPress}
+      aria-label={label ?? (checked ? "Mark not done" : "Mark done")}
+      style={[styles.check, { width: size, height: size }, checked ? styles.checkOn : null]}
+    >
       {checked ? <Icon name="check" size={size - 8} color={colors.gray0} /> : null}
     </Pressable>
   );
@@ -545,6 +575,7 @@ const styles = {
     borderBottomColor: colors.borderSubtle,
     flexShrink: 0,
   },
+  body: { flex: 1, flexDirection: "row" as const, minHeight: 0 },
   doc: { maxWidth: layout.contentMax, width: "100%" as const, marginHorizontal: "auto" as const, padding: space.xxl, gap: space.sm },
   titleRow: { flexDirection: "row" as const, alignItems: "flex-start" as const, gap: space.md },
   groupLabel: { fontWeight: "600" as const, letterSpacing: 0.5, marginTop: space.lg },

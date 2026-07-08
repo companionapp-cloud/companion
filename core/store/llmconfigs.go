@@ -18,7 +18,7 @@ type LLMConfigsRepo struct {
 	clock domain.Clock
 }
 
-const llmConfigColumns = `id, scope, name, base_url, provider, model, api_key_ref, is_default, created_at, updated_at, deleted_at, version, dirty`
+const llmConfigColumns = `id, scope, name, base_url, provider, api_key_ref, is_default, created_at, updated_at, deleted_at, version, dirty`
 
 // CreateLLMConfigInput carries the client-supplied fields for a new config. The API key is
 // handled out of band (stored in the keychain by the bridge); only its ref reaches here.
@@ -27,7 +27,6 @@ type CreateLLMConfigInput struct {
 	Name      string  `json:"name"`
 	BaseURL   string  `json:"baseUrl"`
 	Provider  string  `json:"provider"`
-	Model     string  `json:"model"`
 	APIKeyRef *string `json:"apiKeyRef,omitempty"`
 	IsDefault bool    `json:"isDefault"`
 }
@@ -36,7 +35,6 @@ type CreateLLMConfigInput struct {
 type UpdateLLMConfigInput struct {
 	Name      *string `json:"name,omitempty"`
 	BaseURL   *string `json:"baseUrl,omitempty"`
-	Model     *string `json:"model,omitempty"`
 	APIKeyRef *string `json:"apiKeyRef,omitempty"`
 }
 
@@ -50,16 +48,16 @@ func (r *LLMConfigsRepo) Create(in CreateLLMConfigInput) (*domain.LLMConfig, err
 	now := r.clock.Now().UTC()
 	c := &domain.LLMConfig{
 		ID: id.String(), Scope: in.Scope, Name: in.Name, BaseURL: in.BaseURL,
-		Provider: in.Provider, Model: in.Model, APIKeyRef: in.APIKeyRef, IsDefault: in.IsDefault,
+		Provider: in.Provider, APIKeyRef: in.APIKeyRef, IsDefault: in.IsDefault,
 		CreatedAt: now, UpdatedAt: now, Version: 0, Dirty: true,
 	}
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
 	if _, err := r.db.Exec(
-		`INSERT INTO llm_configs (id, scope, name, base_url, provider, model, api_key_ref, is_default, created_at, updated_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-		c.ID, c.Scope, c.Name, c.BaseURL, c.Provider, c.Model, c.APIKeyRef, boolToInt(c.IsDefault),
+		`INSERT INTO llm_configs (id, scope, name, base_url, provider, api_key_ref, is_default, created_at, updated_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		c.ID, c.Scope, c.Name, c.BaseURL, c.Provider, c.APIKeyRef, boolToInt(c.IsDefault),
 		c.CreatedAt.Format(timeFormat), c.UpdatedAt.Format(timeFormat), c.Version, boolToInt(c.Dirty),
 	); err != nil {
 		return nil, fmt.Errorf("insert llm config: %w", err)
@@ -137,9 +135,6 @@ func (r *LLMConfigsRepo) Update(id string, in UpdateLLMConfigInput) (*domain.LLM
 	if in.BaseURL != nil {
 		c.BaseURL = *in.BaseURL
 	}
-	if in.Model != nil {
-		c.Model = *in.Model
-	}
 	if in.APIKeyRef != nil {
 		c.APIKeyRef = in.APIKeyRef
 	}
@@ -149,9 +144,9 @@ func (r *LLMConfigsRepo) Update(id string, in UpdateLLMConfigInput) (*domain.LLM
 		return nil, err
 	}
 	res, err := r.db.Exec(
-		`UPDATE llm_configs SET name = ?, base_url = ?, model = ?, api_key_ref = ?, updated_at = ?, dirty = 1
+		`UPDATE llm_configs SET name = ?, base_url = ?, api_key_ref = ?, updated_at = ?, dirty = 1
 		 WHERE id = ? AND deleted_at IS NULL;`,
-		c.Name, c.BaseURL, c.Model, c.APIKeyRef, c.UpdatedAt.Format(timeFormat), id,
+		c.Name, c.BaseURL, c.APIKeyRef, c.UpdatedAt.Format(timeFormat), id,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update llm config: %w", err)
@@ -213,7 +208,7 @@ func scanLLMConfig(rows Rows) (*domain.LLMConfig, error) {
 		createdAt, updatedAt string
 		isDefault, dirty     int
 	)
-	if err := rows.Scan(&c.ID, &c.Scope, &c.Name, &c.BaseURL, &c.Provider, &c.Model,
+	if err := rows.Scan(&c.ID, &c.Scope, &c.Name, &c.BaseURL, &c.Provider,
 		&apiKeyRef, &isDefault, &createdAt, &updatedAt, &deletedAt, &c.Version, &dirty); err != nil {
 		return nil, fmt.Errorf("scan llm config: %w", err)
 	}

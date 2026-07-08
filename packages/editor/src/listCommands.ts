@@ -1,6 +1,6 @@
 import { Fragment, Slice, NodeRange, type NodeType, type Attrs, type Node } from "prosemirror-model";
 import { Selection, type Command, type EditorState, type Transaction } from "prosemirror-state";
-import { canSplit, canJoin, liftTarget, ReplaceAroundStep } from "prosemirror-transform";
+import { canSplit, canJoin, liftTarget, findWrapping, ReplaceAroundStep } from "prosemirror-transform";
 
 // The list-editing commands prosemirror-schema-list provides — ported here (that package
 // isn't a dependency, matching how inputrules.ts reimplements prosemirror-inputrules). The
@@ -66,6 +66,73 @@ export function splitListItemKeepingType(itemType: NodeType): Command {
     const isTask = state.selection.$from.node(-1)?.type == itemType && state.selection.$from.node(-1).attrs.checked !== null;
     return (isTask ? splitTodo : splitPlain)(state, dispatch);
   };
+}
+
+/** Wrap the selected block(s) in a list of `listType`. Ported from prosemirror-schema-list
+ * (not a dependency), matching how the split/lift/sink commands above are ported. Used by the
+ * formatting toolbar's list buttons. */
+export function wrapInList(listType: NodeType, attrs?: Attrs | null): Command {
+  return function (state: EditorState, dispatch?: Dispatch) {
+    const { $from, $to } = state.selection;
+    let range = $from.blockRange($to);
+    let doJoin = false;
+    let outerRange = range;
+    if (!range) return false;
+    // If the block is the first child of a list item, wrap the whole outer item instead so
+    // the new list nests cleanly rather than splitting the existing one.
+    if (
+      range.depth >= 2 &&
+      $from.node(range.depth - 1).type.compatibleContent(listType) &&
+      range.startIndex == 0
+    ) {
+      if ($from.index(range.depth - 1) == 0) return false;
+      const $insert = state.doc.resolve(range.start - 2);
+      outerRange = new NodeRange($insert, $insert, range.depth);
+      if (range.endIndex < range.parent.childCount)
+        range = new NodeRange($from, state.doc.resolve($to.end(range.depth)), range.depth);
+      doJoin = true;
+    }
+    const wrap = findWrapping(outerRange!, listType, attrs, range);
+    if (!wrap) return false;
+    if (dispatch) dispatch(doWrapInList(state.tr, range, wrap, doJoin, listType).scrollIntoView());
+    return true;
+  };
+}
+
+function doWrapInList(
+  tr: Transaction,
+  range: NodeRange,
+  wrappers: { type: NodeType; attrs?: Attrs | null }[],
+  joinBefore: boolean,
+  listType: NodeType,
+) {
+  let content = Fragment.empty;
+  for (let i = wrappers.length - 1; i >= 0; i--)
+    content = Fragment.from(wrappers[i].type.create(wrappers[i].attrs, content));
+  tr.step(
+    new ReplaceAroundStep(
+      range.start - (joinBefore ? 2 : 0),
+      range.end,
+      range.start,
+      range.end,
+      new Slice(content, 0, 0),
+      wrappers.length,
+      true,
+    ),
+  );
+  let found = 0;
+  for (let i = 0; i < wrappers.length; i++) if (wrappers[i].type == listType) found = i + 1;
+  const splitDepth = wrappers.length - found;
+  let splitPos = range.start + wrappers.length - (joinBefore ? 2 : 0);
+  const parent = range.parent;
+  for (let i = range.startIndex, e = range.endIndex, first = true; i < e; i++, first = false) {
+    if (!first && canSplit(tr.doc, splitPos, splitDepth)) {
+      tr.split(splitPos, splitDepth);
+      splitPos += 2 * splitDepth;
+    }
+    splitPos += parent.child(i).nodeSize;
+  }
+  return tr;
 }
 
 /** Tab: nest the current list item under the previous one. */

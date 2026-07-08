@@ -47,6 +47,7 @@ export function ChatScreen() {
           composer="floating"
           bottomInset={keyboardVisible ? 0 : insets.bottom}
           onOpenEntity={(type, id) => nav.navigate(type === 'task' ? 'TaskEditor' : 'NoteEditor', { id })}
+          onConfigure={() => nav.navigate('SettingsSection', { section: 'ai' })}
         />
       </View>
     </KeyboardAvoidingView>

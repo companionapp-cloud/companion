@@ -23,7 +23,6 @@ import {
   layout,
   space,
   transition,
-  type IconName,
 } from "@companion/design-system";
 import { NavContext, useNav, type NavLocation, type Navigator, type ProjectSection, type Tab, type TabRef, type ViewId } from "./nav-context";
 import { useCore } from "./CoreContext";
@@ -34,12 +33,14 @@ import { TasksProvider } from "./TasksProvider";
 import { RemindersProvider, type NotificationScheduler } from "./RemindersProvider";
 import { NotificationsProvider } from "./NotificationsProvider";
 import { NotificationsScreen } from "./NotificationsScreen";
+import { ToolVisibilityProvider, useToolVisibility, type ToolsStorage } from "./ToolVisibilityProvider";
 import { ProjectsProvider } from "./ProjectsProvider";
 import { ObjectTypesProvider } from "./ObjectTypesProvider";
 import { ProjectsSidebar } from "./ProjectsSidebar";
 import { ProjectView } from "./ProjectView";
 import { AppToolbar } from "./AppToolbar";
 import { WorkspaceScreen } from "./WorkspaceScreen";
+import { TodayScreen } from "./TodayScreen";
 import { GraphScreen } from "./GraphScreen";
 import { TrashScreen } from "./TrashScreen";
 import { ChatsScreen } from "./ChatScreen";
@@ -51,16 +52,6 @@ import { useSync } from "./SyncProvider";
 // tabs hold the same document.
 let tabSeq = 0;
 const freshTab = (): Tab => ({ uid: `tab${++tabSeq}`, ref: null, back: [], fwd: [] });
-
-const NAV: { id: ViewId; label: string; icon: IconName }[] = [
-  { id: "chat", label: "Chat", icon: "chat" },
-  { id: "calendar", label: "Calendar", icon: "calendar" },
-  { id: "notes", label: "Notes", icon: "notes" },
-  { id: "tasks", label: "Tasks", icon: "tasks" },
-  { id: "habits", label: "Habits", icon: "habits" },
-  { id: "graph", label: "Graph", icon: "graph" },
-  { id: "trash", label: "Trash", icon: "trash" },
-];
 
 type PlaceholderView = "calendar" | "tasks" | "habits";
 
@@ -75,6 +66,8 @@ export interface AppShellProps {
   /** Per-platform reminder scheduler (PLAN §6.4); passed straight to RemindersProvider.
    *  When omitted it uses the best-effort web `Notification` scheduler. */
   notificationScheduler?: NotificationScheduler;
+  /** Where per-device tool visibility persists; defaults to localStorage. */
+  toolsStorage?: ToolsStorage;
 }
 
 // ---------------------------------------------------------------------------
@@ -91,6 +84,7 @@ function webLinking(): LinkingOptions<ParamListBase> | undefined {
     prefixes: [window.location.origin],
     config: {
       screens: {
+        today: "today",
         chat: "chat",
         calendar: "calendar",
         // notes/tasks are the workspace browse lists; the active tab's open document is
@@ -401,9 +395,10 @@ function ReminderNavigationBridge() {
   return null;
 }
 
-export function AppShell({ topInset = 0, notificationScheduler }: AppShellProps) {
+export function AppShell({ topInset = 0, notificationScheduler, toolsStorage }: AppShellProps) {
   const linking = useMemo(webLinking, []);
   return (
+    <ToolVisibilityProvider storage={toolsStorage}>
     <NotesProvider>
       <TasksProvider>
        <RemindersProvider scheduler={notificationScheduler}>
@@ -412,6 +407,7 @@ export function AppShell({ topInset = 0, notificationScheduler }: AppShellProps)
          <ObjectTypesProvider>
           <NavigationContainer linking={linking} documentTitle={{ enabled: false }}>
             <Nav.Navigator initialRouteName="notes" topInset={topInset}>
+              <Nav.Screen name="today" component={TodayScreen} />
               <Nav.Screen name="chat" component={ChatsScreen} />
               <Nav.Screen name="calendar" component={ViewScreen} />
               <Nav.Screen name="notes" component={NotesRouteScreen} />
@@ -430,6 +426,7 @@ export function AppShell({ topInset = 0, notificationScheduler }: AppShellProps)
        </RemindersProvider>
       </TasksProvider>
     </NotesProvider>
+    </ToolVisibilityProvider>
   );
 }
 
@@ -441,6 +438,10 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
   const inWorkspace = nav.current.kind === "notes" || nav.current.kind === "tasks";
   const sync = useSync();
   const dnd = useDnd();
+  // Per-device tool hiding (Settings › Tools): only the rail entry disappears — the view
+  // itself stays routable.
+  const { tools, hidden } = useToolVisibility();
+  const rail = tools.filter((t) => !hidden.has(t.id));
   const [open, setOpen] = useState(false);
   const [pinned, setPinned] = usePersistentBoolean("companion.sidebar.pinned", false);
   // Reveal the rail while dragging a document, so projects are available as drop targets.
@@ -495,7 +496,7 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
 
         <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1 }}>
           <View style={{ gap: 3 }}>
-            {NAV.map((n) => (
+            {rail.map((n) => (
               <RailItem
                 key={n.id}
                 icon={<Icon name={n.icon} size={19} color={nav.activeView === n.id ? colors.accentHover : colors.textSecondary} />}

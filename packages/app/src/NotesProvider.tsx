@@ -15,7 +15,7 @@ export interface NotesStore {
   setFilter: (f: MembershipFilter) => void;
   loading: boolean;
   byId: (id: string) => Note | undefined;
-  create: (input?: { title?: string; contentMd?: string }) => Promise<Note>;
+  create: (input?: { title?: string; contentMd?: string; date?: string | null }) => Promise<Note>;
   remove: (id: string) => Promise<void>;
   /** Debounced, optimistic field save (per note). */
   save: (id: string, fields: { title?: string; contentMd?: string }) => void;
@@ -84,8 +84,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   );
 
   const create = useCallback(
-    async (input?: { title?: string; contentMd?: string }) => {
-      const note = await api.create({ title: input?.title ?? "Untitled", contentMd: input?.contentMd ?? "" });
+    async (input?: { title?: string; contentMd?: string; date?: string | null }) => {
+      const note = await api.create({ title: input?.title ?? "Untitled", contentMd: input?.contentMd ?? "", date: input?.date ?? null });
       setNotes((prev) => [note, ...prev]);
       syncTrigger();
       return note;

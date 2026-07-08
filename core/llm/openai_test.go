@@ -133,3 +133,30 @@ func TestOpenAIEngineIntegration(t *testing.T) {
 		t.Errorf("task not created in store: %+v", hits)
 	}
 }
+
+// TestOpenAIListModels hits GET /models (the OpenAI-compatible listing Ollama also serves)
+// and returns the ids sorted.
+func TestOpenAIListModels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/models") {
+			http.Error(w, "wrong path", http.StatusNotFound)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer sk-test" {
+			t.Errorf("missing bearer auth, got %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[{"id":"qwen2.5"},{"id":"llama3.1"},{"id":""}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	p := &OpenAIProvider{BaseURL: srv.URL + "/v1", APIKey: "sk-test"}
+	got, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("list models: %v", err)
+	}
+	want := []string{"llama3.1", "qwen2.5"} // sorted, empty id dropped
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("models = %v, want %v", got, want)
+	}
+}

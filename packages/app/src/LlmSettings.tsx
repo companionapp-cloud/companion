@@ -47,33 +47,16 @@ const PRESETS: Record<Kind, Preset> = {
   },
 };
 
-// Known models per provider. "Other…" always lets the user type one the list doesn't cover
-// (a freshly pulled Ollama model, a preview snapshot, an org-specific deployment).
-const MODELS: Record<Kind, string[]> = {
-  local: ["qwen2.5", "qwen2.5-coder", "llama3.3", "llama3.1", "mistral-nemo", "firefunction-v2", "command-r"],
-  openai: ["gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o", "gpt-4o-mini", "o4-mini", "o3"],
-  anthropic: [
-    "claude-opus-4-8",
-    "claude-opus-4-7",
-    "claude-opus-4-6",
-    "claude-sonnet-5",
-    "claude-sonnet-4-6",
-    "claude-haiku-4-5",
-    "claude-fable-5",
-  ],
-};
-
 /** LlmSettings manages the user's chat providers (PLAN §6.8): add a local model by URL, or a
- *  cloud model with an API key; list, set default, and remove. Shared across web/desktop
- *  (and reusable by the mobile shell). */
+ *  cloud provider with an API key; list, set default, and remove. The model itself is not
+ *  configured here — it's picked per chat from the provider's live model list. Shared across
+ *  web/desktop (and reused by the mobile shell). */
 export function LlmSettings() {
   const { llm } = useCore();
   const [configs, setConfigs] = useState<LLMConfig[] | null>(null);
   const [kind, setKind] = useState<Kind>("local");
   const [name, setName] = useState(PRESETS.local.name);
   const [baseUrl, setBaseUrl] = useState(PRESETS.local.baseUrl);
-  const [model, setModel] = useState(MODELS.local[0]);
-  const [otherModel, setOtherModel] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -91,15 +74,13 @@ export function LlmSettings() {
     const p = PRESETS[k];
     setName(p.name);
     setBaseUrl(p.baseUrl);
-    setModel(MODELS[k][0]);
-    setOtherModel(false);
     setApiKey("");
     setError(null);
   };
 
   const add = useCallback(async () => {
     const p = PRESETS[kind];
-    if (!name.trim() || !model.trim() || (p.configureUrl && !baseUrl.trim()) || (p.needsKey && !apiKey.trim())) {
+    if (!name.trim() || (p.configureUrl && !baseUrl.trim()) || (p.needsKey && !apiKey.trim())) {
       setError("Fill in the required fields.");
       return;
     }
@@ -111,7 +92,6 @@ export function LlmSettings() {
         provider: p.provider,
         name: name.trim(),
         baseUrl: baseUrl.trim(),
-        model: model.trim(),
         apiKey: p.needsKey ? apiKey.trim() : undefined,
         isDefault: (configs?.length ?? 0) === 0,
       });
@@ -122,7 +102,7 @@ export function LlmSettings() {
     } finally {
       setBusy(false);
     }
-  }, [kind, name, baseUrl, model, apiKey, configs, llm, reload]);
+  }, [kind, name, baseUrl, apiKey, configs, llm, reload]);
 
   const setDefault = async (id: string) => {
     await llm.configs.setDefault(id).catch((e) => setError(String(e)));
@@ -155,7 +135,7 @@ export function LlmSettings() {
                   )}
                 </View>
                 <Text variant="caption" tone="tertiary" numberOfLines={1}>
-                  {c.provider === "anthropic" ? "Anthropic" : c.scope === "device" ? "Local" : "OpenAI-compatible"} · {c.model}
+                  {c.provider === "anthropic" ? "Anthropic" : c.scope === "device" ? "Local" : "OpenAI-compatible"}
                 </Text>
               </View>
               {!c.isDefault && <Button label="Use" variant="secondary" size="sm" onPress={() => setDefault(c.id)} />}
@@ -199,21 +179,6 @@ export function LlmSettings() {
           <Input value={apiKey} onChangeText={setApiKey} placeholder="sk-…" secureTextEntry autoCapitalize="none" />
         </Field>
       )}
-      <Field label="Model">
-        <Select
-          options={MODELS[kind]}
-          value={otherModel ? null : model}
-          onSelect={(m) => {
-            setModel(m);
-            setOtherModel(false);
-          }}
-          onOther={() => {
-            setOtherModel(true);
-            setModel("");
-          }}
-        />
-        {otherModel && <Input value={model} onChangeText={setModel} placeholder="Model name" autoCapitalize="none" />}
-      </Field>
 
       {error && (
         <Text tone="danger" variant="caption">
@@ -223,71 +188,11 @@ export function LlmSettings() {
       <View style={{ flexDirection: "row" }}>
         <Button label={busy ? "…" : "Add provider"} onPress={add} disabled={busy} icon={<Icon name="plus" size={15} />} />
       </View>
-      {preset.needsKey && (
-        <Text variant="caption" tone="tertiary">
-          Your key is stored on this device (keychain on native, browser storage on web) and never in the database.
-        </Text>
-      )}
-    </View>
-  );
-}
-
-/** Select is an inline dropdown: a bordered field that expands to a list of options plus an
- *  "Other…" row. `value` is the chosen option, or null when "Other" is active. */
-function Select({
-  options,
-  value,
-  onSelect,
-  onOther,
-}: {
-  options: string[];
-  value: string | null;
-  onSelect: (v: string) => void;
-  onOther: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const isOther = value === null;
-  return (
-    <View>
-      <Pressable style={styles.field} onPress={() => setOpen((o) => !o)} aria-label="Choose a model">
-        <Text tone={isOther ? "tertiary" : undefined} style={{ flex: 1 }} numberOfLines={1}>
-          {isOther ? "Other…" : value}
-        </Text>
-        <View style={{ transform: [{ rotate: open ? "90deg" : "0deg" }] }}>
-          <Icon name="chevronRight" size={16} color={colors.textTertiary} />
-        </View>
-      </Pressable>
-      {open && (
-        <View style={styles.menu}>
-          {options.map((opt) => (
-            <Pressable
-              key={opt}
-              style={styles.option}
-              aria-label={opt}
-              onPress={() => {
-                onSelect(opt);
-                setOpen(false);
-              }}
-            >
-              <Text style={{ flex: 1 }}>{opt}</Text>
-              {!isOther && opt === value && <Icon name="check" size={15} color={colors.accent} />}
-            </Pressable>
-          ))}
-          <Pressable
-            style={styles.option}
-            aria-label="Other"
-            onPress={() => {
-              onOther();
-              setOpen(false);
-            }}
-          >
-            <Text tone="secondary" style={{ flex: 1 }}>
-              Other…
-            </Text>
-            {isOther && <Icon name="check" size={15} color={colors.accent} />}
-          </Pressable>
-        </View>
-      )}
+      <Text variant="caption" tone="tertiary">
+        {preset.needsKey
+          ? "Your key is stored on this device (keychain on native, browser storage on web) and never in the database."
+          : "You'll pick which model to use in the chat, from the models this server has installed."}
+      </Text>
     </View>
   );
 }
@@ -325,29 +230,4 @@ const styles = {
     backgroundColor: colors.surfaceApp,
   },
   pillActive: { backgroundColor: colors.accentSoft, borderColor: colors.accentSoftBorder },
-  field: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: space.sm,
-    paddingHorizontal: space.lg,
-    height: 36,
-    borderWidth: 1,
-    borderColor: colors.borderDefault,
-    borderRadius: radius.md,
-    backgroundColor: colors.surfaceApp,
-  },
-  menu: {
-    marginTop: space.xs,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    borderRadius: radius.md,
-    backgroundColor: colors.surfaceCard,
-    overflow: "hidden" as const,
-  },
-  option: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    paddingHorizontal: space.lg,
-    paddingVertical: space.md,
-  },
 };

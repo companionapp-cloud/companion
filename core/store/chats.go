@@ -19,7 +19,7 @@ type ChatsRepo struct {
 	clock domain.Clock
 }
 
-const chatColumns = `id, title, config_id, created_at, updated_at, deleted_at, version, dirty`
+const chatColumns = `id, title, config_id, model, created_at, updated_at, deleted_at, version, dirty`
 
 // Create inserts a new chat (UUIDv7 id, version 0, dirty).
 func (r *ChatsRepo) Create(title string, configID *string) (*domain.Chat, error) {
@@ -89,6 +89,12 @@ func (r *ChatsRepo) Touch(id string) error {
 // SetConfig re-pins which provider config a chat runs on (nil = account default).
 func (r *ChatsRepo) SetConfig(id string, configID *string) error {
 	return r.patch(id, `config_id = ?`, configID)
+}
+
+// SetModel records which model a chat runs on (nil = none picked yet). The model is chosen at
+// chat time from the provider's live model list, not baked into the config.
+func (r *ChatsRepo) SetModel(id string, model *string) error {
+	return r.patch(id, `model = ?`, model)
 }
 
 // patch applies an optional `set` fragment plus updated_at/dirty to a live chat.
@@ -167,13 +173,13 @@ func (r *ChatsRepo) Apply(c *domain.Chat) error {
 		deletedAt = c.DeletedAt.UTC().Format(timeFormat)
 	}
 	_, err := r.db.Exec(
-		`INSERT INTO chats (id, title, config_id, created_at, updated_at, deleted_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+		`INSERT INTO chats (id, title, config_id, model, created_at, updated_at, deleted_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
 		 ON CONFLICT(id) DO UPDATE SET
-		   title = excluded.title, config_id = excluded.config_id,
+		   title = excluded.title, config_id = excluded.config_id, model = excluded.model,
 		   created_at = excluded.created_at, updated_at = excluded.updated_at,
 		   deleted_at = excluded.deleted_at, version = excluded.version, dirty = 0;`,
-		c.ID, c.Title, c.ConfigID, c.CreatedAt.UTC().Format(timeFormat), c.UpdatedAt.UTC().Format(timeFormat), deletedAt, c.Version,
+		c.ID, c.Title, c.ConfigID, c.Model, c.CreatedAt.UTC().Format(timeFormat), c.UpdatedAt.UTC().Format(timeFormat), deletedAt, c.Version,
 	)
 	if err != nil {
 		return fmt.Errorf("apply chat: %w", err)
@@ -189,7 +195,7 @@ func (r *ChatsRepo) MarkPushed(id string, version int64) error {
 }
 
 func (r *ChatsRepo) MeaningfulDiff(a, b *domain.Chat) bool {
-	if a.Title != b.Title || derefStr(a.ConfigID) != derefStr(b.ConfigID) {
+	if a.Title != b.Title || derefStr(a.ConfigID) != derefStr(b.ConfigID) || derefStr(a.Model) != derefStr(b.Model) {
 		return true
 	}
 	return (a.DeletedAt == nil) != (b.DeletedAt == nil)
@@ -215,8 +221,8 @@ func (r *ChatsRepo) ConflictedCopy(local *domain.Chat, suffix string) error {
 		title = "Chat"
 	}
 	_, err = r.db.Exec(
-		`INSERT INTO chats (id, title, config_id, created_at, updated_at, version, dirty) VALUES (?, ?, ?, ?, ?, 0, 1);`,
-		id.String(), title+" "+suffix, local.ConfigID, now, now,
+		`INSERT INTO chats (id, title, config_id, model, created_at, updated_at, version, dirty) VALUES (?, ?, ?, ?, ?, ?, 0, 1);`,
+		id.String(), title+" "+suffix, local.ConfigID, local.Model, now, now,
 	)
 	if err != nil {
 		return fmt.Errorf("insert conflicted chat: %w", err)
@@ -227,15 +233,19 @@ func (r *ChatsRepo) ConflictedCopy(local *domain.Chat, suffix string) error {
 func scanChat(rows Rows) (*domain.Chat, error) {
 	var (
 		c                    domain.Chat
-		configID, deletedAt  sql.NullString
+		configID, model      sql.NullString
+		deletedAt            sql.NullString
 		createdAt, updatedAt string
 		dirty                int
 	)
-	if err := rows.Scan(&c.ID, &c.Title, &configID, &createdAt, &updatedAt, &deletedAt, &c.Version, &dirty); err != nil {
+	if err := rows.Scan(&c.ID, &c.Title, &configID, &model, &createdAt, &updatedAt, &deletedAt, &c.Version, &dirty); err != nil {
 		return nil, fmt.Errorf("scan chat: %w", err)
 	}
 	if configID.Valid {
 		c.ConfigID = &configID.String
+	}
+	if model.Valid {
+		c.Model = &model.String
 	}
 	var err error
 	if c.CreatedAt, err = time.Parse(timeFormat, createdAt); err != nil {

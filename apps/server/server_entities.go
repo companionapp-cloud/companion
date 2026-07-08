@@ -507,7 +507,7 @@ func parseTimes(createdAt, updatedAt string, deletedAt sql.NullString, created, 
 
 // ---- chats ---------------------------------------------------------------
 
-const chatCols = `id, title, config_id, created_at, updated_at, deleted_at, version, server_seq`
+const chatCols = `id, title, config_id, model, created_at, updated_at, deleted_at, version, server_seq`
 
 var chatHandler = &entityHandler{
 	typ:   protocol.EntityChat,
@@ -522,13 +522,13 @@ var chatHandler = &entityHandler{
 			deletedAt = c.DeletedAt.UTC().Format(timeFormat)
 		}
 		_, err := tx.Exec(s.rebind(
-			`INSERT INTO chats (id, user_id, title, config_id, created_at, updated_at, deleted_at, version, server_seq)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO chats (id, user_id, title, config_id, model, created_at, updated_at, deleted_at, version, server_seq)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT (id) DO UPDATE SET
-			   title = excluded.title, config_id = excluded.config_id,
+			   title = excluded.title, config_id = excluded.config_id, model = excluded.model,
 			   updated_at = excluded.updated_at, deleted_at = excluded.deleted_at,
 			   version = excluded.version, server_seq = excluded.server_seq;`),
-			c.ID, uid, c.Title, c.ConfigID,
+			c.ID, uid, c.Title, c.ConfigID, c.Model,
 			c.CreatedAt.UTC().Format(timeFormat), updatedAt.Format(timeFormat), deletedAt, version, seq)
 		return err
 	},
@@ -565,15 +565,19 @@ var chatHandler = &entityHandler{
 func scanServerChat(sc rowScanner) (*domain.Chat, int64, error) {
 	var (
 		c                    domain.Chat
-		configID, deletedAt  sql.NullString
+		configID, model      sql.NullString
+		deletedAt            sql.NullString
 		createdAt, updatedAt string
 		seq                  int64
 	)
-	if err := sc.Scan(&c.ID, &c.Title, &configID, &createdAt, &updatedAt, &deletedAt, &c.Version, &seq); err != nil {
+	if err := sc.Scan(&c.ID, &c.Title, &configID, &model, &createdAt, &updatedAt, &deletedAt, &c.Version, &seq); err != nil {
 		return nil, 0, err
 	}
 	if configID.Valid {
 		c.ConfigID = &configID.String
+	}
+	if model.Valid {
+		c.Model = &model.String
 	}
 	if err := parseTimes(createdAt, updatedAt, deletedAt, &c.CreatedAt, &c.UpdatedAt, &c.DeletedAt); err != nil {
 		return nil, 0, err

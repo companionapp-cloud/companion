@@ -16,12 +16,14 @@ const (
 
 // Chat is one saved conversation with the assistant (PLAN §6.8). It syncs across the user's
 // devices so a conversation started on one continues on another; its messages live in
-// separate ChatMessage rows. A chat pins the provider config it runs on (ConfigID); nil
-// means "the account default at run time".
+// separate ChatMessage rows. A chat pins the provider config it runs on (ConfigID; nil means
+// "the account default at run time") and the model chosen for it (Model; nil until the user
+// picks one from the provider's live model list).
 type Chat struct {
 	ID        string     `json:"id"`
 	Title     string     `json:"title"`
 	ConfigID  *string    `json:"configId,omitempty"`
+	Model     *string    `json:"model,omitempty"`
 	CreatedAt time.Time  `json:"createdAt"`
 	UpdatedAt time.Time  `json:"updatedAt"`
 	DeletedAt *time.Time `json:"deletedAt,omitempty"`

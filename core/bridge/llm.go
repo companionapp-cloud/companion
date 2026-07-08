@@ -1,9 +1,11 @@
 package bridge
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"companion/core/domain"
 	"companion/core/llm"
@@ -150,10 +152,8 @@ func (c *Core) llmConfigsSetDefault(payload []byte) ([]byte, error) {
 	return json.Marshal(map[string]bool{"ok": true})
 }
 
-// buildEngine assembles the agentic engine for a config (the given id, or the default when
-// empty): a provider wired to the config's base URL and keychain key, plus the store-backed
-// tool registry.
-func (c *Core) buildEngine(configID string) (*llm.Engine, error) {
+// resolveConfig returns the config for the given id, or the default when empty.
+func (c *Core) resolveConfig(configID string) (*domain.LLMConfig, error) {
 	var (
 		cfg *domain.LLMConfig
 		err error
@@ -169,33 +169,82 @@ func (c *Core) buildEngine(configID string) (*llm.Engine, error) {
 		}
 		return nil, err
 	}
+	return cfg, nil
+}
 
+// providerFor builds the wire provider for a config: wired to its base URL and (for cloud
+// providers) the API key read from the injected keychain.
+func (c *Core) providerFor(cfg *domain.LLMConfig) (llm.Provider, error) {
 	apiKey := ""
 	if cfg.APIKeyRef != nil {
 		if c.secrets == nil {
 			return nil, errors.New("this provider needs an API key but no keychain is available on this device")
 		}
+		var err error
 		if apiKey, err = c.secrets.GetSecret(*cfg.APIKeyRef); err != nil {
 			return nil, fmt.Errorf("read api key: %w", err)
 		}
 	}
-
-	var provider llm.Provider
 	switch cfg.Provider {
 	case domain.ProviderAnthropic:
-		provider = &llm.AnthropicProvider{BaseURL: cfg.BaseURL, APIKey: apiKey}
+		return &llm.AnthropicProvider{BaseURL: cfg.BaseURL, APIKey: apiKey}, nil
 	case domain.ProviderOpenAI:
-		provider = &llm.OpenAIProvider{BaseURL: cfg.BaseURL, APIKey: apiKey}
+		return &llm.OpenAIProvider{BaseURL: cfg.BaseURL, APIKey: apiKey}, nil
 	default:
 		return nil, fmt.Errorf("unknown provider %q", cfg.Provider)
 	}
+}
 
+// buildEngine assembles the agentic engine for a config (the given id, or the default when
+// empty) running the given model: a provider wired to the config's base URL and keychain key,
+// plus the store-backed tool registry. The model is chosen at chat time, not baked into the
+// config, so it must be supplied here.
+func (c *Core) buildEngine(configID, model string) (*llm.Engine, error) {
+	cfg, err := c.resolveConfig(configID)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(model) == "" {
+		return nil, errors.New("no model selected for this chat")
+	}
+	provider, err := c.providerFor(cfg)
+	if err != nil {
+		return nil, err
+	}
 	return &llm.Engine{
 		Provider: provider,
 		Registry: llm.NewStoreRegistry(c.store),
 		System:   systemPrompt,
-		Model:    cfg.Model,
+		Model:    model,
 	}, nil
+}
+
+// llmModelsList returns the models the given provider config currently offers, fetched live
+// from its endpoint so the composer can let the user pick one at chat time.
+func (c *Core) llmModelsList(payload []byte) ([]byte, error) {
+	var args struct {
+		ConfigID string `json:"configId"`
+	}
+	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	cfg, err := c.resolveConfig(args.ConfigID)
+	if err != nil {
+		return nil, err
+	}
+	provider, err := c.providerFor(cfg)
+	if err != nil {
+		return nil, err
+	}
+	lister, ok := provider.(llm.ModelLister)
+	if !ok {
+		return nil, fmt.Errorf("provider %q cannot list models", cfg.Provider)
+	}
+	models, err := lister.ListModels(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(models)
 }
 
 // storeSecret writes an API key to the injected keychain, erroring clearly when the shell

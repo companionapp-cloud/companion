@@ -21,6 +21,13 @@
       "runtimeArgs": ["run", "dev", "-w", "@companion/web", "--", "--port", "5312", "--strictPort"],
       "port": 5312,
       "autoPort": false
+    },
+    {
+      "name": "web-verify-3",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "-w", "@companion/web", "--", "--port", "5321", "--strictPort"],
+      "port": 5321,
+      "autoPort": false
     }
   ]
 }

@@ -6,6 +6,7 @@ import {
   font,
   Icon,
   IconButton,
+  Input,
   radius,
   shadow,
   space,
@@ -33,11 +34,15 @@ const OpenEntityContext = createContext<((type: string, id: string) => void) | u
 export function ChatView({
   chatId,
   onOpenEntity,
+  onConfigure,
   composer = "bar",
   bottomInset = 0,
 }: {
   chatId: string;
   onOpenEntity?: (type: string, id: string) => void;
+  /** Called from the empty state's "Set up in Settings" button; each shell routes to its own
+   *  Settings → AI screen. When omitted, the empty state shows guidance only. */
+  onConfigure?: () => void;
   composer?: "bar" | "floating";
   bottomInset?: number;
 }) {
@@ -48,6 +53,9 @@ export function ChatView({
   const [live, setLive] = useState<{ text: string; actions: ToolAction[] } | null>(null);
   const [configs, setConfigs] = useState<LLMConfig[] | null>(null);
   const [configId, setConfigId] = useState<string | null>(null);
+  // The model is chosen per chat from the provider's live list (fetched when configId changes).
+  const [model, setModel] = useState<string | null>(null);
+  const [models, setModels] = useState<string[] | null>(null);
   // The composer editor is uncontrolled; `draft` mirrors it (for the send button's enabled
   // state) while `draftRef` holds the freshest content for the button's send. Bumping
   // `sendTick` empties the editor after a send.
@@ -65,6 +73,7 @@ export function ChatView({
       .then((d) => {
         setMessages(d.messages);
         setConfigId((cur) => cur ?? d.chat.configId ?? null);
+        setModel((cur) => cur ?? d.chat.model ?? null);
         setWorking(d.working);
       })
       .catch((e) => setError(String(e)));
@@ -84,6 +93,36 @@ export function ChatView({
     if (!configs || configs.length === 0) return;
     setConfigId((cur) => (cur && configs.some((c) => c.id === cur) ? cur : (configs.find((c) => c.isDefault) ?? configs[0]).id));
   }, [configs]);
+
+  // Fetch the chosen provider's live model list whenever it changes.
+  useEffect(() => {
+    if (!configId) {
+      setModels(null);
+      return;
+    }
+    let alive = true;
+    setModels(null);
+    llm.models
+      .list(configId)
+      .then((m) => alive && setModels(m))
+      .catch(() => alive && setModels([]));
+    return () => {
+      alive = false;
+    };
+  }, [configId, llm]);
+
+  // Default the model to the first one offered, but keep an already-chosen model even if it's
+  // not in the live list (e.g. a config restored from a chat, or an Ollama model not pulled here).
+  useEffect(() => {
+    if (!models || models.length === 0) return;
+    setModel((cur) => cur ?? models[0]);
+  }, [models]);
+
+  // Switching provider clears the model so it re-seeds from the new provider's list.
+  const pickConfig = useCallback((id: string) => {
+    setConfigId(id);
+    setModel(null);
+  }, []);
 
   // Live streaming + background completion, all filtered to this chat.
   useEffect(() => {
@@ -116,11 +155,12 @@ export function ChatView({
   }, [chats, llm, chatId, reload]);
 
   const hasProvider = (configs?.length ?? 0) > 0;
+  const canSend = hasProvider && !!model;
 
   // `raw` is the editor's exact content on Enter; the send button passes draftRef instead.
   const send = useCallback(async (raw?: string) => {
     const text = (raw ?? draftRef.current).trim();
-    if (!text || working || !hasProvider) return;
+    if (!text || working || !canSend) return;
     setDraft("");
     draftRef.current = "";
     setSendTick((t) => t + 1); // empty the composer editor
@@ -128,13 +168,13 @@ export function ChatView({
     setLive({ text: "", actions: [] });
     setWorking(true);
     try {
-      await chats.send(chatId, text, configId ?? undefined);
+      await chats.send(chatId, text, configId ?? undefined, model ?? undefined);
     } catch (e) {
       setError(String(e));
       setWorking(false);
       setLive(null);
     }
-  }, [working, hasProvider, chats, chatId, configId]);
+  }, [working, canSend, chats, chatId, configId, model]);
 
   const onDraftChange = useCallback((md: string) => {
     draftRef.current = md;
@@ -167,7 +207,7 @@ export function ChatView({
       <View style={styles.root}>
         <ScrollView ref={scrollRef as never} style={styles.scroll} contentContainerStyle={isThread ? styles.threadAnchored : styles.scrollInner}>
           {!hasProvider && configs !== null ? (
-            <EmptyState onConnect={() => llm.configs.create(DEFAULT_OLLAMA).then(() => void reloadConfigs())} />
+            <EmptyState onConfigure={onConfigure} />
           ) : !isThread ? (
             <View style={styles.center}>
               <RNText style={styles.hint}>Ask about your notes and tasks, or tell me to create one. I can search, then act.</RNText>
@@ -192,11 +232,18 @@ export function ChatView({
                     onOpenRef={(ref) => onOpenEntity?.(ref.type, ref.id)}
                   />
                 </View>
-                <Pressable onPress={() => void send()} disabled={working || !draft.trim()} aria-label="Send" style={[styles.sendCircle, (working || !draft.trim()) && styles.sendCircleOff]}>
+                <Pressable onPress={() => void send()} disabled={working || !draft.trim() || !canSend} aria-label="Send" style={[styles.sendCircle, (working || !draft.trim() || !canSend) && styles.sendCircleOff]}>
                   <Icon name="chevronRight" size={18} color={colors.onAccent} />
                 </Pressable>
               </View>
-              <ProviderSelector configs={configs ?? []} value={configId} onChange={setConfigId} />
+              <SelectorBar
+                configs={configs ?? []}
+                configId={configId}
+                onPickConfig={pickConfig}
+                models={models}
+                model={model}
+                onPickModel={setModel}
+              />
             </View>
           ) : (
             <View style={styles.composerCol}>
@@ -211,24 +258,22 @@ export function ChatView({
                     onOpenRef={(ref) => onOpenEntity?.(ref.type, ref.id)}
                   />
                 </View>
-                <Button label={working ? "…" : "Send"} onPress={() => void send()} disabled={working || !draft.trim()} />
+                <Button label={working ? "…" : "Send"} onPress={() => void send()} disabled={working || !draft.trim() || !canSend} />
               </View>
-              <ProviderSelector configs={configs ?? []} value={configId} onChange={setConfigId} />
+              <SelectorBar
+                configs={configs ?? []}
+                configId={configId}
+                onPickConfig={pickConfig}
+                models={models}
+                model={model}
+                onPickModel={setModel}
+              />
             </View>
           ))}
       </View>
     </OpenEntityContext.Provider>
   );
 }
-
-const DEFAULT_OLLAMA = {
-  scope: "device" as const,
-  name: "Local (Ollama)",
-  baseUrl: "http://localhost:11434/v1",
-  provider: "openai-compatible" as const,
-  model: "qwen2.5",
-  isDefault: true,
-};
 
 // ===========================================================================
 // ChatList — reusable chat list column (desktop detail pane + mobile screen).
@@ -336,17 +381,18 @@ export function ChatsScreen() {
 
   const noProvider = configs !== null && configs.length === 0;
   const onOpen = (type: string, id: string) => (type === "task" ? nav.openTask(id) : nav.openNote(id));
+  const openSettings = () => nav.goView("settings");
 
   // Rendered directly (no Frame) — the AppShell already wraps every screen in a Frame card,
   // so self-wrapping here would produce a card-inside-a-card (double border + gray inset).
   return noProvider ? (
-    <EmptyState onConnect={() => llm.configs.create(DEFAULT_OLLAMA).then(() => void reloadConfigs())} />
+    <EmptyState onConfigure={openSettings} />
   ) : (
     <View style={styles.split}>
       <ChatList chats={chats} selectedId={selectedId} onSelect={setSelectedId} onNew={newChat} onDelete={removeChat} />
       <View style={styles.detail}>
         {selectedId ? (
-          <ChatView chatId={selectedId} onOpenEntity={onOpen} />
+          <ChatView chatId={selectedId} onOpenEntity={onOpen} onConfigure={openSettings} />
         ) : (
           <View style={styles.center}>
             <RNText style={styles.hint}>Pick a chat on the left, or start a new one.</RNText>
@@ -602,59 +648,113 @@ function Composer({
   );
 }
 
-// --- provider selector -----------------------------------------------------
+// --- provider + model selectors --------------------------------------------
 
 function configLabel(c: LLMConfig): string {
-  const provider = c.provider === "anthropic" ? "Anthropic" : c.scope === "device" ? "Local" : "OpenAI";
-  return `${provider} · ${c.model}`;
+  return c.provider === "anthropic" ? "Anthropic" : c.scope === "device" ? "Local" : "OpenAI";
 }
 
-function ProviderSelector({ configs, value, onChange }: { configs: LLMConfig[]; value: string | null; onChange: (id: string) => void }) {
-  const [open, setOpen] = useState(false);
+/** SelectorBar sits under the composer: the provider picker (hidden when there's only one)
+ *  plus the model picker, which lists the models the chosen provider offers live. */
+function SelectorBar({
+  configs,
+  configId,
+  onPickConfig,
+  models,
+  model,
+  onPickModel,
+}: {
+  configs: LLMConfig[];
+  configId: string | null;
+  onPickConfig: (id: string) => void;
+  models: string[] | null;
+  model: string | null;
+  onPickModel: (m: string) => void;
+}) {
   if (configs.length === 0) return null;
-  const current = configs.find((c) => c.id === value) ?? configs[0];
-  const single = configs.length < 2;
+  const current = configs.find((c) => c.id === configId) ?? configs[0];
   return (
     <View style={styles.selectorRow}>
+      {configs.length >= 2 && (
+        <Dropdown
+          label={current.name}
+          options={configs.map((c) => ({ value: c.id, label: `${c.name} — ${configLabel(c)}` }))}
+          value={current.id}
+          onSelect={onPickConfig}
+        />
+      )}
+      <ModelSelector models={models} model={model} onPickModel={onPickModel} />
+    </View>
+  );
+}
+
+function ModelSelector({ models, model, onPickModel }: { models: string[] | null; model: string | null; onPickModel: (m: string) => void }) {
+  // Loading (models === null) or the endpoint returned none / failed (empty): let the user
+  // type a model name so a running-but-unlisted server (or a fresh Ollama pull) still works.
+  if (models === null) return <RNText style={styles.selectorLabel}>Loading models…</RNText>;
+  if (models.length === 0) {
+    return (
+      <View style={styles.modelInputWrap}>
+        <Input value={model ?? ""} onChangeText={onPickModel} placeholder="Model name" autoCapitalize="none" />
+      </View>
+    );
+  }
+  return (
+    <Dropdown
+      label={model ?? "Choose a model"}
+      options={models.map((m) => ({ value: m, label: m }))}
+      value={model}
+      onSelect={onPickModel}
+    />
+  );
+}
+
+/** Dropdown is the shared upward-opening menu used by both selectors under the composer. */
+function Dropdown({
+  label,
+  options,
+  value,
+  onSelect,
+}: {
+  label: string;
+  options: { value: string; label: string }[];
+  value: string | null;
+  onSelect: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <View>
       {open && (
         <View style={styles.selectorMenu}>
-          {configs.map((c) => (
-            <Pressable key={c.id} style={styles.selectorOption} aria-label={c.name} onPress={() => { onChange(c.id); setOpen(false); }}>
+          {options.map((o) => (
+            <Pressable key={o.value} style={styles.selectorOption} aria-label={o.label} onPress={() => { onSelect(o.value); setOpen(false); }}>
               <RNText style={styles.selectorOptionText} numberOfLines={1}>
-                {c.name} — {configLabel(c)}
+                {o.label}
               </RNText>
-              {c.id === current.id && <Icon name="check" size={14} color={colors.accent} />}
+              {o.value === value && <Icon name="check" size={14} color={colors.accent} />}
             </Pressable>
           ))}
         </View>
       )}
-      <Pressable
-        style={styles.selectorTrigger}
-        onPress={() => !single && setOpen((o) => !o)}
-        aria-label={single ? "Model" : "Choose provider"}
-        disabled={single}
-      >
+      <Pressable style={styles.selectorTrigger} onPress={() => setOpen((o) => !o)} aria-label="Choose">
         <RNText style={styles.selectorLabel} numberOfLines={1}>
-          {configLabel(current)}
+          {label}
         </RNText>
-        {!single && (
-          <View style={{ transform: [{ rotate: open ? "-90deg" : "90deg" }] }}>
-            <Icon name="chevronRight" size={13} color={colors.textTertiary} />
-          </View>
-        )}
+        <View style={{ transform: [{ rotate: open ? "-90deg" : "90deg" }] }}>
+          <Icon name="chevronRight" size={13} color={colors.textTertiary} />
+        </View>
       </Pressable>
     </View>
   );
 }
 
-function EmptyState({ onConnect }: { onConnect: () => void }) {
+function EmptyState({ onConfigure }: { onConfigure?: () => void }) {
   return (
     <View style={styles.empty}>
       <Icon name="chat" size={28} color={colors.textTertiary} />
       <RNText style={styles.emptyTitle}>No AI provider yet</RNText>
-      <RNText style={styles.emptyBody}>Connect a model to chat with your notes and tasks. Run Ollama locally, or add OpenAI / Anthropic keys in Settings.</RNText>
-      <Button label="Connect local Ollama" onPress={onConnect} icon={<Icon name="plus" size={15} />} />
-      <RNText style={styles.emptyNote}>Expects Ollama at localhost:11434 with a tool-capable model (e.g. qwen2.5).</RNText>
+      <RNText style={styles.emptyBody}>Connect a model to chat with your notes and tasks. Set up a local Ollama server or an OpenAI / Anthropic key in Settings, then pick a model here.</RNText>
+      {onConfigure && <Button label="Set up in Settings" onPress={onConfigure} icon={<Icon name="settings" size={15} />} />}
     </View>
   );
 }
@@ -709,7 +809,8 @@ const styles = StyleSheet.create({
   sendCircle: { width: 34, height: 34, borderRadius: radius.full, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
   sendCircleOff: { backgroundColor: colors.borderStrong },
   composerCol: { gap: space.xs },
-  selectorRow: { alignItems: "center", justifyContent: "center", paddingBottom: space.xs, position: "relative" },
+  selectorRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: space.md, paddingBottom: space.xs },
+  modelInputWrap: { minWidth: 160, maxWidth: 240 },
   selectorTrigger: { flexDirection: "row", alignItems: "center", gap: space.xs, paddingVertical: space.xs, paddingHorizontal: space.sm, maxWidth: "90%" },
   selectorLabel: { fontSize: font.size.xs, color: colors.textTertiary, fontFamily: font.mono },
   selectorMenu: { position: "absolute", bottom: 32, alignSelf: "center", minWidth: 220, maxWidth: "96%", backgroundColor: colors.surfaceCard, borderWidth: 1, borderColor: colors.borderSubtle, borderRadius: radius.md, paddingVertical: space.xs, marginBottom: space.xs, zIndex: 20, ...shadow.md },

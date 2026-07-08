@@ -6,6 +6,8 @@ export interface Chat {
   id: string;
   title: string;
   configId?: string | null;
+  /** The model chosen for this chat (picked at chat time from the provider's live list). */
+  model?: string | null;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;
@@ -54,9 +56,10 @@ export function chatsApi(core: CoreBridge) {
     create: (input?: { title?: string; configId?: string | null }) => core.invoke<Chat>("chats.create", input ?? {}),
     rename: (id: string, title: string) => core.invoke<{ ok: boolean }>("chats.rename", { id, title }),
     remove: (id: string) => core.invoke<{ ok: boolean }>("chats.delete", { id }),
-    /** Append a user message and start the background run. Returns immediately. */
-    send: (chatId: string, text: string, configId?: string | null) =>
-      core.invoke<{ ok: boolean; working: boolean }>("chats.send", { chatId, text, configId }),
+    /** Append a user message and start the background run. Returns immediately. The provider
+     *  (configId) and model re-pin the chat when they differ from what it last ran on. */
+    send: (chatId: string, text: string, configId?: string | null, model?: string | null) =>
+      core.invoke<{ ok: boolean; working: boolean }>("chats.send", { chatId, text, configId, model }),
     /** The ids of chats currently generating a reply. */
     working: () => core.invoke<string[]>("chats.working"),
 

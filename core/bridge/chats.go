@@ -129,6 +129,7 @@ func (c *Core) chatsSend(payload []byte) ([]byte, error) {
 		ChatID   string  `json:"chatId"`
 		Text     string  `json:"text"`
 		ConfigID *string `json:"configId"`
+		Model    *string `json:"model"`
 	}
 	if err := unmarshal(payload, &args); err != nil {
 		return nil, err
@@ -148,6 +149,11 @@ func (c *Core) chatsSend(payload []byte) ([]byte, error) {
 		_ = c.store.Chats.SetConfig(chat.ID, args.ConfigID)
 		chat.ConfigID = args.ConfigID
 	}
+	// Re-pin the chat's model if the composer picked a different one.
+	if args.Model != nil && chatDerefStr(args.Model) != chatDerefStr(chat.Model) {
+		_ = c.store.Chats.SetModel(chat.ID, args.Model)
+		chat.Model = args.Model
+	}
 
 	// Persist the user turn and (for a fresh chat) name it from that first message.
 	if _, err := c.store.ChatMessages.Append(chat.ID, domain.ChatRoleUser, args.Text, nil, nil); err != nil {
@@ -160,7 +166,7 @@ func (c *Core) chatsSend(payload []byte) ([]byte, error) {
 	}
 	c.emitChatChanged(chat.ID)
 
-	engine, err := c.buildEngine(chatDerefStr(chat.ConfigID))
+	engine, err := c.buildEngine(chatDerefStr(chat.ConfigID), chatDerefStr(chat.Model))
 	if err != nil {
 		c.emitLLMError(chat.ID, err)
 		return nil, err

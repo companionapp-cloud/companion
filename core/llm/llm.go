@@ -95,3 +95,13 @@ type Provider interface {
 	// Chat runs one request/response round, streaming text through onDelta as it arrives.
 	Chat(ctx context.Context, req ChatRequest, onDelta DeltaFunc) (*ChatResponse, error)
 }
+
+// ModelLister is an optional capability a Provider may implement: fetch the models the
+// configured endpoint currently offers (e.g. the models installed in Ollama, or the models a
+// cloud key can reach), so the UI can let the user pick one at chat time rather than baking it
+// into the config. Both concrete providers implement it.
+type ModelLister interface {
+	// ListModels returns the available model ids, sorted. It hits the provider's models
+	// endpoint and so may fail on network/auth errors.
+	ListModels(ctx context.Context) ([]string, error)
+}
