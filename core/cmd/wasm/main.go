@@ -17,6 +17,7 @@ package main
 import (
 	"syscall/js"
 
+	"companion/core/blob"
 	"companion/core/bridge"
 	"companion/core/domain"
 	"companion/core/store"
@@ -36,6 +37,7 @@ func initCore(_ js.Value, args []js.Value) any {
 	sqlite := opts.Get("sqlite")
 	onEvent := opts.Get("onEvent")
 	secrets := opts.Get("secrets")
+	blobs := opts.Get("blobs")
 
 	return newPromise(func(resolve, reject func(any)) {
 		go func() {
@@ -50,6 +52,12 @@ func initCore(_ js.Value, args []js.Value) any {
 			// a localStorage-backed secrets object. Absent it, only local (no-key) providers work.
 			if secrets.Type() == js.TypeObject {
 				core.SetSecretStore(jsSecretStore{secrets: secrets})
+			}
+			// Document bytes (PLAN §6.9): the browser has no filesystem, so the shell injects
+			// an OPFS + fetch blob store. Absent it, document metadata still syncs but bytes
+			// can't transfer, and rendering falls back to "not downloaded".
+			if blobs.Type() == js.TypeObject {
+				core.SetBlobStore(blob.NewJSStore(blobs))
 			}
 
 			handle := js.Global().Get("Object").New()

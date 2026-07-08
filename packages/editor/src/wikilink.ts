@@ -12,7 +12,19 @@ import { Plugin } from "prosemirror-state";
 // round-trip as valid markdown (never bracket-escaped) and render as a chip. The
 // recognized target types mirror core/domain/links.go so what the editor writes is what
 // the link index parses.
-export const LINK_TYPES = new Set(["note", "task", "habit", "project"]);
+export const LINK_TYPES = new Set(["note", "task", "habit", "project", "document"]);
+
+// Short type tokens accepted in markdown, normalized to the canonical node type (mirrors
+// core/domain/links.go typeAliases). Documents are embedded as `![[doc:<id>]]` (PLAN §6.9)
+// but their canonical type is "document"; normalizing on parse keeps the editor's node
+// attrs canonical, and the serializer writes the short form back out.
+const TYPE_ALIASES: Record<string, string> = { doc: "document" };
+const TYPE_SERIALIZE: Record<string, string> = { document: "doc" };
+
+/** Normalize a markdown type token (e.g. "doc") to its canonical node type ("document"). */
+export function normalizeLinkType(token: string): string {
+  return TYPE_ALIASES[token] ?? token;
+}
 
 /** Build a wikilink node from a resolved target, in the given schema. Used by the
  * autocomplete menu and the UUID-paste handler so every inserted chip is shaped the same
@@ -154,11 +166,12 @@ function wikilinkRule(state: InlineState, silent: boolean): boolean {
   if (close < 0) return false;
   const body = src.slice(pos + 2, close);
   const m = BODY_RE.exec(body);
-  if (!m || !LINK_TYPES.has(m[1])) return false;
+  const type = m ? normalizeLinkType(m[1]) : "";
+  if (!m || !LINK_TYPES.has(type)) return false;
   if (!silent) {
     const token = state.push("wikilink", "", 0);
     token.content = body;
-    token.meta = { embed, type: m[1], id: m[2], alias: m[3] || null };
+    token.meta = { embed, type, id: m[2], alias: m[3] || null };
   }
   state.pos = close + 2;
   return true;
@@ -270,7 +283,8 @@ export const serializer = new MarkdownSerializer(
         id: string;
         alias: string | null;
       };
-      state.write(`${embed ? "!" : ""}[[${type}:${id}${alias ? `|${alias}` : ""}]]`);
+      const token = TYPE_SERIALIZE[type] ?? type;
+      state.write(`${embed ? "!" : ""}[[${token}:${id}${alias ? `|${alias}` : ""}]]`);
     },
   },
   {
@@ -298,12 +312,13 @@ export function wikilinkInputRules(targetSchema: Schema): Plugin {
         // bleed into the match.
         const before = view.state.doc.textBetween(blockStart, from, undefined, "￼") + text;
         const m = INPUT_RE.exec(before);
-        if (!m || !LINK_TYPES.has(m[2])) return false;
+        const type = m ? normalizeLinkType(m[2]) : "";
+        if (!m || !LINK_TYPES.has(type)) return false;
         const matchStart = from - (m[0].length - text.length);
         if (matchStart < blockStart) return false;
         const node = targetSchema.nodes.wikilink.create({
           embed: m[1] === "!",
-          type: m[2],
+          type,
           id: m[3],
           alias: m[4] || null,
         });

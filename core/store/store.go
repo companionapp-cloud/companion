@@ -14,6 +14,7 @@ type Store struct {
 
 	Notes          *NotesRepo
 	Tasks          *TasksRepo
+	Documents      *DocumentsRepo
 	Areas          *AreasRepo
 	Projects       *ProjectsRepo
 	ProjectMembers *ProjectMembersRepo
@@ -54,6 +55,10 @@ func New(d Driver, clock domain.Clock) (*Store, error) {
 	// Tasks extract wikilinks from their notes into the shared index too, so a task is a
 	// first-class graph node the moment it exists (PLAN §5.1, §6.4).
 	s.Tasks = &TasksRepo{db: d, clock: clock, links: s.Links, objectTypes: s.ObjectTypes}
+	// Documents are file embeds (PLAN §6.9): metadata rows that sync while their bytes live
+	// in the BlobStore. A document is only ever a graph node/target (notes embed it), never a
+	// link source, so it carries no extractor — it holds the links repo only for symmetry.
+	s.Documents = &DocumentsRepo{db: d, clock: clock, links: s.Links}
 	s.Areas = &AreasRepo{db: d, clock: clock}
 	s.Projects = &ProjectsRepo{db: d, clock: clock}
 	// Project membership mirrors into the link index as authored 'member' edges.

@@ -86,6 +86,23 @@ CREATE INDEX IF NOT EXISTS idx_tasks_user_seq ON tasks (user_id, server_seq);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_occurrence ON tasks (repeat_seed_id, due_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_seed ON tasks (user_id, repeat_seed_id);
 
+CREATE TABLE IF NOT EXISTS documents (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL,
+  filename      TEXT NOT NULL,
+  mime          TEXT NOT NULL DEFAULT 'application/octet-stream',
+  size          BIGINT NOT NULL DEFAULT 0,
+  sha256        TEXT NOT NULL,                 -- content address; bytes live in object storage
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL,
+  deleting_at   TEXT,                          -- Trash (PLAN §4.3)
+  deleted_at    TEXT,
+  version       BIGINT NOT NULL DEFAULT 1,
+  server_seq    BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_documents_user_seq ON documents (user_id, server_seq);
+CREATE INDEX IF NOT EXISTS idx_documents_user_sha ON documents (user_id, sha256);
+
 CREATE TABLE IF NOT EXISTS object_types (
   id             TEXT PRIMARY KEY,
   user_id        TEXT NOT NULL,

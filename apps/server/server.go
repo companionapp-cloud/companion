@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 
@@ -18,10 +19,23 @@ type Server struct {
 	clock    domain.Clock
 	hub      *Hub
 	entities map[string]*entityHandler // per-entity sync SQL, lazily built
+	// blobs stores document bytes in object storage (PLAN §6.9); maxBlobSize caps an
+	// upload. Selected from the environment (S3 / filesystem / in-memory).
+	blobs       BlobBackend
+	maxBlobSize int64
 }
 
 func NewServer(db *sql.DB, dialect string) *Server {
-	return &Server{db: db, dialect: dialect, clock: domain.SystemClock{}, hub: NewHub()}
+	backend, err := newBlobBackend()
+	if err != nil {
+		// Only reached when an S3 backend is explicitly configured but invalid; fail loud
+		// rather than silently dropping document bytes.
+		log.Fatalf("blob backend: %v", err)
+	}
+	return &Server{
+		db: db, dialect: dialect, clock: domain.SystemClock{}, hub: NewHub(),
+		blobs: backend, maxBlobSize: maxBlobSizeFromEnv(),
+	}
 }
 
 // rebind adapts '?' placeholders to the active dialect ('$N' on Postgres).
@@ -45,6 +59,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/sync/pull", s.authed(s.handlePull))
 	mux.Handle("POST /v1/sync/push", s.authed(s.handlePush))
 	mux.Handle("GET /v1/sync/events", s.authed(s.handleEvents))
+	// Document bytes: content-addressed, streamed to/from object storage (PLAN §6.9).
+	mux.Handle("PUT /v1/blobs/{sha256}", s.authed(s.handleBlobPut))
+	mux.Handle("GET /v1/blobs/{sha256}", s.authed(s.handleBlobGet))
 	return withCORS(mux)
 }
 
@@ -54,7 +71,7 @@ func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Access-Control-Allow-Origin", "*")
-		h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
 		h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 		h.Set("Access-Control-Max-Age", "600")
 		if r.Method == http.MethodOptions {

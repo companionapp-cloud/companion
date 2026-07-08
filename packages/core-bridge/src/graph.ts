@@ -3,7 +3,7 @@ import type { CoreBridge } from "./types";
 /** A node in the object graph — a slim projection, never the entity body (PLAN §5.2). */
 export interface GraphNode {
   id: string;
-  type: "note" | "task" | "habit" | "project";
+  type: "note" | "task" | "habit" | "project" | "document";
   title: string;
   objectTypeId?: string | null;
   status?: string | null;

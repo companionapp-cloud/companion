@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sync"
 
+	"companion/core/blob"
 	"companion/core/store"
 )
 
@@ -39,6 +40,11 @@ type Core struct {
 	handler EventHandler
 	sync    syncConfig
 	secrets SecretStore
+	// blobs is the platform blob store for document bytes (PLAN §6.9). The shell injects a
+	// filesystem impl (desktop/mobile) or an OPFS+fetch impl (web) via SetBlobStore. When
+	// absent, document metadata still syncs but bytes cannot transfer — sync skips the
+	// blob pass and rendering must fall back to "not downloaded".
+	blobs blob.Store
 
 	// Chat runs execute on background goroutines so an answer keeps generating (and is saved)
 	// even when the user navigates away (§6.8). working tracks the chats with a live run, so
@@ -57,6 +63,9 @@ func (c *Core) SetEventHandler(h EventHandler) { c.handler = h }
 
 // SetSecretStore registers the platform keychain used for LLM API keys (§6.8).
 func (c *Core) SetSecretStore(s SecretStore) { c.secrets = s }
+
+// SetBlobStore registers the platform store for document bytes (PLAN §6.9).
+func (c *Core) SetBlobStore(b blob.Store) { c.blobs = b }
 
 // emit fans an event out to the registered handler, if any. payload is the
 // already-marshalled JSON body for the event.
@@ -119,6 +128,26 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.tasksUpdate(payload)
 	case "tasks.delete":
 		return c.tasksDelete(payload)
+	case "documents.list":
+		return c.documentsList()
+	case "documents.get":
+		return c.documentsGet(payload)
+	case "documents.create":
+		return c.documentsCreate(payload)
+	case "documents.rename":
+		return c.documentsRename(payload)
+	case "documents.delete":
+		return c.documentsDelete(payload)
+	case "documents.ensureLocal":
+		return c.documentsEnsureLocal(payload)
+	case "documents.ingestFile":
+		return c.documentsIngestFile(payload)
+	case "documents.ingestBytes":
+		return c.documentsIngestBytes(payload)
+	case "documents.localPath":
+		return c.documentsLocalPath(payload)
+	case "documents.dataUrl":
+		return c.documentsDataURL(payload)
 	case "notify.plan":
 		return c.notifyPlan(payload)
 	case "notify.dismissed":

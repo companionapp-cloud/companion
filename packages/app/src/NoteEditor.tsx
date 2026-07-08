@@ -1,4 +1,4 @@
-import { useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { Platform, ScrollView, View } from "react-native";
 import type { Note } from "@companion/core-bridge";
 import { Badge, Icon, IconButton, Text, TextField, colors, layout, space } from "@companion/design-system";
@@ -8,6 +8,7 @@ import { useTasks } from "./TasksProvider";
 import { useNotes } from "./NotesProvider";
 import { ArchetypeChip, MetadataSidePanel } from "./ArchetypeSection";
 import { useLinkSource } from "./useLinkSource";
+import { useDocumentSource } from "./DocumentSourceContext";
 import { NoteGraph } from "./NoteGraph";
 import { MembershipPicker } from "./MembershipPicker";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -44,6 +45,8 @@ export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote, 
   const notes = useNotes();
   // Wikilink autocomplete ([[) and pasted-UUID resolution search the object graph.
   const linkSource = useLinkSource();
+  // File embedding (PLAN §6.9): present on web (OPFS blob store), undefined elsewhere.
+  const documentSource = useDocumentSource();
   const [title, setTitle] = useState(note.title);
   // Seed the editor from `seed.content`; it owns its content thereafter and reports edits
   // back out. `seed.key` remounts it when the sync guard silently adopts a server version
@@ -64,6 +67,25 @@ export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote, 
   // editor renders its own keyboard-anchored toolbar, so this stays dormant.)
   const editorRef = useRef<EditorController>(null);
   const [formatState, setFormatState] = useState<FormatState | null>(null);
+  // Web/desktop: the formatting bar is shown whenever the editor is focused. Clicking a bar
+  // button briefly blurs the editor (then the action refocuses it), so hiding is delayed a
+  // beat to avoid a flicker — a toolbar tap never dismisses the bar it lives in.
+  const [editorFocused, setEditorFocused] = useState(false);
+  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleFocusChange = useCallback((focused: boolean) => {
+    if (blurTimer.current) {
+      clearTimeout(blurTimer.current);
+      blurTimer.current = null;
+    }
+    if (focused) setEditorFocused(true);
+    else blurTimer.current = setTimeout(() => setEditorFocused(false), 200);
+  }, []);
+  useEffect(
+    () => () => {
+      if (blurTimer.current) clearTimeout(blurTimer.current);
+    },
+    [],
+  );
 
   // Reconcile the open editor with incoming synced versions (PLAN §7.3 editor UX): silent
   // adoption when clean, a conflict prompt when the editor has unsaved edits.
@@ -153,8 +175,10 @@ export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote, 
                 onChange(note.id, { contentMd: md });
               }}
               linkSource={linkSource}
+              documentSource={documentSource}
               onOpenRef={onOpenRef}
               onFormatStateChange={setFormatState}
+              onFocusChange={handleFocusChange}
               // `tasks.tasks` gets a fresh identity whenever any task changes (local edit or a
               // synced pull), signalling the editor to re-hydrate its `[[task:…]]` chips.
               linkRevision={tasks.tasks}
@@ -162,9 +186,10 @@ export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote, 
           </ScrollView>
         )}
 
-        {/* Web/desktop selection formatting bar (native uses its own keyboard toolbar). */}
-        {Platform.OS === "web" && !showGraph && formatState?.hasSelection ? (
-          <FormattingBar state={formatState} editorRef={editorRef} />
+        {/* Web/desktop formatting bar, shown while the editor is focused (native uses its own
+            keyboard toolbar). Includes the file-embed action when a documentSource is wired. */}
+        {Platform.OS === "web" && !showGraph && editorFocused ? (
+          <FormattingBar state={formatState} editorRef={editorRef} canAttach={!!documentSource} />
         ) : null}
 
         {showMeta ? (
@@ -216,14 +241,18 @@ const FORMAT_BUTTONS: { name: FormatName; icon: IconName; label: string }[] = [
   { name: "orderedList", icon: "listOrdered", label: "Numbered list" },
 ];
 
-/** Web/desktop: a floating bar of formatting toggles anchored to the bottom of the editor,
- * shown while text is selected. Drives the editor through its imperative handle. */
+/** Web/desktop: a floating bar of insert + formatting actions anchored to the bottom of the
+ * editor, shown while the editor is focused. Drives the editor through its imperative handle.
+ * `state` may be null before the first format snapshot arrives (buttons render enabled). */
 function FormattingBar({
   state,
   editorRef,
+  canAttach,
 }: {
-  state: FormatState;
+  state: FormatState | null;
   editorRef: RefObject<EditorController | null>;
+  /** Show the file-embed action (PLAN §6.9) — only when a documentSource is wired. */
+  canAttach: boolean;
 }) {
   return (
     <View style={styles.formatBar} pointerEvents="box-none">
@@ -231,16 +260,22 @@ function FormattingBar({
         <IconButton label="Insert reference" size="sm" onPress={() => editorRef.current?.insertReference()}>
           <Icon name="link" size={17} color={colors.textSecondary} />
         </IconButton>
+        {canAttach ? (
+          <IconButton label="Attach file" size="sm" onPress={() => editorRef.current?.insertDocument()}>
+            <Icon name="file" size={17} color={colors.textSecondary} />
+          </IconButton>
+        ) : null}
         <View style={styles.formatBarDivider} />
         {FORMAT_BUTTONS.map((b) => {
-          const active = state.active[b.name];
+          const active = !!state?.active[b.name];
+          const disabled = state ? !state.enabled[b.name] : false;
           return (
             <IconButton
               key={b.name}
               label={b.label}
               size="sm"
               active={active}
-              disabled={!state.enabled[b.name]}
+              disabled={disabled}
               onPress={() => editorRef.current?.format(b.name)}
             >
               <Icon name={b.icon} size={17} color={active ? colors.accentHover : colors.textSecondary} />

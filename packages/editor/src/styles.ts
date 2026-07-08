@@ -113,6 +113,59 @@ export const EDITOR_CSS = `
 .pm-wikilink-embed { background: #e7f0fb; color: #1f5fb0; border-color: #cfe0f5; }
 .pm-wikilink.ProseMirror-selectednode { outline: 2px solid #f76808; outline-offset: 1px; }
 
+/* Document embed (![[doc:…]]): an inline-block that renders the file's contents — an image
+   preview, an audio player, or a file chip with a download link (PLAN §6.9). */
+.pm-doc-embed {
+  display: inline-block;
+  vertical-align: bottom;
+  max-width: 100%;
+  cursor: default;
+}
+.pm-doc-embed.ProseMirror-selectednode { outline: 2px solid #f76808; outline-offset: 2px; border-radius: 8px; }
+.pm-doc-image {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  border-radius: 8px;
+  border: 1px solid #e0e0dc;
+}
+.pm-doc-audio { display: block; max-width: 360px; }
+/* File / loading / broken states share a compact chip. */
+.pm-doc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 11px;
+  border-radius: 9px;
+  background: #f5f5f3;
+  border: 1px solid #e0e0dc;
+  color: #3e3e3a;
+  font-size: 0.92em;
+  line-height: 1.3;
+  max-width: 100%;
+}
+.pm-doc-fileicon { flex: 0 0 auto; font-size: 1.05em; }
+.pm-doc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-doc-hint { color: #9a9a92; font-size: 0.85em; flex: 0 0 auto; }
+.pm-doc-download {
+  flex: 0 0 auto;
+  margin-left: 2px;
+  color: #b7500a;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+.pm-doc-download:hover { text-decoration: underline; }
+.pm-doc-broken { border-style: dashed; color: #9a9a92; }
+
+/* Drop target highlight while a file is dragged over the editor (PLAN §6.9). */
+.companion-editor.pm-drop-active {
+  outline: 2px dashed #f76808;
+  outline-offset: 4px;
+  border-radius: 8px;
+  background: rgba(247, 104, 8, 0.04);
+}
+
 /* Task chip: a referenced task rendered like a todo — a round status box, the title, and
    its due / reminder dates. Neutral (not accent) so it reads as a task, not a link. */
 .pm-wikilink-task {

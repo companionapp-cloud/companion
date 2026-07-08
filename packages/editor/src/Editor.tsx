@@ -16,7 +16,7 @@ import { Icon, type IconName } from "@companion/design-system";
 import { EDITOR_JS } from "./editorBundle.generated";
 import { EDITOR_CSS } from "./styles";
 import type { FormatName, FormatState } from "./formatCommands";
-import type { EditorController, EditorProps, LinkSource, LinkSuggestion, LinkType } from "./types";
+import type { DocumentSource, EditorController, EditorProps, LinkSource, LinkSuggestion, LinkType } from "./types";
 
 // The formatting toolbar's buttons, in order. Each format button injects window.__format;
 // the reference button opens the native `[[` picker (it needs a linkSource).
@@ -44,7 +44,7 @@ const FORMAT_BUTTONS: { name: FormatName; icon: IconName; label: string }[] = [
 function buildHtml(
   markdown: string,
   hasLinkSource: boolean,
-  opts: { simple: boolean; placeholder?: string; submitOnEnter: boolean; debounceMs?: number },
+  opts: { simple: boolean; placeholder?: string; submitOnEnter: boolean; debounceMs?: number; hasDocumentSource: boolean },
 ): string {
   // Escape `<` so note content can't break out of the <script> (e.g. "</script>").
   const initial = JSON.stringify(markdown).replace(/</g, "\\u003c");
@@ -66,7 +66,7 @@ function buildHtml(
 </head>
 <body>
 <div id="editor" class="${mountClass}"></div>
-<script>window.__INITIAL_MARKDOWN__ = ${initial}; window.__HAS_LINK_SOURCE__ = ${hasLinkSource ? "true" : "false"}; window.__EDITOR_VARIANT__ = ${opts.simple ? '"simple"' : '"full"'}; window.__PLACEHOLDER__ = ${placeholder}; window.__SUBMIT_ON_ENTER__ = ${opts.submitOnEnter ? "true" : "false"}; window.__DEBOUNCE_MS__ = ${debounce};</script>
+<script>window.__INITIAL_MARKDOWN__ = ${initial}; window.__HAS_LINK_SOURCE__ = ${hasLinkSource ? "true" : "false"}; window.__HAS_DOCUMENT_SOURCE__ = ${opts.hasDocumentSource ? "true" : "false"}; window.__EDITOR_VARIANT__ = ${opts.simple ? '"simple"' : '"full"'}; window.__PLACEHOLDER__ = ${placeholder}; window.__SUBMIT_ON_ENTER__ = ${opts.submitOnEnter ? "true" : "false"}; window.__DEBOUNCE_MS__ = ${debounce};</script>
 <script>${EDITOR_JS}</script>
 </body>
 </html>`;
@@ -87,7 +87,7 @@ interface PickerState {
 }
 
 export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
-  { markdown, onChangeMarkdown, linkSource, onOpenRef, linkRevision, variant, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange },
+  { markdown, onChangeMarkdown, linkSource, documentSource, onOpenRef, linkRevision, variant, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange },
   ref,
 ) {
   const simple = variant === "simple";
@@ -97,6 +97,8 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
   onFormatStateRef.current = onFormatStateChange;
   const linkSourceRef = useRef<LinkSource | undefined>(linkSource);
   linkSourceRef.current = linkSource;
+  const documentSourceRef = useRef<DocumentSource | undefined>(documentSource);
+  documentSourceRef.current = documentSource;
   const onOpenRefRef = useRef(onOpenRef);
   onOpenRefRef.current = onOpenRef;
   const onSubmitRef = useRef(onSubmit);
@@ -114,7 +116,7 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
 
   // Built once from the initial content; the WebView owns edits thereafter.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const html = useMemo(() => buildHtml(markdown, !!linkSource, { simple, placeholder, submitOnEnter: !!onSubmit, debounceMs }), []);
+  const html = useMemo(() => buildHtml(markdown, !!linkSource, { simple, placeholder, submitOnEnter: !!onSubmit, debounceMs, hasDocumentSource: !!documentSource }), []);
 
   useEffect(() => {
     const showEvt = Platform.OS === "ios" ? "keyboardWillChangeFrame" : "keyboardDidShow";
@@ -128,6 +130,21 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
   }, []);
 
   const inject = (js: string) => webRef.current?.injectJavaScript(`${js} true;`);
+  const jsonArg = (v: unknown) => JSON.stringify(v).replace(/</g, "\\u003c");
+
+  // Attach a file on native (PLAN §6.9): the shell's OS-native picker ingests the chosen file
+  // and returns the new document, which we place into the WebView editor at the selection.
+  // The WebView can't receive a File, so ingestion happens host-side and only the id crosses.
+  const pickDocument = async () => {
+    const src = documentSourceRef.current;
+    if (!src?.pick) return;
+    try {
+      const doc = await src.pick();
+      if (doc) inject(`window.__insertDocumentEmbed && window.__insertDocumentEmbed(${jsonArg(doc.id)}, ${jsonArg(doc.filename)});`);
+    } catch {
+      /* picker cancelled or failed */
+    }
+  };
 
   // Re-hydrate task chips inside the WebView when the host signals task data changed. Skips
   // the initial mount, where chips already hydrate on creation (and the WebView may not be
@@ -153,7 +170,6 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
     inject("window.__clear && window.__clear();");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clearSignal]);
-  const jsonArg = (v: unknown) => JSON.stringify(v).replace(/</g, "\\u003c");
 
   // Host-driven controls (used by the shared shell; the on-screen toolbar below calls the
   // same injected globals directly).
@@ -162,14 +178,18 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
     (): EditorController => ({
       format: (name) => inject(`window.__format && window.__format(${jsonArg(name)});`),
       insertReference: () => inject(`window.__insertReference && window.__insertReference();`),
+      // Attach a file via the shell's OS-native picker (PLAN §6.9), then place the embed.
+      insertDocument: () => void pickDocument(),
     }),
-    // `inject`/`jsonArg` read refs and are stable enough; rebuild is harmless.
+    // `inject`/`jsonArg`/`pickDocument` read refs and are stable enough; rebuild is harmless.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
   const resolve = (requestId: unknown, result: unknown) =>
     inject(`window.__resolveLink && window.__resolveLink(${Number(requestId)}, ${jsonArg(result)});`);
+  const resolveDoc = (requestId: unknown, result: unknown) =>
+    inject(`window.__resolveDoc && window.__resolveDoc(${Number(requestId)}, ${jsonArg(result)});`);
 
   const onMessage = (event: WebViewMessageEvent) => {
     try {
@@ -218,6 +238,15 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
           Promise.resolve(src ? src.lookup(msg.payload.id) : null)
             .then((r) => resolve(msg.payload.requestId, r))
             .catch(() => resolve(msg.payload.requestId, null));
+          break;
+        }
+        case "docResolve": {
+          // Resolve an embedded document to a renderable URL (PLAN §6.9). The host reads the
+          // file's bytes and returns a data URL; the WebView can't reach the filesystem itself.
+          const src = documentSourceRef.current;
+          Promise.resolve(src ? src.resolveUrl(msg.payload.id) : null)
+            .then((r) => resolveDoc(msg.payload.requestId, r))
+            .catch(() => resolveDoc(msg.payload.requestId, null));
           break;
         }
       }
@@ -273,17 +302,24 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
             contentContainerStyle={styles.toolbarContent}
           >
             {linkSource ? (
-              <>
-                <Pressable
-                  accessibilityLabel="Insert reference"
-                  style={({ pressed }) => [styles.fmtBtn, pressed && styles.fmtBtnPressed]}
-                  onPress={() => setPicker({ open: true, fromTrigger: false, embed: false })}
-                >
-                  <Icon name="link" size={20} color="#3e3e3a" />
-                </Pressable>
-                <View style={styles.toolbarDivider} />
-              </>
+              <Pressable
+                accessibilityLabel="Insert reference"
+                style={({ pressed }) => [styles.fmtBtn, pressed && styles.fmtBtnPressed]}
+                onPress={() => setPicker({ open: true, fromTrigger: false, embed: false })}
+              >
+                <Icon name="link" size={20} color="#3e3e3a" />
+              </Pressable>
             ) : null}
+            {documentSource ? (
+              <Pressable
+                accessibilityLabel="Attach file"
+                style={({ pressed }) => [styles.fmtBtn, pressed && styles.fmtBtnPressed]}
+                onPress={() => void pickDocument()}
+              >
+                <Icon name="file" size={20} color="#3e3e3a" />
+              </Pressable>
+            ) : null}
+            {linkSource || documentSource ? <View style={styles.toolbarDivider} /> : null}
             {FORMAT_BUTTONS.map((b) => {
               const active = !!formatState?.active[b.name];
               const disabled = !!formatState && !formatState.enabled[b.name];

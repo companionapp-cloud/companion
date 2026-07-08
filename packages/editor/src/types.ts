@@ -6,6 +6,9 @@ import type { FormatName, FormatState } from "./formatCommands";
 export interface EditorController {
   format(name: FormatName): void;
   insertReference(): void;
+  /** Open the OS file picker to embed a document (PLAN §6.9). No-op unless a
+   * {@link DocumentSource} is wired (and, today, web only). */
+  insertDocument(): void;
 }
 
 // The editor's cross-platform contract. `markdown` seeds the editor once (the editor
@@ -17,6 +20,10 @@ export interface EditorProps {
   /** Optional provider for wikilink autocomplete (`[[`) and pasted-UUID resolution.
    * Omit it and those features stay dormant (input rules + chips still work). */
   linkSource?: LinkSource;
+  /** Optional provider for embedding files (PLAN §6.9): ingesting a picked/pasted/dropped
+   * file into a document, and resolving an embedded document to a renderable URL. Omit and
+   * document embeds render as a plain filename chip and there is no way to add one. */
+  documentSource?: DocumentSource;
   /** Called when the reader opens a wikilink chip (select it, then click again). The host
    * decides how — e.g. open the target in a new workspace tab. Omit and chips only select. */
   onOpenRef?: (ref: LinkRef) => void;
@@ -47,6 +54,9 @@ export interface EditorProps {
   /** Notified after every selection/content change with the formatting-toolbar snapshot. The
    * host (web selection bar) renders its buttons from this. Full variant only. */
   onFormatStateChange?: (state: FormatState) => void;
+  /** Notified when the editor gains/loses focus. The web host uses it to show its formatting
+   * bar while the document is focused; native manages its own keyboard toolbar internally. */
+  onFocusChange?: (focused: boolean) => void;
 }
 
 /** A reference to open — the payload of {@link EditorProps.onOpenRef}. */
@@ -57,7 +67,7 @@ export interface LinkRef {
 
 /** A link target the editor can offer or resolve — a slim projection, never a body. */
 export interface LinkSuggestion {
-  type: "note" | "task" | "habit" | "project";
+  type: "note" | "task" | "habit" | "project" | "document";
   id: string;
   title: string;
   /** Task-only extras, so a `[[task:…]]` chip can render like a todo (done state + dates).
@@ -68,7 +78,7 @@ export interface LinkSuggestion {
 }
 
 /** The entity types the `[[` menu can scope its search to. */
-export type LinkType = "note" | "task" | "habit" | "project";
+export type LinkType = "note" | "task" | "habit" | "project" | "document";
 
 /** How the editor reaches the host's object graph. Both calls are async so the native
  * WebView can satisfy them over the postMessage bridge. */
@@ -78,4 +88,30 @@ export interface LinkSource {
   search(query: string, type?: LinkType | "all"): Promise<LinkSuggestion[]>;
   /** Resolve one id (any type) to its target, for turning a pasted UUID into a link. */
   lookup(id: string): Promise<LinkSuggestion | null>;
+}
+
+/** An embedded document resolved to something renderable (PLAN §6.9). `url` is a URL the
+ * editor can put in an <img>/<audio> src or a download link; the host owns its lifetime
+ * (e.g. an object URL it revokes). */
+export interface ResolvedDocument {
+  url: string;
+  mime: string;
+  filename: string;
+}
+
+/** How the editor reaches the host's document store to embed and render files (PLAN §6.9).
+ * Both calls are async so the native WebView could satisfy them over postMessage; today
+ * only the web shell wires it. Raw bytes never cross this seam — the host stages/serves
+ * them and hands back a URL. */
+export interface DocumentSource {
+  /** Resolve an embedded document to a renderable URL (downloading its bytes lazily on
+   * first view), or null when unavailable. The editor revokes object URLs it's given. */
+  resolveUrl(id: string): Promise<ResolvedDocument | null>;
+  /** Stage a picked/pasted/dropped file into a document and return its id + display info
+   * (web: File-based ingestion for drag-drop, paste, and the in-editor file picker). */
+  ingest?(file: File): Promise<{ id: string; filename: string; mime: string }>;
+  /** Host-initiated ingestion via an OS-native picker (mobile): the shell opens the picker,
+   * ingests the chosen file, and returns the new document's id. Used instead of `ingest`
+   * where the editor can't receive a File (the native WebView). */
+  pick?(): Promise<{ id: string; filename: string } | null>;
 }

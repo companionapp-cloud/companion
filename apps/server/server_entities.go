@@ -248,6 +248,92 @@ func parseServerTime(s sql.NullString) (*time.Time, error) {
 	return &parsed, nil
 }
 
+// ---- documents -----------------------------------------------------------
+
+const documentCols = `id, filename, mime, size, sha256, created_at, updated_at, deleting_at, deleted_at, version, server_seq`
+
+var documentHandler = &entityHandler{
+	typ:   protocol.EntityDocument,
+	table: "documents",
+	upsert: func(s *Server, tx *sql.Tx, uid string, raw []byte, updatedAt time.Time, version, seq int64) error {
+		var d domain.Document
+		if err := json.Unmarshal(raw, &d); err != nil {
+			return err
+		}
+		// The metadata row is authoritative here; the bytes are uploaded separately to
+		// object storage via the blob endpoints before this row is pushed (PLAN §6.9).
+		if err := d.Validate(); err != nil {
+			return err
+		}
+		_, err := tx.Exec(s.rebind(
+			`INSERT INTO documents (id, user_id, filename, mime, size, sha256, created_at, updated_at, deleting_at, deleted_at, version, server_seq)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT (id) DO UPDATE SET
+			   filename = excluded.filename, mime = excluded.mime, size = excluded.size,
+			   sha256 = excluded.sha256, updated_at = excluded.updated_at,
+			   deleting_at = excluded.deleting_at, deleted_at = excluded.deleted_at,
+			   version = excluded.version, server_seq = excluded.server_seq;`),
+			d.ID, uid, d.Filename, d.Mime, d.Size, d.SHA256,
+			d.CreatedAt.UTC().Format(timeFormat), updatedAt.Format(timeFormat),
+			fmtTime(d.DeletingAt), fmtTime(d.DeletedAt), version, seq)
+		return err
+	},
+	loadRaw: func(s *Server, tx *sql.Tx, uid, id string) ([]byte, error) {
+		row := tx.QueryRow(s.rebind(`SELECT `+documentCols+` FROM documents WHERE id = ? AND user_id = ?;`), id, uid)
+		d, _, err := scanServerDocument(row)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(d)
+	},
+	pull: func(s *Server, uid string, cursor, limit int64) ([]seqRow, error) {
+		rows, err := s.query(`SELECT `+documentCols+` FROM documents WHERE user_id = ? AND server_seq > ? ORDER BY server_seq ASC LIMIT ?;`, uid, cursor, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var out []seqRow
+		for rows.Next() {
+			d, seq, err := scanServerDocument(rows)
+			if err != nil {
+				return nil, err
+			}
+			body, err := json.Marshal(d)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, seqRow{seq, protocol.PullChange{EntityType: protocol.EntityDocument, Row: body, ServerSeq: seq}})
+		}
+		return out, rows.Err()
+	},
+}
+
+func scanServerDocument(sc rowScanner) (*domain.Document, int64, error) {
+	var (
+		d                     domain.Document
+		deletingAt, deletedAt sql.NullString
+		createdAt, updatedAt  string
+		seq                   int64
+	)
+	if err := sc.Scan(&d.ID, &d.Filename, &d.Mime, &d.Size, &d.SHA256, &createdAt, &updatedAt, &deletingAt, &deletedAt, &d.Version, &seq); err != nil {
+		return nil, 0, err
+	}
+	var err error
+	if d.CreatedAt, err = time.Parse(timeFormat, createdAt); err != nil {
+		return nil, 0, err
+	}
+	if d.UpdatedAt, err = time.Parse(timeFormat, updatedAt); err != nil {
+		return nil, 0, err
+	}
+	if d.DeletingAt, err = parseServerTime(deletingAt); err != nil {
+		return nil, 0, err
+	}
+	if d.DeletedAt, err = parseServerTime(deletedAt); err != nil {
+		return nil, 0, err
+	}
+	return &d, seq, nil
+}
+
 // ---- areas ---------------------------------------------------------------
 
 const areaCols = `id, name, color, sort_order, created_at, updated_at, deleted_at, version, server_seq`

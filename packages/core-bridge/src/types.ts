@@ -48,6 +48,25 @@ export interface Note {
   dirty: boolean;
 }
 
+/** A document — a file embedded in a note (mirrors core/domain.Document, PLAN §6.9). The
+ *  row is metadata only: the bytes live in the platform BlobStore, content-addressed by
+ *  `sha256`, and sync out-of-band. A document is also a graph node that notes embed with
+ *  `![[doc:<id>]]`. `blobUploaded` is a client-only flag and never crosses the wire. */
+export interface Document {
+  id: string;
+  filename: string;
+  mime: string;
+  size: number;
+  /** Lowercase 64-char hex content address of the bytes; immutable for given bytes. */
+  sha256: string;
+  createdAt: string;
+  updatedAt: string;
+  deletingAt?: string | null;
+  deletedAt?: string | null;
+  version: number;
+  dirty: boolean;
+}
+
 /** A task's lifecycle status (mirrors core/domain task status constants). */
 export type TaskStatus = "open" | "done" | "cancelled";
 
@@ -163,7 +182,7 @@ export interface NotificationFeedItem extends TaskNotification {
 }
 
 /** The kinds of entity that can be trashed (mirrors the server's trashable tables). */
-export type TrashEntityType = "note" | "task" | "habit";
+export type TrashEntityType = "note" | "task" | "document" | "habit";
 
 /** One row in the Trash, across entity types (mirrors bridge trashItem). */
 export interface TrashItem {

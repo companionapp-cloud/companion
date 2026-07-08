@@ -11,10 +11,11 @@ import "regexp"
 // token it sees from this set; resolution against real rows happens later (dangling
 // targets are expected — PLAN §5.1).
 const (
-	NodeNote    = "note"
-	NodeTask    = "task"
-	NodeHabit   = "habit"
-	NodeProject = "project"
+	NodeNote     = "note"
+	NodeTask     = "task"
+	NodeHabit    = "habit"
+	NodeProject  = "project"
+	NodeDocument = "document"
 )
 
 // Edge kinds derived from content. Authored kinds ("stack", "member") are mirrored in
@@ -69,10 +70,19 @@ type Graph struct {
 var wikilinkRe = regexp.MustCompile(`(!?)\[\[\s*([a-zA-Z]+)\s*:\s*([^\]|]+?)\s*(?:\|[^\]]*)?\]\]`)
 
 var linkTypes = map[string]bool{
-	NodeNote:    true,
-	NodeTask:    true,
-	NodeHabit:   true,
-	NodeProject: true,
+	NodeNote:     true,
+	NodeTask:     true,
+	NodeHabit:    true,
+	NodeProject:  true,
+	NodeDocument: true,
+}
+
+// typeAliases maps the short type token a user writes in a wikilink to its canonical
+// node type. Documents are embedded as ![[doc:<id>]] (PLAN §6.9) but their node type is
+// "document"; normalizing here keeps the parser output canonical without changing the
+// author-facing syntax. Canonical tokens map to themselves implicitly (not listed).
+var typeAliases = map[string]string{
+	"doc": NodeDocument,
 }
 
 // ParseRefs extracts the outgoing references from a markdown body. Unknown type tokens
@@ -87,6 +97,9 @@ func ParseRefs(markdown string) []Ref {
 	out := make([]Ref, 0, len(matches))
 	for _, m := range matches {
 		typ := m[2]
+		if canonical, ok := typeAliases[typ]; ok {
+			typ = canonical
+		}
 		if !linkTypes[typ] {
 			continue
 		}

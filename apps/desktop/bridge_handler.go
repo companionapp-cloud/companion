@@ -70,7 +70,9 @@ func (h *bridgeHandler) handleInvoke(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+	// Generous cap: most invokes are tiny, but documents.ingestBytes carries a base64-encoded
+	// file (PLAN §6.9), so allow room for a large attachment plus its ~33% encoding overhead.
+	body, err := io.ReadAll(io.LimitReader(r.Body, 160<<20))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

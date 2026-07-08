@@ -4,3 +4,5 @@ export { createWasmBridge } from "./wasm";
 export type { WasmBridgeOptions } from "./wasm";
 export { createWaSqliteDriver } from "./wa-sqlite";
 export type { WaSqliteOptions } from "./wa-sqlite";
+export { createOpfsBlobStore, isWebBlobStoreAvailable } from "./blobstore.web";
+export type { WebBlobStore, OpfsBlobStoreOptions } from "./blobstore.web";

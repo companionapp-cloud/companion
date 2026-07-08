@@ -13,6 +13,7 @@ package mobile
 import (
 	"path/filepath"
 
+	"companion/core/blob"
 	"companion/core/bridge"
 	"companion/core/secrets"
 	"companion/core/store"
@@ -42,6 +43,12 @@ func New(dbPath string) (*Core, error) {
 	// LLM API keys (PLAN §6.8): stored beside the database in the app's documents dir.
 	// SecureStore is the intended hardening upgrade; local Ollama needs no key.
 	core.SetSecretStore(secrets.NewFileStore(filepath.Join(filepath.Dir(dbPath), "secrets.json")))
+	// Document bytes (PLAN §6.9): a filesystem blob store in the app's documents dir. The RN
+	// shell ingests picked files (documents.ingestFile) and reads bytes back by path
+	// (documents.localPath) from this same store; the core syncs them out-of-band.
+	if blobStore, err := blob.NewFSStore(filepath.Join(filepath.Dir(dbPath), "blobs"), nil); err == nil {
+		core.SetBlobStore(blobStore)
+	}
 	return &Core{inner: core, store: st}, nil
 }
 

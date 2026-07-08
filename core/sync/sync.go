@@ -186,6 +186,9 @@ func New(st *store.Store, t Transport, clock domain.Clock) *Engine {
 	e.register(newRepoSyncer[*domain.ObjectType](st.ObjectTypes, clock))
 	e.register(newRepoSyncer[*domain.Note](st.Notes, clock))
 	e.register(newRepoSyncer[*domain.Task](st.Tasks, clock))
+	// Documents sync as metadata rows; their bytes move out-of-band before push / lazily on
+	// render (PLAN §6.9). A note embedding a document that outruns it is a tolerated dangle.
+	e.register(newRepoSyncer[*domain.Document](st.Documents, clock))
 	e.register(newRepoSyncer[*domain.Area](st.Areas, clock))
 	e.register(newRepoSyncer[*domain.Project](st.Projects, clock))
 	e.register(newRepoSyncer[*domain.ProjectMember](st.ProjectMembers, clock))

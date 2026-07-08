@@ -49,6 +49,11 @@ func (c *Core) syncRun() ([]byte, error) {
 	if c.sync.baseURL == "" {
 		return nil, errors.New("sync is not configured")
 	}
+	// Upload any pending document bytes first, so the engine only pushes metadata whose
+	// bytes are already fetchable by other devices (upload-before-push, PLAN §6.9).
+	if err := c.uploadPendingBlobs(); err != nil {
+		return nil, err
+	}
 	engine := syncpkg.New(c.store, syncpkg.NewHTTPTransport(c.sync.baseURL, c.sync.token), nil)
 	if err := engine.Sync(); err != nil {
 		return nil, err

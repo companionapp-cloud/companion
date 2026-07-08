@@ -71,6 +71,8 @@ companion/
 │   ├── domain/               # entities, object schemas, link extraction, validation,
 │   │                         # pure logic (streaks, recurrence)
 │   ├── store/                # SQLite repos + migrations (client-side persistence)
+│   ├── blob/                 # content-addressed document bytes: BlobStore port +
+│   │                         # Go fs impl (desktop/mobile); web injects an OPFS impl
 │   ├── graph/                # graph queries over the link index (full / neighborhood /
 │   │                         # backlinks / rebuild)
 │   ├── sync/                 # client-side sync engine
@@ -163,6 +165,8 @@ The core stays pure by depending on small interfaces the shell injects:
 
 ```go
 type Driver interface { Exec(...) ; Query(...) }        // sqlite access (web only overrides)
+type BlobStore interface { Has(sha256) ; Upload(sha256, url, token) ; Download(...) ; Delete(...) }
+                                                         // document bytes (§6.9; web only overrides)
 type SecretStore interface { Get(k string) ; Set(k, v string) }  // OS keychain / SecureStore
 type Clock interface { Now() time.Time }                 // testability
 type HTTP interface { Do(*Request) (*Response, error) }  // wasm uses fetch under the hood
@@ -255,6 +259,23 @@ CREATE TABLE notes (
   version     INTEGER NOT NULL DEFAULT 0,
   dirty       INTEGER NOT NULL DEFAULT 1
 );
+
+CREATE TABLE documents (          -- file embeds (§6.9): metadata syncs; bytes live in
+  id            TEXT PRIMARY KEY, -- the BlobStore, content-addressed by sha256
+  filename      TEXT NOT NULL,
+  mime          TEXT NOT NULL,
+  size          INTEGER NOT NULL,
+  sha256        TEXT NOT NULL,    -- immutable content address; "replace" = new hash
+  blob_uploaded INTEGER NOT NULL DEFAULT 0,  -- client-only, like dirty: bytes confirmed
+                                             -- at the server. Local presence is never a
+                                             -- column — ask BlobStore.Has(sha256).
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  deleting_at TEXT,                            -- Trash (§4.3)
+  deleted_at  TEXT,
+  version INTEGER NOT NULL DEFAULT 0,
+  dirty   INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX idx_documents_sha256 ON documents (sha256);
 
 CREATE TABLE tasks (
   id             TEXT PRIMARY KEY,
@@ -386,7 +407,10 @@ CREATE VIEW graph_nodes AS        -- slim projection for graph queries; never bo
     FROM habits   WHERE deleted_at IS NULL AND deleting_at IS NULL AND archived_at IS NULL
   UNION ALL
   SELECT id, 'project' AS type, name,       NULL,           area_id
-    FROM projects WHERE deleted_at IS NULL AND archived_at IS NULL;
+    FROM projects WHERE deleted_at IS NULL AND archived_at IS NULL
+  UNION ALL
+  SELECT id, 'document' AS type, filename,  NULL,           mime
+    FROM documents WHERE deleted_at IS NULL AND deleting_at IS NULL;
 -- Trashed rows (deleting_at set) drop out of the graph just like tombstones do.
 -- Areas are not graph nodes; they surface as sidebar headings and as an optional
 -- clustering dimension in the graph view (via the project's area_id).
@@ -472,6 +496,17 @@ CREATE TABLE user_secrets (         -- synced LLM API keys, encrypted at rest
   user_id UUID NOT NULL, key TEXT NOT NULL, value_enc BYTEA NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL, PRIMARY KEY (user_id, key)
 );
+
+CREATE TABLE documents (            -- metadata only; bytes live in S3-compatible
+  id UUID PRIMARY KEY,              -- object storage at {user_id}/{sha256} (§6.9)
+  user_id UUID NOT NULL REFERENCES users(id),
+  filename TEXT NOT NULL, mime TEXT NOT NULL,
+  size BIGINT NOT NULL, sha256 TEXT NOT NULL,
+  version BIGINT NOT NULL DEFAULT 1, server_seq BIGINT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL,
+  deleting_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ
+);
+CREATE INDEX ON documents (user_id, sha256);
 ```
 
 `server_seq` per row (rather than a separate change-log table) keeps pulls simple and
@@ -869,6 +904,58 @@ its `project_members` rows are left intact so restoring returns it to its projec
   tools expose each entity's archetype/props and repeat so the model reads the same shape
   it can write.
 
+### 6.9 Documents (file embeds in notes)
+
+Any file — PDF, audio, image, arbitrary attachment — becomes a **document**: a synced
+metadata row (`documents`, §4.1) plus **immutable, content-addressed bytes** stored
+locally in a `BlobStore` keyed by `sha256`. Metadata rides the ordinary push/pull;
+bytes move out-of-band (below). "Replacing" a file writes new bytes under a new hash
+and updates the row's `sha256` — bytes are never mutated, so bytes can never conflict;
+only metadata plays by §7.3. Content addressing also buys dedupe (the same file
+attached twice is two rows, one blob), idempotent transfer retries, and integrity
+verification for free.
+
+- **`BlobStore` port** (`core/blob`) — the `store.Driver` pattern again: **one Go
+  filesystem implementation serves desktop and mobile** (plain `os` I/O against a base
+  dir the shell passes at init — works identically under Wails and gomobile); **web
+  injects a JS implementation over OPFS**, the same storage layer wa-sqlite already
+  requires, using streaming file handles.
+- **Bytes never cross the bridge.** Ingestion (file picker / drag-drop / paste) and
+  rendering are shell-side operations against the same underlying storage: the shell
+  stages the bytes into the store, computes the sha256, then calls
+  `documents.create({filename, mime, size, sha256})` — metadata only. Rendering asks
+  the shell for a platform URL: a Wails custom scheme on desktop,
+  `URL.createObjectURL` over the OPFS file on web, a file path inside the mobile
+  webview. Core owns metadata, edges, and transfer *orchestration*; nothing large ever
+  enters wasm memory or the postMessage boundary.
+- **Blob sync** — `PUT/GET /v1/blobs/{sha256}` stream through the server to **any
+  S3-compatible object store** (AWS S3, Cloudflare R2, Backblaze B2, MinIO, …) at key
+  `{user_id}/{sha256}`. The server verifies the hash on upload and enforces a max size
+  (default 100 MB, configurable). Backend config via env
+  (`BLOB_S3_ENDPOINT/BUCKET/ACCESS_KEY/SECRET/REGION` + a path-style flag for
+  MinIO-alikes); dev `compose.yaml` gains a MinIO service. Clients never talk to the
+  bucket directly — no CORS story, no credentials on devices; presigned URLs are a
+  documented later optimization, not a v1 requirement.
+  - **Upload-before-push**: bytes for a dirty document row upload first
+    (`blob_uploaded` flips on confirm); the row itself pushes only after — so no
+    device ever pulls metadata whose bytes are unfetchable.
+  - **Lazy download**: pulling a row does *not* fetch bytes. First render does
+    (placeholder + progress), and core/sync decides *what* to transfer while the
+    injected `BlobStore.Upload/Download` moves the bytes — Go streams via `net/http`
+    natively; the web impl streams fetch ⇄ OPFS entirely JS-side.
+- **Editor** — an embed is `![[doc:<uuid>]]` on its own line, the exact shape of task
+  embeds (§6.2); markdown stays canonical text. A `docRef` NodeView renders images
+  inline, an audio player for audio, and a filename/size chip with open/download for
+  everything else. `EditorDataProvider` gains `resolveDocUrl(id)` and
+  `createDocument(file)`; on webview platforms these stay async + serializable (a URL
+  string crosses the boundary, never bytes).
+- **Graph** — the extractor derives `embed` edges from `![[doc:…]]` exactly like task
+  embeds, on local writes and sync-apply alike; documents appear in `graph_nodes`.
+- **Trash & GC** — documents carry `deleting_at` and flow through the normal Trash
+  (§4.3). When a row tombstones, the client deletes local bytes *if no other live row
+  references the hash*; the server trash collector does the same against the bucket
+  (§7.6).
+
 ---
 
 ## 7. Sync protocol
@@ -881,10 +968,13 @@ GET  /v1/sync/pull?cursor=N&limit=500
 POST /v1/sync/push
 GET  /v1/sync/events             -> SSE stream: realtime change notifications (§7.5)
 GET  /v1/secrets / PUT /v1/secrets/{key}
+PUT  /v1/blobs/{sha256}          -> streamed document-bytes upload  (§6.9; server
+GET  /v1/blobs/{sha256}          <- streamed download                verifies hash,
+                                    proxies to any S3-compatible object store)
 ```
 
 Entity types on the wire: `note`, `task`, `area`, `project`, `project_member`,
-`object_type`, `habit`, `habit_link`, `habit_entry`, `calendar_feed`,
+`object_type`, `document`, `habit`, `habit_link`, `habit_entry`, `calendar_feed`,
 `calendar_event`, `llm_config`. **`links` rows never sync** — they are derived
 locally (§5.1). Applied pull rows go through the store's
 normal write path, so extraction runs on synced content too.
@@ -936,6 +1026,9 @@ row — links never dangle because of conflict resolution.
 - Order: **push first, then pull** (push may generate conflicts whose canonical rows
   arrive in the following pull; the conflicted copies push next round — the loop
   converges).
+- Documents bracket the loop (§6.9): blobs for dirty `documents` rows upload *before*
+  push — a row is never pushed until its bytes are fetchable — and downloads happen
+  lazily on first render, outside the loop entirely.
 - All of this is `core/sync` code — identical on every platform; only the HTTP
   transport is injected (fetch on wasm, net/http elsewhere).
 
@@ -1017,6 +1110,11 @@ so their next `sync.run` pulls the tombstones. Clients never run the retention c
 only set `deleting_at` (delete) or clear it (restore). Only entities that carry
 `deleting_at` are swept — projects and areas are never touched.
 
+After sweeping `documents` rows, a second pass GCs object storage: any `sha256` no
+longer referenced by a live `documents` row for that user is deleted from the bucket
+(§6.9). Clients do the mirror-image cleanup in their local `BlobStore` when the
+tombstone pulls down.
+
 ---
 
 ## 8. What lives where (the reuse matrix)
@@ -1045,6 +1143,8 @@ only set `deleting_at` (delete) or clear it (restore). Only entities that carry
 | ICS fetch + parse + clone | — | — | ✅ |
 | Calendar merge query | ✅ | — | — |
 | LLM chat orchestration + retrieval tools | ✅ | — | — |
+| Document metadata + embed edges + transfer orchestration | ✅ | — | ✅ blob endpoints, hash verify |
+| Document bytes (BlobStore) | ✅ Go fs impl (desktop/mobile) | ✅ web OPFS impl; picker ingestion + render URLs | ✅ streams to S3-compatible store |
 | Secret storage | — | ✅ keychain/SecureStore/DPAPI | ✅ encrypted secrets table |
 | Auth token persistence | — | ✅ | ✅ issue/verify |
 | UI, navigation, state presentation | — | ✅ packages/app (+ per-platform shells) | — |
@@ -1121,9 +1221,6 @@ Done:
     settings tab); `prop:<field>` reference edges derived on every write and sync-apply
     (`links.SyncEntitySource`, so extraction still equals `graph.rebuild`); graph nodes
     colored/clustered by `object_type_id` with labeled `prop:*` edges.
-
-
-Next:
 11.  **Repeating tasks** — RRULE on seeds (`core/domain/recurrence.go`: parse/validate,
     next-occurrence preview, `LatestOccurrence`); a natural-language cadence parser
     (`domain.ParseRepeatPhrase` → `tasks.parseRepeat`, §6.4 — minute/hour through
@@ -1133,12 +1230,24 @@ Next:
     **just-in-time** server generation (`apps/server/repeat.go`) — a minute sweep plus an
     on-push check creates only the occurrence whose time has come, never ahead, at most one
     per seed per sweep; occurrences reach other devices instantly via SSE → sync.
-12.  **Habits** — cadence kinds + polarity + streak math + streak-health; entries UI;
+
+Next:
+12. **Documents** — file embeds in notes (§6.9): `documents` entity + sync (metadata
+    rows; immutable content-addressed bytes); `BlobStore` port in `core/blob` (one Go
+    fs impl for desktop + mobile, injected OPFS impl on web; bytes never cross the
+    bridge); `PUT/GET /v1/blobs/{sha256}` streaming through the server to **any
+    S3-compatible store** (MinIO in dev compose); upload-before-push + lazy download
+    in the sync loop; `![[doc:<id>]]` embeds → `embed` edges + graph nodes; editor
+    `docRef` NodeView (inline image/audio, file chip) via `resolveDocUrl`; Trash
+    lifecycle + blob GC on client and bucket.
+13. **Obsidian import of notes**: TODO
+14. **Things 3 import of tasks**: TODO
+15.  **Habits** — cadence kinds + polarity + streak math + streak-health; entries UI;
     `habit_links` stacking + suggestions; `stack` edges in the graph; habit
     membership; the sidebar fire icon goes live; notification schedules; geofence
     registration on mobile.
-13.  **Calendar** — feeds, server ICS fetcher, event clone, merged calendar view.
-14.  **Polish** — silent push (APNs/FCM) as the background complement to SSE,
+16.  **Calendar** — feeds, server ICS fetcher, event clone, merged calendar view.
+17.  **Polish** — silent push (APNs/FCM) as the background complement to SSE,
     tombstone retention + full-resync path, E2E-encrypted secrets, bulk
     re-validation on schema edits, import/export.
 
@@ -1169,6 +1278,12 @@ Next:
   ~100 on Android) mean the shell registers only the nearest/active habit geofences;
   core's plan output should be prioritized. Desktop/web have no geofencing — UI must
   say so.
+- **Browser storage for document blobs.** Web blobs live in OPFS next to the DB;
+  quota is origin-scoped and the browser can evict under pressure. Request
+  `navigator.storage.persist()`, surface usage in settings, and lean on the sync
+  design: any *uploaded* blob is re-downloadable, so eviction degrades to a refetch,
+  not data loss. Not-yet-uploaded blobs are the only real exposure —
+  upload-before-push keeps that window as small as connectivity allows.
 - **Graph scale.** `graph.full` + force layout is fine to a few thousand nodes;
   beyond that, default to neighborhood views and cluster-by-type. The link index
   itself scales fine (it's a covering index with two small B-trees).

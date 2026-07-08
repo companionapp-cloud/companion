@@ -7,7 +7,7 @@ import type { EditorController, EditorProps } from "./types";
 // real DOM, so no WebView is needed — Vite resolves this via .web.tsx). It grows to
 // its content; the note view's ScrollView provides the scroll and document column.
 export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
-  { markdown, onChangeMarkdown, linkSource, onOpenRef, linkRevision, variant, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange },
+  { markdown, onChangeMarkdown, linkSource, documentSource, onOpenRef, linkRevision, variant, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange, onFocusChange },
   ref,
 ) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -18,12 +18,16 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
   // Kept in a ref so the editor (built once) always calls the latest provider.
   const linkSourceRef = useRef(linkSource);
   linkSourceRef.current = linkSource;
+  const documentSourceRef = useRef(documentSource);
+  documentSourceRef.current = documentSource;
   const onOpenRefRef = useRef(onOpenRef);
   onOpenRefRef.current = onOpenRef;
   const onSubmitRef = useRef(onSubmit);
   onSubmitRef.current = onSubmit;
   const onFormatStateRef = useRef(onFormatStateChange);
   onFormatStateRef.current = onFormatStateChange;
+  const onFocusChangeRef = useRef(onFocusChange);
+  onFocusChangeRef.current = onFocusChange;
 
   // The host's selection bar drives the editor through this ref.
   useImperativeHandle(
@@ -31,6 +35,7 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
     (): EditorController => ({
       format: (name) => handleRef.current?.format(name),
       insertReference: () => handleRef.current?.insertReference(),
+      insertDocument: () => handleRef.current?.insertDocument(),
     }),
     [],
   );
@@ -46,12 +51,16 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
       debounceMs,
       onSubmit: onSubmit ? (md) => onSubmitRef.current?.(md) : undefined,
       onFormatStateChange: (state) => onFormatStateRef.current?.(state),
+      onFocusChange: (focused) => onFocusChangeRef.current?.(focused),
       linkSource: linkSourceRef.current
         ? {
             search: (q, type) => linkSourceRef.current!.search(q, type),
             lookup: (id) => linkSourceRef.current!.lookup(id),
           }
         : undefined,
+      // The shell builds this once and keeps it stable, so pass it straight through (unlike
+      // linkSource, no per-call ref indirection is needed).
+      documentSource: documentSourceRef.current,
       onOpenRef: (ref) => onOpenRefRef.current?.(ref),
     });
     handleRef.current = handle;

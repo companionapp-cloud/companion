@@ -18,7 +18,10 @@ const (
 	EntityProject       = "project"
 	EntityProjectMember = "project_member"
 	EntityObjectType    = "object_type"
-	EntityChat          = "chat"
+	// A document is a file embed: metadata syncs here; its bytes move out-of-band through
+	// the blob endpoints (PLAN §6.9).
+	EntityDocument = "document"
+	EntityChat     = "chat"
 	EntityChatMessage   = "chat_message"
 	// A read receipt for one in-app notification fire (PLAN §6.4).
 	EntityNotificationRead = "notification_read"

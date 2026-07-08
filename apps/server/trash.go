@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log"
 	"time"
 )
@@ -12,7 +13,7 @@ import (
 
 // trashTables are the server tables carrying a deleting_at Trash marker. Projects and
 // areas are never trashed, so they are absent here.
-var trashTables = []string{"notes", "tasks"}
+var trashTables = []string{"notes", "tasks", "documents"}
 
 // trashSweepInterval is how often the collector wakes. Trash retention is measured in
 // days, so hourly is ample precision (PLAN §7.6).
@@ -86,6 +87,14 @@ func (s *Server) PurgeExpired() (int, error) {
 			if seq > maxSeqByUser[r.uid] {
 				maxSeqByUser[r.uid] = seq
 			}
+			// A purged document releases its bytes: GC the blob from object storage when no
+			// other live document row for that user still references the hash (PLAN §6.9,
+			// §7.6). Best-effort — a failure only leaves an orphaned object, never data loss.
+			if table == "documents" {
+				if err := s.gcDocumentBlob(r.uid, r.id); err != nil {
+					log.Printf("trash collector: blob gc for document %s: %v", r.id, err)
+				}
+			}
 		}
 	}
 
@@ -93,6 +102,28 @@ func (s *Server) PurgeExpired() (int, error) {
 		s.hub.publish(uid, seq)
 	}
 	return purged, nil
+}
+
+// gcDocumentBlob deletes a document's bytes from object storage when no other live document
+// row for the same user still references the content hash (PLAN §6.9). The just-purged row
+// is a tombstone (deleted_at set), so it is excluded by the deleted_at IS NULL filter — its
+// own reference is already gone. Content addressing means two rows can share one blob (the
+// same file attached twice), so the reference count, not the row, gates deletion.
+func (s *Server) gcDocumentBlob(uid, id string) error {
+	var sha string
+	if err := s.queryRow(`SELECT sha256 FROM documents WHERE id = ? AND user_id = ?;`, id, uid).Scan(&sha); err != nil {
+		return err
+	}
+	var one int
+	err := s.queryRow(
+		`SELECT 1 FROM documents WHERE user_id = ? AND sha256 = ? AND deleted_at IS NULL LIMIT 1;`, uid, sha).Scan(&one)
+	if err == nil {
+		return nil // still referenced by a live row; keep the bytes
+	}
+	if err != sql.ErrNoRows {
+		return err
+	}
+	return s.blobs.Delete(context.Background(), blobKey(uid, sha))
 }
 
 // purgeOne tombstones a single expired row under a fresh version + server_seq, returning

@@ -4,22 +4,25 @@
 // from Editor.tsx so the native app never bundles ProseMirror into its JS.
 import { createEditor } from "../createEditor";
 import type { FormatName } from "./../formatCommands";
-import type { LinkSource, LinkSuggestion } from "../types";
+import type { DocumentSource, LinkSource, LinkSuggestion, ResolvedDocument } from "../types";
 
 declare global {
   interface Window {
     ReactNativeWebView?: { postMessage(message: string): void };
     __INITIAL_MARKDOWN__?: string;
     __HAS_LINK_SOURCE__?: boolean;
+    __HAS_DOCUMENT_SOURCE__?: boolean;
     __EDITOR_VARIANT__?: "full" | "simple";
     __PLACEHOLDER__?: string;
     __SUBMIT_ON_ENTER__?: boolean;
     __DEBOUNCE_MS__?: number;
     __resolveLink?: (requestId: number, payload: unknown) => void;
+    __resolveDoc?: (requestId: number, payload: unknown) => void;
     __refreshLinks?: () => void;
     __clear?: () => void;
     __format?: (name: FormatName) => void;
     __insertReference?: () => void;
+    __insertDocumentEmbed?: (id: string, filename: string) => void;
   }
 }
 
@@ -55,6 +58,33 @@ function bridgedLinkSource(): LinkSource {
   };
 }
 
+// Bridge document rendering to the RN host (PLAN §6.9): the host resolves an embed's id to a
+// URL (a data URL of the file's bytes, downloaded lazily) over postMessage. Ingestion is
+// host-initiated on native — the shell's OS picker injects __insertDocumentEmbed — so this
+// only implements resolveUrl. A generous timeout covers a lazy download + base64 encode.
+function bridgedDocumentSource(): DocumentSource {
+  const pending = new Map<number, (value: unknown) => void>();
+  let nextId = 0;
+  window.__resolveDoc = (requestId, payload) => {
+    const resolve = pending.get(requestId);
+    if (resolve) {
+      pending.delete(requestId);
+      resolve(payload);
+    }
+  };
+  return {
+    resolveUrl: (id) =>
+      new Promise<ResolvedDocument | null>((resolve) => {
+        const requestId = ++nextId;
+        pending.set(requestId, (v) => resolve(v as ResolvedDocument | null));
+        post("docResolve", { requestId, id });
+        setTimeout(() => {
+          if (pending.delete(requestId)) resolve(null);
+        }, 15000);
+      }),
+  };
+}
+
 function init(): void {
   const mount = document.getElementById("editor");
   if (!mount) return;
@@ -70,6 +100,7 @@ function init(): void {
     // linkSource still resolves pasted UUIDs; `[[` delegates to the native modal, which
     // posts linkTrigger/linkTriggerEnd and injects window.__insertRef / __cancelRef.
     linkSource: hasLinks ? bridgedLinkSource() : undefined,
+    documentSource: window.__HAS_DOCUMENT_SOURCE__ ? bridgedDocumentSource() : undefined,
     hostAutocomplete: hasLinks
       ? {
           open: (embed) => post("linkTrigger", { embed }),
@@ -89,6 +120,8 @@ function init(): void {
   // The host's keyboard toolbar injects these to drive formatting / reference insertion.
   window.__format = (name) => handle.format(name);
   window.__insertReference = () => handle.insertReference();
+  // The host injects an already-ingested document embed after its OS picker (PLAN §6.9).
+  window.__insertDocumentEmbed = (id, filename) => handle.insertDocumentEmbed(id, filename);
 
   // The simple editor is an inline field (task note / composer), not a full-screen page, so
   // report its content height and let the host size the WebView to it (bounded by the host's

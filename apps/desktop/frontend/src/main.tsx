@@ -6,7 +6,9 @@ import { Window } from "@wailsio/runtime";
 import { createElement } from "react";
 import { AppRegistry } from "react-native";
 import { App, setFocusWindowOpener } from "@companion/app";
-import { createHttpBridge } from "@companion/core-bridge";
+import { createHttpBridge, documentsApi } from "@companion/core-bridge";
+import type { CoreBridge } from "@companion/core-bridge";
+import type { DocumentSource } from "@companion/editor";
 import { desktopNotificationScheduler } from "./notifications";
 
 // Double-clicking the window chrome (any `--wails-draggable: drag` region, e.g. the
@@ -41,10 +43,44 @@ const topInset = isMac ? 28 : 0;
 // rather than the shared web fallback, which the Wails webview can't honour.
 const notificationScheduler = desktopNotificationScheduler();
 
+// File embedding (PLAN §6.9): the webview passes file bytes to the Go filesystem blob store
+// through the same invoke bridge every other core call uses (ingestBytes to add, dataUrl to
+// render), while the core owns blob sync. Same editor UX as web — attach button, drag-drop,
+// paste — since desktop is DOM.
+const documentSource = desktopDocumentSource(core);
+
 const rootTag = document.getElementById("root")!;
 rootTag.innerHTML = "";
 AppRegistry.registerComponent(
   "Companion",
-  () => () => createElement(App, { core, topInset, notificationScheduler }),
+  () => () => createElement(App, { core, topInset, notificationScheduler, documentSource }),
 );
 AppRegistry.runApplication("Companion", { rootTag });
+
+function desktopDocumentSource(core: CoreBridge): DocumentSource {
+  const documents = documentsApi(core);
+  return {
+    async ingest(file: File) {
+      const data = base64FromArrayBuffer(await file.arrayBuffer());
+      const doc = await documents.ingestBytes(data, file.name, file.type || "application/octet-stream");
+      return { id: doc.id, filename: doc.filename, mime: doc.mime };
+    },
+    async resolveUrl(id: string) {
+      const res = await documents.dataUrl(id); // ensures bytes locally (downloads lazily if synced)
+      if (!res.present || !res.url) return null;
+      return { url: res.url, mime: res.mime ?? "application/octet-stream", filename: res.filename ?? "" };
+    },
+  };
+}
+
+// Base64-encode an ArrayBuffer in chunks (a single String.fromCharCode(...bytes) overflows
+// the call stack for large files).
+function base64FromArrayBuffer(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}

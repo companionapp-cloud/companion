@@ -1,4 +1,4 @@
-import { EditorState, Plugin } from "prosemirror-state";
+import { EditorState, Plugin, TextSelection } from "prosemirror-state";
 import { EditorView, Decoration, DecorationSet } from "prosemirror-view";
 import type { Node } from "prosemirror-model";
 import { history, undo, redo } from "prosemirror-history";
@@ -13,8 +13,9 @@ import { commonmarkInputRules } from "./inputrules";
 import { wikilinkAutocomplete } from "./autocomplete";
 import { wikilinkHostAutocomplete, type HostAutocompleteBridge } from "./hostAutocomplete";
 import { wikilinkNodeView, type WikilinkView } from "./wikilinkView";
+import { documentNodeView, isDocumentEmbed } from "./documentView";
 import { buildFormatCommands, computeFormatState, type FormatName, type FormatState } from "./formatCommands";
-import type { LinkRef, LinkSource } from "./types";
+import type { DocumentSource, LinkRef, LinkSource } from "./types";
 
 // The shared ProseMirror setup — pure DOM, no framework. Used directly on web/desktop
 // (Editor.web.tsx) and inside the WebView on native (webview/main.ts). Content is
@@ -29,6 +30,12 @@ export interface EditorHandle {
   setContent(markdown: string): void;
   /** Empty the document. Shorthand for `setContent("")`. */
   clear(): void;
+  /** Open the OS file picker and embed the chosen file(s) as `![[doc:<id>]]` (PLAN §6.9).
+   * No-op unless a documentSource is wired. */
+  insertDocument(): void;
+  /** Insert an embed for an already-ingested document at the selection. Used by native
+   * shells that ingest via an OS picker outside the editor, then place the embed. */
+  insertDocumentEmbed(id: string, filename: string): void;
   /** Run a formatting toggle (bold, list, blockquote, …) on the current selection and
    * refocus the editor. No-op in the simple variant (it has no marks/blocks). */
   format(name: FormatName): void;
@@ -49,6 +56,10 @@ export interface CreateEditorOptions {
   /** When set, `[[` delegates to a native host modal instead of the in-editor DOM popup
    * (mobile). `linkSource` is still used for pasted-UUID resolution. */
   hostAutocomplete?: HostAutocompleteBridge;
+  /** Host store for embedding + rendering files (PLAN §6.9). When set, the editor accepts
+   * dropped/pasted files and the file picker (insertDocument), and renders `![[doc:…]]`
+   * embeds inline. Omitted, embeds fall back to a filename chip. */
+  documentSource?: DocumentSource;
   /** Notified when the editor gains/loses focus. The native host uses it to show a
    * keyboard toolbar only while the document (not some other field) is focused. */
   onFocusChange?: (focused: boolean) => void;
@@ -194,6 +205,77 @@ export function createEditor(
   // Live task chips register here so refreshLinks() can re-hydrate them on demand.
   const linkViews = new Set<WikilinkView>();
 
+  // Two renderers share the wikilink node type: a plain link/task chip, and (for `![[doc:…]]`)
+  // a rich document embed. The per-node factory below dispatches by node shape.
+  const wlView = wikilinkNodeView({
+    linkSource,
+    onOpenRef: options.onOpenRef,
+    register: (v) => {
+      linkViews.add(v);
+      return () => linkViews.delete(v);
+    },
+  });
+  const docView = documentNodeView({ documentSource: options.documentSource });
+
+  // Insert a document embed node (`![[doc:<id>]]`) at the current selection (PLAN §6.9). The
+  // filename rides as the alias so the chip has a readable label; the core's link extractor
+  // ignores it. Also the host-facing entry point for native shells that ingest a file outside
+  // the editor (their OS picker) and then tell the editor to place the embed.
+  const insertDocEmbed = (id: string, filename: string): void => {
+    const node = wikilinkNode(activeSchema, { type: "document", id, alias: filename, embed: true });
+    try {
+      const { from, to } = view.state.selection;
+      view.dispatch(view.state.tr.replaceRangeWith(from, to, node).scrollIntoView());
+    } catch {
+      /* view torn down mid-insert */
+    }
+  };
+
+  // Ingest File objects (web: drag-drop / paste / the in-editor picker) into documents and
+  // embed each in order; a failed ingest skips just that file. No-op without File ingestion.
+  const embedFiles = async (files: File[]): Promise<void> => {
+    const ingest = options.documentSource?.ingest;
+    if (!ingest || files.length === 0) return;
+    for (const file of files) {
+      try {
+        const doc = await ingest(file);
+        insertDocEmbed(doc.id, doc.filename);
+      } catch {
+        /* ingest failed; skip this file */
+      }
+    }
+  };
+
+  // Attach a file. Native shells provide `pick` (an OS-native picker that ingests and returns
+  // the new document); web shells provide `ingest`, so a transient hidden <input type=file>
+  // supplies the File. Keeps the editor framework-free (no React needed for the picker).
+  const pickAndEmbed = async (): Promise<void> => {
+    const src = options.documentSource;
+    if (!src) return;
+    if (src.pick) {
+      try {
+        const doc = await src.pick();
+        if (doc) insertDocEmbed(doc.id, doc.filename);
+      } catch {
+        /* picker cancelled/failed */
+      }
+      return;
+    }
+    if (!src.ingest) return;
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = true;
+    input.style.display = "none";
+    input.addEventListener("change", () => {
+      const files = input.files ? Array.from(input.files) : [];
+      input.remove();
+      if (files.length) void embedFiles(files);
+      view.focus();
+    });
+    document.body.appendChild(input);
+    input.click();
+  };
+
   let pending: string | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   const flush = () => {
@@ -207,18 +289,24 @@ export function createEditor(
     }
   };
 
+  // External file drag-and-drop for document embeds (PLAN §6.9). The browser only lets a
+  // drop land on a contenteditable if dragover's default is prevented — otherwise it opens
+  // the file instead — so we handle the whole gesture explicitly. A depth counter keeps the
+  // drop highlight stable across the dragenter/dragleave that fire for every child element.
+  let dragDepth = 0;
+  const dragHasFiles = (event: DragEvent): boolean =>
+    !!options.documentSource?.ingest && !!event.dataTransfer && Array.from(event.dataTransfer.types).includes("Files");
+  const setDropActive = (active: boolean): void => {
+    mount.classList.toggle("pm-drop-active", active);
+  };
+
   const view = new EditorView(mount, {
     state,
-    // Task chips hydrate from the host and are clickable; other links keep the plain pill.
+    // Task chips hydrate from the host and are clickable; `![[doc:…]]` renders a rich media
+    // embed; other links keep the plain pill.
     nodeViews: {
-      wikilink: wikilinkNodeView({
-        linkSource,
-        onOpenRef: options.onOpenRef,
-        register: (v) => {
-          linkViews.add(v);
-          return () => linkViews.delete(v);
-        },
-      }),
+      wikilink: (node, nodeView, getPos) =>
+        isDocumentEmbed(node) ? docView(node, nodeView, getPos) : wlView(node, nodeView, getPos),
     },
     handleDOMEvents: {
       focus: () => {
@@ -230,8 +318,52 @@ export function createEditor(
         options.onFocusChange?.(false);
         return false;
       },
+      dragenter: (_v, event) => {
+        if (!dragHasFiles(event)) return false;
+        dragDepth++;
+        setDropActive(true);
+        return false;
+      },
+      dragover: (_v, event) => {
+        if (!dragHasFiles(event)) return false;
+        // Permit the drop (and show the copy cursor) instead of the browser opening the file.
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+        return false;
+      },
+      dragleave: (_v, event) => {
+        if (!dragHasFiles(event)) return false;
+        dragDepth = Math.max(0, dragDepth - 1);
+        if (dragDepth === 0) setDropActive(false);
+        return false;
+      },
+      // A dropped file becomes a document embed at the drop point (PLAN §6.9).
+      drop: (_v, event) => {
+        if (!dragHasFiles(event)) return false;
+        dragDepth = 0;
+        setDropActive(false);
+        const files = event.dataTransfer?.files;
+        if (!files || files.length === 0) return false;
+        event.preventDefault();
+        const at = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
+        if (at != null) {
+          try {
+            view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at)));
+          } catch {
+            /* out-of-range coords: fall back to the current selection */
+          }
+        }
+        void embedFiles(Array.from(files));
+        return true;
+      },
     },
     handlePaste(_view, event) {
+      // Pasted files (e.g. an image on the clipboard) embed as documents.
+      const files = event.clipboardData?.files;
+      if (files && files.length > 0 && options.documentSource?.ingest) {
+        void embedFiles(Array.from(files));
+        return true;
+      }
       const text = event.clipboardData?.getData("text/plain")?.trim();
       if (!text || !UUID_RE.test(text)) return false;
       const { from, to } = view.state.selection;
@@ -291,6 +423,12 @@ export function createEditor(
     setContent,
     clear() {
       setContent("");
+    },
+    insertDocument() {
+      void pickAndEmbed();
+    },
+    insertDocumentEmbed(id: string, filename: string) {
+      insertDocEmbed(id, filename);
     },
     format(name: FormatName) {
       if (!formatCommands) return;

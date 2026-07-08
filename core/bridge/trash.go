@@ -52,6 +52,20 @@ func (c *Core) trashList() ([]byte, error) {
 		})
 	}
 
+	documents, err := c.store.Documents.ListTrash()
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range documents {
+		items = append(items, trashItem{
+			EntityType: "document",
+			ID:         d.ID,
+			Title:      d.Filename,
+			DeletingAt: d.DeletingAt,
+			UpdatedAt:  d.UpdatedAt,
+		})
+	}
+
 	// habits join here once they have repos + Trash support.
 
 	return json.Marshal(items)
@@ -75,6 +89,11 @@ func (c *Core) trashRestore(payload []byte) ([]byte, error) {
 			return nil, mapStoreErr(err)
 		}
 		c.emitTaskChanged(id)
+	case "document":
+		if err := c.store.Documents.Restore(id); err != nil {
+			return nil, mapStoreErr(err)
+		}
+		c.emitDocumentChanged(id)
 	default:
 		return nil, fmt.Errorf("cannot restore entity type %q", entityType)
 	}
@@ -100,10 +119,41 @@ func (c *Core) trashPurge(payload []byte) ([]byte, error) {
 			return nil, mapStoreErr(err)
 		}
 		c.emitTaskChanged(id)
+	case "document":
+		if err := c.purgeDocument(id); err != nil {
+			return nil, mapStoreErr(err)
+		}
+		c.emitDocumentChanged(id)
 	default:
 		return nil, fmt.Errorf("cannot purge entity type %q", entityType)
 	}
 	return json.Marshal(map[string]bool{"ok": true})
+}
+
+// purgeDocument tombstones a document and GCs its local bytes when no other live document
+// row still references the same content hash (PLAN §6.9). The hash is read before the
+// tombstone so the reference check sees the pre-delete state; HashReferencedElsewhere
+// already excludes this id, and the tombstone clears its own reference regardless.
+func (c *Core) purgeDocument(id string) error {
+	d, err := c.store.Documents.GetAny(id)
+	if err != nil {
+		return err
+	}
+	if err := c.store.Documents.Delete(id); err != nil {
+		return err
+	}
+	if c.blobs == nil {
+		return nil
+	}
+	referenced, err := c.store.Documents.HashReferencedElsewhere(d.SHA256, id)
+	if err != nil {
+		return err
+	}
+	if !referenced {
+		// Best-effort: a failed local delete only leaves an orphaned blob, not corruption.
+		_ = c.blobs.Delete(d.SHA256)
+	}
+	return nil
 }
 
 func decodeTrashRef(payload []byte) (entityType, id string, err error) {

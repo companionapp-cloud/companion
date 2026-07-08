@@ -1,4 +1,5 @@
 import type { CoreBridge, SqliteDriver } from "./types";
+import type { WebBlobStore } from "./blobstore.web";
 
 // Shapes the Go wasm core exposes/consumes (see core/cmd/wasm).
 interface GoHandle {
@@ -15,6 +16,9 @@ type CompanionInit = (opts: {
   sqlite: SqliteDriver;
   onEvent: (name: string, payloadJson: string) => void;
   secrets: JsSecretStore;
+  /** OPFS + fetch blob store for document bytes (PLAN §6.9). Optional: when absent, document
+   *  metadata still syncs but bytes can't transfer or render locally. */
+  blobs?: WebBlobStore;
 }) => Promise<GoHandle>;
 
 /** localStorageSecrets keeps LLM keys in localStorage under a namespaced prefix. The browser
@@ -48,6 +52,8 @@ export interface WasmBridgeOptions {
   sqlite: SqliteDriver;
   /** URL of the compiled core (default "/core.wasm"). */
   wasmUrl?: string;
+  /** OPFS + fetch blob store for document bytes (PLAN §6.9). Optional. */
+  blobs?: WebBlobStore;
 }
 
 /**
@@ -81,7 +87,12 @@ export async function createWasmBridge(opts: WasmBridgeOptions): Promise<CoreBri
     for (const cb of set) cb(payload);
   };
 
-  const handle = await g.__companionInit({ sqlite: opts.sqlite, onEvent, secrets: localStorageSecrets() });
+  const handle = await g.__companionInit({
+    sqlite: opts.sqlite,
+    onEvent,
+    secrets: localStorageSecrets(),
+    blobs: opts.blobs,
+  });
 
   return {
     async invoke<T>(method: string, payload?: unknown): Promise<T> {

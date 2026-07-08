@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"companion/core/blob"
 	"companion/core/bridge"
 	"companion/core/secrets"
 	"companion/core/store"
@@ -45,6 +46,14 @@ func main() {
 	core := bridge.New(st)
 	handler := newBridgeHandler(core)
 	core.SetEventHandler(handler)
+	// Document bytes (PLAN §6.9): a filesystem blob store beside the database. The core owns
+	// blob sync; the webview embeds/renders through the invoke bridge (documents.ingestBytes /
+	// documents.dataUrl), so no extra HTTP routes are needed.
+	blobStore, err := blob.NewFSStore(filepath.Join(filepath.Dir(dbPath), "blobs"), nil)
+	if err != nil {
+		log.Fatalf("open blob store: %v", err)
+	}
+	core.SetBlobStore(blobStore)
 	// LLM API keys (PLAN §6.8): stored beside the database in a 0600 file (keychain is the
 	// later hardening upgrade). Local Ollama configs need no key and work without this.
 	core.SetSecretStore(secrets.NewFileStore(filepath.Join(filepath.Dir(dbPath), "secrets.json")))

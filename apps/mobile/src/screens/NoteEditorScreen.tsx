@@ -6,6 +6,7 @@ import { useCore, useNotes, useTasks, MembershipPicker, ConfirmDialog, NoteConfl
 import { Center, Icon, IconButton, Text, TextField, colors, space } from '@companion/design-system';
 import { Editor, type LinkRef, type LinkSource } from '@companion/editor';
 import type { RootStackParamList } from '../MobileShell';
+import { useNativeDocumentSource } from '../useNativeDocumentSource';
 
 // Full-screen editor for one note (pushed above the tab bar): a native title field
 // over the ProseMirror body (a WebView). Delete lives in the nav header.
@@ -79,6 +80,9 @@ export function NoteEditorScreen() {
     [graph],
   );
 
+  // File embedding (PLAN §6.9): the Attach button opens the OS-native document picker.
+  const documentSource = useNativeDocumentSource();
+
   // Clicking a chip pushes its target onto the stack (tasks and notes have screens).
   const onOpenRef = useCallback(
     (ref: LinkRef) => {
@@ -97,10 +101,11 @@ export function NoteEditorScreen() {
         markdown={seed.content}
         onChangeMarkdown={onChangeMarkdown}
         linkSource={linkSource}
+        documentSource={documentSource}
         onOpenRef={onOpenRef}
       />
     ),
-    [seed.key, seed.content, onChangeMarkdown, linkSource, onOpenRef],
+    [seed.key, seed.content, onChangeMarkdown, linkSource, documentSource, onOpenRef],
   );
 
   // Deps exclude note/store so content edits don't re-run setOptions; only the title
