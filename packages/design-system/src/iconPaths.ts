@@ -27,6 +27,7 @@ export const ICON_PATHS = {
   check: "M20 6 9 17l-5-5",
   dot: "M12 12h.01",
   graph: "M18 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM6 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm12 4a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM8.6 13.5l6.8 4M15.4 6.5l-6.8 4",
+  repeat: "M17 2l4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v1a4 4 0 0 1-4 4H3",
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;

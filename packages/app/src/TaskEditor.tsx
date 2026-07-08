@@ -1,10 +1,12 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import type { Task, UpdateTaskInput } from "@companion/core-bridge";
-import { Icon, IconButton, Input, Text, TextField, colors, layout, radius, space, type IconName, type PressState } from "@companion/design-system";
+import { Button, Icon, IconButton, Input, Text, TextField, colors, layout, radius, space, type IconName, type PressState } from "@companion/design-system";
 import { Editor, type LinkRef } from "@companion/editor";
 import { useCore } from "./CoreContext";
 import { useTasks } from "./TasksProvider";
+import { useSync } from "./SyncProvider";
+import { REPEAT_PRESETS, repeatLabel } from "./repeat";
 import { useLinkSource } from "./useLinkSource";
 import { DateTimeInput } from "./DateTimeInput";
 import { TaskGraph } from "./TaskGraph";
@@ -24,12 +26,15 @@ export interface TaskEditorProps {
   /** Open a wikilink chip the reader clicked in the notes (e.g. `[[note:…]]`). Omit and chips
    *  only select. */
   onOpenRef?: (ref: LinkRef) => void;
+  /** Take the user to the sync/connect settings. Wired by each shell so the repeat editor's
+   *  "repeats need a server" CTA can act (occurrences are generated server-side, §6.4). */
+  onConnectSync?: () => void;
 }
 
 /** The detail editor for a single task (PLAN §6.4): a status checkbox, title, quick due /
  *  reminder presets, freeform notes (markdown — scanned for wikilinks), and project
  *  membership. Keyed by task id upstream so each task gets a fresh instance. */
-export function TaskEditor({ task, save, onDelete, showToolbar = true, onOpenRef }: TaskEditorProps) {
+export function TaskEditor({ task, save, onDelete, showToolbar = true, onOpenRef, onConnectSync }: TaskEditorProps) {
   const tasks = useTasks();
   const linkSource = useLinkSource();
   const [title, setTitle] = useState(task.title);
@@ -38,7 +43,7 @@ export function TaskEditor({ task, save, onDelete, showToolbar = true, onOpenRef
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Which metadata field has its full editor expanded (Reminders-style: the chips are the
   // resting state; tapping one reveals the natural-language / preset / picker controls).
-  const [expanded, setExpanded] = useState<null | "due" | "reminder">(null);
+  const [expanded, setExpanded] = useState<null | "due" | "reminder" | "repeat">(null);
   const done = task.status === "done";
 
   // Debounce text saves so every keystroke doesn't hit the store (and churn sync).
@@ -110,6 +115,14 @@ export function TaskEditor({ task, save, onDelete, showToolbar = true, onOpenRef
             onPress={() => setExpanded((e) => (e === "reminder" ? null : "reminder"))}
             onClear={task.remindAt ? () => save(task.id, { clearRemindAt: true }) : undefined}
           />
+          <MetaChip
+            icon="repeat"
+            label="Repeat"
+            display={repeatLabel(task.repeatRule)}
+            active={expanded === "repeat"}
+            onPress={() => setExpanded((e) => (e === "repeat" ? null : "repeat"))}
+            onClear={task.repeatRule ? () => save(task.id, { clearRepeatRule: true }) : undefined}
+          />
         </View>
 
         {expanded === "due" ? (
@@ -132,6 +145,16 @@ export function TaskEditor({ task, save, onDelete, showToolbar = true, onOpenRef
               onClear={() => save(task.id, { clearRemindAt: true })}
               presets={reminderPresets()}
               nlPlaceholder="Type a time, e.g. tomorrow at 9am"
+            />
+          </View>
+        ) : null}
+
+        {expanded === "repeat" ? (
+          <View style={styles.metaEditor}>
+            <RepeatRow
+              task={task}
+              onSet={(rule) => save(task.id, rule ? { repeatRule: rule } : { clearRepeatRule: true })}
+              onConnectSync={onConnectSync}
             />
           </View>
         ) : null}
@@ -263,6 +286,7 @@ export function TaskRow({
       <Text numberOfLines={1} style={[{ flex: 1 }, done ? styles.doneTitle : null]}>
         {task.title || "Untitled task"}
       </Text>
+      {task.repeatSeedId ? <Icon name="repeat" size={13} color={colors.textTertiary} /> : null}
       {task.dueAt ? (
         <Text variant="caption" tone={overdue(task) ? "accent" : "tertiary"}>
           {formatDueShort(task.dueAt)}
@@ -376,6 +400,111 @@ function DateRow({
   );
 }
 
+/** The repeat control: preset cadences plus a live preview of the next few occurrences
+ *  (computed in core from the chosen rule and the task's due date as anchor, PLAN §6.4).
+ *  Choosing a repeat turns the task into a seed; the server materializes its occurrences. */
+function RepeatRow({ task, onSet, onConnectSync }: { task: Task; onSet: (rule: string) => void; onConnectSync?: () => void }) {
+  const { tasks: api } = useCore();
+  const { connected } = useSync();
+  const current = (task.repeatRule ?? "").trim().replace(/^RRULE:/i, "").toUpperCase();
+  const [preview, setPreview] = useState<string[] | null>(null);
+  const [nl, setNl] = useState("");
+  const [failed, setFailed] = useState(false);
+
+  // Refresh the preview whenever the rule or the anchor (due date) changes.
+  useEffect(() => {
+    let live = true;
+    if (!current) {
+      setPreview(null);
+      return;
+    }
+    void api.repeatPreview(task.repeatRule ?? "", task.dueAt ?? undefined, 3).then((res) => {
+      if (live) setPreview(res.valid ? (res.occurrences ?? []) : null);
+    });
+    return () => {
+      live = false;
+    };
+  }, [api, task.repeatRule, task.dueAt, current]);
+
+  // Parse a typed cadence ("every monday", "the third wednesday of the month") in core.
+  const submitNl = async () => {
+    const text = nl.trim();
+    if (!text) return;
+    const { rule } = await api.parseRepeat(text);
+    if (rule) {
+      onSet(rule);
+      setNl("");
+      setFailed(false);
+    } else {
+      setFailed(true);
+    }
+  };
+
+  return (
+    <View style={{ gap: space.sm }}>
+      {!connected ? (
+        <View style={styles.repeatCta}>
+          <Icon name="repeat" size={15} color={colors.textSecondary} />
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text variant="caption" tone="secondary" style={{ fontWeight: "600" }}>
+              Repeats need a connected sync server
+            </Text>
+            <Text variant="caption" tone="tertiary">
+              {current
+                ? "This task won’t recur until you connect a server to generate its occurrences."
+                : "Occurrences are generated on your sync server. Connect one to make tasks recur."}
+            </Text>
+          </View>
+          {onConnectSync ? <Button label="Connect" variant="secondary" size="sm" onPress={onConnectSync} /> : null}
+        </View>
+      ) : null}
+      <Input
+        size="sm"
+        placeholder="Type a cadence, e.g. every other tuesday"
+        value={nl}
+        onChangeText={(t) => {
+          setNl(t);
+          setFailed(false);
+        }}
+        onSubmitEditing={() => void submitNl()}
+        leadingIcon={<Icon name="repeat" size={14} color={colors.textTertiary} />}
+      />
+      {failed ? (
+        <Text variant="caption" tone="tertiary">
+          Couldn’t read a repeat from that — try “every monday” or pick one below.
+        </Text>
+      ) : null}
+      <View style={styles.presets}>
+        {REPEAT_PRESETS.map((p) => {
+          const active = p.rule.toUpperCase() === current;
+          return (
+            <Pressable
+              key={p.label}
+              onPress={() => onSet(p.rule)}
+              style={[styles.chip, active ? styles.chipActive : null]}
+            >
+              <Text variant="caption" tone={active ? "accent" : "secondary"}>
+                {p.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {current ? (
+        preview && preview.length ? (
+          <Text variant="caption" tone="tertiary">
+            Next: {preview.map((iso) => formatDueShort(iso)).join(" · ")}
+          </Text>
+        ) : (
+          <Text variant="caption" tone="tertiary">
+            Occurrences are created once this task syncs to your server.
+          </Text>
+        )
+      ) : null}
+    </View>
+  );
+}
+
 // --- date presets & formatting -------------------------------------------
 
 function atToday(hour: number): Date {
@@ -453,6 +582,17 @@ const styles = {
   clearBtn: { padding: 2 },
   presets: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: space.sm },
   chip: { paddingHorizontal: space.md, paddingVertical: space.xs, borderRadius: radius.full, borderWidth: 1, borderColor: colors.borderDefault },
+  chipActive: { backgroundColor: colors.accentSoft, borderColor: colors.accentSoftBorder },
+  repeatCta: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: space.md,
+    padding: space.md,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.gray50,
+  },
   check: {
     borderRadius: radius.full,
     borderWidth: 2,

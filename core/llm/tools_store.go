@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"companion/core/domain"
@@ -126,6 +127,21 @@ func NewStoreRegistry(s *store.Store) *Registry {
 				return "", err
 			}
 			return jsonResult(projects)
+		},
+	})
+
+	r.Add(Tool{
+		Spec: ToolSpec{
+			Name:        "list_object_types",
+			Description: "List the user's object types (archetypes) — the structured shapes a note or task can take, e.g. Book, Person, Recipe. Each returns its id, what it applies to (note/task/both), and its schema (the fields, their types, and which are required). Call this before creating or updating a note/task as a structured object, so you know which objectTypeId to use and how to fill props.",
+			Schema:      json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{}}`),
+		},
+		Handler: func(_ context.Context, _ json.RawMessage) (string, error) {
+			types, err := s.ObjectTypes.List()
+			if err != nil {
+				return "", err
+			}
+			return jsonResult(types)
 		},
 	})
 
@@ -276,7 +292,10 @@ func NewStoreRegistry(s *store.Store) *Registry {
 			if err != nil {
 				return "", err
 			}
-			return jsonResult(map[string]any{"id": n.ID, "title": n.Title, "contentMd": n.ContentMD, "date": n.Date})
+			return jsonResult(map[string]any{
+				"id": n.ID, "title": n.Title, "contentMd": n.ContentMD, "date": n.Date,
+				"objectTypeId": n.ObjectTypeID, "props": n.Props,
+			})
 		},
 	})
 
@@ -300,7 +319,12 @@ func NewStoreRegistry(s *store.Store) *Registry {
 			if err != nil {
 				return "", err
 			}
-			return jsonResult(map[string]any{"id": t.ID, "title": t.Title, "notesMd": t.NotesMD, "status": t.Status, "dueAt": t.DueAt, "remindAt": t.RemindAt})
+			return jsonResult(map[string]any{
+				"id": t.ID, "title": t.Title, "notesMd": t.NotesMD, "status": t.Status,
+				"dueAt": t.DueAt, "remindAt": t.RemindAt,
+				"repeatRule": t.RepeatRule, "repeatSeedId": t.RepeatSeedID,
+				"objectTypeId": t.ObjectTypeID, "props": t.Props,
+			})
 		},
 	})
 
@@ -333,13 +357,15 @@ func NewStoreRegistry(s *store.Store) *Registry {
 	r.Add(Tool{
 		Spec: ToolSpec{
 			Name:        "create_note",
-			Description: "Create a new note. Call this when the user asks you to write down, capture, or draft a note. Use Markdown for the body; link to other entities with [[type:id]] wikilinks.",
+			Description: "Create a new note. Call this when the user asks you to write down, capture, or draft a note. Use Markdown for the body; link to other entities with [[type:id]] wikilinks. To make it a structured object (e.g. a Book or Person), set objectTypeId + props — call list_object_types first to see the archetypes and their fields.",
 			Schema: json.RawMessage(`{
 				"type":"object",
 				"additionalProperties":false,
 				"properties":{
 					"title":{"type":"string"},
-					"contentMd":{"type":"string","description":"Markdown body."}
+					"contentMd":{"type":"string","description":"Markdown body."},
+					"objectTypeId":{"type":"string","description":"Optional archetype id (from list_object_types) to make this a structured object."},
+					"props":{"type":"object","description":"Optional structured metadata for the objectTypeId, keyed by the type's field keys. Validated against the type's schema."}
 				},
 				"required":["title"]
 			}`),
@@ -347,13 +373,18 @@ func NewStoreRegistry(s *store.Store) *Registry {
 		Write: true,
 		Handler: func(_ context.Context, args json.RawMessage) (string, error) {
 			var a struct {
-				Title     string `json:"title"`
-				ContentMD string `json:"contentMd"`
+				Title        string          `json:"title"`
+				ContentMD    string          `json:"contentMd"`
+				ObjectTypeID string          `json:"objectTypeId"`
+				Props        json.RawMessage `json:"props"`
 			}
 			if err := json.Unmarshal(args, &a); err != nil {
 				return "", err
 			}
-			n, err := s.Notes.Create(store.CreateNoteInput{Title: a.Title, ContentMD: a.ContentMD})
+			n, err := s.Notes.Create(store.CreateNoteInput{
+				Title: a.Title, ContentMD: a.ContentMD,
+				ObjectTypeID: optStr(a.ObjectTypeID), Props: optProps(a.Props),
+			})
 			if err != nil {
 				return "", err
 			}
@@ -364,14 +395,17 @@ func NewStoreRegistry(s *store.Store) *Registry {
 	r.Add(Tool{
 		Spec: ToolSpec{
 			Name:        "update_note",
-			Description: "Update an existing note's title and/or body. Call this only with an id you already know (from search_notes). Omit a field to leave it unchanged.",
+			Description: "Update an existing note's title and/or body, or archetype it (objectTypeId + props; clearObjectType to remove). Call this only with an id you already know (from search_notes). Omit a field to leave it unchanged.",
 			Schema: json.RawMessage(`{
 				"type":"object",
 				"additionalProperties":false,
 				"properties":{
 					"id":{"type":"string"},
 					"title":{"type":"string"},
-					"contentMd":{"type":"string"}
+					"contentMd":{"type":"string"},
+					"objectTypeId":{"type":"string","description":"Archetype id (from list_object_types) to set."},
+					"clearObjectType":{"type":"boolean","description":"Remove the archetype."},
+					"props":{"type":"object","description":"Structured metadata for the objectTypeId, validated against its schema."}
 				},
 				"required":["id"]
 			}`),
@@ -379,14 +413,24 @@ func NewStoreRegistry(s *store.Store) *Registry {
 		Write: true,
 		Handler: func(_ context.Context, args json.RawMessage) (string, error) {
 			var a struct {
-				ID        string  `json:"id"`
-				Title     *string `json:"title"`
-				ContentMD *string `json:"contentMd"`
+				ID              string          `json:"id"`
+				Title           *string         `json:"title"`
+				ContentMD       *string         `json:"contentMd"`
+				ObjectTypeID    string          `json:"objectTypeId"`
+				ClearObjectType bool            `json:"clearObjectType"`
+				Props           json.RawMessage `json:"props"`
 			}
 			if err := json.Unmarshal(args, &a); err != nil {
 				return "", err
 			}
-			n, err := s.Notes.Update(a.ID, store.UpdateNoteInput{Title: a.Title, ContentMD: a.ContentMD})
+			in := store.UpdateNoteInput{
+				Title: a.Title, ContentMD: a.ContentMD,
+				ObjectTypeID: optStr(a.ObjectTypeID), ClearObjectType: a.ClearObjectType,
+			}
+			if p := optProps(a.Props); p != nil {
+				in.Props = &p
+			}
+			n, err := s.Notes.Update(a.ID, in)
 			if err != nil {
 				return "", err
 			}
@@ -397,15 +441,18 @@ func NewStoreRegistry(s *store.Store) *Registry {
 	r.Add(Tool{
 		Spec: ToolSpec{
 			Name:        "create_task",
-			Description: "Create a single task. A task has an optional due date (dueAt) AND, separately, an optional reminder time (remindAt) — the moment to notify the user, usually a bit before the due date. A reminder is NOT a second task: \"remind me to take out the trash on Sunday, an hour before\" is ONE task with dueAt = Sunday and remindAt = one hour before that. Both are RFC3339 timestamps — call get_date first to compute the real dates in the user's timezone.",
+			Description: "Create a single task. A task has an optional due date (dueAt) AND, separately, an optional reminder time (remindAt) — the moment to notify the user, usually a bit before the due date. A reminder is NOT a second task: \"remind me to take out the trash on Sunday, an hour before\" is ONE task with dueAt = Sunday and remindAt = one hour before that. Both are RFC3339 timestamps — call get_date first to compute the real dates in the user's timezone. For a REPEATING task (\"every monday\", \"the first of each month\"), set `repeat` and dueAt to the FIRST occurrence — the server generates the rest. To make it a structured object, set objectTypeId + props (call list_object_types first to see the archetypes and their fields).",
 			Schema: json.RawMessage(`{
 				"type":"object",
 				"additionalProperties":false,
 				"properties":{
 					"title":{"type":"string"},
 					"notesMd":{"type":"string","description":"Optional Markdown details."},
-					"dueAt":{"type":"string","description":"Optional RFC3339 due timestamp (when it's due)."},
-					"remindAt":{"type":"string","description":"Optional RFC3339 reminder timestamp (when to notify the user; often shortly before dueAt)."}
+					"dueAt":{"type":"string","description":"Optional RFC3339 due timestamp (when it's due). For a repeat, this is the first occurrence."},
+					"remindAt":{"type":"string","description":"Optional RFC3339 reminder timestamp (when to notify the user; often shortly before dueAt)."},
+					"repeat":{"type":"string","description":"Optional recurrence: a phrase like \"every monday\", \"every 2 weeks\", \"the third wednesday of the month\", or an RFC5545 RRULE. Makes this a repeating task."},
+					"objectTypeId":{"type":"string","description":"Optional archetype id (from list_object_types) to make this a structured object."},
+					"props":{"type":"object","description":"Optional structured metadata for the objectTypeId, keyed by the type's field keys. Validated against the type's schema."}
 				},
 				"required":["title"]
 			}`),
@@ -413,10 +460,13 @@ func NewStoreRegistry(s *store.Store) *Registry {
 		Write: true,
 		Handler: func(_ context.Context, args json.RawMessage) (string, error) {
 			var a struct {
-				Title    string `json:"title"`
-				NotesMD  string `json:"notesMd"`
-				DueAt    string `json:"dueAt"`
-				RemindAt string `json:"remindAt"`
+				Title        string          `json:"title"`
+				NotesMD      string          `json:"notesMd"`
+				DueAt        string          `json:"dueAt"`
+				RemindAt     string          `json:"remindAt"`
+				Repeat       string          `json:"repeat"`
+				ObjectTypeID string          `json:"objectTypeId"`
+				Props        json.RawMessage `json:"props"`
 			}
 			if err := json.Unmarshal(args, &a); err != nil {
 				return "", err
@@ -429,7 +479,14 @@ func NewStoreRegistry(s *store.Store) *Registry {
 			if err != nil {
 				return "", err
 			}
-			t, err := s.Tasks.Create(store.CreateTaskInput{Title: a.Title, NotesMD: a.NotesMD, DueAt: due, RemindAt: remind})
+			repeat, err := parseRepeatArg(a.Repeat)
+			if err != nil {
+				return "", err
+			}
+			t, err := s.Tasks.Create(store.CreateTaskInput{
+				Title: a.Title, NotesMD: a.NotesMD, DueAt: due, RemindAt: remind, RepeatRule: repeat,
+				ObjectTypeID: optStr(a.ObjectTypeID), Props: optProps(a.Props),
+			})
 			if err != nil {
 				return "", err
 			}
@@ -440,7 +497,7 @@ func NewStoreRegistry(s *store.Store) *Registry {
 	r.Add(Tool{
 		Spec: ToolSpec{
 			Name:        "update_task",
-			Description: "Update an existing task — retitle it, change its notes, mark it done/cancelled, or set/change its due date (dueAt) or reminder time (remindAt). Due date and reminder are separate fields on the same task. Use clearDueAt / clearRemindAt to remove them. Call this only with an id you already know (from list_tasks or search_notes). Omit a field to leave it unchanged; compute any dates with get_date.",
+			Description: "Update an existing task — retitle it, change its notes, mark it done/cancelled, set/change its due date (dueAt) or reminder time (remindAt), make it repeat (repeat), or archetype it (objectTypeId + props). Use clearDueAt / clearRemindAt / clearRepeat to remove those. Call this only with an id you already know (from list_tasks or search_notes). Omit a field to leave it unchanged; compute any dates with get_date.",
 			Schema: json.RawMessage(`{
 				"type":"object",
 				"additionalProperties":false,
@@ -452,7 +509,12 @@ func NewStoreRegistry(s *store.Store) *Registry {
 					"dueAt":{"type":"string","description":"RFC3339 due timestamp to set."},
 					"clearDueAt":{"type":"boolean","description":"Remove the due date."},
 					"remindAt":{"type":"string","description":"RFC3339 reminder timestamp to set."},
-					"clearRemindAt":{"type":"boolean","description":"Remove the reminder."}
+					"clearRemindAt":{"type":"boolean","description":"Remove the reminder."},
+					"repeat":{"type":"string","description":"Recurrence to set: a phrase like \"every monday\" or an RFC5545 RRULE."},
+					"clearRepeat":{"type":"boolean","description":"Stop the task repeating."},
+					"objectTypeId":{"type":"string","description":"Archetype id (from list_object_types) to set."},
+					"clearObjectType":{"type":"boolean","description":"Remove the archetype."},
+					"props":{"type":"object","description":"Structured metadata for the objectTypeId, validated against its schema."}
 				},
 				"required":["id"]
 			}`),
@@ -460,14 +522,19 @@ func NewStoreRegistry(s *store.Store) *Registry {
 		Write: true,
 		Handler: func(_ context.Context, args json.RawMessage) (string, error) {
 			var a struct {
-				ID            string  `json:"id"`
-				Title         *string `json:"title"`
-				NotesMD       *string `json:"notesMd"`
-				Status        *string `json:"status"`
-				DueAt         string  `json:"dueAt"`
-				ClearDueAt    bool    `json:"clearDueAt"`
-				RemindAt      string  `json:"remindAt"`
-				ClearRemindAt bool    `json:"clearRemindAt"`
+				ID              string          `json:"id"`
+				Title           *string         `json:"title"`
+				NotesMD         *string         `json:"notesMd"`
+				Status          *string         `json:"status"`
+				DueAt           string          `json:"dueAt"`
+				ClearDueAt      bool            `json:"clearDueAt"`
+				RemindAt        string          `json:"remindAt"`
+				ClearRemindAt   bool            `json:"clearRemindAt"`
+				Repeat          string          `json:"repeat"`
+				ClearRepeat     bool            `json:"clearRepeat"`
+				ObjectTypeID    string          `json:"objectTypeId"`
+				ClearObjectType bool            `json:"clearObjectType"`
+				Props           json.RawMessage `json:"props"`
 			}
 			if err := json.Unmarshal(args, &a); err != nil {
 				return "", err
@@ -480,10 +547,20 @@ func NewStoreRegistry(s *store.Store) *Registry {
 			if err != nil {
 				return "", err
 			}
-			t, err := s.Tasks.Update(a.ID, store.UpdateTaskInput{
+			repeat, err := parseRepeatArg(a.Repeat)
+			if err != nil {
+				return "", err
+			}
+			in := store.UpdateTaskInput{
 				Title: a.Title, NotesMD: a.NotesMD, Status: a.Status,
 				DueAt: due, ClearDueAt: a.ClearDueAt, RemindAt: remind, ClearRemindAt: a.ClearRemindAt,
-			})
+				RepeatRule: repeat, ClearRepeatRule: a.ClearRepeat,
+				ObjectTypeID: optStr(a.ObjectTypeID), ClearObjectType: a.ClearObjectType,
+			}
+			if p := optProps(a.Props); p != nil {
+				in.Props = &p
+			}
+			t, err := s.Tasks.Update(a.ID, in)
 			if err != nil {
 				return "", err
 			}
@@ -506,6 +583,56 @@ func optTime(s, field string) (*time.Time, error) {
 		return nil, fmt.Errorf("%s must be an RFC3339 timestamp: %w", field, err)
 	}
 	return &t, nil
+}
+
+// parseRepeatArg turns the model's `repeat` argument into an RRULE (PLAN §6.4). It accepts
+// either a plain-English cadence ("every monday", "the first of every month") — parsed by the
+// shared recurrence grammar — or a raw RFC5545 RRULE ("FREQ=WEEKLY;BYDAY=MO"). "" means no
+// repeat (nil). An unrecognizable value is a tool error surfaced to the model.
+func parseRepeatArg(s string) (*string, error) {
+	if s == "" {
+		return nil, nil
+	}
+	if idx := indexFold(s, "FREQ="); idx >= 0 {
+		if err := domain.ValidateRepeatRule(&s); err != nil {
+			return nil, fmt.Errorf("repeat is not a valid RRULE: %w", err)
+		}
+		return &s, nil
+	}
+	rule, err := domain.ParseRepeatPhrase(s, time.Now())
+	if err != nil || rule == "" {
+		return nil, fmt.Errorf("couldn't understand repeat %q — use a phrase like \"every monday\" or an RFC5545 RRULE", s)
+	}
+	return &rule, nil
+}
+
+// indexFold reports the first index of substr in s, case-insensitively, or -1.
+func indexFold(s, substr string) int {
+	ls, lsub := len(s), len(substr)
+	for i := 0; i+lsub <= ls; i++ {
+		if strings.EqualFold(s[i:i+lsub], substr) {
+			return i
+		}
+	}
+	return -1
+}
+
+// optProps normalizes the model's `props` argument (archetype metadata, PLAN §6.3): the empty
+// blob and JSON null both mean "not provided". The store validates it against the object
+// type's schema and returns a tool error if it doesn't fit.
+func optProps(p json.RawMessage) json.RawMessage {
+	if len(p) == 0 || string(p) == "null" {
+		return nil
+	}
+	return p
+}
+
+// optStr converts an empty string to a nil pointer (for optional id-setter fields).
+func optStr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // writeResult is the standard payload a write tool returns: the entity's id, title, and

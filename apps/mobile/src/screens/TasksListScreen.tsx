@@ -3,7 +3,7 @@ import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { Task } from '@companion/core-bridge';
-import { useCore, useTasks, useProjects, Checkbox } from '@companion/app';
+import { useCore, useTasks, useProjects, Checkbox, ListFilterTabs } from '@companion/app';
 import { Icon, Spinner, Text, colors, space } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
 import { useProjectScope } from '../ProjectContext';
@@ -40,10 +40,10 @@ export function TasksListScreen() {
   }, [projectId, membershipsForProject, core]);
 
   const tasks = useMemo(() => {
-    if (!projectId) return store.tasks;
+    if (!projectId) return store.visible; // global list honours the Unsorted/All filter
     if (!memberIds) return [];
     return store.tasks.filter((t) => memberIds.has(t.id));
-  }, [store.tasks, projectId, memberIds]);
+  }, [store.visible, store.tasks, projectId, memberIds]);
 
   const openTask = (id: string) => nav.navigate('TaskEditor', { id });
   const createTask = async () => {
@@ -58,6 +58,18 @@ export function TasksListScreen() {
 
   return (
     <View style={styles.container}>
+      {!projectId ? (
+        <View style={styles.filterBar}>
+          <ListFilterTabs
+            value={store.filter}
+            onChange={store.setFilter}
+            options={[
+              { value: 'unsorted', label: 'Unsorted' },
+              { value: 'all', label: 'All' },
+            ]}
+          />
+        </View>
+      ) : null}
       <FlatList
         data={tasks}
         keyExtractor={(t) => t.id}
@@ -101,6 +113,7 @@ function dueLabel(task: Task): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceApp },
+  filterBar: { paddingHorizontal: space.md, paddingTop: space.sm },
   list: { paddingHorizontal: space.md, paddingVertical: space.sm, gap: 2, flexGrow: 1 },
   empty: { textAlign: 'center', marginTop: space.xxl },
   fab: {

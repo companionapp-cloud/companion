@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"companion/core/domain"
@@ -28,11 +29,14 @@ const taskColumns = `id, title, notes_md, status, due_at, remind_at, completed_a
 // CreateTaskInput carries the client-supplied fields for a new task. ObjectTypeID/Props
 // archetype the task (PLAN §6.3).
 type CreateTaskInput struct {
-	Title        string          `json:"title"`
-	NotesMD      string          `json:"notesMd"`
-	Status       string          `json:"status"` // defaults to open when empty
-	DueAt        *time.Time      `json:"dueAt,omitempty"`
-	RemindAt     *time.Time      `json:"remindAt,omitempty"`
+	Title    string     `json:"title"`
+	NotesMD  string     `json:"notesMd"`
+	Status   string     `json:"status"` // defaults to open when empty
+	DueAt    *time.Time `json:"dueAt,omitempty"`
+	RemindAt *time.Time `json:"remindAt,omitempty"`
+	// RepeatRule turns this into a repeating-task seed (RFC5545 RRULE); the server
+	// materializes its occurrences (PLAN §6.4). Occurrences are never created on the client.
+	RepeatRule   *string         `json:"repeatRule,omitempty"`
 	ObjectTypeID *string         `json:"objectTypeId,omitempty"`
 	Props        json.RawMessage `json:"props,omitempty"`
 }
@@ -48,6 +52,8 @@ type UpdateTaskInput struct {
 	ClearDueAt      bool             `json:"clearDueAt,omitempty"`
 	RemindAt        *time.Time       `json:"remindAt,omitempty"`
 	ClearRemindAt   bool             `json:"clearRemindAt,omitempty"`
+	RepeatRule      *string          `json:"repeatRule,omitempty"`
+	ClearRepeatRule bool             `json:"clearRepeatRule,omitempty"`
 	ObjectTypeID    *string          `json:"objectTypeId,omitempty"`
 	ClearObjectType bool             `json:"clearObjectType,omitempty"`
 	Props           *json.RawMessage `json:"props,omitempty"`
@@ -67,7 +73,7 @@ func (r *TasksRepo) Create(in CreateTaskInput) (*domain.Task, error) {
 	}
 	t := &domain.Task{
 		ID: id.String(), Title: in.Title, NotesMD: in.NotesMD, Status: status,
-		DueAt: in.DueAt, RemindAt: in.RemindAt,
+		DueAt: in.DueAt, RemindAt: in.RemindAt, RepeatRule: trimmedRule(in.RepeatRule),
 		ObjectTypeID: in.ObjectTypeID, Props: json.RawMessage(normalizeProps(in.Props)),
 		CreatedAt: now, UpdatedAt: now, Version: 0, Dirty: true,
 	}
@@ -78,9 +84,9 @@ func (r *TasksRepo) Create(in CreateTaskInput) (*domain.Task, error) {
 		return nil, err
 	}
 	if _, err := r.db.Exec(
-		`INSERT INTO tasks (id, title, notes_md, status, due_at, remind_at, object_type_id, props_json, created_at, updated_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-		t.ID, t.Title, t.NotesMD, t.Status, nullTime(t.DueAt), nullTime(t.RemindAt), t.ObjectTypeID, string(t.Props),
+		`INSERT INTO tasks (id, title, notes_md, status, due_at, remind_at, repeat_rule, object_type_id, props_json, created_at, updated_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		t.ID, t.Title, t.NotesMD, t.Status, nullTime(t.DueAt), nullTime(t.RemindAt), t.RepeatRule, t.ObjectTypeID, string(t.Props),
 		t.CreatedAt.Format(timeFormat), t.UpdatedAt.Format(timeFormat), t.Version, boolToInt(t.Dirty),
 	); err != nil {
 		return nil, fmt.Errorf("insert task: %w", err)
@@ -108,16 +114,44 @@ func (r *TasksRepo) Get(id string) (*domain.Task, error) {
 	return scanTask(rows)
 }
 
-// List returns all live tasks, open first then by due date, newest-updated last as a
-// tiebreak. Trashed and tombstoned tasks are excluded.
+// List returns all live actionable tasks, open first then by due date, newest-updated last
+// as a tiebreak. Trashed and tombstoned tasks are excluded — and so are repeating-task
+// **seeds** (repeat_rule set, repeat_seed_id NULL): a seed is a definition, not a to-do; its
+// materialized occurrences are the actionable rows that appear here (PLAN §6.4). ListSeeds
+// surfaces the definitions separately.
 func (r *TasksRepo) List() ([]*domain.Task, error) {
 	rows, err := r.db.Query(
 		`SELECT ` + taskColumns + ` FROM tasks
 		 WHERE deleted_at IS NULL AND deleting_at IS NULL
+		   AND NOT (repeat_rule IS NOT NULL AND repeat_seed_id IS NULL)
 		 ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END,
 		          due_at IS NULL, due_at, updated_at DESC, id DESC;`)
 	if err != nil {
 		return nil, fmt.Errorf("query tasks: %w", err)
+	}
+	defer rows.Close()
+	out := []*domain.Task{}
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// ListSeeds returns the live repeating-task definitions (seeds), newest first. The bridge
+// pairs each with its computed next occurrence for the "Repeating" UI, which is also the
+// only thing a client with no server configured can show (occurrences never materialize).
+func (r *TasksRepo) ListSeeds() ([]*domain.Task, error) {
+	rows, err := r.db.Query(
+		`SELECT ` + taskColumns + ` FROM tasks
+		 WHERE deleted_at IS NULL AND deleting_at IS NULL
+		   AND repeat_rule IS NOT NULL AND repeat_seed_id IS NULL
+		 ORDER BY created_at DESC, id DESC;`)
+	if err != nil {
+		return nil, fmt.Errorf("query task seeds: %w", err)
 	}
 	defer rows.Close()
 	out := []*domain.Task{}
@@ -163,6 +197,11 @@ func (r *TasksRepo) Update(id string, in UpdateTaskInput) (*domain.Task, error) 
 	} else if in.ClearRemindAt {
 		t.RemindAt = nil
 	}
+	if in.ClearRepeatRule {
+		t.RepeatRule = nil
+	} else if in.RepeatRule != nil {
+		t.RepeatRule = trimmedRule(in.RepeatRule)
+	}
 	if in.ClearObjectType {
 		t.ObjectTypeID = nil
 	} else if in.ObjectTypeID != nil {
@@ -181,10 +220,10 @@ func (r *TasksRepo) Update(id string, in UpdateTaskInput) (*domain.Task, error) 
 	}
 	res, err := r.db.Exec(
 		`UPDATE tasks SET title = ?, notes_md = ?, status = ?, due_at = ?, remind_at = ?,
-		   completed_at = ?, object_type_id = ?, props_json = ?, updated_at = ?, dirty = 1
+		   completed_at = ?, repeat_rule = ?, object_type_id = ?, props_json = ?, updated_at = ?, dirty = 1
 		 WHERE id = ? AND deleted_at IS NULL AND deleting_at IS NULL;`,
 		t.Title, t.NotesMD, t.Status, nullTime(t.DueAt), nullTime(t.RemindAt),
-		nullTime(t.CompletedAt), t.ObjectTypeID, string(normalizeProps(t.Props)), t.UpdatedAt.Format(timeFormat), id,
+		nullTime(t.CompletedAt), t.RepeatRule, t.ObjectTypeID, string(normalizeProps(t.Props)), t.UpdatedAt.Format(timeFormat), id,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update task: %w", err)
@@ -358,6 +397,9 @@ func (r *TasksRepo) MeaningfulDiff(a, b *domain.Task) bool {
 	if derefStr(a.ObjectTypeID) != derefStr(b.ObjectTypeID) || normalizeProps(a.Props) != normalizeProps(b.Props) {
 		return true
 	}
+	if derefStr(a.RepeatRule) != derefStr(b.RepeatRule) || derefStr(a.RepeatSeedID) != derefStr(b.RepeatSeedID) {
+		return true
+	}
 	if (a.DeletingAt == nil) != (b.DeletingAt == nil) {
 		return true
 	}
@@ -393,6 +435,19 @@ func (r *TasksRepo) ConflictedCopy(local *domain.Task, suffix string) error {
 		return fmt.Errorf("insert conflicted task: %w", err)
 	}
 	return r.links.SyncEntitySource(domain.NodeTask, id.String(), local.NotesMD, local.ObjectTypeID, normalizeProps(local.Props))
+}
+
+// trimmedRule normalizes a repeat rule for storage: whitespace-only becomes NULL so a
+// blank rule never masquerades as a repeating seed.
+func trimmedRule(rule *string) *string {
+	if rule == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*rule)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }
 
 // nullTime formats a nullable timestamp for binding, or nil for a NULL column.

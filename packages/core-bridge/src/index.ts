@@ -9,6 +9,8 @@ export type {
   Task,
   TaskStatus,
   TaskNotification,
+  RepeatingTask,
+  RepeatPreview,
   Area,
   Project,
   ProjectMember,

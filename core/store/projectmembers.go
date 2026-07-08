@@ -9,8 +9,6 @@ import (
 
 	"companion/core/domain"
 	"companion/core/sync/protocol"
-
-	"github.com/google/uuid"
 )
 
 // ProjectMembersRepo owns project membership (PLAN §4.1, §6.6): an authored, synced
@@ -22,16 +20,10 @@ type ProjectMembersRepo struct {
 	links *LinksRepo
 }
 
-// memberNamespace seeds the deterministic membership id below. A fixed UUID so the id
-// depends only on the tuple, never the machine.
-var memberNamespace = uuid.MustParse("b6f6c0de-0000-5000-a000-000000000001")
-
-// memberID derives a stable UUIDv5 from the (project, entity) tuple, so the same
-// membership added independently on two offline devices produces the *same* id and
-// converges to one row on sync — no duplicate-tuple conflict, just ordinary
-// version-based reconciliation on the deleted flag.
+// memberID derives the stable UUIDv5 membership id — see domain.MemberID, shared with the
+// server so a server-generated occurrence's memberships converge with the client's.
 func memberID(projectID, entityType, entityID string) string {
-	return uuid.NewSHA1(memberNamespace, []byte(projectID+"\x00"+entityType+"\x00"+entityID)).String()
+	return domain.MemberID(projectID, entityType, entityID)
 }
 
 const memberColumns = `id, project_id, entity_type, entity_id, created_at, updated_at, deleted_at, version, dirty`
@@ -108,6 +100,27 @@ func (r *ProjectMembersRepo) ListForProject(projectID string) ([]*domain.Project
 func (r *ProjectMembersRepo) ListForEntity(entityType, entityID string) ([]*domain.ProjectMember, error) {
 	return r.list(`SELECT `+memberColumns+` FROM project_members
 		WHERE entity_type = ? AND entity_id = ? AND deleted_at IS NULL ORDER BY created_at, id;`, entityType, entityID)
+}
+
+// MemberEntityIDs returns the distinct ids of entities of a type that belong to at least one
+// live project — the "sorted" entities. The browse lists subtract this set to offer
+// "Unsorted" (entities in no project) alongside "All" (PLAN §6.6).
+func (r *ProjectMembersRepo) MemberEntityIDs(entityType string) ([]string, error) {
+	rows, err := r.db.Query(
+		`SELECT DISTINCT entity_id FROM project_members WHERE entity_type = ? AND deleted_at IS NULL;`, entityType)
+	if err != nil {
+		return nil, fmt.Errorf("query member entity ids: %w", err)
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // DeleteForProject tombstones every live membership of a project (used when the project

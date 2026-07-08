@@ -6,6 +6,10 @@ export function notifyApi(core: CoreBridge) {
   return {
     /** Notifications due to fire over the next `horizonDays` (default 30), sorted by time. */
     plan: (horizonDays?: number) => core.invoke<TaskNotification[]>("notify.plan", { horizonDays }),
+    /** Ids of settled tasks (done/cancelled/trashed) whose reminder already fired — the shell
+     *  dismisses any notification still showing for them. Pending fires are cancelled via
+     *  re-planning; this clears already-surfaced ones (PLAN §6.4). */
+    dismissed: (horizonDays?: number) => core.invoke<string[]>("notify.dismissed", { horizonDays }),
   };
 }
 

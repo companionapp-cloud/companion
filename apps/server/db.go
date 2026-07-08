@@ -80,6 +80,11 @@ CREATE TABLE IF NOT EXISTS tasks (
   server_seq     BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_user_seq ON tasks (user_id, server_seq);
+-- One occurrence per (seed, due instant): a safety net behind the materializer's own
+-- idempotency (PLAN §6.4). NULL repeat_seed_id rows (seeds, one-offs) are distinct under
+-- SQL NULL semantics, so non-occurrence tasks are unaffected.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_occurrence ON tasks (repeat_seed_id, due_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_seed ON tasks (user_id, repeat_seed_id);
 
 CREATE TABLE IF NOT EXISTS object_types (
   id             TEXT PRIMARY KEY,

@@ -3,8 +3,16 @@ import type { Note, UpdateNoteInput } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
 import { useSync } from "./SyncProvider";
 
+/** Browse-list membership filter (PLAN §6.6): "unsorted" = notes in no project (default),
+ *  "all" = every note regardless of project. */
+export type MembershipFilter = "unsorted" | "all";
+
 export interface NotesStore {
   notes: Note[];
+  /** The list the global browse view shows: `notes` narrowed by `filter`. */
+  visible: Note[];
+  filter: MembershipFilter;
+  setFilter: (f: MembershipFilter) => void;
   loading: boolean;
   byId: (id: string) => Note | undefined;
   create: (input?: { title?: string; contentMd?: string }) => Promise<Note>;
@@ -18,22 +26,35 @@ export interface NotesStore {
 const NotesCtx = createContext<NotesStore | null>(null);
 
 export function NotesProvider({ children }: { children: ReactNode }) {
-  const { core, notes: api } = useCore();
+  const { core, notes: api, projects: projectsApi } = useCore();
   const { trigger: syncTrigger } = useSync();
   const [notes, setNotes] = useState<Note[]>([]);
+  // Ids of notes that belong to ≥1 project, so `filter: "unsorted"` can subtract them.
+  const [memberIds, setMemberIds] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState<MembershipFilter>("unsorted");
   const [loading, setLoading] = useState(true);
   const saving = useRef(0); // count of in-flight saves; suppress refresh while > 0
 
   const refresh = useCallback(async () => {
-    setNotes(await api.list());
+    const [list, sorted] = await Promise.all([api.list(), projectsApi.memberEntityIds("note")]);
+    setNotes(list);
+    setMemberIds(new Set(sorted));
     setLoading(false);
-  }, [api]);
+  }, [api, projectsApi]);
 
   useEffect(() => {
     void refresh();
-    return core.on("notes.changed", () => {
+    const guarded = () => {
       if (saving.current === 0) void refresh();
-    });
+    };
+    // notes.changed: note edits. nav.changed: project membership edits (which move a note
+    // between the Unsorted and All views).
+    const offNotes = core.on("notes.changed", guarded);
+    const offNav = core.on("nav.changed", guarded);
+    return () => {
+      offNotes();
+      offNav();
+    };
   }, [core, refresh]);
 
   // Per-note debounce timers + accumulated pending fields.
@@ -91,9 +112,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     [api, syncTrigger],
   );
 
+  const visible = useMemo(
+    () => (filter === "all" ? notes : notes.filter((n) => !memberIds.has(n.id))),
+    [notes, memberIds, filter],
+  );
+
   const value = useMemo<NotesStore>(
     () => ({
       notes,
+      visible,
+      filter,
+      setFilter,
       loading,
       byId: (id) => notes.find((n) => n.id === id),
       create,
@@ -101,7 +130,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       save,
       update,
     }),
-    [notes, loading, create, remove, save, update],
+    [notes, visible, filter, loading, create, remove, save, update],
   );
 
   return <NotesCtx.Provider value={value}>{children}</NotesCtx.Provider>;

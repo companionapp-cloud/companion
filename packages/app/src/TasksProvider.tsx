@@ -1,12 +1,22 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { CreateTaskInput, Task, TaskStatus, UpdateTaskInput } from "@companion/core-bridge";
+import type { CreateTaskInput, RepeatingTask, Task, TaskStatus, UpdateTaskInput } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
 import { useSync } from "./SyncProvider";
+import type { MembershipFilter } from "./NotesProvider";
 
 export interface TasksStore {
   tasks: Task[];
+  /** The list the global browse view shows: `tasks` narrowed by `filter` (PLAN §6.6). */
+  visible: Task[];
+  filter: MembershipFilter;
+  setFilter: (f: MembershipFilter) => void;
+  /** Repeating-task definitions (seeds), each with its next occurrence. Seeds are excluded
+   *  from `tasks` — they're not actionable; their materialized occurrences are (PLAN §6.4). */
+  seeds: RepeatingTask[];
   loading: boolean;
   byId: (id: string) => Task | undefined;
+  /** A seed by id, for opening a repeating definition (which is not in `tasks`). */
+  seedById: (id: string) => RepeatingTask | undefined;
   create: (input?: CreateTaskInput) => Promise<Task>;
   update: (id: string, fields: UpdateTaskInput) => Promise<Task>;
   /** Toggle/set a task's status (optimistic — the checkbox flips instantly). */
@@ -20,16 +30,23 @@ const TasksCtx = createContext<TasksStore | null>(null);
  * `data.changed` (a sync pull applied task rows from another device), and triggers a sync
  * after every local mutation — mirrors NotesProvider. */
 export function TasksProvider({ children }: { children: ReactNode }) {
-  const { core, tasks: api } = useCore();
+  const { core, tasks: api, projects: projectsApi } = useCore();
   const { trigger: syncTrigger } = useSync();
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [seeds, setSeeds] = useState<RepeatingTask[]>([]);
+  // Ids of tasks that belong to ≥1 project, so `filter: "unsorted"` can subtract them.
+  const [memberIds, setMemberIds] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState<MembershipFilter>("unsorted");
   const [loading, setLoading] = useState(true);
   const mutating = useRef(0); // suppress refresh clobber while an optimistic write is in flight
 
   const refresh = useCallback(async () => {
-    setTasks(await api.list());
+    const [list, seedList, sorted] = await Promise.all([api.list(), api.listSeeds(), projectsApi.memberEntityIds("task")]);
+    setTasks(list);
+    setSeeds(seedList);
+    setMemberIds(new Set(sorted));
     setLoading(false);
-  }, [api]);
+  }, [api, projectsApi]);
 
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleRefresh = useCallback(() => {
@@ -66,12 +83,15 @@ export function TasksProvider({ children }: { children: ReactNode }) {
         const updated = await api.update(id, fields);
         setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
         syncTrigger();
+        // Adding/removing a repeat rule moves the row between the actionable list and the
+        // Repeating section (seeds are excluded from `tasks`), so reconcile both.
+        if (fields.repeatRule !== undefined || fields.clearRepeatRule) void refresh();
         return updated;
       } finally {
         mutating.current = Math.max(0, mutating.current - 1);
       }
     },
-    [api, syncTrigger],
+    [api, syncTrigger, refresh],
   );
 
   const setStatus = useCallback(
@@ -92,17 +112,27 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     [api, syncTrigger],
   );
 
+  const visible = useMemo(
+    () => (filter === "all" ? tasks : tasks.filter((t) => !memberIds.has(t.id))),
+    [tasks, memberIds, filter],
+  );
+
   const value = useMemo<TasksStore>(
     () => ({
       tasks,
+      visible,
+      filter,
+      setFilter,
+      seeds,
       loading,
       byId: (id) => tasks.find((t) => t.id === id),
+      seedById: (id) => seeds.find((t) => t.id === id),
       create,
       update,
       setStatus,
       remove,
     }),
-    [tasks, loading, create, update, setStatus, remove],
+    [tasks, visible, filter, seeds, loading, create, update, setStatus, remove],
   );
 
   return <TasksCtx.Provider value={value}>{children}</TasksCtx.Provider>;

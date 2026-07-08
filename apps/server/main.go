@@ -34,6 +34,9 @@ func main() {
 	srv := NewServer(db, dialect)
 	// Hourly Trash collector: promotes expired trashed rows to tombstones (PLAN §7.6).
 	srv.StartTrashCollector(context.Background())
+	// Per-minute repeat-task generator: creates each seed's occurrence just in time, only
+	// once its due instant has arrived (never ahead); seed writes also check on push (PLAN §6.4).
+	srv.StartRepeatMaterializer(context.Background())
 
 	log.Printf("companion server listening on %s (store=%s)", addr, dialect)
 	if err := http.ListenAndServe(addr, srv.Handler()); err != nil {

@@ -58,7 +58,17 @@ func (t *Task) Validate() error {
 	if !validTaskStatus(t.Status) {
 		return errors.Join(ErrInvalidTask, errors.New("status must be open, done, or cancelled"))
 	}
+	if err := ValidateRepeatRule(t.RepeatRule); err != nil {
+		return errors.Join(ErrInvalidTask, err)
+	}
 	return nil
+}
+
+// IsRepeatSeed reports whether this task is a repeating-task definition: it carries an
+// RRULE but is not itself a materialized occurrence (PLAN §6.4). Seeds are hidden from the
+// actionable task list; their occurrences are the real to-dos.
+func (t *Task) IsRepeatSeed() bool {
+	return t.RepeatRule != nil && strings.TrimSpace(*t.RepeatRule) != "" && t.RepeatSeedID == nil
 }
 
 // SyncEntity implementation (PLAN §7). A trashed task (DeletingAt set) is not a tombstone;

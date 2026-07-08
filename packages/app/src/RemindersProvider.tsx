@@ -10,6 +10,10 @@ import { activateReminder } from "./reminderNav";
  *  is a best-effort web `Notification` scheduler that no-ops where the API is absent. */
 export interface NotificationScheduler {
   reconcile(plan: TaskNotification[]): void;
+  /** Dismiss any *already-shown* notification for these task ids — used when a task is
+   *  completed/removed so its lingering banner clears (PLAN §6.4). Pending fires are handled
+   *  by `reconcile`; this is the delivered-notification counterpart. Optional. */
+  dismiss?(taskIds: string[]): void;
 }
 
 /** Reconciles task reminders into scheduled notifications after every task change or sync
@@ -47,7 +51,19 @@ export function RemindersProvider({
         // pending OS notification — dropping a valid reminder over a momentary hiccup.
         return;
       }
-      if (!cancelled) sched.reconcile(plan);
+      if (cancelled) return;
+      sched.reconcile(plan);
+      // Cancelling a *pending* fire is handled above (a settled task drops out of the plan).
+      // Separately clear any notification that already surfaced for a task the user has since
+      // completed/removed, so a stale banner doesn't linger (PLAN §6.4).
+      if (sched.dismiss) {
+        try {
+          const ids = await notify.dismissed(horizonDays);
+          if (!cancelled && ids.length) sched.dismiss(ids);
+        } catch {
+          // Best-effort; leave shown notifications as-is on a hiccup.
+        }
+      }
     };
     void reconcile();
     const offTasks = core.on("tasks.changed", () => void reconcile());
@@ -79,11 +95,36 @@ export function RemindersProvider({
  *  default everywhere — native shells inject their own scheduler instead. */
 export function webNotificationScheduler(options?: { registration?: ServiceWorkerRegistration | null }): NotificationScheduler {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  // Notifications this scheduler has actually shown, keyed by taskId, so a completed task's
+  // already-surfaced banner can be closed (the inline `new Notification` path only).
+  const shown = new Map<string, Notification>();
   const NotificationCtor = typeof globalThis !== "undefined" ? (globalThis as { Notification?: typeof Notification }).Notification : undefined;
   const registration = options?.registration ?? null;
   const DAY_MS = 24 * 60 * 60 * 1000;
 
+  const dismiss = (taskIds: string[]) => {
+    for (const id of taskIds) {
+      const n = shown.get(id);
+      if (n) {
+        try {
+          n.close();
+        } catch {
+          /* already closed */
+        }
+        shown.delete(id);
+      }
+    }
+    // Notifications shown by the service worker aren't in `shown`; close them via the SW.
+    if (registration && taskIds.length) {
+      const ids = new Set(taskIds);
+      void registration.getNotifications().then((list) => {
+        for (const n of list) if (n.tag && ids.has(n.tag)) n.close();
+      });
+    }
+  };
+
   return {
+    dismiss,
     reconcile(plan) {
       for (const t of timers.values()) clearTimeout(t);
       timers.clear();
@@ -106,6 +147,11 @@ export function webNotificationScheduler(options?: { registration?: ServiceWorke
               return;
             }
             const notification = new NotificationCtor(n.title, { body: n.body, tag: n.taskId });
+            // Track it so a later completion of this task can dismiss the shown banner.
+            shown.set(n.taskId, notification);
+            notification.onclose = () => {
+              if (shown.get(n.taskId) === notification) shown.delete(n.taskId);
+            };
             // Tapping surfaces the tab and opens the reminder's task (PLAN §6.4).
             notification.onclick = () => {
               if (typeof window !== "undefined" && typeof window.focus === "function") window.focus();

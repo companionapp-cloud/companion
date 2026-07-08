@@ -160,14 +160,95 @@ func TestListProjectItems(t *testing.T) {
 	}
 }
 
+// TestCreateTaskRepeat confirms the scheduling path: a natural-language cadence and a raw
+// RRULE both reach the store as a repeat rule (PLAN §6.4), and gibberish is a tool error.
+func TestCreateTaskRepeat(t *testing.T) {
+	s := newTestStore(t)
+	r := NewStoreRegistry(s)
+	ctx := context.Background()
+
+	// Natural-language cadence → RRULE.
+	if _, err := r.Invoke(ctx, "create_task", json.RawMessage(`{"title":"Standup","repeat":"every weekday"}`)); err != nil {
+		t.Fatalf("create_task repeat phrase: %v", err)
+	}
+	// Raw RRULE passes through.
+	if _, err := r.Invoke(ctx, "create_task", json.RawMessage(`{"title":"Sync","repeat":"FREQ=WEEKLY;BYDAY=MO"}`)); err != nil {
+		t.Fatalf("create_task repeat rrule: %v", err)
+	}
+	seeds, err := s.Tasks.ListSeeds()
+	if err != nil {
+		t.Fatalf("list seeds: %v", err)
+	}
+	if len(seeds) != 2 {
+		t.Fatalf("expected 2 repeating seeds, got %d", len(seeds))
+	}
+	for _, seed := range seeds {
+		if seed.RepeatRule == nil || *seed.RepeatRule == "" {
+			t.Errorf("seed %q has no repeat rule", seed.Title)
+		}
+	}
+	// A meaningless cadence is surfaced to the model as an error, not silently dropped.
+	if _, err := r.Invoke(ctx, "create_task", json.RawMessage(`{"title":"x","repeat":"whenever"}`)); err == nil {
+		t.Error("expected an error for an unrecognizable repeat")
+	}
+}
+
+// TestObjectMetadataTools confirms archetypes are visible to the model and that props are
+// validated on write (PLAN §6.3).
+func TestObjectMetadataTools(t *testing.T) {
+	s := newTestStore(t)
+	schema, _ := json.Marshal(domain.ObjectSchema{Fields: []domain.ObjectField{
+		{Key: "status", Type: domain.FieldSelect, Options: []string{"to-read", "done"}, Required: true},
+	}})
+	ot, err := s.ObjectTypes.Create(store.CreateObjectTypeInput{Name: "Book", AppliesTo: domain.AppliesToNote, SchemaJSON: schema})
+	if err != nil {
+		t.Fatalf("create object type: %v", err)
+	}
+	r := NewStoreRegistry(s)
+	ctx := context.Background()
+
+	// list_object_types surfaces the archetype.
+	out, err := r.Invoke(ctx, "list_object_types", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("list_object_types: %v", err)
+	}
+	if !strings.Contains(out, ot.ID) || !strings.Contains(out, "Book") {
+		t.Errorf("list_object_types missing the type: %s", out)
+	}
+
+	// A note created as a Book with valid props sticks; the archetype is readable back.
+	created, err := r.Invoke(ctx, "create_note",
+		json.RawMessage(`{"title":"Dune","objectTypeId":"`+ot.ID+`","props":{"status":"to-read"}}`))
+	if err != nil {
+		t.Fatalf("create_note archetyped: %v", err)
+	}
+	var res struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal([]byte(created), &res)
+	got, err := s.Notes.Get(res.ID)
+	if err != nil {
+		t.Fatalf("get note: %v", err)
+	}
+	if got.ObjectTypeID == nil || *got.ObjectTypeID != ot.ID {
+		t.Errorf("note archetype not set: %+v", got.ObjectTypeID)
+	}
+
+	// Invalid props (missing required field) are rejected — surfaced to the model.
+	if _, err := r.Invoke(ctx, "create_note",
+		json.RawMessage(`{"title":"Bad","objectTypeId":"`+ot.ID+`","props":{}}`)); err == nil {
+		t.Error("expected validation error for missing required prop")
+	}
+}
+
 // TestStoreToolsSpecsDeterministic guards that the advertised tool list is stable and
 // name-sorted, so it doesn't churn the prompt-cache prefix between requests.
 func TestStoreToolsSpecsDeterministic(t *testing.T) {
 	s := newTestStore(t)
 	r := NewStoreRegistry(s)
 	specs := r.Specs()
-	if len(specs) != 16 {
-		t.Fatalf("expected 16 tools, got %d", len(specs))
+	if len(specs) != 17 {
+		t.Fatalf("expected 17 tools, got %d", len(specs))
 	}
 	for i := 1; i < len(specs); i++ {
 		if specs[i-1].Name > specs[i].Name {

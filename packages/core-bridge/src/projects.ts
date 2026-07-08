@@ -53,6 +53,10 @@ export function projectsApi(core: CoreBridge) {
     projectMembers: (projectId: string) => core.invoke<ProjectMember[]>("projects.members", { projectId }),
     membershipsFor: (entityType: MemberEntityType, entityId: string) =>
       core.invoke<ProjectMember[]>("projects.forEntity", { entityType, entityId }),
+    /** Ids of entities of a type that belong to ≥1 project — the "sorted" set the browse
+     *  lists subtract to offer "Unsorted" vs "All" (PLAN §6.6). */
+    memberEntityIds: (entityType: MemberEntityType) =>
+      core.invoke<string[]>("projects.memberEntityIds", { entityType }),
 
     // Sidebar (area headings + project indicators, computed in core)
     sidebar: () => core.invoke<SidebarData>("nav.sidebar"),

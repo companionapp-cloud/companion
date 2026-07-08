@@ -230,6 +230,25 @@ func (c *Core) projectsForEntity(payload []byte) ([]byte, error) {
 	return json.Marshal(members)
 }
 
+// projectsMemberEntityIds returns the ids of entities of a type that belong to at least one
+// project — the "sorted" set the browse lists subtract to show "Unsorted" vs "All" (§6.6).
+func (c *Core) projectsMemberEntityIds(payload []byte) ([]byte, error) {
+	var args struct {
+		EntityType string `json:"entityType"`
+	}
+	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	if !domain.MemberEntityTypes[args.EntityType] {
+		return json.Marshal([]string{})
+	}
+	ids, err := c.store.ProjectMembers.MemberEntityIDs(args.EntityType)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(ids)
+}
+
 // ---- sidebar -------------------------------------------------------------
 
 func (c *Core) navSidebar() ([]byte, error) {

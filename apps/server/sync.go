@@ -2,13 +2,27 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
 	"time"
 
+	"companion/core/domain"
 	"companion/core/sync/protocol"
 )
+
+// isSeedRow reports whether a pushed task row is a repeating-task seed (rule set, not itself
+// an occurrence), so its occurrences should be re-materialized. A decode failure is treated
+// as "not a seed" — the row already upserted fine; only materialization is skipped.
+func isSeedRow(raw json.RawMessage) bool {
+	var t domain.Task
+	if err := json.Unmarshal(raw, &t); err != nil {
+		return false
+	}
+	return t.IsRepeatSeed()
+}
 
 const defaultPullLimit = 500
 
@@ -99,6 +113,7 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 	handlers := s.handlers()
 	results := make([]protocol.PushResult, 0, len(req.Changes))
 	var maxSeq int64
+	seedIDs := map[string]bool{} // repeating-task seeds touched by this push
 	for _, ch := range req.Changes {
 		e := handlers[ch.EntityType]
 		if e == nil {
@@ -114,7 +129,24 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 		if seq > maxSeq {
 			maxSeq = seq
 		}
+		if res.Status == protocol.StatusAccepted && ch.EntityType == protocol.EntityTask && isSeedRow(ch.Row) {
+			seedIDs[ch.ID] = true
+		}
 		results = append(results, res)
+	}
+	// A pushed seed — created, its rule edited, or trashed/deleted — materializes its
+	// occurrences immediately, so the change reaches other devices via the same SSE poke as
+	// the push itself (PLAN §6.4). Materialization failures are logged, never failing the
+	// push: the hourly sweep is the backstop.
+	for id := range seedIDs {
+		n, seq, err := s.materializeSeed(uid, id)
+		if err != nil {
+			log.Printf("push: materialize seed %s: %v", id, err)
+			continue
+		}
+		if n > 0 && seq > maxSeq {
+			maxSeq = seq
+		}
 	}
 	if maxSeq > 0 {
 		s.hub.publish(uid, maxSeq)

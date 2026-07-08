@@ -5,6 +5,7 @@ go 1.26
 require (
 	github.com/google/uuid v1.6.0
 	github.com/olebedev/when v1.1.0
+	github.com/teambition/rrule-go v1.8.2
 	golang.org/x/mobile v0.0.0-20260611195102-4dd8f1dbf5d2
 	modernc.org/sqlite v1.53.0
 )

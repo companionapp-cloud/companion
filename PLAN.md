@@ -672,13 +672,92 @@ backed by the real task row, not text.
   - Web: best-effort `Notification` API while a tab is open.
 - **Repeating tasks**: the user creates a **seed task** with `repeat_rule` (RRULE,
   parsed with `teambition/rrule-go` — the same package used by core for "next
-  occurrence" previews). **Only the server generates occurrences**: a cron job
-  (hourly + on seed write) materializes occurrence rows (`repeat_seed_id = seed.id`)
-  over a rolling 60-day window, idempotently (unique on `(repeat_seed_id, due_at)`).
-  Occurrences sync down as ordinary tasks; completing one is a normal client edit.
-  Editing a seed's rule regenerates future *uncompleted* occurrences.
-  Consequence to document in the UI: with no server configured, repeats don't
-  materialize (the seed still shows its next-occurrence preview from core).
+  occurrence" previews). The seed's `due_at` is the schedule anchor (DTSTART); a seed
+  with no due date falls back to its `created_at`. **Only the server generates
+  occurrences, and it does so *just in time* — never ahead of time.** A minute-cadence
+  sweep (plus an immediate check on every seed write) asks each live seed, via
+  `core/domain.LatestOccurrence`, "what is the most recent occurrence at or before *now*?"
+  and creates that occurrence row (`repeat_seed_id = seed.id`) if it doesn't exist yet.
+  Consequences, all deliberate:
+  - **Created just in time — at the reminder, not the whole schedule.** An occurrence is
+    generated the moment it becomes *relevant*: its own **reminder time** when the seed has
+    a lead-time reminder (so that reminder can still fire), else its due time. A task due at
+    9:00 with an 8:00 reminder materializes at ~8:00 (reminder = now); a task with no
+    reminder materializes at its due time. A seed whose first notification is still in the
+    future generates nothing yet — the user sees only the seed's next-occurrence *preview*.
+  - **Occurrences copy the seed, dates shifted forward.** Each occurrence carries the
+    seed's title/notes/archetype+props, its **project memberships** (so a repeating task in
+    a project generates member occurrences), and its **due and reminder shifted** to the
+    occurrence's date (reminder keeps the same lead: `remind = due + (seed.remind −
+    seed.due)`). It has no `repeat_rule` of its own and points back at its seed. The **seed
+    then advances** its own displayed due/reminder to the last generated occurrence, so it
+    tracks the schedule. The schedule anchor stays pinned to the *first* occurrence's date,
+    so advancing the seed's display never shifts the cadence or resets a COUNT/UNTIL bound.
+  - **At most one occurrence per seed per sweep**, so no window and no cap are needed — a
+    sub-daily cadence ("every 5 minutes") simply produces one row per sweep as its time
+    comes, and a long outage doesn't flood the table: only the *current* occurrence is
+    created, missed intermediate ones are skipped. An occurrence the user completed or
+    deleted is recorded and never resurrected (the generator checks existence in any row
+    state).
+  - **No future rows to reconcile.** Editing a seed's rule just changes what gets
+    generated next; there is no "regenerate future occurrences" step because none exist
+    ahead. Trashing or deleting a seed stops generation and leaves already-created
+    occurrences as ordinary tasks the user still owns. Completing an occurrence is a normal
+    client edit.
+  - **Seeds are definitions, not to-dos.** A seed is excluded from the actionable task
+    list (`tasks.list`) and from the notification plan — its occurrences are the real
+    rows. Seeds surface separately (`tasks.listSeeds`, each paired with its computed
+    next occurrence) in a "Repeating" section. Consequence to document in the UI: with
+    no server configured, occurrences never materialize, so the seed's next-occurrence
+    preview is all a client can show.
+  - **Natural-language recurrence entry.** Just as due/remind dates accept typed phrases
+    (via `olebedev/when`), the repeat field accepts a typed cadence, parsed **in Go**
+    (`core/domain.ParseRepeatPhrase`, exposed as `tasks.parseRepeat`) into an RRULE — so
+    every platform understands the same phrases and the result is a normal, portable
+    RRULE. `olebedev/when` only resolves single instants, so recurrence needs its own
+    small grammar. The renderer also offers the common cadences as one-tap presets; a
+    power user can still hand-author any RRULE the core validates. Recognized phrase
+    families (case-insensitive; leading "repeat(s)"/"every"/"each" tolerated; "the",
+    "of the/every month", and ordinal/date suffixes normalized):
+    - **Sub-daily frequency** — `every minute` · `every 5 minutes` / `every 30 mins` ·
+      `hourly` · `every hour` · `every 5 hours` · `every other hour` →
+      `FREQ=MINUTELY|HOURLY[;INTERVAL=N]`. (Safe under just-in-time generation: one row per
+      sweep as each instant comes due, never a batch — see above.)
+    - **Plain frequency** — `daily` · `every day` · `weekly` · `every week` · `monthly` ·
+      `every month` · `yearly` · `annually` · `every year` → `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`.
+    - **Intervals** — `every other day` (2) · `every 3 days` / `every three days` ·
+      `every other week` / `biweekly` / `fortnightly` (weekly, 2) · `every 2 weeks` ·
+      `every other month` / `bimonthly` (2) · `quarterly` / `every 3 months` (3) ·
+      `semiannually` / `every 6 months` (6) · `every other year` / `biennially` (yearly, 2)
+      · `every N {days|weeks|months|years}` → `…;INTERVAL=N`.
+    - **Weekday lists (weekly)** — `every monday` · `mondays` · `on tuesdays` ·
+      `every mon` · `every monday and thursday` · `mondays, wednesdays and fridays` ·
+      `every tue, thu` → `FREQ=WEEKLY;BYDAY=…` (weekday synonyms MO…SU, any order,
+      de-duplicated, canonically ordered). Interval combines: `every other monday` /
+      `every 2 weeks on monday` → `FREQ=WEEKLY;INTERVAL=2;BYDAY=MO`.
+    - **Weekday shortcuts** — `weekdays` · `every weekday` · `on weekdays` · `every work
+      day` · `monday to friday` / `monday–friday` / `monday through friday` →
+      `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR`; `weekends` · `every weekend` · `saturday and
+      sunday` → `FREQ=WEEKLY;BYDAY=SA,SU`.
+    - **Ordinal weekday of month** — `the first monday of the month` (1) · `second
+      tuesday` (2) · `third wednesday of every month` (3) · `fourth thursday` (4) ·
+      `fifth friday` (5) · `the last friday of the month` (−1) →
+      `FREQ=MONTHLY;BYDAY=<n>WE`; combines with interval (`the first monday of every
+      other month` → `FREQ=MONTHLY;INTERVAL=2;BYDAY=1MO`). This is the case a naive
+      weekday-list grammar misses.
+    - **Day of month** — `on the 15th (of every month)` · `monthly on the 1st` · `the
+      1st and 15th of the month` · `the last day of the month` (−1) →
+      `FREQ=MONTHLY;BYMONTHDAY=…`.
+    - **Specific date each year** — `every july 4` · `annually on july 4th` · `every year
+      on december 25` → `FREQ=YEARLY;BYMONTH=<m>;BYMONTHDAY=<d>`.
+    - **Bounds (optional suffixes)** — `… for 10 times` / `… 5 times` → `;COUNT=N`; `…
+      until august 1` / `… until 2026-08-01` → `;UNTIL=<instant>` (the trailing
+      date phrase resolved through `olebedev/when`).
+    - **Explicitly *not* recurrence** — `twice a week`, `3 times a month`, and other
+      "times per period" phrases have no fixed days and are **not** expressible as a task
+      RRULE; they are a **habit cadence** (§6.5), and the parser rejects them (returns no
+      rule) rather than guessing days. An unrecognized phrase returns nothing so the UI
+      can show inline "couldn't read that" feedback, exactly like the date field.
 
 ### 6.5 Habits: cadences, polarity, stacking, streaks
 
@@ -775,12 +854,20 @@ its `project_members` rows are left intact so restoring returns it to its projec
   stored in the OS keychain/SecureStore on each device (`api_key_ref`). E2E
   encryption of secrets is a documented later upgrade.
 - **Query-your-data**: core implements retrieval as tool-calls executed *locally*
-  against SQLite (`search_notes`, `list_tasks`, `list_projects`, `get_habit_stats`,
-  `calendar_range` — and, thanks to the link index, `get_backlinks` /
+  against SQLite (`search_notes`, `list_tasks`, `list_projects`, `list_object_types`,
+  `get_habit_stats`, `calendar_range` — and, thanks to the link index, `get_backlinks` /
   `get_neighborhood` for graph-aware answers like "what's connected to the Q3 launch
   project?"). The chat orchestration loop lives entirely in `core/llm`, so
   "ask my data" behaves identically on every platform, and private data only leaves
   the device as the context the user's chosen LLM receives.
+- **Write tools cover the full model.** `create_task`/`update_task` and
+  `create_note`/`update_note` accept everything a human can set: due/reminder times, a
+  **repeat** (a natural-language cadence like "every monday" or an RRULE, parsed by the
+  same `domain.ParseRepeatPhrase`, §6.4), and an **archetype** (`objectTypeId` + `props`,
+  §6.3) validated by the identical Go rules — so the model can schedule a repeating task or
+  file a structured object, not just plain to-dos. `list_object_types` and the `get_*`
+  tools expose each entity's archetype/props and repeat so the model reads the same shape
+  it can write.
 
 ---
 
@@ -1037,8 +1124,15 @@ Done:
 
 
 Next:
-11.  **Repeating tasks** — RRULE on seeds, server cron materialization, regeneration
-    on rule edit (occurrences reach other devices instantly via SSE → sync).
+11.  **Repeating tasks** — RRULE on seeds (`core/domain/recurrence.go`: parse/validate,
+    next-occurrence preview, `LatestOccurrence`); a natural-language cadence parser
+    (`domain.ParseRepeatPhrase` → `tasks.parseRepeat`, §6.4 — minute/hour through
+    ordinal-weekday-of-month, with COUNT/UNTIL bounds) plus preset cadences and a live
+    occurrence preview in the task editor; seeds hidden from the actionable list and the
+    notification plan and surfaced in a "Repeating" section (`tasks.listSeeds`);
+    **just-in-time** server generation (`apps/server/repeat.go`) — a minute sweep plus an
+    on-push check creates only the occurrence whose time has come, never ahead, at most one
+    per seed per sweep; occurrences reach other devices instantly via SSE → sync.
 12.  **Habits** — cadence kinds + polarity + streak math + streak-health; entries UI;
     `habit_links` stacking + suggestions; `stack` edges in the graph; habit
     membership; the sidebar fire icon goes live; notification schedules; geofence

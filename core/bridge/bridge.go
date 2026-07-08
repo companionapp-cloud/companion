@@ -105,6 +105,12 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.notesConflictResolve(payload)
 	case "tasks.list":
 		return c.tasksList()
+	case "tasks.listSeeds":
+		return c.tasksListSeeds()
+	case "tasks.repeatPreview":
+		return c.tasksRepeatPreview(payload)
+	case "tasks.parseRepeat":
+		return c.tasksParseRepeat(payload)
 	case "tasks.get":
 		return c.tasksGet(payload)
 	case "tasks.create":
@@ -115,6 +121,8 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.tasksDelete(payload)
 	case "notify.plan":
 		return c.notifyPlan(payload)
+	case "notify.dismissed":
+		return c.notifyDismissed(payload)
 	case "dates.parse":
 		return c.datesParse(payload)
 	case "trash.list":
@@ -151,6 +159,8 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.projectsMembers(payload)
 	case "projects.forEntity":
 		return c.projectsForEntity(payload)
+	case "projects.memberEntityIds":
+		return c.projectsMemberEntityIds(payload)
 	case "objectTypes.list":
 		return c.objectTypesList()
 	case "objectTypes.get":

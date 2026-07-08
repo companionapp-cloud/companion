@@ -64,6 +64,39 @@ func PlanTasks(tasks []*domain.Task, now time.Time, horizon time.Duration) []Not
 	return out
 }
 
+// SettledReminderIDs returns the ids of tasks whose reminder/due notification has already
+// fired but that are now **settled** — completed, cancelled, trashed, or deleted — so the
+// shell can dismiss any notification still sitting in the tray for them (PLAN §6.4). Cancelling
+// a *pending* fire is handled by re-planning (a settled task drops out of PlanTasks); this
+// covers the case a reminder already surfaced before the user finished the task. Bounded to
+// fires within the trailing `horizon` so the list stays small (older notifications are long
+// gone from the OS).
+func SettledReminderIDs(tasks []*domain.Task, now time.Time, horizon time.Duration) []string {
+	lower := now.Add(-horizon)
+	out := []string{}
+	for _, t := range tasks {
+		if t == nil {
+			continue
+		}
+		if t.Status == domain.TaskOpen && t.DeletedAt == nil && t.DeletingAt == nil {
+			continue // still an active task — keep its notification
+		}
+		fire := t.RemindAt
+		if fire == nil {
+			fire = t.DueAt
+		}
+		if fire == nil {
+			continue // never had a notification
+		}
+		f := fire.UTC()
+		if f.After(now) || f.Before(lower) {
+			continue // not yet fired, or too old to still be shown
+		}
+		out = append(out, t.ID)
+	}
+	return out
+}
+
 // inWindow reports whether t lies in (start, end] — a future fire within the horizon. A
 // fire exactly at `start` is treated as already past (the shell handles missed fires).
 func inWindow(t, start, end time.Time) bool {

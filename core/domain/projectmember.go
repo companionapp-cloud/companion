@@ -4,7 +4,21 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
+
+// memberNamespace seeds the deterministic membership id below — a fixed UUID so the id
+// depends only on the (project, entity) tuple, never the machine that generated it.
+var memberNamespace = uuid.MustParse("b6f6c0de-0000-5000-a000-000000000001")
+
+// MemberID derives a stable UUIDv5 from a (project, entityType, entity) tuple, so the same
+// membership added independently on two devices — or generated on the server for a repeat
+// occurrence — produces the *same* id and converges to one row on sync (PLAN §6.6). Shared by
+// the client store and the server's repeat materializer.
+func MemberID(projectID, entityType, entityID string) string {
+	return uuid.NewSHA1(memberNamespace, []byte(projectID+"\x00"+entityType+"\x00"+entityID)).String()
+}
 
 // ProjectMember is an AUTHORED edge: a synced many-to-many row joining a project to a
 // note, task, or habit (PLAN §4.0/§4.1). It is mirrored into the local `links` index as

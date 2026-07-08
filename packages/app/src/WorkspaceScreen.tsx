@@ -8,6 +8,8 @@ import { useTasks } from "./TasksProvider";
 import { NoteEditor } from "./NoteEditor";
 import { TaskEditor, TaskRow } from "./TaskEditor";
 import { Draggable } from "./DndContext";
+import { repeatLabel } from "./repeat";
+import { ListFilterMenu } from "./ListFilterMenu";
 
 /** The web/desktop workspace: a persistent split of a browse list (notes or tasks, chosen
  * by the rail) and a shared tab strip. Notes and tasks share one set of tabs (in the
@@ -97,7 +99,8 @@ function NoteTabBody({ id, onDelete }: { id: string; onDelete: () => void }) {
 function TaskTabBody({ id, onDelete }: { id: string; onDelete: () => void }) {
   const tasks = useTasks();
   const nav = useNav();
-  const task = tasks.byId(id);
+  // A repeating definition (seed) is not in the actionable list, so fall back to seeds.
+  const task = tasks.byId(id) ?? tasks.seedById(id);
   if (!task) {
     return (
       <Center>
@@ -118,6 +121,7 @@ function TaskTabBody({ id, onDelete }: { id: string; onDelete: () => void }) {
         // Clicking a chip in the notes opens its target in a new tab, leaving this task put.
         if (ref.type === "task" || ref.type === "note") nav.openInNewTab({ kind: ref.type, id: ref.id });
       }}
+      onConnectSync={() => nav.goView("settings")}
     />
   );
 }
@@ -132,20 +136,27 @@ function NotesList() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return store.notes;
-    return store.notes.filter((n) => n.title.toLowerCase().includes(q) || n.contentMd.toLowerCase().includes(q));
-  }, [store.notes, query]);
+    if (!q) return store.visible;
+    return store.visible.filter((n) => n.title.toLowerCase().includes(q) || n.contentMd.toLowerCase().includes(q));
+  }, [store.visible, query]);
 
   if (store.loading) return <Spinner label="Loading your notes…" />;
 
   return (
     <View style={styles.list}>
       <View style={styles.listHeader}>
-        <Text variant="caption" tone="secondary" style={{ flex: 1, fontWeight: "600" }}>
-          All notes
-        </Text>
+        <View style={{ flex: 1 }}>
+          <ListFilterMenu
+            value={store.filter}
+            onChange={store.setFilter}
+            options={[
+              { value: "unsorted", label: "Unsorted notes" },
+              { value: "all", label: "All notes" },
+            ]}
+          />
+        </View>
         <Text variant="mono" tone="tertiary">
-          {store.notes.length}
+          {store.visible.length}
         </Text>
       </View>
       <View style={styles.search}>
@@ -189,10 +200,10 @@ function TasksList() {
   const activeId = activeRef?.kind === "task" ? activeRef.id : null;
 
   const { open, done } = useMemo(() => {
-    const open = store.tasks.filter((t) => t.status !== "done");
-    const done = store.tasks.filter((t) => t.status === "done");
+    const open = store.visible.filter((t) => t.status !== "done");
+    const done = store.visible.filter((t) => t.status === "done");
     return { open, done };
-  }, [store.tasks]);
+  }, [store.visible]);
 
   const add = async () => {
     const title = draft.trim();
@@ -206,9 +217,16 @@ function TasksList() {
   return (
     <View style={styles.list}>
       <View style={styles.listHeader}>
-        <Text variant="caption" tone="secondary" style={{ flex: 1, fontWeight: "600" }}>
-          Tasks
-        </Text>
+        <View style={{ flex: 1 }}>
+          <ListFilterMenu
+            value={store.filter}
+            onChange={store.setFilter}
+            options={[
+              { value: "unsorted", label: "Unsorted tasks" },
+              { value: "all", label: "All tasks" },
+            ]}
+          />
+        </View>
         <Text variant="mono" tone="tertiary">
           {open.length}
         </Text>
@@ -235,6 +253,23 @@ function TasksList() {
             Nothing to do. Add a task above.
           </Text>
         )}
+        {store.seeds.length ? (
+          <>
+            <Text variant="caption" tone="tertiary" style={styles.doneLabel}>
+              REPEATING · {store.seeds.length}
+            </Text>
+            {store.seeds.map((s) => (
+              <ListRow
+                key={s.id}
+                icon={<Icon name="repeat" size={16} color={s.id === activeId ? colors.accentHover : colors.textTertiary} />}
+                title={s.title || "Untitled task"}
+                subtitle={repeatSubtitle(s.repeatRule, s.nextOccurrence)}
+                selected={s.id === activeId}
+                onPress={() => nav.openTask(s.id)}
+              />
+            ))}
+          </>
+        ) : null}
         {done.length ? (
           <>
             <Text variant="caption" tone="tertiary" style={styles.doneLabel}>
@@ -255,6 +290,15 @@ function TasksList() {
 function notePreview(n: Note): string {
   const body = n.contentMd.replace(/\s+/g, " ").trim();
   return body || "No additional text";
+}
+
+/** Subtitle for a repeating definition: its cadence plus the next occurrence date. */
+function repeatSubtitle(rule?: string | null, next?: string | null): string {
+  const cadence = repeatLabel(rule) ?? "Repeats";
+  if (!next) return cadence;
+  const d = new Date(next);
+  if (Number.isNaN(d.getTime())) return cadence;
+  return `${cadence} · next ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
 }
 
 const styles = {

@@ -73,6 +73,21 @@ export interface Task {
   dirty: boolean;
 }
 
+/** A repeating-task definition (seed) paired with its next computed occurrence (mirrors
+ *  bridge.RepeatingTask, PLAN §6.4). `nextOccurrence` is null when the rule is exhausted. It
+ *  is the only thing a client with no server configured can show, since occurrences never
+ *  materialize locally. */
+export interface RepeatingTask extends Task {
+  nextOccurrence?: string | null;
+}
+
+/** Result of tasks.repeatPreview: whether an RRULE parses, and if so its upcoming
+ *  occurrences as ISO timestamps (mirrors the bridge's repeat-preview payload). */
+export interface RepeatPreview {
+  valid: boolean;
+  occurrences?: string[];
+}
+
 /** Which entity kinds an object type can archetype (mirrors core/domain AppliesTo*). */
 export type AppliesTo = "note" | "task" | "both";
 

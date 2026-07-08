@@ -61,7 +61,13 @@ export function TaskEditorScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surfaceCard }}>
-      <TaskEditor task={task} save={store.update} showToolbar={false} onOpenRef={onOpenRef} />
+      <TaskEditor
+        task={task}
+        save={store.update}
+        showToolbar={false}
+        onOpenRef={onOpenRef}
+        onConnectSync={() => nav.navigate('SettingsSection', { section: 'sync' })}
+      />
       {showProjects ? (
         <MembershipPicker entityType="task" entityId={taskId} onClose={() => setShowProjects(false)} />
       ) : null}

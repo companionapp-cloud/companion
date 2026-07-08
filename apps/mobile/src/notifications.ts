@@ -49,7 +49,29 @@ export function createMobileNotificationScheduler(): NotificationScheduler {
         await scheduleReminderPlan(plan);
       });
     },
+    dismiss(taskIds) {
+      queue = queue.then(() => dismissDeliveredForTasks(taskIds));
+    },
   };
+}
+
+/** Dismiss already-delivered local notifications for the given task ids (PLAN §6.4) — used
+ *  when a task is completed/removed so its banner in the tray clears. Cancelling a *pending*
+ *  fire is handled by scheduleReminderPlan re-planning without it. */
+export async function dismissDeliveredForTasks(taskIds: string[]): Promise<void> {
+  if (!taskIds.length) return;
+  const wanted = new Set(taskIds);
+  try {
+    const delivered = await Notifications.getPresentedNotificationsAsync();
+    for (const d of delivered) {
+      const taskId = (d.request?.content?.data as { taskId?: unknown } | undefined)?.taskId;
+      if (typeof taskId === 'string' && wanted.has(taskId)) {
+        await Notifications.dismissNotificationAsync(d.request.identifier).catch(() => {});
+      }
+    }
+  } catch {
+    // Best-effort — leave delivered notifications in place on failure.
+  }
 }
 
 /** Cancel every scheduled reminder and re-register the plan as local notifications (capped

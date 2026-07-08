@@ -3,7 +3,7 @@ import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { Note } from '@companion/core-bridge';
-import { useCore, useNotes, useProjects } from '@companion/app';
+import { useCore, useNotes, useProjects, ListFilterTabs } from '@companion/app';
 import { Icon, Spinner, Text, colors, space } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
 import { useProjectScope } from '../ProjectContext';
@@ -42,10 +42,10 @@ export function NotesListScreen() {
   }, [projectId, membershipsForProject, core]);
 
   const notes = useMemo(() => {
-    if (!projectId) return store.notes;
+    if (!projectId) return store.visible; // global list honours the Unsorted/All filter
     if (!memberIds) return [];
     return store.notes.filter((n) => memberIds.has(n.id));
-  }, [store.notes, projectId, memberIds]);
+  }, [store.visible, store.notes, projectId, memberIds]);
 
   const openNote = (id: string) => nav.navigate('NoteEditor', { id });
   const createNote = async () => {
@@ -60,6 +60,18 @@ export function NotesListScreen() {
 
   return (
     <View style={styles.container}>
+      {!projectId ? (
+        <View style={styles.filterBar}>
+          <ListFilterTabs
+            value={store.filter}
+            onChange={store.setFilter}
+            options={[
+              { value: 'unsorted', label: 'Unsorted' },
+              { value: 'all', label: 'All' },
+            ]}
+          />
+        </View>
+      ) : null}
       <FlatList
         data={notes}
         keyExtractor={(n) => n.id}
@@ -113,6 +125,7 @@ function relTime(iso: string): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceApp },
+  filterBar: { paddingHorizontal: space.md, paddingTop: space.sm },
   list: { paddingHorizontal: space.md, paddingVertical: space.sm, gap: 2, flexGrow: 1 },
   time: { fontSize: 11 },
   empty: { textAlign: 'center', marginTop: space.xxl },
