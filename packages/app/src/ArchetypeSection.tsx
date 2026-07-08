@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { Platform, Pressable, ScrollView, View } from "react-native";
 import type { ObjectProps } from "@companion/core-bridge";
 import { Icon, IconButton, Text, colors, radius, space, type IconName, type PressState } from "@companion/design-system";
 import { useObjectTypes } from "./ObjectTypesProvider";
@@ -256,7 +256,9 @@ function usePersistentWidth(key: string, initial: number) {
 }
 
 const styles = {
-  wrap: { gap: space.xs, alignSelf: "flex-start" as const },
+  // The chip anchors the picker; keep it above sibling chips so the floating dropdown
+  // (absolutely positioned below) paints over them instead of pushing them around.
+  wrap: { alignSelf: "flex-start" as const, position: "relative" as const, zIndex: 1 },
   ghostChip: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
@@ -315,14 +317,21 @@ const styles = {
     borderBottomColor: colors.borderSubtle,
   },
   sidePanelBody: { padding: space.lg },
+  // Floats below the chip so opening it never changes the chip's footprint (which would
+  // otherwise shove the "Edited" timestamp / resize neighboring task chips).
   dropdown: {
-    alignSelf: "flex-start" as const,
+    position: "absolute" as const,
+    top: "100%" as const,
+    left: 0,
+    marginTop: space.xs,
+    zIndex: 10,
     minWidth: 180,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
     borderRadius: radius.md,
     backgroundColor: colors.surfaceCard,
     overflow: "hidden" as const,
+    ...(Platform.OS === "web" ? { boxShadow: "0 8px 24px rgba(0,0,0,0.14)" } : null),
   },
   dropdownRow: {
     flexDirection: "row" as const,
