@@ -92,6 +92,25 @@ func (c *Core) notesDelete(payload []byte) ([]byte, error) {
 	return json.Marshal(map[string]bool{"ok": true})
 }
 
+// notesDeleteMany trashes several notes in one call (bulk multiselect delete — PLAN §6.6),
+// so the UI issues a single request instead of one per selected note. Emits one change +
+// one bulk data.changed after the batch.
+func (c *Core) notesDeleteMany(payload []byte) ([]byte, error) {
+	var args struct {
+		IDs []string `json:"ids"`
+	}
+	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	n, err := c.store.Notes.TrashMany(args.IDs)
+	if err != nil {
+		return nil, mapStoreErr(err)
+	}
+	c.emit(notesChangedEvent, nil)
+	c.emitDataChanged("", "")
+	return json.Marshal(map[string]int64{"count": n})
+}
+
 // notesHold marks a note as open in an editor so the sync engine defers a conflicting
 // server version to the UI instead of auto-forking it (see hold.go).
 func (c *Core) notesHold(payload []byte) ([]byte, error) {

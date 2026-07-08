@@ -274,6 +274,35 @@ func (r *TasksRepo) Trash(id string) error {
 	return r.links.DeleteSource(domain.NodeTask, id)
 }
 
+// TrashMany moves several tasks to the Trash in one statement (bulk multiselect delete —
+// PLAN §6.6), mirroring Trash: one UPDATE flips deleting_at/updated_at/dirty for every
+// still-live id, then each task's edges are dropped. Missing/already-trashed/tombstoned ids
+// are skipped. Returns the number of tasks actually trashed.
+func (r *TasksRepo) TrashMany(ids []string) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	now := r.clock.Now().UTC()
+	deletingAt := now.Add(TrashRetention)
+	in, idArgs := placeholders(ids)
+	args := append([]any{deletingAt.Format(timeFormat), now.Format(timeFormat)}, idArgs...)
+	res, err := r.db.Exec(
+		`UPDATE tasks SET deleting_at = ?, updated_at = ?, dirty = 1
+		 WHERE id IN (`+in+`) AND deleted_at IS NULL AND deleting_at IS NULL;`,
+		args...,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("trash tasks: %w", err)
+	}
+	affected, _ := res.RowsAffected()
+	for _, id := range ids {
+		if err := r.links.DeleteSource(domain.NodeTask, id); err != nil {
+			return affected, err
+		}
+	}
+	return affected, nil
+}
+
 // Restore brings a task back from the Trash (or a tombstone) and re-indexes its links.
 func (r *TasksRepo) Restore(id string) error {
 	t, err := r.GetAny(id)

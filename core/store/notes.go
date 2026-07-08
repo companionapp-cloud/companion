@@ -241,6 +241,37 @@ func (r *NotesRepo) Trash(id string) error {
 	return nil
 }
 
+// TrashMany moves several notes to the Trash in one statement (bulk multiselect delete —
+// PLAN §6.6). It mirrors Trash: one UPDATE flips deleting_at/updated_at/dirty for every
+// still-live id, then each trashed note's outgoing links are dropped so it leaves the
+// graph. Ids that are missing, already trashed, or tombstoned are simply skipped (no
+// error). Returns the number of notes actually trashed.
+func (r *NotesRepo) TrashMany(ids []string) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	now := r.clock.Now().UTC()
+	deletingAt := now.Add(TrashRetention)
+	in, idArgs := placeholders(ids)
+	args := append([]any{deletingAt.Format(timeFormat), now.Format(timeFormat)}, idArgs...)
+	res, err := r.db.Exec(
+		`UPDATE notes SET deleting_at = ?, updated_at = ?, dirty = 1
+		 WHERE id IN (`+in+`) AND deleted_at IS NULL AND deleting_at IS NULL;`,
+		args...,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("trash notes: %w", err)
+	}
+	affected, _ := res.RowsAffected()
+	// Trashed rows leave the graph, mirroring a tombstone. Restore re-derives the edges.
+	for _, id := range ids {
+		if err := r.links.DeleteSource(domain.NodeNote, id); err != nil {
+			return affected, err
+		}
+	}
+	return affected, nil
+}
+
 // Restore brings a note back to life from either delete state (PLAN §4.3): it clears both
 // deleting_at (Trash) and deleted_at (a tombstone — e.g. deleted on another device), bumps
 // updated_at, marks it dirty so the resurrection syncs and wins, and re-derives its

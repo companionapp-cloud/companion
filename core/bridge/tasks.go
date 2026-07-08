@@ -185,6 +185,26 @@ func (c *Core) tasksDelete(payload []byte) ([]byte, error) {
 	return json.Marshal(map[string]bool{"ok": true})
 }
 
+// tasksDeleteMany trashes several tasks in one call (bulk multiselect delete — PLAN §6.6),
+// so the UI issues a single request. Emits one changed + one bulk data.changed + one
+// nav.changed after the batch.
+func (c *Core) tasksDeleteMany(payload []byte) ([]byte, error) {
+	var args struct {
+		IDs []string `json:"ids"`
+	}
+	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	n, err := c.store.Tasks.TrashMany(args.IDs)
+	if err != nil {
+		return nil, mapStoreErr(err)
+	}
+	c.emit(tasksChangedEvent, nil)
+	c.emit(navChangedEvent, nil)
+	c.emitDataChanged("", "")
+	return json.Marshal(map[string]int64{"count": n})
+}
+
 // notifyPlan returns the reminder/due notifications due to fire over a rolling window
 // (default 30 days), computed in core from the live tasks (PLAN §6.4). The shell schedules
 // them per-platform.

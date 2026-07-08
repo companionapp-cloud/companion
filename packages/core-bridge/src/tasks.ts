@@ -51,6 +51,8 @@ export function tasksApi(core: CoreBridge) {
     create: (input: CreateTaskInput) => core.invoke<Task>("tasks.create", input),
     update: (id: string, fields: UpdateTaskInput) => core.invoke<Task>("tasks.update", { id, ...fields }),
     remove: (id: string) => core.invoke<{ ok: boolean }>("tasks.delete", { id }),
+    /** Bulk-trash several tasks in one call (multiselect delete). */
+    removeMany: (ids: string[]) => core.invoke<{ count: number }>("tasks.deleteMany", { ids }),
   };
 }
 

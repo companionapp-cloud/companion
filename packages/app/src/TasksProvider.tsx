@@ -22,6 +22,8 @@ export interface TasksStore {
   /** Toggle/set a task's status (optimistic — the checkbox flips instantly). */
   setStatus: (id: string, status: TaskStatus) => Promise<void>;
   remove: (id: string) => Promise<void>;
+  /** Bulk-trash several tasks in one core call (multiselect delete). */
+  removeMany: (ids: string[]) => Promise<void>;
 }
 
 const TasksCtx = createContext<TasksStore | null>(null);
@@ -112,6 +114,17 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     [api, syncTrigger],
   );
 
+  const removeMany = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return;
+      await api.removeMany(ids);
+      const drop = new Set(ids);
+      setTasks((prev) => prev.filter((t) => !drop.has(t.id)));
+      syncTrigger();
+    },
+    [api, syncTrigger],
+  );
+
   const visible = useMemo(
     () => (filter === "all" ? tasks : tasks.filter((t) => !memberIds.has(t.id))),
     [tasks, memberIds, filter],
@@ -131,8 +144,9 @@ export function TasksProvider({ children }: { children: ReactNode }) {
       update,
       setStatus,
       remove,
+      removeMany,
     }),
-    [tasks, visible, filter, seeds, loading, create, update, setStatus, remove],
+    [tasks, visible, filter, seeds, loading, create, update, setStatus, remove, removeMany],
   );
 
   return <TasksCtx.Provider value={value}>{children}</TasksCtx.Provider>;

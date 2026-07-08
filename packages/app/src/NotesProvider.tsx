@@ -17,6 +17,8 @@ export interface NotesStore {
   byId: (id: string) => Note | undefined;
   create: (input?: { title?: string; contentMd?: string; date?: string | null }) => Promise<Note>;
   remove: (id: string) => Promise<void>;
+  /** Bulk-trash several notes in one core call (multiselect delete). */
+  removeMany: (ids: string[]) => Promise<void>;
   /** Debounced, optimistic field save (per note). */
   save: (id: string, fields: { title?: string; contentMd?: string }) => void;
   /** Immediate update for non-text fields (archetype, props — PLAN §6.3). */
@@ -112,6 +114,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     [api, syncTrigger],
   );
 
+  const removeMany = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return;
+      await api.removeMany(ids);
+      const drop = new Set(ids);
+      setNotes((prev) => prev.filter((n) => !drop.has(n.id)));
+      syncTrigger();
+    },
+    [api, syncTrigger],
+  );
+
   const visible = useMemo(
     () => (filter === "all" ? notes : notes.filter((n) => !memberIds.has(n.id))),
     [notes, memberIds, filter],
@@ -127,10 +140,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       byId: (id) => notes.find((n) => n.id === id),
       create,
       remove,
+      removeMany,
       save,
       update,
     }),
-    [notes, visible, filter, loading, create, remove, save, update],
+    [notes, visible, filter, loading, create, remove, removeMany, save, update],
   );
 
   return <NotesCtx.Provider value={value}>{children}</NotesCtx.Provider>;

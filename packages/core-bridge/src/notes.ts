@@ -39,6 +39,8 @@ export function notesApi(core: CoreBridge) {
     update: (id: string, fields: UpdateNoteInput) =>
       core.invoke<Note>("notes.update", { id, ...fields }),
     remove: (id: string) => core.invoke<{ ok: boolean }>("notes.delete", { id }),
+    /** Bulk-trash several notes in one call (multiselect delete). */
+    removeMany: (ids: string[]) => core.invoke<{ count: number }>("notes.deleteMany", { ids }),
     /** Mark a note open in an editor so sync defers its conflicts to the UI. */
     hold: (id: string) => core.invoke<{ ok: boolean }>("notes.hold", { id }),
     /** Stop holding the open note (editor closed). */

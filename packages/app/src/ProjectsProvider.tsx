@@ -29,6 +29,8 @@ export interface ProjectsStore {
   /** Persist a new order for one area's projects (drag-and-drop, PLAN §6.6). */
   reorderProjects: (areaId: string, ids: string[]) => Promise<void>;
   addMember: (projectId: string, entityType: MemberEntityType, entityId: string) => Promise<void>;
+  /** Assign several entities to one project in a single core call (multiselect assign). */
+  addMembers: (projectId: string, entityType: MemberEntityType, entityIds: string[]) => Promise<void>;
   removeMember: (projectId: string, entityType: MemberEntityType, entityId: string) => Promise<void>;
   membershipsFor: (entityType: MemberEntityType, entityId: string) => Promise<ProjectMember[]>;
   membershipsForProject: (projectId: string) => Promise<ProjectMember[]>;
@@ -158,6 +160,15 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
     },
     [api, refresh, syncTrigger],
   );
+  const addMembers = useCallback(
+    async (projectId: string, entityType: MemberEntityType, entityIds: string[]) => {
+      if (entityIds.length === 0) return;
+      await api.addMembers(projectId, entityType, entityIds);
+      await refresh();
+      syncTrigger();
+    },
+    [api, refresh, syncTrigger],
+  );
   const removeMember = useCallback(
     async (projectId: string, entityType: MemberEntityType, entityId: string) => {
       await api.removeMember(projectId, entityType, entityId);
@@ -187,11 +198,12 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
       reorderAreas,
       reorderProjects,
       addMember,
+      addMembers,
       removeMember,
       membershipsFor,
       membershipsForProject,
     }),
-    [sidebar, areas, projects, loading, createArea, updateArea, deleteArea, createProject, updateProject, deleteProject, reorderAreas, reorderProjects, addMember, removeMember, membershipsFor, membershipsForProject],
+    [sidebar, areas, projects, loading, createArea, updateArea, deleteArea, createProject, updateProject, deleteProject, reorderAreas, reorderProjects, addMember, addMembers, removeMember, membershipsFor, membershipsForProject],
   );
 
   return <ProjectsCtx.Provider value={value}>{children}</ProjectsCtx.Provider>;

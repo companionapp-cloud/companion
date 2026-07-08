@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from "react";
-import { ScrollView, View } from "react-native";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ScrollView, View, type GestureResponderEvent } from "react-native";
 import type { Note } from "@companion/core-bridge";
 import { Center, Icon, Input, ListRow, SplitView, Spinner, Text, colors, layout, space } from "@companion/design-system";
 import { useNav } from "./nav-context";
@@ -10,6 +10,9 @@ import { TaskEditor, TaskRow } from "./TaskEditor";
 import { Draggable } from "./DndContext";
 import { repeatSubtitle } from "./repeat";
 import { ListFilterMenu } from "./ListFilterMenu";
+import { useMultiSelect, pressMods } from "./MultiSelectProvider";
+import { SelectionStack } from "./SelectionStack";
+import { MultiSelectBar } from "./MultiSelectBar";
 
 /** The web/desktop workspace: a persistent split of a browse list (notes or tasks, chosen
  * by the rail) and a shared tab strip. Notes and tasks share one set of tabs (in the
@@ -41,6 +44,11 @@ export function WorkspaceScreen() {
  * "Nothing selected" placeholder. */
 function TabContent() {
   const nav = useNav();
+  const ms = useMultiSelect();
+
+  // While ≥2 items are multiselected, the detail pane shows the selection stack (the first
+  // selected item on top) instead of the active tab's editor.
+  if (ms.active) return <SelectionStackBody />;
 
   return (
     <View style={styles.detail}>
@@ -63,6 +71,28 @@ function TabContent() {
           <Text tone="tertiary">Nothing selected. Pick something from the list, or open a new tab.</Text>
         </Center>
       ) : null}
+    </View>
+  );
+}
+
+/** The multiselect preview: the first selected item, rendered on the stack. */
+function SelectionStackBody() {
+  const ms = useMultiSelect();
+  const notes = useNotes();
+  const tasks = useTasks();
+  const id = ms.primaryId;
+  let body: ReactNode = <Center><Text tone="tertiary">Nothing to preview.</Text></Center>;
+  if (id && ms.kind === "note") {
+    const note = notes.byId(id);
+    if (note) body = <NoteEditor key={note.id} note={note} onChange={notes.save} />;
+  } else if (id && ms.kind === "task") {
+    const task = tasks.byId(id) ?? tasks.seedById(id);
+    if (task) body = <TaskEditor key={task.id} task={task} save={tasks.update} />;
+  }
+  return (
+    <View style={styles.detail}>
+      <MultiSelectBar />
+      <SelectionStack count={ms.count}>{body}</SelectionStack>
     </View>
   );
 }
@@ -130,6 +160,7 @@ function TaskTabBody({ id, onDelete }: { id: string; onDelete: () => void }) {
 function NotesList() {
   const store = useNotes();
   const nav = useNav();
+  const ms = useMultiSelect();
   const [query, setQuery] = useState("");
   const activeRef = nav.activeTab.ref;
   const activeId = activeRef?.kind === "note" ? activeRef.id : null;
@@ -139,6 +170,14 @@ function NotesList() {
     if (!q) return store.visible;
     return store.visible.filter((n) => n.title.toLowerCase().includes(q) || n.contentMd.toLowerCase().includes(q));
   }, [store.visible, query]);
+
+  // Announce this list (and its visible order) so multiselect gestures + range work here.
+  // Only while the notes route is active — the workspace stays mounted (hidden) on other
+  // routes, and registering there would fight the on-screen list for the shared scope.
+  useEffect(() => {
+    if (nav.current.kind !== "notes") return;
+    ms.register("notes", "note", filtered.map((n) => n.id));
+  }, [ms.register, filtered, nav.current.kind]);
 
   if (store.loading) return <Spinner label="Loading your notes…" />;
 
@@ -170,17 +209,22 @@ function NotesList() {
       </View>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.md, gap: 2 }}>
         {filtered.length ? (
-          filtered.map((n) => (
-            <Draggable key={n.id} payload={{ kind: "note", id: n.id, label: n.title || "Untitled" }}>
-              <ListRow
-                icon={<Icon name="file" size={17} color={n.id === activeId ? colors.accentHover : colors.textTertiary} />}
-                title={n.title || "Untitled"}
-                subtitle={notePreview(n)}
-                selected={n.id === activeId}
-                onPress={() => nav.openNote(n.id)}
-              />
-            </Draggable>
-          ))
+          filtered.map((n) => {
+            const selected = ms.active ? ms.isSelected(n.id) : n.id === activeId;
+            return (
+              <Draggable key={n.id} payload={{ kind: "note", id: n.id, label: n.title || "Untitled" }}>
+                <ListRow
+                  icon={<Icon name="file" size={17} color={selected ? colors.accentHover : colors.textTertiary} />}
+                  title={n.title || "Untitled"}
+                  subtitle={notePreview(n)}
+                  selected={selected}
+                  onPress={(e) => {
+                    if (!ms.press(n.id, pressMods(e))) nav.openNote(n.id);
+                  }}
+                />
+              </Draggable>
+            );
+          })
         ) : (
           <Text tone="tertiary" variant="caption" style={styles.empty}>
             {query ? "No notes match that." : "Nothing here yet. A blank page is just potential, etc."}
@@ -195,6 +239,7 @@ function NotesList() {
 function TasksList() {
   const store = useTasks();
   const nav = useNav();
+  const ms = useMultiSelect();
   const [draft, setDraft] = useState("");
   const activeRef = nav.activeTab.ref;
   const activeId = activeRef?.kind === "task" ? activeRef.id : null;
@@ -204,6 +249,18 @@ function TasksList() {
     const done = store.visible.filter((t) => t.status === "done");
     return { open, done };
   }, [store.visible]);
+
+  // Multiselect covers the actionable tasks (open + done); repeating seeds stay single-select.
+  // Gated on the active route (see NotesList) so the hidden workspace doesn't clobber the scope.
+  useEffect(() => {
+    if (nav.current.kind !== "tasks") return;
+    ms.register("tasks", "task", [...open, ...done].map((t) => t.id));
+  }, [ms.register, open, done, nav.current.kind]);
+
+  const selectFor = (id: string) => (ms.active ? ms.isSelected(id) : id === activeId);
+  const pressTask = (id: string, e: GestureResponderEvent) => {
+    if (!ms.press(id, pressMods(e))) nav.openTask(id);
+  };
 
   const add = async () => {
     const title = draft.trim();
@@ -245,7 +302,7 @@ function TasksList() {
         {open.length ? (
           open.map((t) => (
             <Draggable key={t.id} payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }}>
-              <TaskRow task={t} selected={t.id === activeId} onPress={() => nav.openTask(t.id)} onToggle={() => void store.setStatus(t.id, "done")} />
+              <TaskRow task={t} selected={selectFor(t.id)} onPress={(e) => pressTask(t.id, e)} onToggle={() => void store.setStatus(t.id, "done")} />
             </Draggable>
           ))
         ) : (
@@ -277,7 +334,7 @@ function TasksList() {
             </Text>
             {done.map((t) => (
               <Draggable key={t.id} payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }}>
-                <TaskRow task={t} selected={t.id === activeId} onPress={() => nav.openTask(t.id)} onToggle={() => void store.setStatus(t.id, "open")} />
+                <TaskRow task={t} selected={selectFor(t.id)} onPress={(e) => pressTask(t.id, e)} onToggle={() => void store.setStatus(t.id, "open")} />
               </Draggable>
             ))}
           </>

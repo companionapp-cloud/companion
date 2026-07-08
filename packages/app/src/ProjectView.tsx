@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import type { Note, ProjectMember, RepeatingTask, Task } from "@companion/core-bridge";
 import {
@@ -25,6 +25,9 @@ import { NoteEditor } from "./NoteEditor";
 import { TaskEditor, TaskRow } from "./TaskEditor";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { repeatSubtitle } from "./repeat";
+import { useMultiSelect, pressMods } from "./MultiSelectProvider";
+import { SelectionStack } from "./SelectionStack";
+import { MultiSelectBar } from "./MultiSelectBar";
 
 const SECTIONS: { id: ProjectSection; label: string; icon: IconName }[] = [
   { id: "notes", label: "Notes", icon: "notes" },
@@ -105,7 +108,18 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
   const notesStore = useNotes();
   const tasksStore = useTasks();
   const { addMember } = useProjects();
+  const ms = useMultiSelect();
   const loc = nav.current;
+
+  // Register the on-screen section list for multiselect (notes / actionable tasks; seeds
+  // stay single-select). Scoped per project+section so switching lists drops the selection.
+  const secProjectId = loc.kind === "project" ? loc.projectId : "";
+  const secSection = loc.kind === "project" ? loc.section : undefined;
+  useEffect(() => {
+    if (secSection === "notes") ms.register(`project:${secProjectId}:notes`, "note", notes.map((n) => n.id));
+    else if (secSection === "tasks") ms.register(`project:${secProjectId}:tasks`, "task", tasks.map((t) => t.id));
+  }, [ms.register, secProjectId, secSection, notes, tasks]);
+
   if (loc.kind !== "project") return null;
   const { projectId, section, itemId } = loc;
 
@@ -144,16 +158,21 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.md, gap: 2 }}>
           {section === "notes" ? (
             notes.length ? (
-              notes.map((n) => (
-                <ListRow
-                  key={n.id}
-                  icon={<Icon name="file" size={17} color={n.id === itemId ? colors.accentHover : colors.textTertiary} />}
-                  title={n.title || "Untitled"}
-                  subtitle={preview(n.contentMd)}
-                  selected={n.id === itemId}
-                  onPress={() => nav.openProjectItem(projectId, "notes", n.id)}
-                />
-              ))
+              notes.map((n) => {
+                const selected = ms.active ? ms.isSelected(n.id) : n.id === itemId;
+                return (
+                  <ListRow
+                    key={n.id}
+                    icon={<Icon name="file" size={17} color={selected ? colors.accentHover : colors.textTertiary} />}
+                    title={n.title || "Untitled"}
+                    subtitle={preview(n.contentMd)}
+                    selected={selected}
+                    onPress={(e) => {
+                      if (!ms.press(n.id, pressMods(e))) nav.openProjectItem(projectId, "notes", n.id);
+                    }}
+                  />
+                );
+              })
             ) : (
               <Text tone="tertiary" variant="caption" style={styles.empty}>
                 No notes yet. Add one with ＋, or add existing notes from a note’s “Projects” menu.
@@ -166,8 +185,10 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
                   <TaskRow
                     key={t.id}
                     task={t}
-                    selected={t.id === itemId}
-                    onPress={() => nav.openProjectItem(projectId, "tasks", t.id)}
+                    selected={ms.active ? ms.isSelected(t.id) : t.id === itemId}
+                    onPress={(e) => {
+                      if (!ms.press(t.id, pressMods(e))) nav.openProjectItem(projectId, "tasks", t.id);
+                    }}
                     onToggle={() => void tasksStore.setStatus(t.id, t.status === "done" ? "open" : "done")}
                   />
                 ))}
@@ -234,9 +255,30 @@ function DetailPane({ notes }: { notes: Note[] }) {
   const nav = useNav();
   const notesStore = useNotes();
   const tasksStore = useTasks();
+  const ms = useMultiSelect();
   const loc = nav.current;
   if (loc.kind !== "project") return null;
   const { section, itemId } = loc;
+
+  // A multiselection takes over the detail pane: the bulk sub-toolbar + the selection stack
+  // showing the first selected item, instead of the single-item editor.
+  if (ms.active) {
+    const id = ms.primaryId;
+    let body: ReactNode = <Center><Text tone="tertiary">Nothing to preview.</Text></Center>;
+    if (id && ms.kind === "note") {
+      const note = notesStore.byId(id);
+      if (note) body = <NoteEditor key={note.id} note={note} onChange={notesStore.save} />;
+    } else if (id && ms.kind === "task") {
+      const task = tasksStore.byId(id) ?? tasksStore.seedById(id);
+      if (task) body = <TaskEditor key={task.id} task={task} save={tasksStore.update} />;
+    }
+    return (
+      <View style={{ flex: 1, minHeight: 0 }}>
+        <MultiSelectBar />
+        <SelectionStack count={ms.count}>{body}</SelectionStack>
+      </View>
+    );
+  }
 
   if (section === "notes" && itemId) {
     const note = notesStore.byId(itemId);

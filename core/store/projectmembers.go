@@ -73,6 +73,21 @@ func (r *ProjectMembersRepo) Add(projectID, entityType, entityID string) (*domai
 	return m, nil
 }
 
+// AddMany makes several entities members of one project (bulk multiselect "assign to
+// project" — PLAN §6.6). Each add reuses Add, so the per-tuple revive/insert + edge-mirror
+// logic is preserved and the call is idempotent; it returns the resulting memberships.
+func (r *ProjectMembersRepo) AddMany(projectID, entityType string, entityIDs []string) ([]*domain.ProjectMember, error) {
+	out := make([]*domain.ProjectMember, 0, len(entityIDs))
+	for _, entityID := range entityIDs {
+		m, err := r.Add(projectID, entityType, entityID)
+		if err != nil {
+			return out, err
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
 // Remove soft-deletes a membership (idempotent) and drops its mirrored edge.
 func (r *ProjectMembersRepo) Remove(projectID, entityType, entityID string) error {
 	id := memberID(projectID, entityType, entityID)

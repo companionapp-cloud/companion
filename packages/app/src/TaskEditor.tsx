@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { Pressable, ScrollView, View, type GestureResponderEvent } from "react-native";
 import type { Task, UpdateTaskInput } from "@companion/core-bridge";
 import { Button, Icon, IconButton, Input, Text, TextField, colors, layout, radius, space, type IconName, type PressState } from "@companion/design-system";
 import { Editor, type LinkRef } from "@companion/editor";
@@ -300,7 +300,7 @@ export function TaskRow({
 }: {
   task: Task;
   selected?: boolean;
-  onPress: () => void;
+  onPress: (e: GestureResponderEvent) => void;
   onToggle: () => void;
 }) {
   const done = task.status === "done";

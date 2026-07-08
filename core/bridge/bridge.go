@@ -104,6 +104,8 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.notesUpdate(payload)
 	case "notes.delete":
 		return c.notesDelete(payload)
+	case "notes.deleteMany":
+		return c.notesDeleteMany(payload)
 	case "notes.hold":
 		return c.notesHold(payload)
 	case "notes.release":
@@ -128,6 +130,8 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.tasksUpdate(payload)
 	case "tasks.delete":
 		return c.tasksDelete(payload)
+	case "tasks.deleteMany":
+		return c.tasksDeleteMany(payload)
 	case "documents.list":
 		return c.documentsList()
 	case "documents.get":
@@ -188,6 +192,8 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.projectsDelete(payload)
 	case "projects.addMember":
 		return c.projectsAddMember(payload)
+	case "projects.addMembers":
+		return c.projectsAddMembers(payload)
 	case "projects.removeMember":
 		return c.projectsRemoveMember(payload)
 	case "projects.members":

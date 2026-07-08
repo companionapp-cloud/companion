@@ -48,6 +48,9 @@ export function projectsApi(core: CoreBridge) {
     // Membership (editable from either end)
     addMember: (projectId: string, entityType: MemberEntityType, entityId: string) =>
       core.invoke<ProjectMember>("projects.addMember", { projectId, entityType, entityId }),
+    /** Assign several entities to one project in a single call (multiselect assign). */
+    addMembers: (projectId: string, entityType: MemberEntityType, entityIds: string[]) =>
+      core.invoke<ProjectMember[]>("projects.addMembers", { projectId, entityType, entityIds }),
     removeMember: (projectId: string, entityType: MemberEntityType, entityId: string) =>
       core.invoke<{ ok: boolean }>("projects.removeMember", { projectId, entityType, entityId }),
     projectMembers: (projectId: string) => core.invoke<ProjectMember[]>("projects.members", { projectId }),

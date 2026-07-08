@@ -184,6 +184,27 @@ func (c *Core) projectsAddMember(payload []byte) ([]byte, error) {
 	return json.Marshal(m)
 }
 
+// projectsAddMembers assigns several entities to one project in a single call (bulk
+// multiselect "assign to project" — PLAN §6.6), so the UI issues one request. Emits one
+// nav.changed + bulk data.changed after the batch.
+func (c *Core) projectsAddMembers(payload []byte) ([]byte, error) {
+	var args struct {
+		ProjectID  string   `json:"projectId"`
+		EntityType string   `json:"entityType"`
+		EntityIDs  []string `json:"entityIds"`
+	}
+	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	members, err := c.store.ProjectMembers.AddMany(args.ProjectID, args.EntityType, args.EntityIDs)
+	if err != nil {
+		return nil, err
+	}
+	c.emit(navChangedEvent, nil)
+	c.emitDataChanged("", "")
+	return json.Marshal(members)
+}
+
 func (c *Core) projectsRemoveMember(payload []byte) ([]byte, error) {
 	var args memberArgs
 	if err := unmarshal(payload, &args); err != nil {

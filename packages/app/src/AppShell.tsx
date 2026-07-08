@@ -45,6 +45,7 @@ import { GraphScreen } from "./GraphScreen";
 import { TrashScreen } from "./TrashScreen";
 import { ChatsScreen } from "./ChatScreen";
 import { DndProvider, useDnd } from "./DndContext";
+import { MultiSelectProvider } from "./MultiSelectProvider";
 import { SettingsScreen } from "./SettingsScreen";
 import { useSync } from "./SyncProvider";
 
@@ -362,9 +363,11 @@ function NavBridge({
   return (
     <NavContext.Provider value={nav}>
       <ReminderNavigationBridge />
-      <DndProvider>
-        <Shell topInset={topInset}>{children}</Shell>
-      </DndProvider>
+      <MultiSelectProvider>
+        <DndProvider>
+          <Shell topInset={topInset}>{children}</Shell>
+        </DndProvider>
+      </MultiSelectProvider>
     </NavContext.Provider>
   );
 }
