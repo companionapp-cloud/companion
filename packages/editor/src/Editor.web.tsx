@@ -7,7 +7,7 @@ import type { EditorController, EditorProps } from "./types";
 // real DOM, so no WebView is needed — Vite resolves this via .web.tsx). It grows to
 // its content; the note view's ScrollView provides the scroll and document column.
 export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
-  { markdown, onChangeMarkdown, linkSource, documentSource, onOpenRef, linkRevision, variant, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange, onFocusChange },
+  { markdown, onChangeMarkdown, linkSource, documentSource, onOpenRef, onQuickCreate, linkRevision, variant, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange, onFocusChange, tableMenuPresenter },
   ref,
 ) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -22,6 +22,8 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
   documentSourceRef.current = documentSource;
   const onOpenRefRef = useRef(onOpenRef);
   onOpenRefRef.current = onOpenRef;
+  const onQuickCreateRef = useRef(onQuickCreate);
+  onQuickCreateRef.current = onQuickCreate;
   const onSubmitRef = useRef(onSubmit);
   onSubmitRef.current = onSubmit;
   const onFormatStateRef = useRef(onFormatStateChange);
@@ -35,7 +37,9 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
     (): EditorController => ({
       format: (name) => handleRef.current?.format(name),
       insertReference: () => handleRef.current?.insertReference(),
+      insertTable: () => handleRef.current?.insertTable(),
       insertDocument: () => handleRef.current?.insertDocument(),
+      resolveQuickCreate: (target) => handleRef.current?.resolveQuickCreate(target),
     }),
     [],
   );
@@ -62,6 +66,10 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
       // linkSource, no per-call ref indirection is needed).
       documentSource: documentSourceRef.current,
       onOpenRef: (ref) => onOpenRefRef.current?.(ref),
+      onQuickCreate: (req) => onQuickCreateRef.current?.(req),
+      // Desktop injects a Wails-backed native menu presenter; web leaves it undefined (the
+      // editor falls back to its built-in HTML popup). Captured once at mount, like documentSource.
+      tableMenuPresenter,
     });
     handleRef.current = handle;
     return () => {

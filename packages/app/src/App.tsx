@@ -11,6 +11,8 @@ import { AppShell } from "./AppShell";
 import type { NotificationScheduler } from "./RemindersProvider";
 import { FocusView } from "./FocusView";
 import { focusTarget } from "./focus";
+import { CaptureView } from "./CaptureView";
+import { captureRequested } from "./capture";
 
 /**
  * App is the shared root. The platform shell creates the CoreBridge (wasm on web,
@@ -35,11 +37,22 @@ export function App({
   documentSource?: DocumentSource;
 }) {
   const target = focusTarget();
+  const capture = captureRequested();
   return (
     <CoreProvider core={core}>
       <DocumentSourceProvider documentSource={documentSource}>
         <SyncProvider>
-        {target ? (
+        {capture ? (
+          <NotesProvider>
+            <TasksProvider>
+              <ProjectsProvider>
+                <ObjectTypesProvider>
+                  <CaptureView />
+                </ObjectTypesProvider>
+              </ProjectsProvider>
+            </TasksProvider>
+          </NotesProvider>
+        ) : target ? (
           <NotesProvider>
             <TasksProvider>
               <ProjectsProvider>

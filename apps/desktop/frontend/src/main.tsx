@@ -5,11 +5,12 @@ import "@wailsio/runtime";
 import { Window } from "@wailsio/runtime";
 import { createElement } from "react";
 import { AppRegistry } from "react-native";
-import { App, setFocusWindowOpener } from "@companion/app";
+import { App, setFocusWindowOpener, setCaptureWindowCloser, setTableMenuPresenter } from "@companion/app";
 import { createHttpBridge, documentsApi } from "@companion/core-bridge";
 import type { CoreBridge } from "@companion/core-bridge";
 import type { DocumentSource } from "@companion/editor";
 import { desktopNotificationScheduler } from "./notifications";
+import { desktopTableMenuPresenter } from "./tableMenu";
 
 // Double-clicking the window chrome (any `--wails-draggable: drag` region, e.g. the
 // toolbar or rail) zooms the window, matching native macOS titlebar behaviour. The
@@ -23,6 +24,15 @@ if (typeof window !== "undefined" && (window as unknown as { _wails?: unknown })
   });
 }
 
+// Quick-capture window (main.go opens /?capture=1 in a frameless, transparent window on the
+// global Cmd/Ctrl+Shift+N shortcut). The page's default body/#root background (index.html)
+// is opaque; clear it so the window is see-through and CaptureView's rounded card + shadow
+// read against it. Harmless on the main window, which never carries ?capture.
+if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("capture")) {
+  document.documentElement.style.background = "transparent";
+  document.body.style.background = "transparent";
+}
+
 // Desktop shell: the Wails Go process hosts the core and exposes it over HTTP + SSE
 // on the asset server (same origin). Wire a CoreBridge to it and mount the shared UI.
 const core = createHttpBridge();
@@ -32,6 +42,18 @@ const core = createHttpBridge();
 setFocusWindowOpener(({ kind, id }) => {
   void fetch(`/window?kind=${kind}&id=${encodeURIComponent(id)}`, { method: "POST" });
 });
+
+// Quick-capture dismiss: close the current (frameless) window via the Wails runtime. The
+// browser `window.close()` doesn't close a native Wails window, so CaptureView routes its
+// Cancel / Esc / post-save dismiss through here.
+setCaptureWindowCloser(() => {
+  void Window.Close();
+});
+
+// Editor tables: present a native Wails context menu instead of the built-in HTML popup. The
+// presenter posts the menu state to /table-menu and runs the chosen action on the "table:action"
+// event (see ./tableMenu.ts + apps/desktop/table_menu.go).
+setTableMenuPresenter(desktopTableMenuPresenter());
 
 // macOS uses a transparent titlebar (main.go MacTitleBarHiddenInset), so content
 // draws under the traffic lights — reserve space for them. Windows/Linux keep their

@@ -128,7 +128,9 @@ func (r *LinksRepo) DeleteSource(sourceType, sourceID string) error {
 
 // Full returns the entire graph: every node projection plus every edge. The payload is
 // ids/titles/kinds only (no bodies), so this stays small even for the whole
-// knowledgebase (PLAN §5.2).
+// knowledgebase (PLAN §5.2). Edges dangling to a *trashed* entity are dropped (see
+// pruneHiddenEdges) so deleted notes/tasks don't resurface as ghost nodes; edges to
+// targets that simply don't exist yet still dangle (the ghost affordance, PLAN §5.1).
 func (r *LinksRepo) Full() (*domain.Graph, error) {
 	nodes, err := r.queryNodes(`SELECT ` + graphNodeColumns + ` FROM graph_nodes;`)
 	if err != nil {
@@ -139,7 +141,108 @@ func (r *LinksRepo) Full() (*domain.Graph, error) {
 	if err != nil {
 		return nil, err
 	}
+	edges, err = r.pruneHiddenEdges(edges)
+	if err != nil {
+		return nil, err
+	}
 	return &domain.Graph{Nodes: nodes, Edges: edges}, nil
+}
+
+// hiddenKeys is the set of entity nodes that exist as rows but are excluded from the
+// graph_nodes view: trashed/tombstoned notes, tasks and documents, plus archived or
+// tombstoned habits and projects. It is the read-time complement of the incoming edges
+// DeleteSource intentionally leaves to dangle (PLAN §5.1) — a graph read uses it to hide
+// edges pointing at a deleted entity while still surfacing edges to not-yet-created ones.
+// Kept in lockstep with the graph_nodes view (migration 0011).
+func (r *LinksRepo) hiddenKeys() (map[nodeKey]bool, error) {
+	rows, err := r.db.Query(
+		`SELECT 'note', id     FROM notes     WHERE deleted_at IS NOT NULL OR deleting_at IS NOT NULL
+		 UNION ALL SELECT 'task', id     FROM tasks     WHERE deleted_at IS NOT NULL OR deleting_at IS NOT NULL
+		 UNION ALL SELECT 'habit', id    FROM habits    WHERE deleted_at IS NOT NULL OR deleting_at IS NOT NULL OR archived_at IS NOT NULL
+		 UNION ALL SELECT 'project', id  FROM projects  WHERE deleted_at IS NOT NULL OR archived_at IS NOT NULL
+		 UNION ALL SELECT 'document', id FROM documents WHERE deleted_at IS NOT NULL OR deleting_at IS NOT NULL;`)
+	if err != nil {
+		return nil, fmt.Errorf("hidden keys: %w", err)
+	}
+	defer rows.Close()
+	set := map[nodeKey]bool{}
+	for rows.Next() {
+		var k nodeKey
+		if err := rows.Scan(&k.typ, &k.id); err != nil {
+			return nil, err
+		}
+		set[k] = true
+	}
+	return set, rows.Err()
+}
+
+// pruneHiddenEdges drops any edge with an endpoint in the hidden (trashed/archived) set,
+// so a deleted entity stops appearing as a ghost node. Edges to genuinely-uncreated
+// targets are kept (they carry no hidden row), preserving the ghost affordance.
+func (r *LinksRepo) pruneHiddenEdges(edges []domain.GraphEdge) ([]domain.GraphEdge, error) {
+	hidden, err := r.hiddenKeys()
+	if err != nil {
+		return nil, err
+	}
+	if len(hidden) == 0 {
+		return edges, nil
+	}
+	out := make([]domain.GraphEdge, 0, len(edges))
+	for _, e := range edges {
+		if hidden[nodeKey{e.SourceType, e.SourceID}] || hidden[nodeKey{e.TargetType, e.TargetID}] {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+// EmbeddedDocumentIDs returns the ids of the documents a source embeds — its outgoing
+// ![[doc:<id>]] edges (PLAN §6.9). The bridge reads these before trashing a note so it can
+// cascade the deletion to the files the note owns. Must be read while the source's edges
+// still exist: Trash/Delete call DeleteSource, which drops them.
+func (r *LinksRepo) EmbeddedDocumentIDs(sourceType, sourceID string) ([]string, error) {
+	rows, err := r.db.Query(
+		`SELECT target_id FROM links
+		 WHERE source_type = ? AND source_id = ? AND target_type = ? AND kind = ?;`,
+		sourceType, sourceID, domain.NodeDocument, domain.KindEmbed)
+	if err != nil {
+		return nil, fmt.Errorf("query embedded documents: %w", err)
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan embedded document: %w", err)
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// DocumentReferencedByLiveSource reports whether any live (not trashed, not tombstoned)
+// note or task still embeds the document. The delete cascade consults it so a file shared
+// by another entity isn't trashed out from under it — the row-level analogue of
+// DocumentsRepo.HashReferencedElsewhere, which guards the shared blob bytes.
+func (r *LinksRepo) DocumentReferencedByLiveSource(docID string) (bool, error) {
+	rows, err := r.db.Query(
+		`SELECT 1 FROM links l JOIN notes n ON n.id = l.source_id
+		   WHERE l.source_type = ? AND l.target_type = ? AND l.target_id = ? AND l.kind = ?
+		     AND n.deleted_at IS NULL AND n.deleting_at IS NULL
+		 UNION ALL
+		 SELECT 1 FROM links l JOIN tasks t ON t.id = l.source_id
+		   WHERE l.source_type = ? AND l.target_type = ? AND l.target_id = ? AND l.kind = ?
+		     AND t.deleted_at IS NULL AND t.deleting_at IS NULL
+		 LIMIT 1;`,
+		domain.NodeNote, domain.NodeDocument, docID, domain.KindEmbed,
+		domain.NodeTask, domain.NodeDocument, docID, domain.KindEmbed)
+	if err != nil {
+		return false, fmt.Errorf("query document references: %w", err)
+	}
+	defer rows.Close()
+	referenced := rows.Next()
+	return referenced, rows.Err()
 }
 
 // Backlinks returns the source nodes that reference the given target (PLAN §5.2:
@@ -198,6 +301,12 @@ func (r *LinksRepo) Neighborhood(nodeType, nodeID string, depth int) (*domain.Gr
 		if reached[nodeKey{e.SourceType, e.SourceID}] && reached[nodeKey{e.TargetType, e.TargetID}] {
 			edges = append(edges, e)
 		}
+	}
+	// A trashed node is still reachable via its dangling incoming edges but is absent from
+	// `nodes` (graph_nodes filters it out); drop those edges so it doesn't ghost back in.
+	edges, err = r.pruneHiddenEdges(edges)
+	if err != nil {
+		return nil, err
 	}
 	return &domain.Graph{Nodes: nodes, Edges: edges}, nil
 }

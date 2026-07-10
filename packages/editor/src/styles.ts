@@ -234,7 +234,20 @@ export const EDITOR_CSS = `
 }
 .pm-wikilink-brokenicon svg { width: 0.9em; height: 0.9em; }
 
-/* Floating [[ autocomplete picker (appended to <body>, positioned at the caret). */
+/* Unresolved "empty" link: raw [[label]] text the author never resolved to a target. Styled
+   as a dashed, muted pill-ish run; double-clicking it opens the quick-create UI. */
+.pm-wikilink-empty {
+  border-radius: 4px;
+  padding: 0 2px;
+  color: #9a5a4a;
+  background: #faf1ee;
+  text-decoration: underline dashed #d9b7ac;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* Floating [[ autocomplete result list (appended to <body>, positioned at the caret). Focus
+   stays in the editor — this is a read-only list navigated with the keyboard. */
 .pm-wikilink-menu {
   position: fixed;
   z-index: 9999;
@@ -246,34 +259,6 @@ export const EDITOR_CSS = `
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
   font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   overflow: hidden;
-}
-.pm-wikilink-menu-header {
-  display: flex;
-  gap: 6px;
-  padding: 8px;
-  border-bottom: 1px solid #efefec;
-}
-.pm-wikilink-menu-input {
-  flex: 1;
-  min-width: 0;
-  padding: 6px 9px;
-  border: 1px solid #e0e0dc;
-  border-radius: 7px;
-  font: inherit;
-  color: #1a1a18;
-  outline: none;
-}
-.pm-wikilink-menu-input:focus { border-color: #f7a86b; box-shadow: 0 0 0 2px #fdece0; }
-.pm-wikilink-menu-typesel {
-  flex-shrink: 0;
-  padding: 6px 8px;
-  border: 1px solid #e0e0dc;
-  border-radius: 7px;
-  font: inherit;
-  color: #595954;
-  background: #fafaf8;
-  cursor: pointer;
-  outline: none;
 }
 .pm-wikilink-menu-list { max-height: 240px; overflow-y: auto; padding: 4px; }
 .pm-wikilink-menu-empty { padding: 10px 9px; color: #9a9a92; }
@@ -302,6 +287,125 @@ export const EDITOR_CSS = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* GFM tables: real rows/cells with a header row. Columns/rows auto-size (no columnResizing
+   plugin is installed, so cells are not resizable); the table caps at the editor width and
+   cells wrap rather than overflow. Rounded outer corners via a table border + rounded corner
+   cells (border-collapse: separate is required for per-corner radius). */
+.ProseMirror table {
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: auto;
+  width: auto;
+  max-width: 100%;
+  margin: 0 0 0.8em;
+  font-size: 0.95em;
+  border: 1px solid #e0e0dc;
+  border-radius: 8px;
+}
+.ProseMirror th,
+.ProseMirror td {
+  /* The table border draws the outer top + left edges; cells draw only the interior grid. */
+  border-right: 1px solid #e0e0dc;
+  border-bottom: 1px solid #e0e0dc;
+  padding: 6px 10px;
+  vertical-align: top;
+  text-align: left;
+  min-width: 3em;
+  position: relative;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.ProseMirror th:last-child,
+.ProseMirror td:last-child { border-right: none; }
+.ProseMirror tr:last-child th,
+.ProseMirror tr:last-child td { border-bottom: none; }
+/* Round the four corner cells so the header's top and the last row's bottom follow the radius. */
+.ProseMirror tr:first-child th:first-child,
+.ProseMirror tr:first-child td:first-child { border-top-left-radius: 8px; }
+.ProseMirror tr:first-child th:last-child,
+.ProseMirror tr:first-child td:last-child { border-top-right-radius: 8px; }
+.ProseMirror tr:last-child th:first-child,
+.ProseMirror tr:last-child td:first-child { border-bottom-left-radius: 8px; }
+.ProseMirror tr:last-child th:last-child,
+.ProseMirror tr:last-child td:last-child { border-bottom-right-radius: 8px; }
+.ProseMirror th {
+  background: #f5f5f3;
+  font-weight: 600;
+}
+/* prosemirror-tables tags the active cell(s) so menu actions have an anchor. */
+.ProseMirror .selectedCell { background: rgba(247, 104, 8, 0.1); }
+
+/* Per-cell hover affordance: a flat vertical-ellipsis button (styled like the toolbar buttons)
+   at the end of the hovered cell that opens the table menu. Appended to <body> and positioned
+   (fixed, viewport coords) by the tableMenu plugin from the cell's rect, so it works under any
+   mount. Hovering the button keeps it up (the plugin cancels the hide) so it stays clickable. */
+.pm-table-cellbtn {
+  position: fixed;
+  z-index: 20;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  background: transparent;
+  border: none;
+  color: #7b7b75;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  user-select: none;
+}
+.pm-table-cellbtn:hover { background: rgba(0, 0, 0, 0.08); color: #3e3e3a; }
+
+/* Built-in HTML table menu (web). Desktop/iOS present a native menu instead; the model is
+   identical (see tableMenu.ts). Mirrors the wikilink picker chrome. */
+.pm-table-menu,
+.pm-table-submenu {
+  z-index: 10000;
+  min-width: 200px;
+  background: #ffffff;
+  border: 1px solid #e6e6e2;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+  padding: 5px;
+  font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #1a1a18;
+}
+.pm-table-menu { position: fixed; }
+.pm-table-submenu {
+  position: absolute;
+  top: -5px;
+  left: 100%;
+  margin-left: 3px;
+  min-width: 150px;
+  display: none;
+}
+.pm-table-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  position: relative;
+}
+.pm-table-menu-item:hover { background: #f5f5f3; }
+.pm-table-menu-item.has-submenu:hover > .pm-table-submenu { display: block; }
+.pm-table-menu-item.is-disabled { color: #bcbcb6; cursor: default; }
+.pm-table-menu-item.is-disabled:hover { background: transparent; }
+.pm-table-menu-label { flex: 1; }
+.pm-table-menu-arrow { color: #9a9a92; font-size: 0.78em; }
+.pm-table-menu-check {
+  width: 14px;
+  flex: 0 0 14px;
+  color: #b7500a;
+  text-align: center;
+}
+.pm-table-menu-sep { height: 1px; background: #efefec; margin: 4px 6px; }
 `;
 
 // Web only: inject the editor CSS into the document head once.

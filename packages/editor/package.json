@@ -19,18 +19,23 @@
     "prosemirror-markdown": "1.13.4",
     "prosemirror-model": "1.25.9",
     "prosemirror-state": "1.4.4",
+    "prosemirror-tables": "1.7.1",
     "prosemirror-view": "1.42.0"
   },
   "peerDependencies": {
     "react": "*",
     "react-native": "*",
-    "react-native-webview": "*"
+    "react-native-webview": "*",
+    "expo-clipboard": "*"
   },
   "peerDependenciesMeta": {
     "react-native": {
       "optional": true
     },
     "react-native-webview": {
+      "optional": true
+    },
+    "expo-clipboard": {
       "optional": true
     }
   },

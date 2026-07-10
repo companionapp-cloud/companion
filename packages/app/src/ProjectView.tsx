@@ -17,6 +17,7 @@ import {
   type IconName,
 } from "@companion/design-system";
 import { useNav, type ProjectSection } from "./nav-context";
+import { useToolVisibility, type ToolId } from "./ToolVisibilityProvider";
 import { useCore } from "./CoreContext";
 import { useProjects } from "./ProjectsProvider";
 import { useNotes } from "./NotesProvider";
@@ -29,11 +30,11 @@ import { useMultiSelect, pressMods } from "./MultiSelectProvider";
 import { SelectionStack } from "./SelectionStack";
 import { MultiSelectBar } from "./MultiSelectBar";
 
-const SECTIONS: { id: ProjectSection; label: string; icon: IconName }[] = [
-  { id: "notes", label: "Notes", icon: "notes" },
-  { id: "tasks", label: "Tasks", icon: "tasks" },
-  { id: "calendars", label: "Calendars", icon: "calendar" },
-  { id: "habits", label: "Habits", icon: "habits" },
+const SECTIONS: { id: ProjectSection; label: string; icon: IconName; tool: ToolId }[] = [
+  { id: "notes", label: "Notes", icon: "notes", tool: "notes" },
+  { id: "tasks", label: "Tasks", icon: "tasks", tool: "tasks" },
+  { id: "calendars", label: "Calendars", icon: "calendar", tool: "calendar" },
+  { id: "habits", label: "Habits", icon: "habits", tool: "habits" },
 ];
 const SECTION_LABEL: Record<ProjectSection, string> = { notes: "Notes", tasks: "Tasks", calendars: "Calendars", habits: "Habits" };
 
@@ -95,7 +96,7 @@ export function ProjectView() {
   }
 
   return (
-    <SplitView storageKey="companion.project.listWidth" defaultWidth={layout.listW} minWidth={240} maxWidth={460} aside={<ListColumn notes={notes} tasks={tasks} seeds={seeds} noteCount={noteMembers.length} taskCount={taskMembers.length} />}>
+    <SplitView storageKey="companion.project.listWidth" defaultWidth={layout.listW} minWidth={240} maxWidth={460} aside={<ListColumn notes={notes} tasks={tasks} seeds={seeds} noteCount={notes.length} taskCount={tasks.length + seeds.length} />}>
       <DetailPane notes={notes} />
     </SplitView>
   );
@@ -109,6 +110,8 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
   const tasksStore = useTasks();
   const { addMember } = useProjects();
   const ms = useMultiSelect();
+  // Hiding a tool in Settings › Tools also drops its project section from this menu.
+  const { hidden } = useToolVisibility();
   const loc = nav.current;
 
   // Register the on-screen section list for multiselect (notes / actionable tasks; seeds
@@ -234,7 +237,7 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
         </Text>
       </View>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.md, gap: 2 }}>
-        {SECTIONS.map((s) => (
+        {SECTIONS.filter((s) => !hidden.has(s.tool)).map((s) => (
           <ListRow
             key={s.id}
             icon={<Icon name={s.icon} size={18} color={colors.textSecondary} />}
@@ -294,7 +297,7 @@ function DetailPane({ notes }: { notes: Note[] }) {
         key={note.id}
         note={note}
         onChange={notesStore.save}
-        onPopOut={(id) => nav.openNote(id)}
+        onPopOut={(id) => nav.openInNewTab({ kind: "note", id })}
         onDelete={async (id) => {
           await notesStore.remove(id);
           nav.openProjectSection(loc.projectId, "notes");
@@ -317,6 +320,7 @@ function DetailPane({ notes }: { notes: Note[] }) {
         key={task.id}
         task={task}
         save={tasksStore.update}
+        onPopOut={(id) => nav.openInNewTab({ kind: "task", id })}
         onDelete={async (id) => {
           await tasksStore.remove(id);
           nav.openProjectSection(loc.projectId, "tasks");

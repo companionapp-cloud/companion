@@ -12,6 +12,8 @@ export function trashApi(core: CoreBridge) {
     /** Permanently delete an item now ("Delete forever"). */
     purge: (entityType: TrashEntityType, id: string) =>
       core.invoke<{ ok: boolean }>("trash.purge", { entityType, id }),
+    /** Permanently delete everything in the Trash ("Empty trash"). */
+    empty: () => core.invoke<{ ok: boolean }>("trash.empty"),
   };
 }
 

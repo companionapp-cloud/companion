@@ -90,6 +90,44 @@ func TestBacklinksAndDanglingTarget(t *testing.T) {
 	}
 }
 
+// TestGraphHidesTrashedNodes guards the graph read: an edge pointing at a trashed entity
+// drops out (so the deleted node doesn't ghost back in), while an edge to a target that
+// was never created still dangles.
+func TestGraphHidesTrashedNodes(t *testing.T) {
+	clk := &fixedClock{t: time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)}
+	s := newTestStore(t, clk)
+
+	task, err := s.Tasks.Create(CreateTaskInput{Title: "Doomed"})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	// A live note references the task and a never-created ghost.
+	if _, err := s.Notes.Create(CreateNoteInput{Title: "Src", ContentMD: "[[task:" + task.ID + "]] and [[note:ghost-id]]"}); err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+
+	g, _ := s.Links.Full()
+	if len(g.Edges) != 2 {
+		t.Fatalf("expected 2 edges before trash, got %+v", g.Edges)
+	}
+
+	// Trashing the task removes its own outgoing edges but leaves the note's incoming edge
+	// dangling; the graph read must still drop it so the task stops appearing.
+	if err := s.Tasks.Trash(task.ID); err != nil {
+		t.Fatalf("trash task: %v", err)
+	}
+	g, _ = s.Links.Full()
+	if hasNode(g, task.ID) {
+		t.Errorf("trashed task should not be a graph node: %+v", g.Nodes)
+	}
+	if len(g.Edges) != 1 {
+		t.Fatalf("expected only the dangling ghost edge after trash, got %+v", g.Edges)
+	}
+	if g.Edges[0].TargetID != "ghost-id" {
+		t.Errorf("expected the surviving edge to be the uncreated ghost, got %+v", g.Edges[0])
+	}
+}
+
 func TestNeighborhoodDepth(t *testing.T) {
 	clk := &fixedClock{t: time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)}
 	s := newTestStore(t, clk)

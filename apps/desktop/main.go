@@ -71,6 +71,9 @@ func main() {
 	// for Options) and assigned just below.
 	var app *application.App
 	var mainWindow *application.WebviewWindow
+	// Native table context menu (editor tables). Built after the window exists; the
+	// /table-menu handler captures it by reference, so it's set before any request arrives.
+	var tableCtxMenu *tableMenu
 	openFocusWindow := func(url string) {
 		app.Window.NewWithOptions(application.WebviewWindowOptions{
 			Title:            "Companion",
@@ -84,6 +87,55 @@ func main() {
 				TitleBar: application.MacTitleBarHiddenInset,
 			},
 		})
+	}
+
+	// Quick capture (Cmd/Ctrl+Shift+N): a small, frameless panel for jotting a note or task.
+	// It's presented Spotlight-style — floating in over whatever you're doing without pulling
+	// Companion (or its main window) to the foreground, and dismissed by just closing that one
+	// window. Reused if already open so repeated presses resurface it; nilled on close so the
+	// next press builds a fresh one. Frameless + transparent lets the webview draw its own
+	// rounded, shadowed card (packages/app CaptureView) — see the ?capture=1 route in App.tsx.
+	var captureWindow *application.WebviewWindow
+	openCaptureWindow := func() {
+		if captureWindow != nil {
+			presentCapturePanel(captureWindow)
+			return
+		}
+		win := app.Window.NewWithOptions(application.WebviewWindowOptions{
+			Name:          "capture",
+			Title:         "Quick Capture",
+			Width:         560,
+			Height:        480,
+			DisableResize: true,
+			Frameless:     true,
+			// Created hidden: Wails' own show activates the whole app. We surface it ourselves
+			// via presentCapturePanel (orderFrontRegardless — no app activation) below.
+			Hidden:           true,
+			BackgroundType:   application.BackgroundTypeTransparent,
+			BackgroundColour: application.NewRGBA(0, 0, 0, 0),
+			InitialPosition:  application.WindowCentered,
+			URL:              "/?capture=1",
+			// Esc dismisses via a capture-phase keydown handler in CaptureView (which also
+			// cleans up an empty draft). A native Wails keybinding can't do that — it's
+			// swallowed by the focused ProseMirror editor — so it's intentionally not set here.
+			Mac: application.MacWindow{
+				Backdrop: application.MacBackdropTransparent,
+				// The window content is transparent except for the CaptureView card, which
+				// draws its own rounded corners + shadow. macOS's native window shadow on a
+				// transparent (non-opaque) window is computed before the web content paints,
+				// so it renders as a hard rectangle behind the card — disable it and let the
+				// CSS card shadow be the only one.
+				DisableShadow: true,
+			},
+		})
+		// Just forget the window on close (Esc / Cancel / after save) so the next shortcut
+		// press builds a fresh one. Nothing else to do: because presenting it never activated
+		// the app, closing it doesn't promote the main window or otherwise disturb focus.
+		win.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
+			captureWindow = nil
+		})
+		captureWindow = win
+		presentCapturePanel(win)
 	}
 
 	app = application.New(application.Options{
@@ -106,7 +158,9 @@ func main() {
 			},
 		},
 		Assets: application.AssetOptions{
-			Handler: rootHandler(handler, notifHandler, openFocusWindow),
+			Handler: rootHandler(handler, notifHandler, openFocusWindow, func(w http.ResponseWriter, r *http.Request) {
+				tableCtxMenu.handleOpen(w, r)
+			}),
 		},
 	})
 
@@ -160,6 +214,18 @@ func main() {
 
 	installMenuBar(app, mainWindow)
 
+	// Register the native table context menu now that the app + window exist. The /table-menu
+	// route (set up above, capturing tableCtxMenu by reference) drives it.
+	tableCtxMenu = installTableMenu(app, mainWindow)
+
+	// Global quick-capture shortcut (PLAN §6.4): system-wide Cmd+Shift+N (Ctrl+Shift+N off
+	// macOS) opens the capture window even when Companion isn't focused — the whole point of
+	// staying resident in the menu bar. "CmdOrCtrl" resolves per-platform. The OS binding is
+	// deferred until Run(); registration only fails here on a malformed accelerator.
+	if err := app.GlobalShortcut.Register("CmdOrCtrl+Shift+N", openCaptureWindow); err != nil {
+		log.Printf("register quick-capture shortcut: %v", err)
+	}
+
 	if err := app.Run(); err != nil {
 		log.Fatalf("run app: %v", err)
 	}
@@ -169,7 +235,7 @@ func main() {
 // (/invoke, /events) to the bridge handler. /window spawns a focus-mode window for a
 // document (the workspace's expand/pop-out action) — browser window.open can't create a
 // real app window in the Wails webview, so the frontend asks the Go side here.
-func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusWindow func(url string)) http.Handler {
+func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusWindow func(url string), openTableMenu http.HandlerFunc) http.Handler {
 	frontend, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {
 		log.Fatalf("mount frontend assets: %v", err)
@@ -191,6 +257,8 @@ func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusW
 		openFocusWindow("/?" + url.Values{kind: {id}}.Encode())
 		w.WriteHeader(http.StatusNoContent)
 	})
+	// Present the native table context menu at a point (the editor posts the menu state here).
+	mux.HandleFunc("/table-menu", openTableMenu)
 	mux.Handle("/", files)
 	return mux
 }

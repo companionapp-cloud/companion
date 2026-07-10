@@ -39,6 +39,7 @@ export const ICON_PATHS = {
   quote: "M17 6H3M21 12H8M21 18H8M3 12v6",
   listBullet: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
   listOrdered: "M10 6h11M10 12h11M10 18h11M4 6h1v4M4 10h2M6 18H4c0-1 2-2 2-3s-1-1.5-2-1",
+  table: "M12 3v18M3 9h18M3 15h18M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z",
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;

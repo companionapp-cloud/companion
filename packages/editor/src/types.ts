@@ -1,4 +1,8 @@
 import type { FormatName, FormatState } from "./formatCommands";
+import type { TableMenuPresenter } from "./tableMenu";
+
+export type { TableMenuPresenter, TableMenuRequest } from "./tableMenu";
+export type { TableMenuItem } from "./tableCommands";
 
 /** Imperative handle exposed via `ref` on the {@link Editor}, letting the host's formatting
  * toolbar drive the editor. On web it calls the DOM editor directly; on native it injects
@@ -6,9 +10,30 @@ import type { FormatName, FormatState } from "./formatCommands";
 export interface EditorController {
   format(name: FormatName): void;
   insertReference(): void;
+  /** Insert a blank 2×2 GFM table at the cursor (full variant only). */
+  insertTable(): void;
   /** Open the OS file picker to embed a document (PLAN §6.9). No-op unless a
    * {@link DocumentSource} is wired (and, today, web only). */
   insertDocument(): void;
+  /** Complete a quick-create started from an empty `[[label]]` link (see
+   * {@link EditorProps.onQuickCreate}): pass the newly created target to swap the raw text
+   * for a resolved chip, or null to cancel and leave the text as-is. */
+  resolveQuickCreate(target: QuickCreateTarget | null): void;
+}
+
+/** Fired when the reader double-clicks an unresolved `[[label]]` link. The host opens its
+ * quick-create UI (make a note/task titled `label`) and answers via
+ * {@link EditorController.resolveQuickCreate}. `embed` mirrors a leading `!` on the link. */
+export interface QuickCreateRequest {
+  label: string;
+  embed: boolean;
+}
+
+/** The entity a quick-create resolved to, used to build the replacement chip. */
+export interface QuickCreateTarget {
+  type: LinkType;
+  id: string;
+  title: string;
 }
 
 // The editor's cross-platform contract. `markdown` seeds the editor once (the editor
@@ -27,6 +52,10 @@ export interface EditorProps {
   /** Called when the reader opens a wikilink chip (select it, then click again). The host
    * decides how — e.g. open the target in a new workspace tab. Omit and chips only select. */
   onOpenRef?: (ref: LinkRef) => void;
+  /** Called when the reader double-clicks an unresolved `[[label]]` link, so the host can
+   * offer to quick-create a note/task titled `label`. The host answers via the controller's
+   * {@link EditorController.resolveQuickCreate}. Omit and empty links stay inert text. */
+  onQuickCreate?: (req: QuickCreateRequest) => void;
   /** Change this value's identity to re-hydrate `[[task:…]]` chips against the latest task
    * data (via {@link LinkSource.lookup}). The editor otherwise hydrates a chip only when it
    * mounts, so a task edited elsewhere while the note stays open would look stale. Only
@@ -57,6 +86,10 @@ export interface EditorProps {
   /** Notified when the editor gains/loses focus. The web host uses it to show its formatting
    * bar while the document is focused; native manages its own keyboard toolbar internally. */
   onFocusChange?: (focused: boolean) => void;
+  /** Present the table cell menu natively instead of the built-in HTML popup. The desktop shell
+   * passes the Wails-backed presenter here (injected via `setTableMenuPresenter`); web leaves it
+   * undefined (HTML popup). iOS wires its own presenter inside the WebView. Full variant only. */
+  tableMenuPresenter?: TableMenuPresenter;
 }
 
 /** A reference to open — the payload of {@link EditorProps.onOpenRef}. */

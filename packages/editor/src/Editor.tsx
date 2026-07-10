@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import {
+  Dimensions,
   FlatList,
   Keyboard,
   Modal,
@@ -12,10 +13,12 @@ import {
   View,
 } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
+import * as Clipboard from "expo-clipboard";
 import { Icon, type IconName } from "@companion/design-system";
 import { EDITOR_JS } from "./editorBundle.generated";
 import { EDITOR_CSS } from "./styles";
 import type { FormatName, FormatState } from "./formatCommands";
+import type { TableMenuItem } from "./tableCommands";
 import type { DocumentSource, EditorController, EditorProps, LinkSource, LinkSuggestion, LinkType } from "./types";
 
 // The formatting toolbar's buttons, in order. Each format button injects window.__format;
@@ -87,7 +90,7 @@ interface PickerState {
 }
 
 export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
-  { markdown, onChangeMarkdown, linkSource, documentSource, onOpenRef, linkRevision, variant, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange },
+  { markdown, onChangeMarkdown, linkSource, documentSource, onOpenRef, onQuickCreate, linkRevision, variant, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange },
   ref,
 ) {
   const simple = variant === "simple";
@@ -101,6 +104,8 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
   documentSourceRef.current = documentSource;
   const onOpenRefRef = useRef(onOpenRef);
   onOpenRefRef.current = onOpenRef;
+  const onQuickCreateRef = useRef(onQuickCreate);
+  onQuickCreateRef.current = onQuickCreate;
   const onSubmitRef = useRef(onSubmit);
   onSubmitRef.current = onSubmit;
   const webRef = useRef<WebView>(null);
@@ -108,6 +113,8 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
   const [editorFocused, setEditorFocused] = useState(false);
   const [kbHeight, setKbHeight] = useState(0);
   const [picker, setPicker] = useState<PickerState>({ open: false, fromTrigger: false, embed: false });
+  // The table cell menu the WebView asked us to present natively (null when closed).
+  const [tableMenu, setTableMenu] = useState<{ items: TableMenuItem[]; anchor: { x: number; y: number } } | null>(null);
   // Latest formatting snapshot from the WebView, so the toolbar can show active states.
   const [formatState, setFormatState] = useState<FormatState | null>(null);
   // Simple variant: the WebView is sized to its reported content height, between the host's
@@ -178,8 +185,11 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
     (): EditorController => ({
       format: (name) => inject(`window.__format && window.__format(${jsonArg(name)});`),
       insertReference: () => inject(`window.__insertReference && window.__insertReference();`),
+      insertTable: () => inject(`window.__insertTable && window.__insertTable();`),
       // Attach a file via the shell's OS-native picker (PLAN §6.9), then place the embed.
       insertDocument: () => void pickDocument(),
+      resolveQuickCreate: (target) =>
+        inject(`window.__resolveQuickCreate && window.__resolveQuickCreate(${jsonArg(target)});`),
     }),
     // `inject`/`jsonArg`/`pickDocument` read refs and are stable enough; rebuild is harmless.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -223,8 +233,22 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
         case "linkTriggerEnd":
           setPicker((p) => (p.fromTrigger ? { ...p, open: false } : p));
           break;
+        case "tableMenu":
+          if (msg.payload && Array.isArray(msg.payload.items)) {
+            setTableMenu({ items: msg.payload.items as TableMenuItem[], anchor: msg.payload.anchor ?? { x: 0, y: 0 } });
+          }
+          break;
+        case "copy":
+          // Table copy actions route here — the WebView clipboard is unreliable, so write from
+          // the host with expo-clipboard.
+          if (typeof msg.payload === "string") void Clipboard.setStringAsync(msg.payload);
+          break;
         case "openRef":
           if (msg.payload?.type && msg.payload?.id) onOpenRefRef.current?.(msg.payload);
+          break;
+        case "quickCreate":
+          if (typeof msg.payload?.label === "string")
+            onQuickCreateRef.current?.({ label: msg.payload.label, embed: !!msg.payload.embed });
           break;
         case "linkSearch": {
           const src = linkSourceRef.current;
@@ -272,6 +296,16 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
     setPicker((p) => ({ ...p, open: false }));
   };
 
+  // Table menu: run the picked action in the WebView, or tell it the menu was dismissed.
+  const onTableAction = (id: string) => {
+    inject(`window.__runTableAction && window.__runTableAction(${jsonArg(id)});`);
+    setTableMenu(null);
+  };
+  const onDismissTableMenu = () => {
+    inject(`window.__dismissTableMenu && window.__dismissTableMenu();`);
+    setTableMenu(null);
+  };
+
   // The simple field types `[[` to open the native picker; its keyboard toolbar is skipped
   // (it's a screen-anchored overlay that assumes the full-screen editor's layout).
   const showToolbar = !simple && editorFocused && kbHeight > 0 && !picker.open;
@@ -310,6 +344,13 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
                 <Icon name="link" size={20} color="#3e3e3a" />
               </Pressable>
             ) : null}
+            <Pressable
+              accessibilityLabel="Insert table"
+              style={({ pressed }) => [styles.fmtBtn, pressed && styles.fmtBtnPressed]}
+              onPress={() => inject(`window.__insertTable && window.__insertTable();`)}
+            >
+              <Icon name="table" size={20} color="#3e3e3a" />
+            </Pressable>
             {documentSource ? (
               <Pressable
                 accessibilityLabel="Attach file"
@@ -350,9 +391,78 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
         onSelect={onSelect}
         onCancel={onCancelPicker}
       />
+
+      <TableMenuSheet
+        menu={tableMenu}
+        onSelect={onTableAction}
+        onDismiss={onDismissTableMenu}
+      />
     </View>
   );
 });
+
+// The native table cell menu (iOS). Presented as a menu card anchored near the tap point, with
+// the two grouped submenus ("Copy table as", "Align column") as an in-place drill-down. A native
+// RN menu rather than an HTML popup, so it sits above the WebView and matches the platform.
+function TableMenuSheet({
+  menu,
+  onSelect,
+  onDismiss,
+}: {
+  menu: { items: TableMenuItem[]; anchor: { x: number; y: number } } | null;
+  onSelect: (id: string) => void;
+  onDismiss: () => void;
+}) {
+  const [submenu, setSubmenu] = useState<TableMenuItem | null>(null);
+  // Reset the drill-down whenever a new menu opens/closes.
+  useEffect(() => {
+    setSubmenu(null);
+  }, [menu]);
+  if (!menu) return null;
+
+  const list = submenu?.children ?? menu.items;
+  const width = 240;
+  const { width: screenW, height: screenH } = Dimensions.get("window");
+  const left = Math.max(8, Math.min(menu.anchor.x, screenW - width - 8));
+  const top = Math.max(48, Math.min(menu.anchor.y, screenH - 320));
+
+  const renderRow = (item: TableMenuItem, i: number) => {
+    if (item.separator) return <View key={`s${i}`} style={styles.tmSep} />;
+    const disabled = item.enabled === false;
+    const hasChildren = !!item.children?.length;
+    return (
+      <Pressable
+        key={item.id ?? item.label ?? String(i)}
+        disabled={disabled}
+        style={({ pressed }) => [styles.tmItem, pressed && !disabled && styles.tmItemPressed]}
+        onPress={() => {
+          if (hasChildren) setSubmenu(item);
+          else if (item.id) onSelect(item.id);
+        }}
+      >
+        <Text style={styles.tmCheck}>{item.checked ? "✓" : ""}</Text>
+        <Text style={[styles.tmLabel, disabled && styles.tmLabelDisabled]}>{item.label}</Text>
+        {hasChildren ? <Text style={styles.tmArrow}>›</Text> : null}
+      </Pressable>
+    );
+  };
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onDismiss}>
+      <Pressable style={styles.tmBackdrop} onPress={onDismiss} />
+      <View style={[styles.tmCard, { left, top, width }]}>
+        {submenu ? (
+          <Pressable style={({ pressed }) => [styles.tmItem, pressed && styles.tmItemPressed]} onPress={() => setSubmenu(null)}>
+            <Text style={styles.tmArrow}>‹</Text>
+            <Text style={styles.tmLabel}>{submenu.label}</Text>
+          </Pressable>
+        ) : null}
+        {submenu ? <View style={styles.tmSep} /> : null}
+        <ScrollView style={{ maxHeight: 300 }}>{list.map(renderRow)}</ScrollView>
+      </View>
+    </Modal>
+  );
+}
 
 // The native `[[` picker: a bottom sheet with a search field, a type filter, and results.
 function LinkPicker({
@@ -575,4 +685,33 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   itemTitle: { flex: 1, fontSize: 16, color: "#1a1a18" },
+
+  // Table cell menu (native card anchored near the tap point).
+  tmBackdrop: { flex: 1, backgroundColor: "transparent" },
+  tmCard: {
+    position: "absolute",
+    backgroundColor: "#ffffff",
+    borderRadius: 12,
+    paddingVertical: 5,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#e6e6e2",
+    shadowColor: "#000",
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  tmItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  tmItemPressed: { backgroundColor: "#f2f2ef" },
+  tmCheck: { width: 14, fontSize: 15, color: "#b7500a", textAlign: "center" },
+  tmLabel: { flex: 1, fontSize: 15, color: "#1a1a18" },
+  tmLabelDisabled: { color: "#bcbcb6" },
+  tmArrow: { fontSize: 17, color: "#9a9a92" },
+  tmSep: { height: StyleSheet.hairlineWidth, backgroundColor: "#ececea", marginVertical: 3 },
 });

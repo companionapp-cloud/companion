@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, View, type GestureResponderEvent } from "react-native";
 import type { Task, UpdateTaskInput } from "@companion/core-bridge";
 import { Button, Icon, IconButton, Input, Text, TextField, colors, layout, radius, space, type IconName, type PressState } from "@companion/design-system";
-import { Editor, type LinkRef } from "@companion/editor";
+import { Editor, type EditorController, type LinkRef } from "@companion/editor";
 import { useCore } from "./CoreContext";
 import { useTasks } from "./TasksProvider";
 import { useSync } from "./SyncProvider";
 import { REPEAT_PRESETS, repeatLabel } from "./repeat";
 import { useLinkSource } from "./useLinkSource";
+import { useQuickCreateLink } from "./useQuickCreateLink";
 import { DateTimeInput } from "./DateTimeInput";
 import { TaskGraph } from "./TaskGraph";
 import { MembershipPicker } from "./MembershipPicker";
@@ -20,6 +21,9 @@ export interface TaskEditorProps {
   save: (id: string, fields: UpdateTaskInput) => void;
   /** Shown as a delete (→ Trash) action when provided. */
   onDelete?: (id: string) => void;
+  /** Shown as an "open in the workspace tab strip" action when provided (used from the
+   *  project detail pane, which has no tabs of its own). */
+  onPopOut?: (id: string) => void;
   /** Render the built-in sub-toolbar (projects + delete) and its overlays. Desktop keeps
    *  it; mobile turns it off and hosts those actions in the nav header instead. */
   showToolbar?: boolean;
@@ -34,9 +38,12 @@ export interface TaskEditorProps {
 /** The detail editor for a single task (PLAN §6.4): a status checkbox, title, quick due /
  *  reminder presets, freeform notes (markdown — scanned for wikilinks), and project
  *  membership. Keyed by task id upstream so each task gets a fresh instance. */
-export function TaskEditor({ task, save, onDelete, showToolbar = true, onOpenRef, onConnectSync }: TaskEditorProps) {
+export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true, onOpenRef, onConnectSync }: TaskEditorProps) {
   const tasks = useTasks();
   const linkSource = useLinkSource();
+  const editorRef = useRef<EditorController>(null);
+  // Empty `[[label]]` links in the notes double-click to a quick-create dialog.
+  const quickCreate = useQuickCreateLink(editorRef);
   const [title, setTitle] = useState(task.title);
   const [showProjects, setShowProjects] = useState(false);
   const [showGraph, setShowGraph] = useState(false);
@@ -72,6 +79,11 @@ export function TaskEditor({ task, save, onDelete, showToolbar = true, onOpenRef
           <IconButton label={showMeta ? "Hide metadata" : "Show metadata"} size="sm" active={showMeta} onPress={() => setShowMeta((v) => !v)}>
             <Icon name="panelRight" size={16} color={showMeta ? colors.accentHover : colors.textTertiary} />
           </IconButton>
+          {onPopOut ? (
+            <IconButton label="Open in tab" size="sm" onPress={() => onPopOut(task.id)}>
+              <Icon name="external" size={15} color={colors.textTertiary} />
+            </IconButton>
+          ) : null}
           {onDelete ? (
             <IconButton label="Delete task" size="sm" onPress={() => setConfirmDelete(true)}>
               <Icon name="trash" size={16} color={colors.textTertiary} />
@@ -189,12 +201,14 @@ export function TaskEditor({ task, save, onDelete, showToolbar = true, onOpenRef
         {/* Notes read as a rounded input, left-aligned with the due / reminder fields above. */}
         <View style={styles.notesField}>
           <Editor
+            ref={editorRef}
             variant="simple"
             markdown={task.notesMd}
             placeholder="Notes… use [[ to link a note."
             onChangeMarkdown={(md) => debouncedSave("notes", { notesMd: md })}
             linkSource={linkSource}
             onOpenRef={onOpenRef}
+            onQuickCreate={quickCreate.onQuickCreate}
             // `tasks.tasks` gets a fresh identity when any task changes, re-hydrating chips.
             linkRevision={tasks.tasks}
             minHeight={110}
@@ -212,6 +226,8 @@ export function TaskEditor({ task, save, onDelete, showToolbar = true, onOpenRef
           />
         ) : null}
       </View>
+
+      {quickCreate.dialog}
 
       {showProjects ? (
         <MembershipPicker entityType="task" entityId={task.id} onClose={() => setShowProjects(false)} />

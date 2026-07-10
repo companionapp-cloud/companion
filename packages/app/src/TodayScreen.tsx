@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Platform, Pressable, ScrollView, View } from "react-native";
 import {
   Badge,
   Button,
@@ -13,11 +13,15 @@ import {
   space,
   type PressState,
 } from "@companion/design-system";
-import { Editor, type LinkRef } from "@companion/editor";
+import { Editor, type EditorController, type FormatState, type LinkRef } from "@companion/editor";
+import { FormattingBar } from "./FormattingBar";
+import { tableMenuPresenter } from "./tableMenu";
 import { useNav } from "./nav-context";
 import { useNotes } from "./NotesProvider";
 import { useTasks } from "./TasksProvider";
 import { useLinkSource } from "./useLinkSource";
+import { useQuickCreateLink } from "./useQuickCreateLink";
+import { useDocumentSource } from "./DocumentSourceContext";
 
 // The "Today" tool (PLAN §6.x): a large daily-note editor with a small mini-calendar aside.
 // A daily note is an ordinary note stamped with a `date` (YYYY-MM-DD). The note for the
@@ -78,17 +82,17 @@ export function TodayScreen() {
             <Button variant="ghost" size="sm" label="Jump to today" onPress={() => setSelected(today)} />
           ) : null}
         </View>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.doc}>
-          {/* Keyed by date so switching days remounts with that day's content seeded in. */}
-          <DailyNote
-            key={selected}
-            date={selected}
-            onOpenRef={(ref) => {
-              // Clicking a chip opens its target in a new workspace tab.
-              if (ref.type === "task" || ref.type === "note") nav.openInNewTab({ kind: ref.type, id: ref.id });
-            }}
-          />
-        </ScrollView>
+        {/* Keyed by date so switching days remounts with that day's content seeded in.
+            DailyNote owns its own scroll region on web so the floating formatting bar can
+            anchor to the fixed viewport rather than scroll away with the document. */}
+        <DailyNote
+          key={selected}
+          date={selected}
+          onOpenRef={(ref) => {
+            // Clicking a chip opens its target in a new workspace tab.
+            if (ref.type === "task" || ref.type === "note") nav.openInNewTab({ kind: ref.type, id: ref.id });
+          }}
+        />
       </View>
     </SplitView>
   );
@@ -112,6 +116,8 @@ export function DailyNote({
   const notes = useNotes();
   const tasks = useTasks();
   const linkSource = useLinkSource();
+  // File embedding (PLAN §6.9): present on web (OPFS blob store), undefined elsewhere.
+  const documentSource = useDocumentSource();
 
   // Resolve this day's note once, at mount. `notes.notes` is newest-updated first, so `find`
   // lands on the most recent note for the day if somehow more than one shares the date. We
@@ -119,6 +125,33 @@ export function DailyNote({
   const initial = useRef(notes.notes.find((n) => n.date === date)).current;
   const noteIdRef = useRef<string | null>(initial?.id ?? null);
   const [hasNote, setHasNote] = useState(!!initial);
+
+  // Web/desktop: the formatting bar floats over the editor while it's focused. The editor
+  // reports which toggles are active/available; the ref drives them. (Native renders its own
+  // keyboard-anchored toolbar inside the editor, so this stays dormant there.) Mirrors the
+  // note editor's formatting-bar plumbing.
+  const editorRef = useRef<EditorController>(null);
+  // Empty `[[label]]` links double-click to a quick-create dialog (make a note/task chip).
+  const quickCreate = useQuickCreateLink(editorRef);
+  const [formatState, setFormatState] = useState<FormatState | null>(null);
+  // Show the bar whenever the editor is focused. Clicking a bar button briefly blurs the
+  // editor (the action then refocuses it), so hiding is delayed a beat to avoid a flicker.
+  const [editorFocused, setEditorFocused] = useState(false);
+  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleFocusChange = useCallback((focused: boolean) => {
+    if (blurTimer.current) {
+      clearTimeout(blurTimer.current);
+      blurTimer.current = null;
+    }
+    if (focused) setEditorFocused(true);
+    else blurTimer.current = setTimeout(() => setEditorFocused(false), 200);
+  }, []);
+  useEffect(
+    () => () => {
+      if (blurTimer.current) clearTimeout(blurTimer.current);
+    },
+    [],
+  );
 
   // Create-on-first-keystroke, guarded so a burst of edits before the create resolves can't
   // spawn duplicate notes; the latest content typed during creation is flushed afterwards.
@@ -148,8 +181,8 @@ export function DailyNote({
       });
   };
 
-  return (
-    <View style={styles.page}>
+  const body = (
+    <>
       <View style={{ paddingHorizontal: headingPadding }}>
         <Text variant="title" style={styles.heading}>
           {formatFullDate(date)}
@@ -159,14 +192,45 @@ export function DailyNote({
         </Text>
       </View>
       <Editor
+        ref={editorRef}
         markdown={initial?.contentMd ?? ""}
         onChangeMarkdown={handleChange}
         linkSource={linkSource}
+        documentSource={documentSource}
         // A fresh identity whenever any task changes re-hydrates `[[task:…]]` chips.
         linkRevision={tasks.tasks}
         placeholder="Start today’s note…"
         onOpenRef={onOpenRef}
+        onQuickCreate={quickCreate.onQuickCreate}
+        onFormatStateChange={setFormatState}
+        onFocusChange={handleFocusChange}
+        // Desktop injects a Wails-backed native table menu; web uses the built-in HTML popup.
+        tableMenuPresenter={tableMenuPresenter()}
       />
+    </>
+  );
+
+  // Native: the editor manages its own keyboard-anchored toolbar and scrolls internally, so
+  // the host View is enough. Web/desktop: own the scroll region here so the floating
+  // formatting bar can anchor to this fixed container instead of scrolling with the document.
+  if (Platform.OS !== "web") {
+    return (
+      <View style={styles.page}>
+        {body}
+        {quickCreate.dialog}
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.page}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.doc}>
+        {body}
+      </ScrollView>
+      {editorFocused ? (
+        <FormattingBar state={formatState} editorRef={editorRef} canAttach={!!documentSource} />
+      ) : null}
+      {quickCreate.dialog}
     </View>
   );
 }
@@ -361,6 +425,7 @@ const styles = {
     bottom: 5,
     width: 4,
     height: 4,
+    marginTop: 2,
     borderRadius: radius.full,
   },
 };

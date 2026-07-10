@@ -258,10 +258,26 @@ function NavBridge({
       setTabs((ts) =>
         ts.map((tab, i) => {
           if (i !== active) return tab;
-          if (tab.ref && tab.ref.kind === ref.kind && tab.ref.id === ref.id) return tab; // re-select: no-op
+          if (tab.ref && tab.ref.kind === ref.kind && tab.ref.id === ref.id) {
+            // Re-select of the same document: keep history, but refresh its origin (a project
+            // detail-pane select vs a plain workspace select) so the tab returns to the right
+            // place when clicked.
+            return tab.ref.projectId === ref.projectId ? tab : { ...tab, ref };
+          }
           return { ...tab, ref, back: tab.ref ? [...tab.back, tab.ref] : tab.back, fwd: [] };
         }),
       );
+    };
+    // Put a tab's document on screen: a project-origin doc returns to its project route, a
+    // plain doc to the shared workspace section. Skips a redundant push when already there.
+    const showRef = (ref: TabRef) => {
+      if (ref.projectId) {
+        const here =
+          current.kind === "project" && current.projectId === ref.projectId && current.itemId === ref.id;
+        if (!here) goto("project", { projectId: ref.projectId, section: ref.kind === "note" ? "notes" : "tasks", itemId: ref.id });
+        return;
+      }
+      ensureSection(ref.kind === "note" ? "notes" : "tasks");
     };
     // Restore a document from the active tab's Back (dir -1) or Forward (dir +1) stack.
     const stepTab = (dir: -1 | 1): boolean => {
@@ -278,7 +294,7 @@ function NavBridge({
           return { ...t, ref: target, fwd: t.fwd.slice(0, -1), back: t.ref ? [...t.back, t.ref] : t.back };
         }),
       );
-      ensureSection(target.kind === "note" ? "notes" : "tasks");
+      showRef(target);
       return true;
     };
     // Close a tab, keeping at least one (empty) slot and a valid active index.
@@ -343,7 +359,7 @@ function NavBridge({
       selectTab: (index) => {
         setActiveIndex(index);
         const ref = tabs[index]?.ref;
-        if (ref) ensureSection(ref.kind === "note" ? "notes" : "tasks");
+        if (ref) showRef(ref);
       },
       closeTab: (index) => removeTab(index),
       expandTab: (index) => {
@@ -356,7 +372,14 @@ function NavBridge({
       // ← item and the URL stays deep-linkable.
       openProject: (projectId) => goto("project", { projectId }),
       openProjectSection: (projectId, section) => goto("project", { projectId, section }),
-      openProjectItem: (projectId, section, itemId) => goto("project", { projectId, section, itemId }),
+      openProjectItem: (projectId, section, itemId) => {
+        // Selecting a note/task in a project also points the shared tab strip's active tab at
+        // it, so the tab tracks the project detail pane (and stays put when you leave to the
+        // workspace). Other sections (calendars/habits) carry no document, so leave tabs alone.
+        if (section === "notes") selectRef({ kind: "note", id: itemId, projectId });
+        else if (section === "tasks") selectRef({ kind: "task", id: itemId, projectId });
+        goto("project", { projectId, section, itemId });
+      },
     };
   }, [current, tabs, active, activeTab, routeName, inWorkspace, state, forwardStack, navigation]);
 
@@ -524,14 +547,6 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
             expanded={expanded}
             onPress={() => nav.goView("settings")}
           />
-          <View style={{ flexDirection: "row", alignItems: "center", gap: space.lg, paddingHorizontal: space.sm, height: 32 }}>
-            <Avatar name="You" size="sm" />
-            {expanded ? (
-              <Text variant="caption" tone="secondary" numberOfLines={1} style={{ flex: 1 }}>
-                you@companion.so
-              </Text>
-            ) : null}
-          </View>
         </View>
       </View>
 

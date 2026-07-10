@@ -7,5 +7,10 @@ export type {
   LinkSuggestion,
   DocumentSource,
   ResolvedDocument,
+  QuickCreateRequest,
+  QuickCreateTarget,
+  TableMenuPresenter,
+  TableMenuRequest,
+  TableMenuItem,
 } from "./types";
 export type { FormatName, FormatState } from "./formatCommands";

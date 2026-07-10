@@ -1,35 +1,38 @@
 import { Plugin } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 import type { Schema } from "prosemirror-model";
-import { wikilinkNode } from "./wikilink";
+import { wikilinkNode, LINK_TYPES, normalizeLinkType } from "./wikilink";
 import { detectTrigger, triggerKey as key, type Trigger } from "./wikilinkTrigger";
 import type { LinkSource, LinkSuggestion, LinkType } from "./types";
 
 // The `[[` autocomplete (web/desktop). Typing `[[` (or `![[` for an embed) anchors a
-// floating link picker at the caret: a search input plus a type dropdown to scope by
-// entity type, over a keyboard-navigable result list. The picker owns keyboard focus
-// while open, so it's a self-contained widget — the editor just supplies the anchor range
-// and receives the chosen wikilink. Plain DOM appended to <body>. Native uses a host
-// modal instead (see hostAutocomplete.ts).
+// floating result list at the caret. Unlike the old popup, focus stays in the editor: what
+// you type after `[[` is the live query, ArrowUp/Down move the highlight, and Enter/Tab
+// complete the highlighted result into a chip. The plugin owns no focusable DOM — it's a
+// pure read-out driven by the trigger state, with keyboard handled via handleKeyDown.
+// Native uses a host modal instead (see hostAutocomplete.ts).
 
-const TYPES: { value: LinkType | "all"; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "note", label: "Notes" },
-  { value: "task", label: "Tasks" },
-  { value: "habit", label: "Habits" },
-  { value: "project", label: "Projects" },
-];
+// Optional `type:` scope prefix on the query (the visible dropdown is gone; power users can
+// still scope by typing e.g. `[[task:standup`). Splits a leading known type token off the
+// query; everything else searches across all types.
+function scopeQuery(query: string): { query: string; type: LinkType | "all" } {
+  const m = /^\s*([a-zA-Z]+)\s*:\s*(.*)$/s.exec(query);
+  if (m) {
+    const type = normalizeLinkType(m[1]);
+    if (LINK_TYPES.has(type)) return { query: m[2], type: type as LinkType };
+  }
+  return { query, type: "all" };
+}
 
 export function wikilinkAutocomplete(linkSource: LinkSource, schema: Schema): Plugin {
   const ui = {
     root: null as HTMLElement | null,
-    input: null as HTMLInputElement | null,
-    typeSel: null as HTMLSelectElement | null,
     list: null as HTMLElement | null,
     view: null as EditorView | null,
     open: false,
     items: [] as LinkSuggestion[],
     index: 0,
+    query: "",
     range: null as { from: number; to: number; embed: boolean } | null,
     dismissedFrom: null as number | null,
     token: 0,
@@ -39,7 +42,7 @@ export function wikilinkAutocomplete(linkSource: LinkSource, schema: Schema): Pl
   const onDocMouseDown = (e: MouseEvent) => {
     if (ui.root && !ui.root.contains(e.target as Node)) {
       if (ui.range) ui.dismissedFrom = ui.range.from;
-      close(false);
+      close();
     }
   };
 
@@ -49,39 +52,13 @@ export function wikilinkAutocomplete(linkSource: LinkSource, schema: Schema): Pl
     root.className = "pm-wikilink-menu";
     root.style.display = "none";
 
-    const header = document.createElement("div");
-    header.className = "pm-wikilink-menu-header";
-
-    const input = document.createElement("input");
-    input.type = "text";
-    input.className = "pm-wikilink-menu-input";
-    input.placeholder = "Search links…";
-    input.addEventListener("input", () => runSearch());
-    input.addEventListener("keydown", onInputKey);
-
-    const typeSel = document.createElement("select");
-    typeSel.className = "pm-wikilink-menu-typesel";
-    for (const t of TYPES) {
-      const opt = document.createElement("option");
-      opt.value = t.value;
-      opt.textContent = t.label;
-      typeSel.appendChild(opt);
-    }
-    typeSel.addEventListener("change", () => {
-      ui.input?.focus();
-      runSearch();
-    });
-
     const list = document.createElement("div");
     list.className = "pm-wikilink-menu-list";
 
-    header.append(input, typeSel);
-    root.append(header, list);
+    root.append(list);
     document.body.appendChild(root);
 
     ui.root = root;
-    ui.input = input;
-    ui.typeSel = typeSel;
     ui.list = list;
   }
 
@@ -119,43 +96,51 @@ export function wikilinkAutocomplete(linkSource: LinkSource, schema: Schema): Pl
 
   const onViewportChange = () => reposition();
 
-  function openAt(view: EditorView, t: Trigger): void {
+  // Open (or, if already open, keep in sync with) the picker for the given trigger. Focus
+  // never leaves the editor — the list just tracks the trigger's growing query.
+  function sync(view: EditorView, t: Trigger): void {
     build();
+    const fresh = !ui.open;
+    ui.view = view;
     ui.range = { from: t.from, to: t.to, embed: t.embed };
     // Bail if the caret has no coords (e.g. a detached view).
     try {
       view.coordsAtPos(t.from);
     } catch {
       ui.range = null;
+      if (ui.open) close();
       return;
     }
-    ui.open = true;
-    ui.input!.value = t.query;
-    ui.typeSel!.value = "all";
-    ui.root!.style.display = "block";
-    reposition(); // measure the shown element, then place it edge-aware
-    document.addEventListener("mousedown", onDocMouseDown, true);
-    window.addEventListener("resize", onViewportChange);
-    window.addEventListener("scroll", onViewportChange, true);
-    ui.input!.focus();
-    runSearch();
+    if (fresh) {
+      ui.open = true;
+      ui.root!.style.display = "block";
+      document.addEventListener("mousedown", onDocMouseDown, true);
+      window.addEventListener("resize", onViewportChange);
+      window.addEventListener("scroll", onViewportChange, true);
+    }
+    // Re-run the search only when the query actually changed (or on first open); the caret
+    // may have moved either way, so always reposition.
+    if (fresh || t.query !== ui.query) {
+      ui.query = t.query;
+      runSearch();
+    } else {
+      reposition();
+    }
   }
 
-  function close(refocus: boolean): void {
+  function close(): void {
     if (ui.timer) clearTimeout(ui.timer);
     ui.token++;
     ui.open = false;
+    ui.query = "";
     if (ui.root) ui.root.style.display = "none";
     document.removeEventListener("mousedown", onDocMouseDown, true);
     window.removeEventListener("resize", onViewportChange);
     window.removeEventListener("scroll", onViewportChange, true);
-    if (refocus) ui.view?.focus();
   }
 
   function runSearch(): void {
-    if (!ui.input || !ui.typeSel) return;
-    const query = ui.input.value;
-    const type = ui.typeSel.value as LinkType | "all";
+    const { query, type } = scopeQuery(ui.query);
     if (ui.timer) clearTimeout(ui.timer);
     const token = ++ui.token;
     ui.timer = setTimeout(() => {
@@ -183,8 +168,9 @@ export function wikilinkAutocomplete(linkSource: LinkSource, schema: Schema): Pl
     if (!ui.items.length) {
       const empty = document.createElement("div");
       empty.className = "pm-wikilink-menu-empty";
-      empty.textContent = "No matches";
+      empty.textContent = "No matches — finish with ]] to leave an empty link";
       list.appendChild(empty);
+      reposition();
       return;
     }
     ui.items.forEach((it, i) => {
@@ -198,7 +184,7 @@ export function wikilinkAutocomplete(linkSource: LinkSource, schema: Schema): Pl
       title.textContent = it.title || it.id;
       row.append(badge, title);
       row.addEventListener("mousedown", (e) => {
-        e.preventDefault(); // don't blur the search input before we handle the click
+        e.preventDefault(); // keep focus in the editor while we handle the click
         choose(i);
       });
       list.appendChild(row);
@@ -208,33 +194,32 @@ export function wikilinkAutocomplete(linkSource: LinkSource, schema: Schema): Pl
     reposition(); // the list just changed height — re-check the viewport edges
   }
 
-  function onInputKey(e: KeyboardEvent): void {
-    if (!ui.open) return;
-    switch (e.key) {
+  // Keyboard, handled from the editor (focus never left it). Returns true to swallow the
+  // key. With no results, Enter/Tab fall through so the editor behaves normally.
+  function onKeyDown(event: KeyboardEvent): boolean {
+    if (!ui.open) return false;
+    switch (event.key) {
       case "ArrowDown":
-        if (ui.items.length) {
-          ui.index = (ui.index + 1) % ui.items.length;
-          renderList();
-        }
-        e.preventDefault();
-        break;
+        if (!ui.items.length) return false;
+        ui.index = (ui.index + 1) % ui.items.length;
+        renderList();
+        return true;
       case "ArrowUp":
-        if (ui.items.length) {
-          ui.index = (ui.index - 1 + ui.items.length) % ui.items.length;
-          renderList();
-        }
-        e.preventDefault();
-        break;
+        if (!ui.items.length) return false;
+        ui.index = (ui.index - 1 + ui.items.length) % ui.items.length;
+        renderList();
+        return true;
       case "Enter":
       case "Tab":
-        if (ui.items.length) choose(ui.index);
-        e.preventDefault();
-        break;
+        if (!ui.items.length) return false;
+        choose(ui.index);
+        return true;
       case "Escape":
         if (ui.range) ui.dismissedFrom = ui.range.from;
-        close(true);
-        e.preventDefault();
-        break;
+        close();
+        return true;
+      default:
+        return false;
     }
   }
 
@@ -251,7 +236,8 @@ export function wikilinkAutocomplete(linkSource: LinkSource, schema: Schema): Pl
       /* view torn down */
     }
     ui.dismissedFrom = null;
-    close(true);
+    close();
+    view.focus();
   }
 
   function teardown(): void {
@@ -269,6 +255,9 @@ export function wikilinkAutocomplete(linkSource: LinkSource, schema: Schema): Pl
       init: () => null,
       apply: (_tr, _prev, _old, next) => detectTrigger(next),
     },
+    props: {
+      handleKeyDown: (_view, event) => onKeyDown(event),
+    },
     view() {
       return {
         update(view) {
@@ -276,12 +265,12 @@ export function wikilinkAutocomplete(linkSource: LinkSource, schema: Schema): Pl
           const t = key.getState(view.state);
           if (!t) {
             ui.dismissedFrom = null;
-            if (ui.open) close(false);
+            if (ui.open) close();
             return;
           }
-          // Only (re)open on a fresh trigger; once open the picker owns focus and the
-          // editor no longer changes, so we leave it alone.
-          if (!ui.open && t.from !== ui.dismissedFrom) openAt(view, t);
+          // Don't reopen on the same trigger the user just dismissed (Escape / click-away).
+          if (!ui.open && t.from === ui.dismissedFrom) return;
+          sync(view, t);
         },
         destroy: teardown,
       };

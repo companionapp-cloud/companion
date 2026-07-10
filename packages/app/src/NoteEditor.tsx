@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform, ScrollView, View } from "react-native";
 import type { Note } from "@companion/core-bridge";
 import { Badge, Icon, IconButton, Text, TextField, colors, layout, space } from "@companion/design-system";
-import { Editor, type EditorController, type FormatName, type FormatState, type LinkRef } from "@companion/editor";
-import type { IconName } from "@companion/design-system";
+import { Editor, type EditorController, type FormatState, type LinkRef } from "@companion/editor";
+import { FormattingBar } from "./FormattingBar";
+import { tableMenuPresenter } from "./tableMenu";
 import { useTasks } from "./TasksProvider";
 import { useNotes } from "./NotesProvider";
 import { ArchetypeChip, MetadataSidePanel } from "./ArchetypeSection";
 import { useLinkSource } from "./useLinkSource";
+import { useQuickCreateLink } from "./useQuickCreateLink";
 import { useDocumentSource } from "./DocumentSourceContext";
 import { NoteGraph } from "./NoteGraph";
 import { MembershipPicker } from "./MembershipPicker";
@@ -23,7 +25,8 @@ const DOC_PAD_TOP = Platform.OS === "web" ? 32 : 16;
 export interface NoteEditorProps {
   note: Note;
   onChange: (id: string, fields: { title?: string; contentMd?: string }) => void;
-  /** Shown as a pop-out (focus) action in the note's sub-toolbar when provided. */
+  /** Shown as an "open in the workspace tab strip" action in the note's sub-toolbar when
+   *  provided (used from the project detail pane, which has no tabs of its own). */
   onPopOut?: (id: string) => void;
   /** Shown as a delete action in the note's sub-toolbar when provided. */
   onDelete?: (id: string) => void;
@@ -66,6 +69,9 @@ export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote, 
   // editor reports which toggles are active/available; the ref drives them. (On native the
   // editor renders its own keyboard-anchored toolbar, so this stays dormant.)
   const editorRef = useRef<EditorController>(null);
+  // Empty `[[label]]` links: double-clicking one opens a quick-create dialog that makes a
+  // note/task and swaps the raw text for a real chip.
+  const quickCreate = useQuickCreateLink(editorRef);
   const [formatState, setFormatState] = useState<FormatState | null>(null);
   // Web/desktop: the formatting bar is shown whenever the editor is focused. Clicking a bar
   // button briefly blurs the editor (then the action refocuses it), so hiding is delayed a
@@ -126,7 +132,7 @@ export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote, 
           <Icon name="panelRight" size={16} color={showMeta ? colors.accentHover : colors.textTertiary} />
         </IconButton>
         {onPopOut ? (
-          <IconButton label="Open in new window" size="sm" onPress={() => onPopOut(note.id)}>
+          <IconButton label="Open in tab" size="sm" onPress={() => onPopOut(note.id)}>
             <Icon name="external" size={15} color={colors.textTertiary} />
           </IconButton>
         ) : null}
@@ -177,8 +183,12 @@ export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote, 
               linkSource={linkSource}
               documentSource={documentSource}
               onOpenRef={onOpenRef}
+              onQuickCreate={quickCreate.onQuickCreate}
               onFormatStateChange={setFormatState}
               onFocusChange={handleFocusChange}
+              // Desktop injects a Wails-backed native table menu; web leaves it undefined and the
+              // editor uses its built-in HTML popup.
+              tableMenuPresenter={tableMenuPresenter()}
               // `tasks.tasks` gets a fresh identity whenever any task changes (local edit or a
               // synced pull), signalling the editor to re-hydrate its `[[task:…]]` chips.
               linkRevision={tasks.tasks}
@@ -201,6 +211,8 @@ export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote, 
           />
         ) : null}
       </View>
+
+      {quickCreate.dialog}
 
       {showProjects ? (
         <MembershipPicker entityType="note" entityId={note.id} onClose={() => setShowProjects(false)} />
@@ -228,65 +240,6 @@ export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote, 
   );
 }
 
-// The formatting actions shown in the web selection bar, in order (mirrors the native
-// keyboard toolbar in @companion/editor). Insert-reference is prepended separately.
-const FORMAT_BUTTONS: { name: FormatName; icon: IconName; label: string }[] = [
-  { name: "bold", icon: "bold", label: "Bold" },
-  { name: "italic", icon: "italic", label: "Italic" },
-  { name: "strike", icon: "strikethrough", label: "Strikethrough" },
-  { name: "code", icon: "code", label: "Code" },
-  { name: "codeBlock", icon: "codeBlock", label: "Code block" },
-  { name: "blockquote", icon: "quote", label: "Blockquote" },
-  { name: "bulletList", icon: "listBullet", label: "Bulleted list" },
-  { name: "orderedList", icon: "listOrdered", label: "Numbered list" },
-];
-
-/** Web/desktop: a floating bar of insert + formatting actions anchored to the bottom of the
- * editor, shown while the editor is focused. Drives the editor through its imperative handle.
- * `state` may be null before the first format snapshot arrives (buttons render enabled). */
-function FormattingBar({
-  state,
-  editorRef,
-  canAttach,
-}: {
-  state: FormatState | null;
-  editorRef: RefObject<EditorController | null>;
-  /** Show the file-embed action (PLAN §6.9) — only when a documentSource is wired. */
-  canAttach: boolean;
-}) {
-  return (
-    <View style={styles.formatBar} pointerEvents="box-none">
-      <View style={styles.formatBarInner}>
-        <IconButton label="Insert reference" size="sm" onPress={() => editorRef.current?.insertReference()}>
-          <Icon name="link" size={17} color={colors.textSecondary} />
-        </IconButton>
-        {canAttach ? (
-          <IconButton label="Attach file" size="sm" onPress={() => editorRef.current?.insertDocument()}>
-            <Icon name="file" size={17} color={colors.textSecondary} />
-          </IconButton>
-        ) : null}
-        <View style={styles.formatBarDivider} />
-        {FORMAT_BUTTONS.map((b) => {
-          const active = !!state?.active[b.name];
-          const disabled = state ? !state.enabled[b.name] : false;
-          return (
-            <IconButton
-              key={b.name}
-              label={b.label}
-              size="sm"
-              active={active}
-              disabled={disabled}
-              onPress={() => editorRef.current?.format(b.name)}
-            >
-              <Icon name={b.icon} size={17} color={active ? colors.accentHover : colors.textSecondary} />
-            </IconButton>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
-
 const styles = {
   subToolbar: {
     flexDirection: "row" as const,
@@ -305,33 +258,6 @@ const styles = {
     marginHorizontal: "auto" as const,
     padding: DOC_PAD,
     paddingTop: DOC_PAD_TOP,
-  },
-  // Floating formatting bar, centered along the bottom of the editor (web/desktop).
-  formatBar: {
-    position: "absolute" as const,
-    left: 0,
-    right: 0,
-    bottom: space.lg,
-    alignItems: "center" as const,
-  },
-  formatBarInner: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: space.xs,
-    paddingHorizontal: space.xs,
-    paddingVertical: space.xs,
-    borderRadius: 12,
-    backgroundColor: colors.surfaceCard,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    // A soft lift so it reads as floating above the document (web only).
-    ...(Platform.OS === "web" ? { boxShadow: "0 6px 22px rgba(0,0,0,0.13)" } : null),
-  },
-  formatBarDivider: {
-    width: 1,
-    height: 20,
-    marginHorizontal: space.xs,
-    backgroundColor: colors.borderSubtle,
   },
   // The "Edited …" timestamp and the archetype chip share a line under the title.
   metaLine: {

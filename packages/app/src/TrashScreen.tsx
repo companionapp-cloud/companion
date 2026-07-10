@@ -25,6 +25,7 @@ export function TrashScreen() {
   const { core, trash } = useCore();
   const [items, setItems] = useState<TrashItem[] | null>(null); // null = loading
   const [purgeTarget, setPurgeTarget] = useState<TrashItem | null>(null);
+  const [confirmEmpty, setConfirmEmpty] = useState(false);
 
   const refresh = useCallback(() => {
     void trash.list().then(setItems);
@@ -50,13 +51,22 @@ export function TrashScreen() {
     await trash.purge(it.entityType, it.id);
     refresh();
   };
+  const empty = async () => {
+    await trash.empty();
+    refresh();
+  };
 
   if (items === null) return <Spinner label="Opening the Trash…" />;
 
   return (
     <View style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={styles.page}>
-        <Text variant="title">Trash</Text>
+        <View style={styles.header}>
+          <Text variant="title">Trash</Text>
+          {items.length > 0 ? (
+            <Button label="Empty trash" size="sm" variant="danger" onPress={() => setConfirmEmpty(true)} />
+          ) : null}
+        </View>
         <Text tone="tertiary" variant="caption" style={styles.blurb}>
           Deleted notes, tasks, and habits are kept here for 30 days, then permanently removed.
           Projects and areas aren’t trashed — deleting one takes effect immediately.
@@ -95,8 +105,22 @@ export function TrashScreen() {
           confirmLabel="Delete forever"
           onConfirm={async () => {
             await purge(purgeTarget);
+            setPurgeTarget(null);
           }}
           onClose={() => setPurgeTarget(null)}
+        />
+      ) : null}
+
+      {confirmEmpty ? (
+        <ConfirmDialog
+          title="Empty the Trash?"
+          message={`This permanently deletes all ${items?.length ?? 0} item${(items?.length ?? 0) === 1 ? "" : "s"} in the Trash. This can’t be undone.`}
+          confirmLabel="Empty trash"
+          onConfirm={async () => {
+            await empty();
+            setConfirmEmpty(false);
+          }}
+          onClose={() => setConfirmEmpty(false)}
         />
       ) : null}
     </View>
@@ -116,6 +140,7 @@ function countdown(deletingAt?: string | null): string {
 
 const styles = {
   page: { maxWidth: layout.contentMax, width: "100%" as const, marginHorizontal: "auto" as const, padding: space.xxl, gap: space.md },
+  header: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: space.md },
   blurb: { lineHeight: 18, marginBottom: space.md },
   empty: { alignItems: "center" as const, paddingVertical: space.xxxl },
   card: {

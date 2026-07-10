@@ -7,6 +7,7 @@ import {
   MarkdownSerializer,
 } from "prosemirror-markdown";
 import { Plugin } from "prosemirror-state";
+import { addTableNodes, enableTableTokenizer, tableParseTokens, tableSerializerNodes } from "./tables";
 
 // Wikilinks ([[type:id]] / ![[type:id|alias]]) are first-class in the editor: they
 // round-trip as valid markdown (never bracket-escaped) and render as a chip. The
@@ -40,7 +41,10 @@ export function wikilinkNode(
   },
 ) {
   return targetSchema.nodes.wikilink.create({
-    embed: attrs.embed ?? false,
+    // Documents have no meaningful plain-link chip — their canonical form is an
+    // `![[doc:…]]` embed that renders the file inline (PLAN §6.9) — so always embed them,
+    // regardless of whether the picker was opened with `[[` or `![[`.
+    embed: attrs.type === "document" ? true : (attrs.embed ?? false),
     type: attrs.type,
     id: attrs.id,
     alias: attrs.alias ?? null,
@@ -50,6 +54,19 @@ export function wikilinkNode(
 // The inner grammar of a wikilink body ("type:id" with an optional "|alias"), shared by
 // the markdown tokenizer and the type-to-chip input rule.
 const BODY_RE = /^\s*([a-zA-Z]+)\s*:\s*([^\]|]+?)\s*(?:\|\s*([^\]]*?)\s*)?$/;
+
+/** Parse a wikilink body ("type:id" / "type:id|alias") into its resolved parts, or null if
+ * it isn't a valid, known link type. Used to tell a real `[[type:id]]` from an unresolved
+ * `[[label]]` "empty" link (see emptyWikilink.ts) and to scope `[[` autocomplete searches. */
+export function parseWikilinkBody(
+  body: string,
+): { type: string; id: string; alias: string | null } | null {
+  const m = BODY_RE.exec(body);
+  if (!m) return null;
+  const type = normalizeLinkType(m[1]);
+  if (!LINK_TYPES.has(type)) return null;
+  return { type, id: m[2], alias: m[3] || null };
+}
 
 // ---------------------------------------------------------------------------
 // Schema: an inline, atomic chip node carrying the parsed target. Exported so the
@@ -138,7 +155,7 @@ const strikethroughSpec: MarkSpec = {
 };
 
 export const schema = new Schema({
-  nodes: baseSchema.spec.nodes.update("list_item", listItem).addToEnd("wikilink", wikilinkSpec),
+  nodes: addTableNodes(baseSchema.spec.nodes.update("list_item", listItem).addToEnd("wikilink", wikilinkSpec)),
   marks: baseSchema.spec.marks.addToEnd("strikethrough", strikethroughSpec),
 });
 
@@ -198,6 +215,8 @@ if (!tokenizer.__wikilinkRule) {
   tokenizer.inline.ruler.before("link", "wikilink", wikilinkRule as unknown as Parameters<RulerBefore>[2]);
   tokenizer.__wikilinkRule = true;
 }
+// GFM pipe tables — also disabled by the CommonMark preset (see tables.ts).
+enableTableTokenizer(tokenizer);
 
 // Task-list marker: after inline parsing, find list items whose first line starts with
 // `[ ]`/`[x]`, record the checked state on the list_item token, and strip the marker so
@@ -240,6 +259,7 @@ function parseChecked(v: string | null | undefined): boolean | null {
 
 export const parser = new MarkdownParser(schema, defaultMarkdownParser.tokenizer, {
   ...defaultMarkdownParser.tokens,
+  ...tableParseTokens,
   // markdown-it emits s_open/s_close for `~~…~~`; map it onto our strikethrough mark.
   s: { mark: "strikethrough" },
   list_item: {
@@ -268,9 +288,30 @@ export const parser = new MarkdownParser(schema, defaultMarkdownParser.tokenizer
 // ---------------------------------------------------------------------------
 // Serializer: write the wikilink markdown raw so its brackets are never escaped.
 // ---------------------------------------------------------------------------
+// An unresolved "empty" link kept as literal `[[label]]` text (see emptyWikilink.ts). The
+// default text serializer escapes `[`/`]`, which would write `\[\[label\]\]`; match these
+// runs so they can be emitted raw and round-trip cleanly.
+const EMPTY_LINK_RE = /\[\[[^[\]\n]+\]\]/g;
+
 export const serializer = new MarkdownSerializer(
   {
     ...defaultMarkdownSerializer.nodes,
+    // GFM pipe-table subtree (table walks its own rows/cells; see tables.ts).
+    ...tableSerializerNodes(),
+    // Write text normally, but emit `[[label]]` empty-link runs without markdown escaping so
+    // they persist as clean wikilink text (real `[[type:id]]` links are chip nodes, not text).
+    text(state, node) {
+      const text = node.text ?? "";
+      let last = 0;
+      let m: RegExpExecArray | null;
+      EMPTY_LINK_RE.lastIndex = 0;
+      while ((m = EMPTY_LINK_RE.exec(text)) !== null) {
+        if (m.index > last) state.text(text.slice(last, m.index), true);
+        state.text(m[0], false);
+        last = m.index + m[0].length;
+      }
+      if (last < text.length) state.text(text.slice(last), true);
+    },
     list_item(state, node) {
       // A todo writes its GFM marker before the item's content; plain bullets are unchanged.
       if (node.attrs.checked !== null) state.write(node.attrs.checked ? "[x] " : "[ ] ");

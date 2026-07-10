@@ -1,10 +1,11 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useCore, useNotes, useTasks, MembershipPicker, ConfirmDialog, NoteConflictDialog, useNoteSyncGuard } from '@companion/app';
-import { Center, Icon, IconButton, Text, TextField, colors, space } from '@companion/design-system';
-import { Editor, type LinkRef, type LinkSource } from '@companion/editor';
+import { useCore, useNotes, useTasks, MembershipPicker, ConfirmDialog, NoteConflictDialog, useNoteSyncGuard, useQuickCreateLink, ArchetypeChip, ObjectMetadataPanel } from '@companion/app';
+import { Center, Icon, IconButton, Text, TextField, colors, radius, shadow, space } from '@companion/design-system';
+import type { ObjectProps } from '@companion/core-bridge';
+import { Editor, type EditorController, type LinkRef, type LinkSource } from '@companion/editor';
 import type { RootStackParamList } from '../MobileShell';
 import { useNativeDocumentSource } from '../useNativeDocumentSource';
 
@@ -18,6 +19,7 @@ export function NoteEditorScreen() {
   const note = store.byId(noteId);
   const [title, setTitle] = useState(note?.title ?? '');
   const [showProjects, setShowProjects] = useState(false);
+  const [showMeta, setShowMeta] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Seed the editor from `seed.content`; the WebView owns its content after mount and
   // reports changes back out (a changing markdown prop re-injects on every keystroke and
@@ -83,6 +85,11 @@ export function NoteEditorScreen() {
   // File embedding (PLAN §6.9): the Attach button opens the OS-native document picker.
   const documentSource = useNativeDocumentSource();
 
+  // Empty `[[label]]` links: double-tapping one opens a quick-create dialog that makes a
+  // note/task and swaps in a real chip (via the editor's imperative handle).
+  const editorRef = useRef<EditorController>(null);
+  const quickCreate = useQuickCreateLink(editorRef);
+
   // Clicking a chip pushes its target onto the stack (tasks and notes have screens).
   const onOpenRef = useCallback(
     (ref: LinkRef) => {
@@ -98,14 +105,16 @@ export function NoteEditorScreen() {
     () => (
       <Editor
         key={seed.key}
+        ref={editorRef}
         markdown={seed.content}
         onChangeMarkdown={onChangeMarkdown}
         linkSource={linkSource}
         documentSource={documentSource}
         onOpenRef={onOpenRef}
+        onQuickCreate={quickCreate.onQuickCreate}
       />
     ),
-    [seed.key, seed.content, onChangeMarkdown, linkSource, documentSource, onOpenRef],
+    [seed.key, seed.content, onChangeMarkdown, linkSource, documentSource, onOpenRef, quickCreate.onQuickCreate],
   );
 
   // Deps exclude note/store so content edits don't re-run setOptions; only the title
@@ -117,6 +126,9 @@ export function NoteEditorScreen() {
         <View style={styles.headerActions}>
           <IconButton label="Add to projects" size="sm" onPress={() => setShowProjects(true)}>
             <Icon name="folder" size={18} color={colors.textSecondary} />
+          </IconButton>
+          <IconButton label="Metadata" size="sm" onPress={() => setShowMeta(true)}>
+            <Icon name="panelRight" size={18} color={colors.textSecondary} />
           </IconButton>
           <IconButton
             label="Note graph"
@@ -155,8 +167,19 @@ export function NoteEditorScreen() {
         />
       </View>
       {body}
+      {quickCreate.dialog}
       {showProjects ? (
         <MembershipPicker entityType="note" entityId={noteId} onClose={() => setShowProjects(false)} />
+      ) : null}
+      {showMeta ? (
+        <NoteMetadataSheet
+          objectTypeId={note.objectTypeId}
+          props={note.props}
+          onSetType={(typeId) => void store.update(noteId, { objectTypeId: typeId })}
+          onClearType={() => void store.update(noteId, { clearObjectType: true, props: {} })}
+          onChangeProps={(next) => void store.update(noteId, { props: next })}
+          onClose={() => setShowMeta(false)}
+        />
       ) : null}
       {confirmDelete ? (
         <ConfirmDialog
@@ -182,10 +205,85 @@ export function NoteEditorScreen() {
   );
 }
 
+// A modal sheet holding the object type selector + its structured-props form (PLAN §6.3).
+// The note body is a full-screen WebView, so unlike the task editor (which shows metadata
+// inline) mobile notes surface it in an overlay toggled from the header.
+function NoteMetadataSheet({
+  objectTypeId,
+  props,
+  onSetType,
+  onClearType,
+  onChangeProps,
+  onClose,
+}: {
+  objectTypeId?: string | null;
+  props?: ObjectProps;
+  onSetType: (typeId: string) => void;
+  onClearType: () => void;
+  onChangeProps: (next: ObjectProps) => void;
+  onClose: () => void;
+}) {
+  return (
+    <View style={styles.scrim}>
+      <Pressable style={styles.scrimFill} onPress={onClose} aria-label="Close" />
+      <View style={styles.card}>
+        <View style={styles.sheetHeader}>
+          <Text variant="title">Metadata</Text>
+          <View style={{ flex: 1 }} />
+          <IconButton label="Close" size="sm" onPress={onClose}>
+            <Icon name="close" size={16} color={colors.textSecondary} />
+          </IconButton>
+        </View>
+        <ScrollView contentContainerStyle={styles.sheetBody}>
+          <ArchetypeChip
+            kind="note"
+            objectTypeId={objectTypeId}
+            onSetType={onSetType}
+            onClearType={onClearType}
+          />
+          <ObjectMetadataPanel objectTypeId={objectTypeId} props={props} onChangeProps={onChangeProps} />
+        </ScrollView>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceCard },
   // 20px matches the editor body's horizontal inset on mobile (.pm-wrap in
   // packages/editor/src/styles.ts) so the title lines up with the content beneath it.
   title: { paddingHorizontal: 20, paddingTop: space.md },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  scrim: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(17,17,16,0.28)',
+    zIndex: 100,
+  },
+  scrimFill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  card: {
+    width: 380,
+    maxWidth: '92%',
+    maxHeight: '80%',
+    backgroundColor: colors.surfaceCard,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    ...shadow.lg,
+    overflow: 'hidden',
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: space.xl,
+    paddingVertical: space.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+  },
+  sheetBody: { padding: space.xl, gap: space.lg },
 });

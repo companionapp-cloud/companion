@@ -5,8 +5,10 @@ export type ViewId = "today" | "chat" | "calendar" | "notes" | "tasks" | "habits
 /** The content types a project drills into (its sub-nav). */
 export type ProjectSection = "notes" | "tasks" | "calendars" | "habits";
 
-/** A document open in a workspace tab. */
-export type TabRef = { kind: "note" | "task"; id: string };
+/** A document open in a workspace tab. `projectId` records that the document was opened from
+ *  a project (via its detail pane), so re-selecting the tab returns to that project route
+ *  rather than the bare workspace `/notes/:id` · `/tasks/:id`. Absent = a plain workspace tab. */
+export type TabRef = { kind: "note" | "task"; id: string; projectId?: string };
 
 /** One workspace tab slot: a stable uid, its (possibly empty) document, and that tab's own
  *  selection history. Notes and tasks share one strip; an empty slot renders as "Nothing

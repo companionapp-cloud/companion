@@ -78,6 +78,8 @@ companion/
 │   ├── sync/                 # client-side sync engine
 │   ├── llm/                  # OpenAI-compatible client, prompt building, retrieval
 │   ├── notify/               # notification planning (pure computation)
+│   ├── importer/             # one-way importers (obsidian vault, roam JSON export
+│   │                         # → notes/documents/links)
 │   ├── bridge/               # invoke() dispatcher: method string + JSON in/out
 │   └── cmd/
 │       ├── wasm/             # main for GOOS=js build
@@ -956,6 +958,125 @@ verification for free.
   references the hash*; the server trash collector does the same against the bucket
   (§7.6).
 
+### 6.10 Obsidian import (desktop + mobile)
+
+One-way, one-shot import of an Obsidian vault: markdown files become Companion notes,
+vault attachments become documents (§6.9), and Obsidian's name-based wikilinks are
+rewritten to canonical `[[type:uuid]]` refs (§4.0). **Desktop and mobile only** — the
+web app cannot reach a local vault; the Import settings tab is hidden there.
+
+- **Where it lives.** Parsing, link resolution, conversion, and orchestration are Go
+  (`core/importer/obsidian`) — logic over an fs path, headlessly testable against a
+  fixture vault. Shells contribute exactly one thing: a vault directory path.
+  - Desktop: native folder picker (Wails dialog); core reads the vault **in place,
+    strictly read-only** — the vault is never mutated.
+  - Mobile: OS pickers don't yield raw filesystem paths, so the shell copies the picked
+    folder into a staging dir inside the app sandbox (iOS document picker with a
+    security-scoped folder; Android Storage Access Framework), hands core that path,
+    and deletes the staging copy afterwards. Large-vault caveat (transient 2× space)
+    goes in the UI copy.
+- **Bridge API, two phases** so the user confirms before anything is written:
+  - `import.obsidianScan {vaultPath}` → walks the vault and returns a preview: note
+    count, referenced-attachment count/bytes, unresolved-link count (→ stubs),
+    ambiguous-name warnings. Writes nothing.
+  - `import.obsidianRun {vaultPath, projectId}` → performs the import, streaming
+    `import.progress {stage, done, total}` events; returns
+    `{notes, stubs, documents, linksConverted, warnings[]}`. `import.cancel` sets a
+    flag checked between batches (already-written batches stay — the summary says how
+    far it got).
+- **Resolution index (pass 0).** Every `.md` file gets a fresh UUIDv7 keyed by its
+  vault-relative path. Links resolve the way Obsidian resolves them: exact relative
+  path first, then unique basename (case-insensitive); an ambiguous bare basename
+  resolves deterministically (shortest path, then lexicographic) and records a
+  warning. Non-md files index the same way for attachment resolution.
+- **Attachments (pass 1).** Every local file referenced by a converted link is
+  ingested through the existing §6.9 pipeline — `blob.FSStore.IngestPath` + a
+  `documents` row (content addressing dedupes identical bytes for free). Unreferenced
+  vault files are skipped and counted in the summary.
+- **Conversion + note creation (pass 2).** Title = filename without extension; body =
+  converted markdown. Conversion rules:
+
+  | Obsidian | Companion |
+  |---|---|
+  | `[[Name]]` | `[[note:<id>\|Name]]` |
+  | `[[Name\|alias]]` | `[[note:<id>\|alias]]` |
+  | `[[Name#Heading]]` / `[[Name#^block]]` | `[[note:<id>\|Name > Heading]]` — fragment dropped (no heading anchors in the model), display text preserved |
+  | `![[Name]]` (note embed) | `![[note:<id>\|Name]]` — the editor's wikilink node already carries an embed flag and renders an embed-styled chip; true transclusion is a later editor feature |
+  | `![[file.png]]`, `![alt](local/path.png)` | ingest → `![[doc:<id>]]` |
+  | `[text](local/file.pdf)` | ingest → `[[doc:<id>\|text]]` |
+  | `[[Missing]]` (unresolved) | create a **stub note** (empty body, title `Missing`, deduped case-insensitively across the vault) and ref it — Obsidian semantics: every link resolves |
+  | external URLs, tags, callouts, `%%comments%%`, `==highlights==`, math, mermaid | pass through verbatim — markdown is canonical; unsupported syntax renders as text |
+  | YAML frontmatter | preserved verbatim at the top of the body — no data loss; mapping frontmatter to archetype props (§6.3) is a later enhancement |
+  | `- [ ]` checkboxes | stay plain markdown checkboxes, same as natively authored notes (the "todos become task refs" upgrade will apply to imported notes when it lands) |
+
+- **Everything joins one project.** The run call takes a target `projectId` (picked
+  or created inline in the UI); every created note and stub gets a `project_members`
+  row. Vault folder structure is deliberately **not** mapped to projects/areas in v1,
+  and daily-note filenames get no special treatment (they import as plain notes;
+  revisit alongside Today-tool polish).
+- **No new write machinery.** Notes and membership rows are created through the
+  normal store write path, so link extraction runs per note, `data.changed` fires,
+  and the graph is correct with **no `graph.rebuild` step**. Rows are born dirty, so
+  ordinary sync pushes notes/documents and upload-before-push (§6.9) moves the blobs.
+  The import runs in batches — not one vault-sized transaction — to bound memory on
+  mobile.
+- **UI: an Import settings tab** (a `settingsSections.tsx` entry) gated on a shell
+  capability flag exposed through core-bridge (web reports unavailable → tab hidden).
+  Flow: pick vault → scan preview → pick/create target project → run with progress →
+  summary (counts + warnings list). Re-running an import duplicates notes (v1 keeps
+  no provenance) — the UI says so before the run.
+- **Testing**: a fixture vault in `testdata/` covering every row of the conversion
+  table; golden-file conversion tests; scan-preview counts must match run results;
+  the extraction-equals-rebuild invariant (§11) asserted over a freshly imported
+  vault.
+
+### 6.11 Roam Research import (desktop + mobile)
+
+One-way, one-shot import of a Roam graph from Roam's **JSON export** ("Export All" →
+JSON; the picker accepts the `.json` or the `.zip` Roam wraps it in — unzipped in Go
+with stdlib `archive/zip`). JSON rather than Roam's markdown export, deliberately:
+it is the only format where block `uid`s survive — so block refs and embeds are
+resolvable — and page titles arrive exactly, with no filename mangling. Everything
+structural reuses §6.10: the shared `import.progress` / `import.cancel` plumbing, the
+same Import settings tab (which becomes a source chooser: Obsidian vault / Roam
+export), the same scan-then-run contract where scan writes nothing, the same
+batched-not-one-transaction execution, the same everything-into-one-chosen-project
+policy, and the same "normal write path, so extraction + sync just work, no
+`graph.rebuild`" story. What differs is the translation:
+
+- **Single file, simpler shells.** Unlike a vault directory, the input is one file:
+  desktop uses a native file picker; mobile's document picker already hands the shell
+  a sandboxed copy — **no staging-directory dance**. Still desktop + mobile only
+  (one consistent import surface; the tab stays capability-gated).
+- **Bridge**: `import.roamScan {filePath}` → preview `{pages, blocks,
+  attachmentsToDownload, warnings}`; `import.roamRun {filePath, projectId}` → the
+  same summary shape as the Obsidian run.
+- **Pages → notes; outlines → markdown.** The resolution index maps every page title
+  to a fresh UUIDv7 (Roam titles are unique — no ambiguity pass needed) and every
+  block `uid` to its page + text. A page's block tree renders as nested markdown
+  bullet lists; blocks carrying a `heading` attribute become `#`/`##`/`###` lines;
+  code and quote blocks become fenced blocks / blockquotes. Pages Roam auto-created
+  from refs (no children) import as empty notes, so every ref resolves — §6.10's
+  stub-note policy falls out for free.
+- **Conversion rules:**
+
+  | Roam | Companion |
+  |---|---|
+  | `[[Page Name]]` | `[[note:<id>\|Page Name]]` — exact-title resolution; nested refs (`[[Page [[Inner]]]]`) resolve the outer page by its full literal title |
+  | `#Tag` / `#[[Long Tag]]` | `[[note:<id>\|#Tag]]` — Roam hashtags *are* page refs; the alias keeps the `#` so prose reads unchanged |
+  | `((uid))` block ref | the referenced block's converted text inlined, followed by `([[note:<id>\|→ Page]])` pointing at the source page — Companion has no block-level nodes; materializing keeps notes readable and the graph edge survives. Resolution depth is capped (nested/cyclic block refs) with a warning |
+  | `{{[[embed]]: ((uid))}}` / `{{embed: ((uid))}}` | same materialization as block refs |
+  | `{{[[TODO]]}} text` / `{{[[DONE]]}} text` | `- [ ] text` / `- [x] text` — plain markdown checkboxes, same policy as §6.10 |
+  | `![](https://firebasestorage…)` uploads | **downloaded at import time** via the injected HTTP client and ingested through the §6.9 pipeline → `![[doc:<id>]]`; on fetch failure the URL stays + a warning. Grabbing the bytes is the point — Roam-hosted assets aren't guaranteed to outlive the graph |
+  | `__italic__` / `^^highlight^^` | `*italic*` / `==highlight==` — Roam's `__` means italic (markdown would read it as bold), so it is translated; `^^` maps to the same highlight syntax Obsidian imports pass through |
+  | `Attr:: value`, `{{query}}`, `{{table}}`, other `{{components}}` | pass through verbatim as text; attribute lines do **not** spawn notes for their keys (Roam does, but that's index noise here) — counted in warnings |
+  | Daily pages (`July 10th, 2026`) | plain notes titled as-is — same decision as §6.10, no `note.date` mapping in v1 |
+
+- **Testing**: a fixture JSON graph in `testdata/` covering every table row;
+  golden-file conversion tests; block-ref depth-cap behavior (self- and
+  mutually-referencing blocks); download-failure fallback; scan counts match run
+  results; extraction-equals-rebuild over an imported graph.
+
 ---
 
 ## 7. Sync protocol
@@ -1145,6 +1266,7 @@ tombstone pulls down.
 | LLM chat orchestration + retrieval tools | ✅ | — | — |
 | Document metadata + embed edges + transfer orchestration | ✅ | — | ✅ blob endpoints, hash verify |
 | Document bytes (BlobStore) | ✅ Go fs impl (desktop/mobile) | ✅ web OPFS impl; picker ingestion + render URLs | ✅ streams to S3-compatible store |
+| Importers — Obsidian vault, Roam JSON (scan, conversion, ingestion) | ✅ core/importer | ✅ pickers (folder / file; mobile staging for vaults only) | — |
 | Secret storage | — | ✅ keychain/SecureStore/DPAPI | ✅ encrypted secrets table |
 | Auth token persistence | — | ✅ | ✅ issue/verify |
 | UI, navigation, state presentation | — | ✅ packages/app (+ per-platform shells) | — |
@@ -1230,8 +1352,6 @@ Done:
     **just-in-time** server generation (`apps/server/repeat.go`) — a minute sweep plus an
     on-push check creates only the occurrence whose time has come, never ahead, at most one
     per seed per sweep; occurrences reach other devices instantly via SSE → sync.
-
-Next:
 12. **Documents** — file embeds in notes (§6.9): `documents` entity + sync (metadata
     rows; immutable content-addressed bytes); `BlobStore` port in `core/blob` (one Go
     fs impl for desktop + mobile, injected OPFS impl on web; bytes never cross the
@@ -1240,14 +1360,32 @@ Next:
     in the sync loop; `![[doc:<id>]]` embeds → `embed` edges + graph nodes; editor
     `docRef` NodeView (inline image/audio, file chip) via `resolveDocUrl`; Trash
     lifecycle + blob GC on client and bucket.
-13. **Obsidian import of notes**: TODO
-14. **Things 3 import of tasks**: TODO
-15.  **Habits** — cadence kinds + polarity + streak math + streak-health; entries UI;
+
+Next:
+13. **Obsidian import of notes** — §6.10: `core/importer/obsidian` (vault walk +
+    resolution index, Obsidian→canonical link conversion, stub notes for unresolved
+    links, attachment ingestion through the §6.9 pipeline); `import.obsidianScan` /
+    `import.obsidianRun` / `import.cancel` bridge methods + `import.progress` events;
+    Import settings tab (**desktop + mobile only**, capability-gated — web has no
+    vault access; vault picker via Wails dialog / mobile copy-to-staging); everything
+    imports into one user-chosen project; notes flow through the normal write path so
+    extraction + sync just work; fixture-vault golden tests + extraction==rebuild
+    asserted over an import.
+14. **Roam Research import of notes** — §6.11: `core/importer/roam` (JSON-export
+    parser: page + block-uid index, outline→markdown rendering, page-ref/tag/block-ref
+    conversion with depth-capped block-ref materialization, `{{[[TODO]]}}`/`{{[[DONE]]}}`
+    → markdown checkboxes, Roam-hosted attachments downloaded and ingested through the
+    §6.9 pipeline); `import.roamScan` / `import.roamRun` reusing milestone 13's shared
+    progress/cancel plumbing and Import settings tab (now a source chooser); single-file
+    input so mobile needs no staging directory; fixture-graph golden tests +
+    extraction==rebuild asserted over an import.
+15. **Things 3 import of tasks**: TODO
+16.  **Habits** — cadence kinds + polarity + streak math + streak-health; entries UI;
     `habit_links` stacking + suggestions; `stack` edges in the graph; habit
     membership; the sidebar fire icon goes live; notification schedules; geofence
     registration on mobile.
-16.  **Calendar** — feeds, server ICS fetcher, event clone, merged calendar view.
-17.  **Polish** — silent push (APNs/FCM) as the background complement to SSE,
+17.  **Calendar** — feeds, server ICS fetcher, event clone, merged calendar view.
+18.  **Polish** — silent push (APNs/FCM) as the background complement to SSE,
     tombstone retention + full-resync path, E2E-encrypted secrets, bulk
     re-validation on schema edits, import/export.
 
@@ -1287,6 +1425,18 @@ Next:
 - **Graph scale.** `graph.full` + force layout is fine to a few thousand nodes;
   beyond that, default to neighborhood views and cluster-by-type. The link index
   itself scales fine (it's a covering index with two small B-trees).
+- **Obsidian import fidelity.** Link resolution mimics Obsidian best-effort (relative
+  path, then unique basename; ambiguous names resolve deterministically with a
+  warning rather than silently guessing). Mobile must stage a copy of the vault
+  (transient 2× space on big vaults). v1 keeps no import provenance, so re-running an
+  import duplicates notes — stated in the UI; provenance tracking is a Polish
+  candidate if users re-import evolving vaults.
+- **Roam import specifics.** Only the JSON export is supported (the markdown export
+  drops block uids, making block refs unresolvable — document this in the UI). Block
+  refs materialize inline, duplicating content by design, with a depth cap against
+  reference cycles. Attachment downloads need network at import time and Roam's
+  hosted URLs may fail or expire — failures degrade to the original URL + a warning,
+  never a failed import.
 - **Clock skew**: conflict rule compares `updated_at` from different devices. Server
   clamps client timestamps to `now()` when they arrive from the future; document that
   "newer" is best-effort.

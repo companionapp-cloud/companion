@@ -1,21 +1,27 @@
 import { EditorState, Plugin, TextSelection } from "prosemirror-state";
+import type { Command } from "prosemirror-state";
 import { EditorView, Decoration, DecorationSet } from "prosemirror-view";
 import type { Node } from "prosemirror-model";
 import { history, undo, redo } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap, chainCommands, splitBlock } from "prosemirror-commands";
+import { tableEditing, goToNextCell, isInTable } from "prosemirror-tables";
 import { splitListItemKeepingType, liftListItem, sinkListItem } from "./listCommands";
+import { tableMenuPlugin, type TableMenuPresenter } from "./tableMenu";
+import { createTable, tableFromGrid, tableFromMarkdownCommand } from "./tables";
+import type { ClipboardWriter } from "./tableCommands";
 // Schema/parser/serializer extended with wikilink support (chips + un-escaped [[…]]).
 import { schema, parser, serializer, wikilinkInputRules, wikilinkNode } from "./wikilink";
 // The restricted plain-text-plus-references schema and its round-trip (see simpleSchema.ts).
 import { simpleSchema, parseSimple, serializeSimple } from "./simpleSchema";
 import { commonmarkInputRules } from "./inputrules";
 import { wikilinkAutocomplete } from "./autocomplete";
+import { emptyWikilinkPlugin, type EmptyLink } from "./emptyWikilink";
 import { wikilinkHostAutocomplete, type HostAutocompleteBridge } from "./hostAutocomplete";
 import { wikilinkNodeView, type WikilinkView } from "./wikilinkView";
 import { documentNodeView, isDocumentEmbed } from "./documentView";
 import { buildFormatCommands, computeFormatState, type FormatName, type FormatState } from "./formatCommands";
-import type { DocumentSource, LinkRef, LinkSource } from "./types";
+import type { DocumentSource, LinkRef, LinkSource, QuickCreateRequest, QuickCreateTarget } from "./types";
 
 // The shared ProseMirror setup — pure DOM, no framework. Used directly on web/desktop
 // (Editor.web.tsx) and inside the WebView on native (webview/main.ts). Content is
@@ -42,6 +48,12 @@ export interface EditorHandle {
   /** Open the `[[` reference picker at the cursor (inserts the trigger, which the
    * autocomplete plugin turns into the web popup or the native host modal). */
   insertReference(): void;
+  /** Insert a blank 2×2 GFM table (header row + one body row) at the cursor. Full variant
+   * only; a no-op in the simple editor. */
+  insertTable(): void;
+  /** Complete (or cancel) a quick-create started from an empty `[[label]]` link: replace the
+   * raw text with a resolved chip for `target`, or leave it untouched when `target` is null. */
+  resolveQuickCreate(target: QuickCreateTarget | null): void;
 }
 
 export interface CreateEditorOptions {
@@ -69,11 +81,20 @@ export interface CreateEditorOptions {
   /** Open a referenced entity when its chip is clicked (after it's selected). Wired to the
    * host's navigation (web opens a new tab; native posts the ref to the shell). */
   onOpenRef?: (ref: LinkRef) => void;
+  /** Notified when an unresolved `[[label]]` link is double-clicked, so the host can offer a
+   * quick-create. The host answers via {@link EditorHandle.resolveQuickCreate}. */
+  onQuickCreate?: (req: QuickCreateRequest) => void;
   /** "full" is the document editor (headings, lists, task items, marks …). "simple" is a
    * plain-text-plus-references editor for task notes and the chat composer. Default "full". */
   variant?: "full" | "simple";
   /** Placeholder shown while the document is empty (simple variant). */
   placeholder?: string;
+  /** Present the table cell menu natively instead of the built-in HTML popup. Injected by the
+   * desktop (Wails) and iOS shells; omitted on web. Full variant only. */
+  tableMenuPresenter?: TableMenuPresenter;
+  /** Host clipboard writer for the table copy actions (iOS WebView can't use navigator.clipboard
+   * reliably). Web/desktop leave this off and fall back to navigator.clipboard. */
+  clipboard?: ClipboardWriter;
   /** When set, Enter submits (calls this with the current content) instead of inserting a
    * newline, and Shift-Enter makes a new paragraph — the chat composer's send behavior. The
    * markdown is passed so the host sends exactly what's shown, not a debounced draft. Simple
@@ -100,6 +121,39 @@ function placeholderPlugin(text: string): Plugin {
 
 // A bare UUID on the clipboard becomes a wikilink (its type resolved via linkSource).
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+// Enter inside a table cell inserts a hard line break (cells are multiline; splitting the block
+// would make a broken table). Serializes as `<br>` — see tables.ts. Returns true only in a table,
+// so the keymap chain falls through to normal Enter handling elsewhere.
+const enterInCell: Command = (state, dispatch) => {
+  if (!isInTable(state)) return false;
+  if (dispatch) dispatch(state.tr.replaceSelectionWith(schema.nodes.hard_break.create()).scrollIntoView());
+  return true;
+};
+
+// Some blocks have no keyboard way to escape below them when they end the document — a table, a
+// code block (Enter just adds a line inside), or a blockquote. Keep an empty trailing paragraph
+// after any of them so the caret can always land past it. Runs reactively on any transaction
+// (including the selection change from clicking in, and the toolbar insert), so the escape hatch is
+// always present. Only appends when missing, so it can't loop; the empty paragraph serializes to
+// nothing, so it doesn't churn the note.
+//
+// Lists are intentionally excluded: they already have a natural keyboard exit — pressing Enter in
+// an empty last item lifts it out of the list (splitListItemKeepingType → liftListItem). A trailing
+// paragraph there would just leave a redundant blank line after that lift.
+const TRAILING_ESCAPE_BLOCKS = new Set(["table", "code_block", "blockquote"]);
+function trailingParagraphPlugin(): Plugin {
+  return new Plugin({
+    appendTransaction(_trs, _oldState, newState) {
+      const last = newState.doc.lastChild;
+      if (last && TRAILING_ESCAPE_BLOCKS.has(last.type.name)) {
+        const para = schema.nodes.paragraph.createAndFill();
+        if (para) return newState.tr.insert(newState.doc.content.size, para);
+      }
+      return null;
+    },
+  });
+}
 
 // Toggle a task item when its checkbox is clicked. The box is contentEditable=false, so
 // mousedown doesn't move the selection; we resolve the enclosing list_item and flip its
@@ -152,12 +206,25 @@ export function createEditor(
     : linkSource
       ? [wikilinkAutocomplete(linkSource, activeSchema)]
       : [];
+  // Empty `[[label]]` links: double-clicking one asks the host to quick-create a note/task
+  // (options.onQuickCreate). Stash the clicked range so resolveQuickCreate can swap it for a
+  // resolved chip once the host answers. Only installed when a host handler is wired.
+  let pendingQuickCreate: { from: number; to: number; label: string } | null = null;
+  const emptyLinkPlugins = options.onQuickCreate
+    ? [
+        emptyWikilinkPlugin((link: EmptyLink) => {
+          pendingQuickCreate = { from: link.from, to: link.to, label: link.label };
+          options.onQuickCreate!({ label: link.label, embed: false });
+        }),
+      ]
+    : [];
   const plugins: Plugin[] = simple
     ? [
         history(),
         wikilinkInputRules(activeSchema),
         // Native delegates `[[` to a host modal; web/desktop use the in-editor DOM popup.
         ...autocompletePlugins,
+        ...emptyLinkPlugins,
         keymap({ "Mod-z": undo, "Mod-y": redo, "Shift-Mod-z": redo }),
         ...(options.placeholder ? [placeholderPlugin(options.placeholder)] : []),
         // Composer send: Enter submits, Shift-Enter drops to a new paragraph. Without an
@@ -180,15 +247,30 @@ export function createEditor(
         commonmarkInputRules(schema),
         wikilinkInputRules(activeSchema),
         taskCheckboxPlugin(),
+        // Table cell selection + arrow-key navigation, and the per-cell menu (hover ellipsis /
+        // right-click / long-press). The menu presents natively on desktop/iOS when a presenter
+        // is injected, else the built-in HTML popup.
+        tableEditing(),
+        trailingParagraphPlugin(),
+        tableMenuPlugin({ presenter: options.tableMenuPresenter, clipboard: options.clipboard }),
         // Native delegates `[[` to a host modal; web/desktop use the in-editor DOM popup.
         ...autocompletePlugins,
+        ...emptyLinkPlugins,
         keymap({ "Mod-z": undo, "Mod-y": redo, "Shift-Mod-z": redo }),
-        // List editing (before baseKeymap so Enter/Tab are intercepted inside a list): Enter
-        // splits the item, or leaves the list when the item is empty; Tab / Shift-Tab nest.
+        // List + table editing (before baseKeymap so Enter/Tab are intercepted first): Enter
+        // splits a list item or leaves the list, but is swallowed inside a table cell (GFM cells
+        // are single-line). Tab / Shift-Tab move between cells in a table, else nest list items.
         keymap({
-          Enter: chainCommands(splitListItemKeepingType(schema.nodes.list_item), liftListItem(schema.nodes.list_item)),
-          Tab: sinkListItem(schema.nodes.list_item),
-          "Shift-Tab": liftListItem(schema.nodes.list_item),
+          Enter: chainCommands(
+            // A GFM header+delimiter typed by hand becomes a table (before the cell guard, so it
+            // can fire while the caret is still in the delimiter paragraph).
+            tableFromMarkdownCommand(schema),
+            enterInCell,
+            splitListItemKeepingType(schema.nodes.list_item),
+            liftListItem(schema.nodes.list_item),
+          ),
+          Tab: chainCommands(goToNextCell(1), sinkListItem(schema.nodes.list_item)),
+          "Shift-Tab": chainCommands(goToNextCell(-1), liftListItem(schema.nodes.list_item)),
         }),
         keymap(baseKeymap),
       ];
@@ -364,6 +446,33 @@ export function createEditor(
         void embedFiles(Array.from(files));
         return true;
       }
+      // A tab-delimited grid pasted as plain text (a spreadsheet selection with no HTML) becomes
+      // a table. When the clipboard carries HTML the default parser already builds the table from
+      // the schema's parseDOM, so only the plain-text-only case is handled, and only in the full
+      // editor (the simple variant has no table nodes).
+      if (!simple) {
+        const html = event.clipboardData?.getData("text/html");
+        const raw = event.clipboardData?.getData("text/plain");
+        if (!html && raw && raw.includes("\t") && /\r?\n/.test(raw.trim())) {
+          const grid = raw
+            .replace(/\r\n/g, "\n")
+            .replace(/\n+$/, "")
+            .split("\n")
+            .map((l) => l.split("\t"));
+          if (grid.length >= 1 && grid.every((r) => r.length >= 2)) {
+            const table = tableFromGrid(activeSchema, grid);
+            if (table) {
+              try {
+                const { from, to } = view.state.selection;
+                view.dispatch(view.state.tr.replaceRangeWith(from, to, table).scrollIntoView());
+                return true;
+              } catch {
+                /* view torn down */
+              }
+            }
+          }
+        }
+      }
       const text = event.clipboardData?.getData("text/plain")?.trim();
       if (!text || !UUID_RE.test(text)) return false;
       const { from, to } = view.state.selection;
@@ -443,6 +552,33 @@ export function createEditor(
         view.focus();
       } catch {
         /* view torn down */
+      }
+    },
+    insertTable() {
+      // A blank 2×2 GFM table (header row + one body row). Full editor only; the simple schema
+      // has no table nodes.
+      if (simple) return;
+      try {
+        view.dispatch(view.state.tr.replaceSelectionWith(createTable(activeSchema, 2, 2)).scrollIntoView());
+        view.focus();
+      } catch {
+        /* view torn down */
+      }
+    },
+    resolveQuickCreate(target: QuickCreateTarget | null) {
+      const pending = pendingQuickCreate;
+      pendingQuickCreate = null;
+      if (!pending || !target) return;
+      // Guard against staleness: only replace if the range still reads a `[[…]]` link (the
+      // doc may have been edited while the host's quick-create UI was open).
+      try {
+        const text = view.state.doc.textBetween(pending.from, pending.to, undefined, "￼");
+        if (!text.startsWith("[[") || !text.endsWith("]]")) return;
+        const node = wikilinkNode(activeSchema, { type: target.type, id: target.id, alias: target.title });
+        view.dispatch(view.state.tr.replaceRangeWith(pending.from, pending.to, node).scrollIntoView());
+        view.focus();
+      } catch {
+        /* view torn down or range out of sync */
       }
     },
   };

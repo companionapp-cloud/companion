@@ -4,7 +4,8 @@
 // from Editor.tsx so the native app never bundles ProseMirror into its JS.
 import { createEditor } from "../createEditor";
 import type { FormatName } from "./../formatCommands";
-import type { DocumentSource, LinkSource, LinkSuggestion, ResolvedDocument } from "../types";
+import type { DocumentSource, LinkSource, LinkSuggestion, QuickCreateTarget, ResolvedDocument } from "../types";
+import type { TableMenuRequest } from "../tableMenu";
 
 declare global {
   interface Window {
@@ -22,7 +23,13 @@ declare global {
     __clear?: () => void;
     __format?: (name: FormatName) => void;
     __insertReference?: () => void;
+    __insertTable?: () => void;
     __insertDocumentEmbed?: (id: string, filename: string) => void;
+    __resolveQuickCreate?: (target: QuickCreateTarget | null) => void;
+    // Table menu: the host presents a native menu from the posted model, then injects the
+    // chosen action id (or a dismiss). Set while a menu request is in flight.
+    __runTableAction?: (id: string) => void;
+    __dismissTableMenu?: () => void;
   }
 }
 
@@ -85,6 +92,9 @@ function bridgedDocumentSource(): DocumentSource {
   };
 }
 
+// The table menu request currently awaiting a native selection (see tableMenuPresenter).
+let pendingTableMenu: TableMenuRequest | null = null;
+
 function init(): void {
   const mount = document.getElementById("editor");
   if (!mount) return;
@@ -112,7 +122,32 @@ function init(): void {
     onFormatStateChange: (state) => post("format", state),
     // Opening a referenced entity is the shell's job; hand the ref up over the bridge.
     onOpenRef: (ref) => post("openRef", ref),
+    // Double-clicking an empty `[[label]]` link: ask the shell to quick-create; it answers
+    // by injecting __resolveQuickCreate with the new note/task (or null to cancel).
+    onQuickCreate: (req) => post("quickCreate", req),
+    // The table cell menu is presented natively by the RN host: post the model + anchor, then
+    // the host injects __runTableAction(id) / __dismissTableMenu(). A DOM popup inside the
+    // WebView would fight the on-screen keyboard, same rationale as the `[[` picker.
+    tableMenuPresenter: (req: TableMenuRequest) => {
+      pendingTableMenu = req;
+      post("tableMenu", { anchor: req.anchor, items: req.items });
+    },
+    // Copy actions can't use navigator.clipboard reliably in the WebView; route to the host.
+    clipboard: (text) => post("copy", text),
   });
+  // Table menu: the host answers the posted request by running an action or dismissing.
+  window.__runTableAction = (id) => {
+    const req = pendingTableMenu;
+    pendingTableMenu = null;
+    req?.onSelect(id);
+  };
+  window.__dismissTableMenu = () => {
+    const req = pendingTableMenu;
+    pendingTableMenu = null;
+    req?.onDismiss();
+  };
+  // The host's keyboard toolbar injects this to insert a table.
+  window.__insertTable = () => handle.insertTable();
   // The host injects __refreshLinks() to re-hydrate task chips after task data changes.
   window.__refreshLinks = () => handle.refreshLinks();
   // The host injects __clear() to empty the composer after a send.
@@ -122,6 +157,8 @@ function init(): void {
   window.__insertReference = () => handle.insertReference();
   // The host injects an already-ingested document embed after its OS picker (PLAN §6.9).
   window.__insertDocumentEmbed = (id, filename) => handle.insertDocumentEmbed(id, filename);
+  // The host injects the quick-create result (or null) to finish an empty-link resolution.
+  window.__resolveQuickCreate = (target) => handle.resolveQuickCreate(target);
 
   // The simple editor is an inline field (task note / composer), not a full-screen page, so
   // report its content height and let the host size the WebView to it (bounded by the host's

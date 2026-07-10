@@ -170,6 +170,8 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.trashRestore(payload)
 	case "trash.purge":
 		return c.trashPurge(payload)
+	case "trash.empty":
+		return c.trashEmpty()
 	case "areas.list":
 		return c.areasList()
 	case "areas.create":

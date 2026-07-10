@@ -8,6 +8,8 @@ export { TodayScreen, DailyNote, TodayCalendar, todayISO, formatFullDate } from 
 export { TaskEditor, TaskRow, Checkbox } from "./TaskEditor";
 export { TrashScreen } from "./TrashScreen";
 export { NoteConflictDialog } from "./NoteConflictDialog";
+export { useQuickCreateLink } from "./useQuickCreateLink";
+export { QuickCreateLinkDialog } from "./QuickCreateLinkDialog";
 export { useNoteSyncGuard } from "./useNoteSyncGuard";
 export type { NoteSyncGuard, NoteConflictKind } from "./useNoteSyncGuard";
 export { GraphScreen } from "./GraphScreen";
@@ -60,3 +62,7 @@ export { useNav } from "./nav-context";
 export type { NavLocation, Navigator, ViewId, Tab, TabRef } from "./nav-context";
 export { focusTarget, focusUrl, openFocusWindow, setFocusWindowOpener } from "./focus";
 export type { FocusTarget, FocusKind } from "./focus";
+export { CaptureView } from "./CaptureView";
+export { CaptureForm } from "./CaptureForm";
+export { captureRequested, closeCaptureWindow, setCaptureWindowCloser } from "./capture";
+export { setTableMenuPresenter, tableMenuPresenter } from "./tableMenu";

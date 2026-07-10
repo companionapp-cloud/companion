@@ -183,6 +183,100 @@ func TestDocumentsIngestFileNoLocalStore(t *testing.T) {
 	}
 }
 
+// Deleting a note cascades to the documents it embeds: they land in the Trash with it, are
+// hidden from the live list, and are restored together when the note is restored. A file
+// still embedded by another live note stays put.
+func TestNoteDeleteCascadesToDocuments(t *testing.T) {
+	c, _ := newTestCore(t)
+
+	mkDoc := func(name string) domain.Document {
+		out, err := c.Invoke("documents.create", mustJSON(map[string]any{
+			"filename": name, "mime": "application/pdf", "size": 3, "sha256": hashA,
+		}))
+		if err != nil {
+			t.Fatalf("create doc %s: %v", name, err)
+		}
+		var d domain.Document
+		json.Unmarshal(out, &d)
+		return d
+	}
+	mkNote := func(body string) domain.Note {
+		out, err := c.Invoke("notes.create", mustJSON(map[string]string{"title": "N", "contentMd": body}))
+		if err != nil {
+			t.Fatalf("create note: %v", err)
+		}
+		var n domain.Note
+		json.Unmarshal(out, &n)
+		return n
+	}
+	liveDocIDs := func() map[string]bool {
+		out, err := c.Invoke("documents.list", nil)
+		if err != nil {
+			t.Fatalf("list docs: %v", err)
+		}
+		var docs []domain.Document
+		json.Unmarshal(out, &docs)
+		ids := map[string]bool{}
+		for _, d := range docs {
+			ids[d.ID] = true
+		}
+		return ids
+	}
+
+	owned := mkDoc("owned.pdf")   // embedded only by the note we delete
+	shared := mkDoc("shared.pdf") // embedded by the deleted note AND a second live note
+	note := mkNote("![[doc:" + owned.ID + "]] and ![[doc:" + shared.ID + "]]")
+	mkNote("keeps ![[doc:" + shared.ID + "]]")
+
+	if ids := liveDocIDs(); !ids[owned.ID] || !ids[shared.ID] {
+		t.Fatalf("both docs should start live: %v", ids)
+	}
+
+	if _, err := c.Invoke("notes.delete", mustJSON(map[string]string{"id": note.ID})); err != nil {
+		t.Fatalf("delete note: %v", err)
+	}
+
+	// owned left the live set with its note; shared stays because another live note embeds it.
+	ids := liveDocIDs()
+	if ids[owned.ID] {
+		t.Error("owned document should be trashed with its note")
+	}
+	if !ids[shared.ID] {
+		t.Error("shared document must stay live for the note that still embeds it")
+	}
+
+	// The owned document appears in the Trash tagged as a document.
+	out, err := c.Invoke("trash.list", nil)
+	if err != nil {
+		t.Fatalf("trash.list: %v", err)
+	}
+	var trash []struct {
+		EntityType string `json:"entityType"`
+		ID         string `json:"id"`
+	}
+	json.Unmarshal(out, &trash)
+	foundOwned := false
+	for _, it := range trash {
+		if it.EntityType == "document" && it.ID == owned.ID {
+			foundOwned = true
+		}
+		if it.EntityType == "document" && it.ID == shared.ID {
+			t.Error("shared document must not be in the Trash")
+		}
+	}
+	if !foundOwned {
+		t.Error("owned document should be listed in the Trash")
+	}
+
+	// Restoring the note brings its owned file back.
+	if _, err := c.Invoke("trash.restore", mustJSON(map[string]string{"entityType": "note", "id": note.ID})); err != nil {
+		t.Fatalf("restore note: %v", err)
+	}
+	if ids := liveDocIDs(); !ids[owned.ID] {
+		t.Error("owned document should be restored with its note")
+	}
+}
+
 func sha256Hex(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])

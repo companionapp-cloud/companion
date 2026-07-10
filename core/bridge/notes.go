@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"encoding/json"
+	"errors"
 
 	"companion/core/domain"
 	"companion/core/store"
@@ -84,8 +85,17 @@ func (c *Core) notesDelete(payload []byte) ([]byte, error) {
 	if err := unmarshal(payload, &args); err != nil {
 		return nil, err
 	}
+	// Read the note's embedded documents before Trash drops its edges, so the delete can
+	// cascade to the files it owns (PLAN §6.9).
+	docIDs, err := c.store.Links.EmbeddedDocumentIDs(domain.NodeNote, args.ID)
+	if err != nil {
+		return nil, err
+	}
 	if err := c.store.Notes.Trash(args.ID); err != nil {
 		return nil, mapStoreErr(err)
+	}
+	if err := c.cascadeTrashDocuments(docIDs); err != nil {
+		return nil, err
 	}
 	c.emit(notesChangedEvent, nil)
 	c.emitDataChanged("note", args.ID)
@@ -102,13 +112,68 @@ func (c *Core) notesDeleteMany(payload []byte) ([]byte, error) {
 	if err := unmarshal(payload, &args); err != nil {
 		return nil, err
 	}
+	// Collect each note's embedded documents before TrashMany drops the edges, then cascade
+	// the deletion to those files (PLAN §6.9).
+	var docIDs []string
+	for _, id := range args.IDs {
+		ids, err := c.store.Links.EmbeddedDocumentIDs(domain.NodeNote, id)
+		if err != nil {
+			return nil, err
+		}
+		docIDs = append(docIDs, ids...)
+	}
 	n, err := c.store.Notes.TrashMany(args.IDs)
 	if err != nil {
 		return nil, mapStoreErr(err)
 	}
+	if err := c.cascadeTrashDocuments(docIDs); err != nil {
+		return nil, err
+	}
 	c.emit(notesChangedEvent, nil)
 	c.emitDataChanged("", "")
 	return json.Marshal(map[string]int64{"count": n})
+}
+
+// cascadeTrashDocuments trashes the given documents so a note's files leave with it
+// (PLAN §6.9). A document still embedded by another live note or task is left in place —
+// files can be shared — and one already trashed/tombstoned (ErrNotFound) is skipped. Call
+// it after the owning note is trashed so its own embed no longer counts as a live
+// reference. Restoring the note brings the files back (see trashRestore).
+func (c *Core) cascadeTrashDocuments(docIDs []string) error {
+	for _, id := range docIDs {
+		referenced, err := c.store.Links.DocumentReferencedByLiveSource(id)
+		if err != nil {
+			return err
+		}
+		if referenced {
+			continue
+		}
+		if err := c.store.Documents.Trash(id); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				continue
+			}
+			return err
+		}
+		c.emitDocumentChanged(id)
+	}
+	return nil
+}
+
+// cascadeRestoreDocuments brings a restored note's embedded documents back out of the Trash
+// (PLAN §6.9), the inverse of cascadeTrashDocuments. Call it after the note is restored so
+// its edges have been re-derived. A document that is already live (ErrNotFound) is skipped,
+// so a file the user trashed on its own isn't disturbed unless it rode the note down.
+func (c *Core) cascadeRestoreDocuments(docIDs []string) error {
+	for _, id := range docIDs {
+		if err := c.store.Documents.Restore(id); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				continue
+			}
+			return err
+		}
+		c.emitDocumentChanged(id)
+	}
+	return nil
 }
 
 // notesHold marks a note as open in an editor so the sync engine defers a conflicting
