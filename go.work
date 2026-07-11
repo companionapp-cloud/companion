@@ -1,7 +1,9 @@
 go 1.26.1
 
 use (
+	./apps/cloud
 	./apps/desktop
 	./apps/server
 	./core
+	./packages/syncserver
 )

@@ -8,21 +8,21 @@ WEB_PUBLIC := apps/web/public
 MOBILE_MODULE := apps/mobile/modules/companion-core
 
 .PHONY: all test test-go fmt vet desktop desktop-frontend desktop-run desktop-app desktop-app-run core-wasm web-assets \
-        web-run server server-run gomobile-init core-android core-ios android-lib \
+        web-run server server-run cloud cloud-frontend cloud-emails cloud-run gomobile-init core-android core-ios android-lib \
         mobile-artifacts mobile-run db-up db-down db-logs db-reset clean
 
 all: test
 
-## test-go: run the Go core + desktop + server test suites (fast, headless SQLite)
+## test-go: run the Go core + desktop + syncserver test suites (fast, headless SQLite)
 test-go:
-	$(GO) test ./core/... ./apps/desktop/... ./apps/server/...
+	$(GO) test ./core/... ./apps/desktop/... ./packages/syncserver/... ./apps/cloud/...
 
-## test-server-pg: run the server suite against the compose Postgres *test* database
+## test-server-pg: run the sync server suite against the compose Postgres *test* database
 ## (make db-up first). Never touches the dev database.
 test-server-pg:
 	@set -a; if [ -f .env ]; then . ./.env; fi; set +a; \
 	COMPANION_TEST_DB="$${TEST_DATABASE_URL:-postgres://companion:companion@localhost:5432/companion_test?sslmode=disable}" \
-	$(GO) test -C apps/server -count=1 .
+	$(GO) test -C packages/syncserver -count=1 .
 
 test: test-go
 
@@ -103,6 +103,27 @@ server:
 ## present, so DATABASE_URL points it at the compose Postgres.
 server-run:
 	@set -a; if [ -f .env ]; then . ./.env; fi; set +a; cd apps/server && $(GO) run .
+
+## cloud-frontend: build the cloud account/billing portal into apps/cloud/frontend/dist
+## (baked into the cloud binary via go:embed).
+cloud-frontend:
+	npm run build -w @companion/cloud-frontend
+
+## cloud-emails: render the React Email templates into apps/cloud/emails/dist (also
+## embedded by the cloud binary and sent over SMTP with per-recipient substitution).
+cloud-emails:
+	npm run build -w @companion/cloud-emails
+
+## cloud: build the cloud binary (open-core sync API + Stripe billing + admin), embedding
+## the freshly built frontend and email templates.
+cloud: cloud-frontend cloud-emails
+	mkdir -p $(BUILD_DIR)
+	cd apps/cloud && $(GO) build -o ../../$(BUILD_DIR)/companion-cloud .
+
+## cloud-run: run the cloud server from source (dev, :8080). Loads .env so DATABASE_URL,
+## the STRIPE_* keys, and SMTP_* settings are picked up.
+cloud-run: cloud-frontend cloud-emails
+	@set -a; if [ -f .env ]; then . ./.env; fi; set +a; cd apps/cloud && $(GO) run .
 
 ## gomobile-init: install + initialise gomobile (needs Xcode / Android NDK, PLAN §3.2)
 gomobile-init:

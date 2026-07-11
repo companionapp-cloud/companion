@@ -10,7 +10,13 @@
   "workspaces": [
     "apps/*",
     "apps/desktop/frontend",
-    "packages/*"
+    "apps/cloud/frontend",
+    "apps/cloud/emails",
+    "packages/app",
+    "packages/config",
+    "packages/core-bridge",
+    "packages/design-system",
+    "packages/editor"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
