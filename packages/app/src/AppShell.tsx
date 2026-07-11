@@ -24,6 +24,7 @@ import {
   space,
   transition,
 } from "@companion/design-system";
+import type { SidebarArea } from "@companion/core-bridge";
 import { NavContext, useNav, type NavLocation, type Navigator, type ProjectSection, type Tab, type TabRef, type ViewId } from "./nav-context";
 import { useCore } from "./CoreContext";
 import { setReminderActivationHandler } from "./reminderNav";
@@ -34,9 +35,10 @@ import { RemindersProvider, type NotificationScheduler } from "./RemindersProvid
 import { NotificationsProvider } from "./NotificationsProvider";
 import { NotificationsScreen } from "./NotificationsScreen";
 import { ToolVisibilityProvider, useToolVisibility, type ToolsStorage } from "./ToolVisibilityProvider";
-import { ProjectsProvider } from "./ProjectsProvider";
+import { ProjectsProvider, useProjects } from "./ProjectsProvider";
 import { ObjectTypesProvider } from "./ObjectTypesProvider";
 import { ProjectsSidebar } from "./ProjectsSidebar";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { ProjectView } from "./ProjectView";
 import { AppToolbar } from "./AppToolbar";
 import { WorkspaceScreen } from "./WorkspaceScreen";
@@ -469,6 +471,10 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
   const inWorkspace = nav.current.kind === "notes" || nav.current.kind === "tasks";
   const sync = useSync();
   const dnd = useDnd();
+  const { deleteArea } = useProjects();
+  // The area pending deletion — its confirm dialog is rendered at the shell root, outside
+  // the clipped (overflow:hidden) rail so the scrim can cover the whole window.
+  const [deletingArea, setDeletingArea] = useState<SidebarArea | null>(null);
   // Per-device tool hiding (Settings › Tools): only the rail entry disappears — the view
   // itself stays routable.
   const { tools, hidden } = useToolVisibility();
@@ -539,7 +545,13 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
             ))}
           </View>
           {/* Areas → projects tree, only when there's room to render labels. */}
-          {expanded ? <ProjectsSidebar onSelectProject={nav.openProject} activeProjectId={activeProjectId} /> : null}
+          {expanded ? (
+            <ProjectsSidebar
+              onSelectProject={nav.openProject}
+              activeProjectId={activeProjectId}
+              onDeleteArea={setDeletingArea}
+            />
+          ) : null}
           {/* Empty rail space fills the column (a window drag handle on desktop). */}
           <View style={{ flexGrow: 1, minHeight: space.xl }} />
         </ScrollView>
@@ -568,6 +580,19 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
           {inWorkspace ? null : children}
         </Frame>
       </View>
+
+      {deletingArea ? (
+        <ConfirmDialog
+          title="Delete area?"
+          message={`Delete the area “${deletingArea.name}”? It has no projects, so nothing else is affected.`}
+          confirmLabel="Delete area"
+          onConfirm={async () => {
+            await deleteArea(deletingArea.id);
+            setDeletingArea(null);
+          }}
+          onClose={() => setDeletingArea(null)}
+        />
+      ) : null}
     </View>
   );
 }

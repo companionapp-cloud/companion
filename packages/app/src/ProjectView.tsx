@@ -26,7 +26,7 @@ import { useTasks, filterTasksByDue } from "./TasksProvider";
 import { ListFilterMenu } from "./ListFilterMenu";
 import { NoteEditor } from "./NoteEditor";
 import { TaskEditor, TaskRow } from "./TaskEditor";
-import { ConfirmDialog } from "./ConfirmDialog";
+import { DeleteProjectDialog } from "./DeleteProjectDialog";
 import { repeatSubtitle } from "./repeat";
 import { useMultiSelect, pressMods } from "./MultiSelectProvider";
 import { SelectionStack } from "./SelectionStack";
@@ -459,14 +459,10 @@ function ProjectHome({ notes }: { notes: Note[] }) {
     </ScrollView>
 
     {confirmDelete ? (
-      <ConfirmDialog
-        title="Delete project?"
-        message={`This permanently deletes “${project.name}” and its organization. Notes stay in your library. This can’t be undone.`}
-        confirmLabel="Delete project"
-        confirmText={project.name}
-        confirmTextPrompt="Type the project name to confirm:"
-        onConfirm={async () => {
-          await deleteProject(project.id);
+      <DeleteProjectDialog
+        projectName={project.name}
+        onConfirm={async (deleteContent) => {
+          await deleteProject(project.id, deleteContent);
           nav.back();
         }}
         onClose={() => setConfirmDelete(false)}

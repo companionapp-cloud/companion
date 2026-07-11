@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,6 +12,11 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// ErrAreaNotEmpty is returned when a delete is attempted on an area that still holds
+// projects. An area is only deletable once empty so its projects aren't silently orphaned
+// into "Unsorted" (PLAN §6.6).
+var ErrAreaNotEmpty = errors.New("area not empty")
 
 // AreasRepo is the CRUD + sync repository for areas (PLAN §6.6). Areas are a flat,
 // ordered list of sidebar headings; they group projects but are not graph nodes.

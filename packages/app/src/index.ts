@@ -60,6 +60,8 @@ export type { DragPayload } from "./DndContext";
 export { MembershipPicker } from "./MembershipPicker";
 export { ConfirmDialog } from "./ConfirmDialog";
 export type { ConfirmDialogProps } from "./ConfirmDialog";
+export { DeleteProjectDialog } from "./DeleteProjectDialog";
+export type { DeleteProjectDialogProps } from "./DeleteProjectDialog";
 export { SyncProvider, useSync } from "./SyncProvider";
 export type { SyncController, SyncStatus, SyncStorage } from "./SyncProvider";
 export { SettingsScreen } from "./SettingsScreen";

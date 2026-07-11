@@ -13,9 +13,13 @@ import { useDropTarget } from "./DndContext";
 export function ProjectsSidebar({
   onSelectProject,
   activeProjectId,
+  onDeleteArea,
 }: {
   onSelectProject?: (id: string) => void;
   activeProjectId?: string | null;
+  /** Request deletion of an (empty) area. The host renders the confirm dialog outside the
+   *  clipped rail (see AppShell). */
+  onDeleteArea?: (area: SidebarArea) => void;
 }) {
   const { sidebar, createArea, createProject, reorderAreas, reorderProjects } = useProjects();
   const [addingArea, setAddingArea] = useState(false);
@@ -41,22 +45,15 @@ export function ProjectsSidebar({
 
   const renderArea = (area: SidebarArea, dragHandlers: object) => (
     <View style={{ marginBottom: space.sm }}>
-      <View style={styles.areaHeader} {...dragHandlers}>
-        {area.color ? <View style={[styles.areaDot, { backgroundColor: area.color }]} /> : null}
-        <Text variant="caption" tone="secondary" numberOfLines={1} style={{ flex: 1, fontWeight: "600" }}>
-          {area.name}
-        </Text>
-        <IconButton
-          label={`New project in ${area.name}`}
-          size="sm"
-          onPress={() => {
-            setAddingProjectFor(area.id);
-            setProjectName("");
-          }}
-        >
-          <Icon name="plus" size={13} color={colors.textTertiary} />
-        </IconButton>
-      </View>
+      <AreaHeader
+        area={area}
+        dragHandlers={dragHandlers}
+        onAddProject={() => {
+          setAddingProjectFor(area.id);
+          setProjectName("");
+        }}
+        onDeleteArea={onDeleteArea}
+      />
       <SortableList
         items={area.projects}
         keyExtractor={(p) => p.id}
@@ -125,6 +122,45 @@ export function ProjectsSidebar({
           Group your work into areas and projects. Add one with ＋.
         </Text>
       ) : null}
+    </View>
+  );
+}
+
+/** An area heading: a color dot, name, and the always-present "new project" button. An
+ *  empty area additionally reveals a delete button on hover — areas are only deletable once
+ *  they hold no projects (PLAN §6.6). */
+function AreaHeader({
+  area,
+  dragHandlers,
+  onAddProject,
+  onDeleteArea,
+}: {
+  area: SidebarArea;
+  dragHandlers: object;
+  onAddProject: () => void;
+  onDeleteArea?: (area: SidebarArea) => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const deletable = area.projects.length === 0 && !!onDeleteArea;
+  return (
+    <View
+      style={styles.areaHeader}
+      {...dragHandlers}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+    >
+      {area.color ? <View style={[styles.areaDot, { backgroundColor: area.color }]} /> : null}
+      <Text variant="caption" tone="secondary" numberOfLines={1} style={{ flex: 1, fontWeight: "600" }}>
+        {area.name}
+      </Text>
+      {deletable && hovered ? (
+        <IconButton label={`Delete area ${area.name}`} size="sm" onPress={() => onDeleteArea?.(area)}>
+          <Icon name="trash" size={13} color={colors.textTertiary} />
+        </IconButton>
+      ) : null}
+      <IconButton label={`New project in ${area.name}`} size="sm" onPress={onAddProject}>
+        <Icon name="plus" size={13} color={colors.textTertiary} />
+      </IconButton>
     </View>
   );
 }

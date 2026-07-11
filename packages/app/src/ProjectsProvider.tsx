@@ -23,7 +23,9 @@ export interface ProjectsStore {
   deleteArea: (id: string) => Promise<void>;
   createProject: (input: CreateProjectInput) => Promise<Project>;
   updateProject: (id: string, fields: UpdateProjectInput) => Promise<void>;
-  deleteProject: (id: string) => Promise<void>;
+  /** Delete a project. When `deleteContent` is true its member notes/tasks are trashed too;
+   *  otherwise they fall back to "Unsorted" (PLAN §6.6). */
+  deleteProject: (id: string, deleteContent?: boolean) => Promise<void>;
   /** Persist a new top-to-bottom order for the areas (drag-and-drop, PLAN §6.6). */
   reorderAreas: (ids: string[]) => Promise<void>;
   /** Persist a new order for one area's projects (drag-and-drop, PLAN §6.6). */
@@ -121,8 +123,8 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
     [api, refresh, syncTrigger],
   );
   const deleteProject = useCallback(
-    async (id: string) => {
-      await api.deleteProject(id);
+    async (id: string, deleteContent?: boolean) => {
+      await api.deleteProject(id, deleteContent);
       await refresh();
       syncTrigger();
     },

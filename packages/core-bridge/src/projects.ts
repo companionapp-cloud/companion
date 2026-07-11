@@ -41,7 +41,10 @@ export function projectsApi(core: CoreBridge) {
     listProjects: () => core.invoke<Project[]>("projects.list"),
     createProject: (input: CreateProjectInput) => core.invoke<Project>("projects.create", input),
     updateProject: (id: string, fields: UpdateProjectInput) => core.invoke<Project>("projects.update", { id, ...fields }),
-    deleteProject: (id: string) => core.invoke<{ ok: boolean }>("projects.delete", { id }),
+    /** Delete a project. When `deleteContent` is true its member notes/tasks are trashed too;
+     *  otherwise they fall back to "Unsorted" (PLAN §6.6). */
+    deleteProject: (id: string, deleteContent = false) =>
+      core.invoke<{ ok: boolean }>("projects.delete", { id, deleteContent }),
     /** Persist a new order for a single area's projects (drag-and-drop). */
     reorderProjects: (areaId: string, ids: string[]) => core.invoke<{ ok: boolean }>("projects.reorder", { areaId, ids }),
 

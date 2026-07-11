@@ -142,6 +142,23 @@ func (r *ProjectsRepo) List() ([]*domain.Project, error) {
 	return out, rows.Err()
 }
 
+// CountForArea returns how many live projects belong to an area. Used to enforce that an
+// area is only deletable once empty (PLAN §6.6).
+func (r *ProjectsRepo) CountForArea(areaID string) (int, error) {
+	rows, err := r.db.Query(`SELECT COUNT(*) FROM projects WHERE area_id = ? AND deleted_at IS NULL;`, areaID)
+	if err != nil {
+		return 0, fmt.Errorf("count projects for area: %w", err)
+	}
+	defer rows.Close()
+	n := 0
+	if rows.Next() {
+		if err := rows.Scan(&n); err != nil {
+			return 0, err
+		}
+	}
+	return n, rows.Err()
+}
+
 // Update applies partial changes, bumps updated_at, marks dirty.
 func (r *ProjectsRepo) Update(id string, in UpdateProjectInput) (*domain.Project, error) {
 	p, err := r.Get(id)

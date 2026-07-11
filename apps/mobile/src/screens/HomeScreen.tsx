@@ -3,8 +3,8 @@ import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleShee
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { SidebarProject } from '@companion/core-bridge';
-import { useNotes, useProjects, useTasks, useNotifications, useToolVisibility, SortableList, CaptureForm, type ToolId } from '@companion/app';
+import type { SidebarArea, SidebarProject } from '@companion/core-bridge';
+import { useNotes, useProjects, useTasks, useNotifications, useToolVisibility, SortableList, CaptureForm, ConfirmDialog, type ToolId } from '@companion/app';
 import { Icon, IconButton, Input, ProgressRing, Text, colors, font, radius, space, type IconName } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
 import { Card, CardRow, CountPill, IconTile, SectionLabel } from '../ui/native';
@@ -30,13 +30,15 @@ export function HomeScreen() {
   const nav = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const store = useNotes();
-  const { sidebar, createArea, createProject, reorderAreas, reorderProjects } = useProjects();
+  const { sidebar, createArea, createProject, deleteArea, reorderAreas, reorderProjects } = useProjects();
 
   const [addingArea, setAddingArea] = useState(false);
   const [areaName, setAreaName] = useState('');
   const [addingProjectFor, setAddingProjectFor] = useState<string | null>(null);
   const [projectName, setProjectName] = useState('');
   const [capture, setCapture] = useState(false);
+  // The empty area pending deletion (its confirm dialog renders over the screen).
+  const [deletingArea, setDeletingArea] = useState<SidebarArea | null>(null);
   // Reorder mode: toggled by the header "Edit" button. While on, rows drag to reorder
   // (areas among themselves, projects within their area) and tap-to-open is suspended.
   const [editing, setEditing] = useState(false);
@@ -150,9 +152,17 @@ export function HomeScreen() {
                   {area.name}
                 </Text>
                 {editing ? (
-                  <View {...drag} style={styles.dragHandle} aria-label={`Reorder ${area.name}`}>
-                    <Icon name="moreH" size={18} color={colors.textTertiary} />
-                  </View>
+                  <>
+                    {/* Areas are only deletable once empty (PLAN §6.6). */}
+                    {area.projects.length === 0 ? (
+                      <IconButton label={`Delete area ${area.name}`} size="sm" onPress={() => setDeletingArea(area)}>
+                        <Icon name="trash" size={16} color={colors.textTertiary} />
+                      </IconButton>
+                    ) : null}
+                    <View {...drag} style={styles.dragHandle} aria-label={`Reorder ${area.name}`}>
+                      <Icon name="moreH" size={18} color={colors.textTertiary} />
+                    </View>
+                  </>
                 ) : (
                   <IconButton
                     label={`New project in ${area.name}`}
@@ -250,6 +260,19 @@ export function HomeScreen() {
       </Pressable>
 
       <CaptureSheet visible={capture} onClose={() => setCapture(false)} />
+
+      {deletingArea ? (
+        <ConfirmDialog
+          title="Delete area?"
+          message={`Delete the area “${deletingArea.name}”? It has no projects, so nothing else is affected.`}
+          confirmLabel="Delete area"
+          onConfirm={async () => {
+            await deleteArea(deletingArea.id);
+            setDeletingArea(null);
+          }}
+          onClose={() => setDeletingArea(null)}
+        />
+      ) : null}
     </View>
   );
 }

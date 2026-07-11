@@ -2,9 +2,9 @@ import { useLayoutEffect } from 'react';
 import { Platform, View } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useNavigation } from '@react-navigation/native';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useProjects } from '@companion/app';
-import { Icon, Text, colors, font, type IconName } from '@companion/design-system';
+import { Icon, IconButton, Text, colors, font, type IconName } from '@companion/design-system';
 import type { ProjectTabParamList, RootStackParamList } from '../MobileShell';
 import { ProjectContext } from '../ProjectContext';
 import { NotesListScreen } from './NotesListScreen';
@@ -24,7 +24,7 @@ const TAB: Record<keyof ProjectTabParamList, { label: string; icon: IconName }> 
  * the tab screens themselves render headerless. */
 export function ProjectScreen({ route }: NativeStackScreenProps<RootStackParamList, 'Project'>) {
   const { projectId } = route.params;
-  const nav = useNavigation();
+  const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { projects, areas } = useProjects();
   const project = projects.find((p) => p.id === projectId);
   const areaName = project ? areas.find((a) => a.id === project.areaId)?.name : undefined;
@@ -44,8 +44,13 @@ export function ProjectScreen({ route }: NativeStackScreenProps<RootStackParamLi
           ) : null}
         </View>
       ),
+      headerRight: () => (
+        <IconButton label="Project settings" size="sm" onPress={() => nav.navigate('ProjectSettings', { projectId })}>
+          <Icon name="settings" size={18} color={colors.textSecondary} />
+        </IconButton>
+      ),
     });
-  }, [nav, project?.name, areaName]);
+  }, [nav, project?.name, areaName, projectId]);
 
   return (
     <ProjectContext.Provider value={projectId}>

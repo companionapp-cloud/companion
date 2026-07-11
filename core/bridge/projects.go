@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"encoding/json"
+	"errors"
 
 	"companion/core/domain"
 	"companion/core/store"
@@ -78,8 +79,16 @@ func (c *Core) areasDelete(payload []byte) ([]byte, error) {
 	if err := unmarshal(payload, &args); err != nil {
 		return nil, err
 	}
-	// Deletion does not cascade: the area's projects keep their now-dangling area_id
-	// and render under "Unsorted" (PLAN §6.6).
+	// An area is only deletable once empty, so its projects aren't silently orphaned into
+	// "Unsorted". The client hides the affordance until the area is empty; this is the
+	// backstop (PLAN §6.6).
+	n, err := c.store.Projects.CountForArea(args.ID)
+	if err != nil {
+		return nil, err
+	}
+	if n > 0 {
+		return nil, store.ErrAreaNotEmpty
+	}
 	if err := c.store.Areas.Delete(args.ID); err != nil {
 		return nil, mapStoreErr(err)
 	}
@@ -146,12 +155,25 @@ func (c *Core) projectsReorder(payload []byte) ([]byte, error) {
 func (c *Core) projectsDelete(payload []byte) ([]byte, error) {
 	var args struct {
 		ID string `json:"id"`
+		// DeleteContent trashes the project's member notes/tasks too; otherwise they keep
+		// living and fall back to "Unsorted" (PLAN §6.6).
+		DeleteContent bool `json:"deleteContent"`
 	}
 	if err := unmarshal(payload, &args); err != nil {
 		return nil, err
 	}
-	// Tombstone the project's memberships (dropping their edges); member entities are
-	// never touched (PLAN §6.6).
+	// Snapshot the memberships before DeleteForProject drops their edges — the optional
+	// content trash below walks them.
+	members, err := c.store.ProjectMembers.ListForProject(args.ID)
+	if err != nil {
+		return nil, err
+	}
+	if args.DeleteContent {
+		if err := c.trashProjectMembers(members); err != nil {
+			return nil, err
+		}
+	}
+	// Tombstone the project's memberships (dropping their edges).
 	if err := c.store.ProjectMembers.DeleteForProject(args.ID); err != nil {
 		return nil, err
 	}
@@ -159,7 +181,47 @@ func (c *Core) projectsDelete(payload []byte) ([]byte, error) {
 		return nil, mapStoreErr(err)
 	}
 	c.emitNavChanged("project", args.ID)
+	if args.DeleteContent {
+		// The member notes/tasks moved to the Trash — refresh those lists and the graph.
+		c.emit(notesChangedEvent, nil)
+		c.emit(tasksChangedEvent, nil)
+		c.emitDataChanged("", "")
+	}
 	return json.Marshal(map[string]bool{"ok": true})
+}
+
+// trashProjectMembers moves a deleted project's member entities to the Trash (the
+// "delete content" branch of projects.delete — PLAN §6.6). Notes cascade to their embedded
+// documents, matching notes.delete; tasks trash directly. Habits have no repo yet, so they
+// are skipped. A member already gone (ErrNotFound) is ignored so a partially-deleted
+// project still cleans up.
+func (c *Core) trashProjectMembers(members []*domain.ProjectMember) error {
+	for _, m := range members {
+		switch m.EntityType {
+		case domain.NodeNote:
+			docIDs, err := c.store.Links.EmbeddedDocumentIDs(domain.NodeNote, m.EntityID)
+			if err != nil {
+				return err
+			}
+			if err := c.store.Notes.Trash(m.EntityID); err != nil {
+				if errors.Is(err, store.ErrNotFound) {
+					continue
+				}
+				return err
+			}
+			if err := c.cascadeTrashDocuments(docIDs); err != nil {
+				return err
+			}
+		case domain.NodeTask:
+			if err := c.store.Tasks.Trash(m.EntityID); err != nil {
+				if errors.Is(err, store.ErrNotFound) {
+					continue
+				}
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // ---- membership ----------------------------------------------------------

@@ -23,6 +23,7 @@ import { ChatScreen } from './screens/ChatScreen';
 import { ChatListScreen } from './screens/ChatListScreen';
 import { PlaceholderScreen } from './screens/PlaceholderScreen';
 import { ProjectScreen } from './screens/ProjectScreen';
+import { ProjectSettingsScreen } from './screens/ProjectSettingsScreen';
 import { SettingsScreen, SettingsSectionScreen } from './screens/SettingsScreen';
 import type { SettingsSectionId } from '@companion/app';
 import type { CalendarItem } from '@companion/core-bridge';
@@ -50,6 +51,8 @@ export type RootStackParamList = {
   Notifications: undefined;
   // A project and its scoped tab bar.
   Project: { projectId: string };
+  // A project's settings (rename, reassign area, delete).
+  ProjectSettings: { projectId: string };
   // Shared detail/overlay screens.
   NoteEditor: { id: string };
   TaskEditor: { id: string };
@@ -129,6 +132,7 @@ export function MobileShell() {
         <RootStack.Screen name="Trash" component={TrashScreen} options={{ title: 'Trash' }} />
         <RootStack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifications' }} />
         <RootStack.Screen name="Project" component={ProjectScreen} />
+        <RootStack.Screen name="ProjectSettings" component={ProjectSettingsScreen} options={{ title: 'Project settings' }} />
         <RootStack.Screen name="NoteEditor" component={NoteEditorScreen} options={{ title: '' }} />
         <RootStack.Screen name="TaskEditor" component={TaskEditorScreen} options={{ title: 'Task' }} />
         <RootStack.Screen name="NoteGraph" component={NoteGraphScreen} options={{ title: 'Graph' }} />
