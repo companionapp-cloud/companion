@@ -111,14 +111,24 @@ func handler(srv *syncserver.Server, bill *billing, adm *admin, vrf *verifier, p
 		writeJSON(w, http.StatusOK, map[string]string{"syncUrl": syncURL})
 	})
 
+	// Coarse abuse protection for the cloud-only credential/email flows: cap attempts so
+	// verification/reset-email flooding and token guessing are bounded. Anonymous routes are
+	// keyed per client IP; the authenticated resend is keyed per user.
+	emailLim := syncserver.NewRateLimiter(10, 5)
+	// verify/send needs the session first (Authed populates the user id UserKey reads), then
+	// the per-user limit runs inside it.
+	verifySend := srv.Authed(func(w http.ResponseWriter, r *http.Request) {
+		emailLim.Limit(syncserver.UserKey, vrf.handleSend).ServeHTTP(w, r)
+	})
+
 	// Email verification (cloud-only). Sending needs a session; verifying is token-based so
 	// the link works from any browser.
-	mux.Handle("POST /api/v1/auth/verify/send", srv.Authed(vrf.handleSend))
-	mux.HandleFunc("POST /api/v1/auth/verify", vrf.handleVerify)
+	mux.Handle("POST /api/v1/auth/verify/send", verifySend)
+	mux.Handle("POST /api/v1/auth/verify", emailLim.Limit(syncserver.IPPathKey, vrf.handleVerify))
 
 	// Forgot password (cloud-only, both public and token-based).
-	mux.HandleFunc("POST /api/v1/auth/forgot", pwr.handleForgot)
-	mux.HandleFunc("POST /api/v1/auth/reset", pwr.handleReset)
+	mux.Handle("POST /api/v1/auth/forgot", emailLim.Limit(syncserver.IPPathKey, pwr.handleForgot))
+	mux.Handle("POST /api/v1/auth/reset", emailLim.Limit(syncserver.IPPathKey, pwr.handleReset))
 
 	// Billing (cloud-only). Checkout + status require a session; the webhook is
 	// authenticated by its Stripe signature instead.

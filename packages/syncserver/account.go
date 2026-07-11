@@ -82,7 +82,10 @@ func (s *Server) handleUpdateEmail(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "a valid email is required")
 		return
 	}
-	if _, err := s.exec(`UPDATE users SET email = ? WHERE id = ?;`, email, uid); err != nil {
+	// Changing the address drops its verified status: ownership of the new address hasn't
+	// been proven, and downstream gates (e.g. the cloud's subscribe-requires-verified check)
+	// must not inherit the old address's trust.
+	if _, err := s.exec(`UPDATE users SET email = ?, email_verified_at = NULL WHERE id = ?;`, email, uid); err != nil {
 		writeErr(w, http.StatusConflict, "email already registered")
 		return
 	}

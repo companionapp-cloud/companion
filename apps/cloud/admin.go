@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"net/http"
+	"strings"
 	"time"
 
 	"companion/syncserver"
@@ -204,7 +205,13 @@ func (a *admin) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Email != nil {
-		if _, err := a.db.ExecContext(r.Context(), a.rebind(`UPDATE users SET email = ? WHERE id = ?;`), *req.Email, id); err != nil {
+		email := strings.TrimSpace(strings.ToLower(*req.Email))
+		if email == "" || !strings.Contains(email, "@") {
+			writeErr(w, http.StatusBadRequest, "a valid email is required")
+			return
+		}
+		// Same rule as self-service (account.go): a changed address is no longer verified.
+		if _, err := a.db.ExecContext(r.Context(), a.rebind(`UPDATE users SET email = ?, email_verified_at = NULL WHERE id = ?;`), email, id); err != nil {
 			writeErr(w, http.StatusConflict, "email already in use")
 			return
 		}

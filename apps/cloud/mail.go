@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"embed"
 	"fmt"
+	"html"
 	"log/slog"
 	"net"
 	"net/smtp"
@@ -54,17 +55,21 @@ func newMailer() *mailer {
 
 func (m *mailer) configured() bool { return m.host != "" }
 
-// template loads an embedded email template and substitutes {{key}} placeholders.
+// template loads an embedded email template and substitutes {{key}} placeholders. Values are
+// HTML-escaped: they include user-controlled data (e.g. firstName from registration), and an
+// attacker could otherwise register a victim's address with markup in their name to inject
+// phishing content into a mail sent from our domain. Escaping is also correct for the URL
+// values, which sit inside href="…" attributes.
 func (m *mailer) template(name string, vars map[string]string) (string, error) {
 	raw, err := emailTemplates.ReadFile("emails/dist/" + name)
 	if err != nil {
 		return "", fmt.Errorf("email template %s: %w", name, err)
 	}
-	html := string(raw)
+	out := string(raw)
 	for k, v := range vars {
-		html = strings.ReplaceAll(html, "{{"+k+"}}", v)
+		out = strings.ReplaceAll(out, "{{"+k+"}}", html.EscapeString(v))
 	}
-	return html, nil
+	return out, nil
 }
 
 // send delivers an HTML email. Without SMTP configured it logs the message (with any link)

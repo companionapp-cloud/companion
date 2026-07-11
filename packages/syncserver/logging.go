@@ -89,20 +89,40 @@ func levelForStatus(status int) slog.Level {
 	}
 }
 
-// clientIP prefers the first hop of X-Forwarded-For (set by a trusted proxy), else the
-// connection's remote address without its port.
+// trustProxy controls whether clientIP believes the X-Forwarded-For header. A direct client
+// can set XFF to any value, so trusting it unconditionally lets an attacker spoof their
+// apparent IP and defeat IP-keyed rate limiting. Enable it (TRUST_PROXY=1) only when the
+// service actually runs behind a proxy that overwrites XFF.
+var trustProxy = envTrue("TRUST_PROXY")
+
+func envTrue(k string) bool {
+	switch strings.TrimSpace(strings.ToLower(os.Getenv(k))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
+// clientIP returns the best-effort client IP: the first hop of X-Forwarded-For when a
+// trusted proxy is configured, else the connection's remote address without its port.
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if i := strings.IndexByte(xff, ','); i >= 0 {
-			return strings.TrimSpace(xff[:i])
+	if trustProxy {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			if i := strings.IndexByte(xff, ','); i >= 0 {
+				return strings.TrimSpace(xff[:i])
+			}
+			return strings.TrimSpace(xff)
 		}
-		return strings.TrimSpace(xff)
 	}
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		return host
 	}
 	return r.RemoteAddr
 }
+
+// ClientIP returns the best-effort client IP (see clientIP), exported so a wrapping binary
+// (the cloud) can key its own rate limiting on the same value.
+func ClientIP(r *http.Request) string { return clientIP(r) }
 
 // respRecorder captures the status code and byte count while delegating everything else,
 // including Flush so SSE streams still flush through it.

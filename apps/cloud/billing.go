@@ -105,6 +105,17 @@ func (b *billing) handleCheckout(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "verify your email before subscribing")
 		return
 	}
+	// Refuse a second checkout while a subscription is already live: a repeat Checkout mints
+	// a parallel Stripe subscription and double-bills the user. They must manage the existing
+	// one (cancel/change) rather than start another.
+	var existing string
+	_ = b.db.QueryRowContext(r.Context(), b.rebind(
+		`SELECT status FROM subscriptions WHERE user_id = ?;`), uid).Scan(&existing)
+	switch stripe.SubscriptionStatus(existing) {
+	case stripe.SubscriptionStatusActive, stripe.SubscriptionStatusTrialing:
+		writeErr(w, http.StatusConflict, "you already have an active subscription")
+		return
+	}
 	if stripe.Key == "" {
 		writeErr(w, http.StatusServiceUnavailable, "billing is not configured")
 		return
@@ -292,25 +303,25 @@ func (b *billing) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "bad payload")
 			return
 		}
-		if cs.ClientReferenceID == "" {
-			// Nothing to tie the subscription to; ack so Stripe stops retrying.
-			w.WriteHeader(http.StatusOK)
+		// Only entitle immediately when Checkout collected payment (or none was required, e.g.
+		// a free trial or 100%-off coupon). Asynchronous methods (bank debits, etc.) complete
+		// the session "unpaid": record the linkage as pending and let the async_payment_succeeded
+		// event promote it, so unpaid users can't sync in the meantime.
+		status := "active"
+		if cs.PaymentStatus == stripe.CheckoutSessionPaymentStatusUnpaid {
+			status = "pending"
+		}
+		b.applyCheckoutSession(r.Context(), &cs, status)
+
+	case stripe.EventTypeCheckoutSessionAsyncPaymentSucceeded:
+		var cs stripe.CheckoutSession
+		if err := json.Unmarshal(event.Data.Raw, &cs); err != nil {
+			writeErr(w, http.StatusBadRequest, "bad payload")
 			return
 		}
-		var customerID, subID string
-		if cs.Customer != nil {
-			customerID = cs.Customer.ID
-		}
-		if cs.Subscription != nil {
-			subID = cs.Subscription.ID
-		}
-		planID := cs.Metadata["plan_id"]
-		if planID == "" {
-			planID = "default"
-		}
-		// Checkout completed implies an active subscription; the customer.subscription.*
-		// events that follow keep status/period-end authoritative.
-		b.upsertByUser(r.Context(), cs.ClientReferenceID, planID, customerID, subID, "active", "")
+		// The deferred payment cleared; the pending row from checkout.session.completed
+		// becomes active.
+		b.applyCheckoutSession(r.Context(), &cs, "active")
 
 	case stripe.EventTypeCustomerSubscriptionUpdated, stripe.EventTypeCustomerSubscriptionDeleted:
 		var sub stripe.Subscription
@@ -345,6 +356,28 @@ func (b *billing) defaultPaidPlan(ctx context.Context) (planID, priceID string) 
 	return id.String, price.String
 }
 
+// applyCheckoutSession records the subscription linkage carried by a completed Checkout
+// session at the given status. Shared by the synchronous completion and the deferred
+// async-payment-succeeded events. A session with no client_reference_id can't be tied to an
+// account, so it is a no-op (the webhook still acks 200).
+func (b *billing) applyCheckoutSession(ctx context.Context, cs *stripe.CheckoutSession, status string) {
+	if cs.ClientReferenceID == "" {
+		return
+	}
+	var customerID, subID string
+	if cs.Customer != nil {
+		customerID = cs.Customer.ID
+	}
+	if cs.Subscription != nil {
+		subID = cs.Subscription.ID
+	}
+	planID := cs.Metadata["plan_id"]
+	if planID == "" {
+		planID = "default"
+	}
+	b.upsertByUser(ctx, cs.ClientReferenceID, planID, customerID, subID, status, "")
+}
+
 // upsertByUser records or refreshes a Stripe-sourced subscription after checkout. Keyed by
 // user_id so a repeat checkout replaces the prior linkage.
 func (b *billing) upsertByUser(ctx context.Context, userID, planID, customerID, subID, status, periodEnd string) {
@@ -365,18 +398,42 @@ func (b *billing) upsertByUser(ctx context.Context, userID, planID, customerID, 
 	}
 }
 
-// updateByCustomer applies a subscription lifecycle change, matched to the account by the
-// Stripe customer id recorded at checkout.
+// updateByCustomer applies a subscription lifecycle change from a customer.subscription.*
+// event. It matches on the exact Stripe subscription id first: a customer may have owned
+// several subscriptions over time (e.g. a re-checkout), and a lifecycle event for an *old*
+// one must not overwrite the row that tracks the current subscription — otherwise canceling
+// a superseded subscription would lock a paying user out of sync. Only when no row tracks
+// that subscription id yet does it fall back to the customer, and even then it won't adopt
+// the event over a row already bound to a different subscription.
 func (b *billing) updateByCustomer(ctx context.Context, customerID, subID, status, periodEnd string) {
-	if customerID == "" {
+	if subID == "" && customerID == "" {
 		return
 	}
 	now := time.Now().UTC().Format(timeFormat)
+	if subID != "" {
+		res, err := b.db.ExecContext(ctx, b.rebind(`
+			UPDATE subscriptions
+			SET status = ?, current_period_end = ?, updated_at = ?
+			WHERE stripe_subscription_id = ?;`),
+			status, nullify(periodEnd), now, subID)
+		if err != nil {
+			slog.Error("billing: update subscription", "subscription", subID, "err", err)
+			return
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			return
+		}
+	}
+	if customerID == "" {
+		return
+	}
+	// First lifecycle event after checkout, before the subscription id was recorded: bind it
+	// to the customer's row, but never clobber a row already tracking a different subscription.
 	_, err := b.db.ExecContext(ctx, b.rebind(`
 		UPDATE subscriptions
 		SET stripe_subscription_id = ?, status = ?, current_period_end = ?, updated_at = ?
-		WHERE stripe_customer_id = ?;`),
-		nullify(subID), status, nullify(periodEnd), now, customerID)
+		WHERE stripe_customer_id = ? AND (stripe_subscription_id IS NULL OR stripe_subscription_id = ?);`),
+		nullify(subID), status, nullify(periodEnd), now, customerID, subID)
 	if err != nil {
 		slog.Error("billing: update subscription", "customer", customerID, "err", err)
 	}

@@ -33,7 +33,17 @@ type Server struct {
 	// allow-all (dev convenience for the open-core server). The cloud sets its own
 	// env-configured policy via WithCORS, or WithoutCORS to own CORS at a higher layer.
 	corsMW func(http.Handler) http.Handler
+	// authLimiter rate-limits the unauthenticated credential endpoints (register/login/
+	// refresh) per client IP, so password stuffing and account-creation floods are bounded.
+	authLimiter *RateLimiter
 }
+
+// Per-IP, per-endpoint limits for the credential routes: enough headroom for a human
+// retrying, restrictive for automated abuse.
+const (
+	authRatePerMinute = 20
+	authBurst         = 10
+)
 
 // Option customizes a Server at construction. The open-core binary passes none; the
 // cloud wraps billing/subscription authorization via WithSyncGuard.
@@ -69,6 +79,7 @@ func New(db *sql.DB, dialect string, opts ...Option) *Server {
 	s := &Server{
 		db: db, dialect: dialect, clock: domain.SystemClock{}, hub: NewHub(),
 		blobs: backend, maxBlobSize: maxBlobSizeFromEnv(),
+		authLimiter: NewRateLimiter(authRatePerMinute, authBurst),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -115,9 +126,11 @@ func (s *Server) queryRow(q string, args ...any) *sql.Row { return s.db.QueryRow
 // dev CORS so the browser (web app) can sync cross-origin.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/auth/register", s.handleRegister)
-	mux.HandleFunc("POST /v1/auth/login", s.handleLogin)
-	mux.HandleFunc("POST /v1/auth/refresh", s.handleRefresh)
+	// Credential endpoints are rate-limited per client IP (per path) to bound brute-force
+	// and account-creation abuse.
+	mux.Handle("POST /v1/auth/register", s.authLimiter.Limit(IPPathKey, s.handleRegister))
+	mux.Handle("POST /v1/auth/login", s.authLimiter.Limit(IPPathKey, s.handleLogin))
+	mux.Handle("POST /v1/auth/refresh", s.authLimiter.Limit(IPPathKey, s.handleRefresh))
 	// Account self-service (shared by open-core + cloud): profile + credential changes.
 	mux.Handle("GET /v1/account", s.authed(s.handleAccount))
 	mux.Handle("POST /v1/account/profile", s.authed(s.handleUpdateProfile))

@@ -46,8 +46,8 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	email := strings.TrimSpace(strings.ToLower(req.Email))
-	if email == "" || len(req.Password) < 6 {
-		writeErr(w, http.StatusBadRequest, "email and a 6+ character password are required")
+	if email == "" || !strings.Contains(email, "@") || len(req.Password) < 6 {
+		writeErr(w, http.StatusBadRequest, "a valid email and a 6+ character password are required")
 		return
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
