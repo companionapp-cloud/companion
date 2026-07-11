@@ -1,0 +1,151 @@
+name: Release
+
+# Fires when a version tag is pushed (e.g. v0.0.0, v1.2.3). Builds the server for
+# every desktop/server OS + a Linux Docker image, and the cloud as a Linux Docker
+# image, then attaches the binaries and image links to the GitHub release.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*" # pre-releases: v1.2.3-rc1
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build a release for, e.g. v0.0.0"
+        required: true
+
+permissions:
+  contents: write # create the release + upload binaries
+  packages: write # push images to GHCR
+
+env:
+  # GHCR image names. github.repository_owner is already lowercase for this repo;
+  # the images job lowercases defensively regardless.
+  SERVER_IMAGE: companion-server
+  CLOUD_IMAGE: companion-cloud
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Cross-compiled server binaries for every supported OS/arch. The store driver
+  # is pure Go (modernc.org/sqlite), so CGO_ENABLED=0 lets one Linux runner emit
+  # static binaries for macOS and Windows too — no per-OS runners needed.
+  # ---------------------------------------------------------------------------
+  server-binaries:
+    name: server (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64, ext: "" }
+          - { goos: linux, goarch: arm64, ext: "" }
+          - { goos: darwin, goarch: amd64, ext: "" }
+          - { goos: darwin, goarch: arm64, ext: "" }
+          - { goos: windows, goarch: amd64, ext: ".exe" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+          cache-dependency-path: apps/server/go.sum
+
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          out="dist/companion-server-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+          mkdir -p dist
+          go build -C apps/server -trimpath -ldflags="-s -w" -o "$(pwd)/$out" .
+          ls -lh "$out"
+
+      - name: Attach binary to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: dist/companion-server-*
+
+  # ---------------------------------------------------------------------------
+  # Multi-arch Linux Docker images for the server and the cloud, pushed to GHCR.
+  # ---------------------------------------------------------------------------
+  images:
+    name: image (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: server, image: companion-server, dockerfile: apps/server/Dockerfile }
+          - { name: cloud, image: companion-cloud, dockerfile: apps/cloud/Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve tag + lowercase owner
+        id: meta
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "ref=ghcr.io/${owner}/${{ matrix.image }}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.ref }}:${{ steps.meta.outputs.version }}
+            ${{ steps.meta.outputs.ref }}:latest
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  # ---------------------------------------------------------------------------
+  # Once the images are pushed, append their GHCR links to the release notes.
+  # ---------------------------------------------------------------------------
+  release-notes:
+    name: release notes
+    runs-on: ubuntu-latest
+    needs: [server-binaries, images]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Append Docker image links
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          version="${TAG#v}"
+          notes=$(cat <<EOF
+
+          ### Docker images
+
+          - Server: \`ghcr.io/${owner}/${SERVER_IMAGE}:${version}\`
+            <https://ghcr.io/${owner}/${SERVER_IMAGE}>
+          - Cloud: \`ghcr.io/${owner}/${CLOUD_IMAGE}:${version}\`
+            <https://ghcr.io/${owner}/${CLOUD_IMAGE}>
+
+          \`\`\`bash
+          docker pull ghcr.io/${owner}/${SERVER_IMAGE}:${version}
+          docker pull ghcr.io/${owner}/${CLOUD_IMAGE}:${version}
+          \`\`\`
+          EOF
+          )
+          # Preserve any existing body (e.g. autogenerated notes) and append ours.
+          existing=$(gh release view "$TAG" --json body --jq .body 2>/dev/null || true)
+          printf '%s\n%s\n' "$existing" "$notes" > body.md
+          gh release edit "$TAG" --notes-file body.md
