@@ -258,6 +258,22 @@ CREATE TABLE IF NOT EXISTS user_secrets (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (user_id, key)
 );
+
+-- End-to-end encryption key material (PLAN §E2EE). Every column here is opaque to the
+-- server: the master key is stored only wrapped (encrypted) by a key the server never sees,
+-- so the operator holds ciphertext for both the content and the key that decrypts it. A row
+-- exists only for accounts that have enabled encryption; its absence means "plaintext account".
+CREATE TABLE IF NOT EXISTS user_keys (
+  user_id            TEXT PRIMARY KEY,
+  wrapped_master_key TEXT NOT NULL,   -- enc$v1$… : master key sealed with the password-derived KEK
+  kdf_salt           TEXT NOT NULL,   -- base64 salt fed to Argon2id to reproduce the KEK
+  kdf_time           BIGINT NOT NULL, -- Argon2id iterations
+  kdf_memory_k       BIGINT NOT NULL, -- Argon2id memory (KiB)
+  kdf_threads        BIGINT NOT NULL, -- Argon2id parallelism
+  recovery_wrapped   TEXT,            -- enc$v1$… : same master key sealed with the recovery code
+  public_key         TEXT,            -- base64 X25519 public key (reserved for sealed-box calendar)
+  updated_at         TEXT NOT NULL
+);
 `
 
 // OpenDB opens the store, choosing the driver from the DSN: a postgres:// URL uses

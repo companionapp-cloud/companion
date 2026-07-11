@@ -89,16 +89,16 @@ func scanServerFeed(sc rowScanner) (*domain.CalendarFeed, int64, error) {
 	return &f, seq, nil
 }
 
-// ---- calendar events (server-owned, pull-only) ---------------------------
+// ---- calendar events (client-authored under E2EE) ------------------------
 
 const eventCols = `id, feed_id, ics_uid, title, starts_at, ends_at, all_day, location, description, created_at, updated_at, deleted_at, version, server_seq`
 
 var calendarEventHandler = &entityHandler{
 	typ:   protocol.EntityCalendarEvent,
 	table: "calendar_events",
-	// upsert is defined for completeness but is never reached by a client push: clients
-	// never author events (their local repo has no dirty rows). The fetcher writes events
-	// directly (see calendar.go).
+	// Clients expand their own feeds and push the resulting events (encrypted) through this
+	// handler like any other entity (PLAN §E2EE); the title/location/description arrive as opaque
+	// ciphertext and are stored verbatim.
 	upsert: func(s *Server, tx *sql.Tx, uid string, raw []byte, updatedAt time.Time, version, seq int64) error {
 		var e domain.CalendarEvent
 		if err := json.Unmarshal(raw, &e); err != nil {

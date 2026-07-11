@@ -89,6 +89,10 @@ export type {
   RNAppStateSubscription,
 } from "./notifier.native";
 export * as auth from "./auth";
-export type { AuthResult } from "./auth";
+export type { AuthResult, PreloginResult } from "./auth";
+export { cryptoApi, formatRecoveryCode } from "./crypto";
+export type { CryptoApi, CryptoSetup, CryptoRewrap, KdfParams } from "./crypto";
+export * as keys from "./keys";
+export type { KeyMaterial } from "./keys";
 export { createHttpBridge } from "./http";
 export type { HttpBridgeOptions } from "./http";

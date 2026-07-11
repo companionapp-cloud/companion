@@ -51,6 +51,13 @@ type Core struct {
 	// lists can show a spinner; guarded by chatMu.
 	chatMu  sync.Mutex
 	working map[string]bool
+
+	// masterKey is the unlocked end-to-end encryption key (PLAN §E2EE): non-nil means the store
+	// is unlocked and sync transparently encrypts/decrypts; nil means locked or a plaintext
+	// account. Held only in memory; guarded by cryptoMu since sync and the crypto.* methods can
+	// touch it concurrently.
+	cryptoMu  sync.Mutex
+	masterKey []byte
 }
 
 // New builds a Core over an already-open store.
@@ -220,6 +227,24 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.syncConfigure(payload)
 	case "sync.run":
 		return c.syncRun()
+	case "crypto.setup":
+		return c.cryptoSetup(payload)
+	case "crypto.deriveAuthKey":
+		return c.cryptoDeriveAuthKey(payload)
+	case "crypto.unlock":
+		return c.cryptoUnlock(payload)
+	case "crypto.unlockWithRecovery":
+		return c.cryptoUnlockWithRecovery(payload)
+	case "crypto.rewrap":
+		return c.cryptoRewrap(payload)
+	case "crypto.unlockFromCache":
+		return c.cryptoUnlockFromCache()
+	case "crypto.lock":
+		return c.cryptoLock()
+	case "crypto.status":
+		return c.cryptoStatus()
+	case "crypto.reencryptAll":
+		return c.cryptoReencryptAll()
 	case "graph.full":
 		return c.graphFull()
 	case "graph.neighborhood":

@@ -45,12 +45,24 @@ type SyncableRepo[T domain.SyncEntity] interface {
 	Decode(raw json.RawMessage) (T, error)
 }
 
-// entitySyncer is the type-erased façade the engine iterates over.
+// RowCipher is the optional end-to-end encryption seam (PLAN §E2EE). When set, the engine
+// encrypts a marshaled row's protected fields just before pushing and decrypts a pulled row's
+// fields just before decoding, so plaintext never crosses the wire or reaches the server. A nil
+// RowCipher means encryption is disabled (or the store is locked): rows sync verbatim, which is
+// also the legacy/pre-encryption path. Implemented by *crypto.Cipher.
+type RowCipher interface {
+	EncryptRow(entityType string, row []byte) ([]byte, error)
+	DecryptRow(entityType string, row []byte) ([]byte, error)
+}
+
+// entitySyncer is the type-erased façade the engine iterates over. The cipher is passed in per
+// call (rather than captured at registration) because it is set on the engine after the syncers
+// are wired, and may change when the store is locked/unlocked.
 type entitySyncer interface {
 	entityType() string
-	collectDirty() ([]protocol.PushChange, error)
-	applyPulled(raw json.RawMessage) error
-	resolveConflict(serverRaw json.RawMessage) error
+	collectDirty(cipher RowCipher) ([]protocol.PushChange, error)
+	applyPulled(cipher RowCipher, raw json.RawMessage) error
+	resolveConflict(cipher RowCipher, serverRaw json.RawMessage) error
 	markPushed(id string, version int64) error
 }
 
@@ -67,7 +79,7 @@ func newRepoSyncer[T domain.SyncEntity](repo SyncableRepo[T], clock domain.Clock
 
 func (s *repoSyncer[T]) entityType() string { return s.repo.EntityType() }
 
-func (s *repoSyncer[T]) collectDirty() ([]protocol.PushChange, error) {
+func (s *repoSyncer[T]) collectDirty(cipher RowCipher) ([]protocol.PushChange, error) {
 	dirty, err := s.repo.Dirty()
 	if err != nil {
 		return nil, err
@@ -77,6 +89,14 @@ func (s *repoSyncer[T]) collectDirty() ([]protocol.PushChange, error) {
 		raw, err := json.Marshal(row)
 		if err != nil {
 			return nil, err
+		}
+		// Encrypt content fields before they leave the device (E2EE). The id, version, and
+		// updatedAt below stay plaintext — the server needs them for conflict resolution — and
+		// they are read from the row struct, not the (now-encrypted) JSON.
+		if cipher != nil {
+			if raw, err = cipher.EncryptRow(s.repo.EntityType(), raw); err != nil {
+				return nil, err
+			}
 		}
 		out = append(out, protocol.PushChange{
 			EntityType:  s.repo.EntityType(),
@@ -94,7 +114,11 @@ func (s *repoSyncer[T]) markPushed(id string, version int64) error {
 }
 
 // applyPulled reconciles one incoming server row with the local copy (§7.1).
-func (s *repoSyncer[T]) applyPulled(raw json.RawMessage) error {
+func (s *repoSyncer[T]) applyPulled(cipher RowCipher, raw json.RawMessage) error {
+	raw, err := decryptRow(cipher, s.repo.EntityType(), raw)
+	if err != nil {
+		return err
+	}
 	server, err := s.repo.Decode(raw)
 	if err != nil {
 		return err
@@ -119,7 +143,11 @@ func (s *repoSyncer[T]) applyPulled(raw json.RawMessage) error {
 }
 
 // resolveConflict handles a push 'conflict' result: the server kept its (newer) row.
-func (s *repoSyncer[T]) resolveConflict(serverRaw json.RawMessage) error {
+func (s *repoSyncer[T]) resolveConflict(cipher RowCipher, serverRaw json.RawMessage) error {
+	serverRaw, err := decryptRow(cipher, s.repo.EntityType(), serverRaw)
+	if err != nil {
+		return err
+	}
 	server, err := s.repo.Decode(serverRaw)
 	if err != nil {
 		return err
@@ -160,6 +188,20 @@ func (s *repoSyncer[T]) serverWins(local, server T) error {
 	return s.repo.Apply(server)
 }
 
+// decryptRow restores a pulled row's encrypted fields to plaintext before it is decoded into a
+// concrete entity. A nil cipher (encryption off / locked) passes the bytes through, as does a
+// legacy plaintext row under an active cipher — DecryptRow only touches enc$v1$ envelopes.
+func decryptRow(cipher RowCipher, entityType string, raw json.RawMessage) (json.RawMessage, error) {
+	if cipher == nil {
+		return raw, nil
+	}
+	out, err := cipher.DecryptRow(entityType, raw)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // Engine runs the sync loop against a local store and a transport.
 type Engine struct {
 	store     *store.Store
@@ -168,7 +210,14 @@ type Engine struct {
 	pullLimit int
 	syncers   []entitySyncer
 	byType    map[string]entitySyncer
+	// cipher, when non-nil, transparently encrypts pushed rows and decrypts pulled rows (E2EE,
+	// PLAN §E2EE). Nil leaves sync operating on plaintext. Set via SetCipher before Sync.
+	cipher RowCipher
 }
+
+// SetCipher enables end-to-end encryption for this engine using the unlocked master key. Passing
+// nil disables it (plaintext sync). The shell sets this from the unlocked key before each sync.
+func (e *Engine) SetCipher(c RowCipher) { e.cipher = c }
 
 // New builds an Engine wired to every syncable entity. A nil clock defaults to the
 // system clock.
@@ -223,7 +272,7 @@ func (e *Engine) Sync() error {
 func (e *Engine) push() error {
 	var changes []protocol.PushChange
 	for _, s := range e.syncers {
-		d, err := s.collectDirty()
+		d, err := s.collectDirty(e.cipher)
 		if err != nil {
 			return err
 		}
@@ -255,7 +304,7 @@ func (e *Engine) push() error {
 			if len(r.ServerRow) == 0 {
 				continue
 			}
-			if err := syncer.resolveConflict(r.ServerRow); err != nil {
+			if err := syncer.resolveConflict(e.cipher, r.ServerRow); err != nil {
 				return err
 			}
 		}
@@ -279,7 +328,7 @@ func (e *Engine) pull() error {
 			if syncer == nil {
 				continue // unknown entity type from a newer server; skip (forward-compat)
 			}
-			if err := syncer.applyPulled(ch.Row); err != nil {
+			if err := syncer.applyPulled(e.cipher, ch.Row); err != nil {
 				return err
 			}
 		}

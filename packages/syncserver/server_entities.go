@@ -942,6 +942,13 @@ func (s *Server) validateEntityProps(tx *sql.Tx, uid string, objectTypeID *strin
 	if objectTypeID == nil || *objectTypeID == "" {
 		return nil
 	}
+	// Under end-to-end encryption the server holds only ciphertext for props (and for the
+	// type's schema), so it cannot validate them — that check moves entirely to the client,
+	// which validated before encrypting. Skip silently for encrypted rows; plaintext accounts
+	// still get server-side validation below (PLAN §E2EE).
+	if isEncryptedField(props) {
+		return nil
+	}
 	var schemaJSON string
 	row := tx.QueryRow(s.rebind(`SELECT schema_json FROM object_types WHERE id = ? AND user_id = ? AND deleted_at IS NULL;`), *objectTypeID, uid)
 	if err := row.Scan(&schemaJSON); err != nil {
@@ -949,6 +956,9 @@ func (s *Server) validateEntityProps(tx *sql.Tx, uid string, objectTypeID *strin
 			return nil // dangling type: tolerate, like a dangling wikilink
 		}
 		return err
+	}
+	if isEncryptedField(json.RawMessage(schemaJSON)) {
+		return nil // encrypted schema: nothing the server can parse; client already validated
 	}
 	schema, err := domain.ParseSchema(json.RawMessage(schemaJSON))
 	if err != nil {

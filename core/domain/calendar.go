@@ -54,10 +54,12 @@ func (f *CalendarFeed) SyncUpdatedAt() time.Time { return f.UpdatedAt }
 func (f *CalendarFeed) SyncDeleted() bool        { return f.DeletedAt != nil }
 func (f *CalendarFeed) SyncDirty() bool          { return f.Dirty }
 
-// CalendarEvent is a server-owned clone of one occurrence expanded from a feed's ICS
-// (PLAN §6.7). It is READ-ONLY on clients: they receive it via the normal sync pull and
-// never author or push it. Hence there is no Dirty field — SyncDirty always reports false,
-// so the sync engine never treats a local event as a pending push or a conflict source.
+// CalendarEvent is one occurrence expanded from a feed's ICS (PLAN §6.7). Under end-to-end
+// encryption the CLIENT — not the server — fetches each feed, expands it, and pushes the events,
+// so their content (title/location/description) is encrypted before it leaves the device. Events
+// are therefore ordinary syncable rows: dirty-tracked and pushed like any entity. Their ids are
+// deterministic (feed|uid|start), so every device expanding the same feed produces the same rows
+// and they converge instead of duplicating.
 type CalendarEvent struct {
 	ID          string     `json:"id"`
 	FeedID      string     `json:"feedId"`
@@ -72,15 +74,15 @@ type CalendarEvent struct {
 	UpdatedAt   time.Time  `json:"updatedAt"`
 	DeletedAt   *time.Time `json:"deletedAt,omitempty"`
 	Version     int64      `json:"version"`
+	Dirty       bool       `json:"dirty"`
 }
 
-// SyncEntity implementation (PLAN §7). SyncDirty is always false: clients never write
-// calendar events, so the local copy is never a push candidate.
+// SyncEntity implementation (PLAN §7).
 func (e *CalendarEvent) SyncID() string           { return e.ID }
 func (e *CalendarEvent) SyncVersion() int64       { return e.Version }
 func (e *CalendarEvent) SyncUpdatedAt() time.Time { return e.UpdatedAt }
 func (e *CalendarEvent) SyncDeleted() bool        { return e.DeletedAt != nil }
-func (e *CalendarEvent) SyncDirty() bool          { return false }
+func (e *CalendarEvent) SyncDirty() bool          { return e.Dirty }
 
 // ItemKind tags the origin of a CalendarItem in the merged calendar view.
 type ItemKind string

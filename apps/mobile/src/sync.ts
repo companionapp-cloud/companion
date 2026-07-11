@@ -1,4 +1,4 @@
-import { auth, syncApi, type CoreBridge } from '@companion/core-bridge';
+import { auth, syncApi, cryptoApi, type CoreBridge } from '@companion/core-bridge';
 import { nativeSyncStorage } from './syncStorage';
 
 // A headless, one-shot sync for the background reminder task. SyncProvider owns the rich
@@ -30,6 +30,11 @@ export async function syncOnce(core: CoreBridge): Promise<void> {
     return;
   }
   const api = syncApi(core);
+
+  // For an encrypted account, restore the master key from the keychain before syncing so this
+  // headless pass encrypts pushes and decrypts pulls just like the foreground loop. Without it a
+  // pull would write ciphertext into the local store. No-op for a plaintext account (PLAN §E2EE).
+  await cryptoApi(core).unlockFromCache();
 
   const refresh = async (): Promise<boolean> => {
     if (!cfg.refreshToken) return false;

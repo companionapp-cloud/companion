@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { auth, syncApi, createSyncNotifier, type SyncApi, type SyncNotifier } from "@companion/core-bridge";
+import { auth, keys, cryptoApi, formatRecoveryCode, syncApi, createSyncNotifier, type SyncApi, type SyncNotifier } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
 
 const STORAGE_KEY = "companion.sync.config";
@@ -13,6 +13,9 @@ interface PersistedConfig {
   refreshToken: string;
   expiresAt: number; // epoch ms; when `token` expires
   email: string;
+  /** The account is end-to-end encrypted (PLAN §E2EE): the master key must be unlocked before
+   *  syncing, or a push would leak plaintext. New accounts register encrypted by default. */
+  encrypted: boolean;
 }
 
 /** Synchronous key/value persistence for the sync config. Web/desktop use
@@ -48,16 +51,33 @@ const localStorageBacked: SyncStorage = {
   },
 };
 
-export type SyncStatus = "disconnected" | "idle" | "syncing" | "error";
+// "locked": an encrypted account whose master key isn't in memory (e.g. a web reload, where the
+// key isn't cached). Sync is paused until unlock() re-derives it from the password, so a locked
+// store can never push plaintext (PLAN §E2EE).
+export type SyncStatus = "disconnected" | "idle" | "syncing" | "error" | "locked";
 export type AuthMode = "login" | "register";
+
+/** connect returns the one-time recovery code when a new encrypted account was created, so the UI
+ *  can show it once and tell the user to store it — losing both password and code means losing the
+ *  data (the server holds only ciphertext). */
+export interface ConnectResult {
+  recoveryCode: string | null;
+}
 
 export interface SyncController {
   connected: boolean;
   email: string | null;
   status: SyncStatus;
+  /** The connected account is end-to-end encrypted. */
+  encrypted: boolean;
   lastError: string | null;
   lastSyncedAt: number | null;
-  connect: (baseUrl: string, email: string, password: string, mode: AuthMode) => Promise<void>;
+  connect: (baseUrl: string, email: string, password: string, mode: AuthMode) => Promise<ConnectResult>;
+  /** Re-derive the master key for a locked encrypted account, then resume syncing. */
+  unlock: (password: string) => Promise<void>;
+  /** Migrate a connected plaintext account to end-to-end encryption: swap the credential, upload
+   *  the wrapped key, and re-push every row encrypted. Returns the one-time recovery code. */
+  enableEncryption: (password: string) => Promise<ConnectResult>;
   disconnect: () => void;
   /** Debounced sync — called on mutations and navigation. */
   trigger: () => void;
@@ -82,6 +102,7 @@ export function SyncProvider({
 }) {
   const { core } = useCore();
   const api = useMemo<SyncApi>(() => syncApi(core), [core]);
+  const crypto = useMemo(() => cryptoApi(core), [core]);
   const notifier = useMemo<SyncNotifier>(() => injectedNotifier ?? createSyncNotifier(), [injectedNotifier]);
 
   const storageRef = useRef(storage);
@@ -137,6 +158,17 @@ export function SyncProvider({
     }
   }, [api, applyRotatedTokens]);
 
+  // For an encrypted account, make sure the master key is in memory before any sync. Native
+  // shells restore it from the keychain (unlockFromCache); web has no keychain, so after a reload
+  // the store stays locked until the user re-enters the password. Returns false when still locked —
+  // the caller must NOT sync then, or it would push plaintext (PLAN §E2EE).
+  const ensureUnlocked = useCallback(async (): Promise<boolean> => {
+    const cfg = configRef.current;
+    if (!cfg?.encrypted) return true;
+    if ((await crypto.status()).unlocked) return true;
+    return (await crypto.unlockFromCache()).unlocked;
+  }, [crypto]);
+
   const runNow = useCallback(async () => {
     if (!configRef.current || running.current) return;
     running.current = true;
@@ -147,6 +179,11 @@ export function SyncProvider({
       const cfg = configRef.current;
       if (cfg.expiresAt && Date.now() >= cfg.expiresAt - REFRESH_SKEW_MS) {
         if (!(await refreshTokens())) throw new Error("Session expired — please sign in again.");
+      }
+      // Never sync an encrypted account whose key isn't loaded — that would leak plaintext.
+      if (!(await ensureUnlocked())) {
+        setStatus("locked");
+        return; // finally resets `running` and schedules the next check
       }
       try {
         await api.run();
@@ -217,41 +254,125 @@ export function SyncProvider({
     [],
   );
 
-  const connect = useCallback(async (baseUrl: string, email: string, password: string, mode: AuthMode) => {
-    const res = mode === "register" ? await auth.register(baseUrl, email, password) : await auth.login(baseUrl, email, password);
+  const connect = useCallback(async (baseUrl: string, email: string, password: string, mode: AuthMode): Promise<ConnectResult> => {
+    let res;
+    let encrypted = false;
+    let recoveryCode: string | null = null;
+
+    if (mode === "register") {
+      // New accounts are end-to-end encrypted by default (PLAN §E2EE): generate the key material
+      // locally, register with the derived auth key (so the server never sees the password), then
+      // upload the wrapped key. The store is left unlocked, and the recovery code is surfaced once.
+      const setup = await crypto.setup(password);
+      res = await auth.register(baseUrl, email, setup.authKeyHex);
+      await keys.putKeys(baseUrl, res.token, keys.materialFromSetup(setup));
+      encrypted = true;
+      recoveryCode = formatRecoveryCode(setup.recoveryCode);
+    } else {
+      // Ask the server how this account authenticates before sending anything.
+      const pre = await auth.prelogin(baseUrl, email);
+      if (pre.encrypted && pre.salt && pre.kdf) {
+        const { authKeyHex } = await crypto.deriveAuthKey(password, pre.salt, pre.kdf);
+        res = await auth.login(baseUrl, email, authKeyHex);
+        const km = await keys.fetchKeys(baseUrl, res.token);
+        if (km) {
+          await crypto.unlock(password, km.wrappedMasterKey, km.kdfSalt, {
+            time: km.kdfTime,
+            memoryK: km.kdfMemoryK,
+            threads: km.kdfThreads,
+          });
+          encrypted = true;
+        }
+      } else {
+        // Legacy plaintext account: authenticate with the raw password, no encryption.
+        res = await auth.login(baseUrl, email, password);
+      }
+    }
+
     const cfg: PersistedConfig = {
       baseUrl,
       token: res.token,
       refreshToken: res.refreshToken,
       expiresAt: Date.parse(res.expiresAt),
       email,
+      encrypted,
     };
     saveConfig(cfg, storageRef.current);
     setStatus("idle");
     setLastError(null);
     setConfig(cfg); // effect re-configures + syncs
-  }, []);
+    return { recoveryCode };
+  }, [crypto]);
+
+  // unlock re-derives the master key for a locked encrypted account (a web reload, typically),
+  // then resumes syncing. Wrong password surfaces as an error and leaves the store locked.
+  const unlock = useCallback(async (password: string) => {
+    const cfg = configRef.current;
+    if (!cfg) throw new Error("not connected");
+    const km = await keys.fetchKeys(cfg.baseUrl, cfg.token);
+    if (!km) throw new Error("this account has no encryption key");
+    await crypto.unlock(password, km.wrappedMasterKey, km.kdfSalt, {
+      time: km.kdfTime,
+      memoryK: km.kdfMemoryK,
+      threads: km.kdfThreads,
+    });
+    setStatus("idle");
+    setLastError(null);
+    void runNow();
+  }, [crypto, runNow]);
+
+  // enableEncryption migrates a connected plaintext account (PLAN §E2EE). It generates key material,
+  // swaps the server credential from the raw password to the derived auth key (via the account
+  // password-change endpoint, which rotates the session), uploads the wrapped key, then flags every
+  // row dirty and syncs so the server's plaintext copies are overwritten with ciphertext.
+  const enableEncryption = useCallback(async (password: string): Promise<ConnectResult> => {
+    const cfg = configRef.current;
+    if (!cfg) throw new Error("not connected");
+    if (cfg.encrypted) return { recoveryCode: null };
+
+    const setup = await crypto.setup(password); // generates + unlocks the master key
+    const session = await auth.changePassword(cfg.baseUrl, cfg.token, password, setup.authKeyHex);
+    const next: PersistedConfig = {
+      ...cfg,
+      token: session.token,
+      refreshToken: session.refreshToken,
+      expiresAt: Date.parse(session.expiresAt),
+      encrypted: true,
+    };
+    configRef.current = next;
+    saveConfig(next, storageRef.current);
+    await keys.putKeys(next.baseUrl, next.token, keys.materialFromSetup(setup));
+    await crypto.reencryptAll(); // flag every row dirty
+    setConfig(next); // reconfigures with the rotated token + syncs (re-pushes encrypted)
+    void runNow();
+    return { recoveryCode: formatRecoveryCode(setup.recoveryCode) };
+  }, [crypto, runNow]);
 
   const disconnect = useCallback(() => {
+    // Drop the in-memory master key (and native cache) so signing out also locks the store.
+    void crypto.lock();
     clearConfig(storageRef.current);
     setConfig(null);
     setStatus("disconnected");
     setLastError(null);
     setLastSyncedAt(null);
-  }, []);
+  }, [crypto]);
 
   const value = useMemo<SyncController>(
     () => ({
       connected: !!config,
       email: config?.email ?? null,
       status,
+      encrypted: config?.encrypted ?? false,
       lastError,
       lastSyncedAt,
       connect,
+      unlock,
+      enableEncryption,
       disconnect,
       trigger,
     }),
-    [config, status, lastError, lastSyncedAt, connect, disconnect, trigger],
+    [config, status, lastError, lastSyncedAt, connect, unlock, enableEncryption, disconnect, trigger],
   );
 
   return <SyncCtx.Provider value={value}>{children}</SyncCtx.Provider>;

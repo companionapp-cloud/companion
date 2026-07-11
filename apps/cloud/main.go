@@ -64,7 +64,7 @@ func main() {
 	srv := syncserver.New(db, dialect, syncserver.WithSyncGuard(bill.Guard), syncserver.WithoutCORS())
 	srv.StartTrashCollector(context.Background())
 	srv.StartRepeatMaterializer(context.Background())
-	srv.StartCalendarFetcher(context.Background())
+	// Calendar ICS fetching moved to the client (PLAN §E2EE); no server-side fetch sweep.
 
 	// CLOUD_ADMIN_EMAILS bootstraps the admin_users table: any already-registered user with
 	// a listed email is promoted at boot (others must register first, then be re-promoted or

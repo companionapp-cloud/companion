@@ -2,10 +2,13 @@ package syncserver
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"net/http"
 	"strings"
 	"time"
+
+	"companion/core/crypto"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -127,6 +130,53 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, session.response(uid))
+}
+
+type preloginRequest struct {
+	Email string `json:"email"`
+}
+
+// preloginResponse tells a signing-in client how to form its credential (PLAN §E2EE). For an
+// encryption-enabled account it returns the KDF salt + params so the client can derive the auth
+// key locally and send that in place of the password (the server never sees the password). For a
+// plaintext account — or an unknown email — it returns Encrypted=false and the client logs in with
+// the raw password as before. The false case is deliberately ambiguous (unknown vs. plaintext) to
+// limit account enumeration.
+type preloginResponse struct {
+	Encrypted bool              `json:"encrypted"`
+	Salt      string            `json:"salt,omitempty"`
+	KDF       *crypto.KDFParams `json:"kdf,omitempty"`
+}
+
+// handlePrelogin is the unauthenticated lookup a client performs before login to decide whether to
+// send a derived auth key (encrypted account) or the raw password (plaintext account). It is
+// rate-limited like the other auth endpoints to slow enumeration.
+func (s *Server) handlePrelogin(w http.ResponseWriter, r *http.Request) {
+	var req preloginRequest
+	if err := decode(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	email := strings.TrimSpace(strings.ToLower(req.Email))
+	var salt string
+	var t, m, p int64
+	err := s.queryRow(
+		`SELECT k.kdf_salt, k.kdf_time, k.kdf_memory_k, k.kdf_threads
+		 FROM user_keys k JOIN users u ON u.id = k.user_id WHERE u.email = ?;`, email).
+		Scan(&salt, &t, &m, &p)
+	if err == sql.ErrNoRows {
+		writeJSON(w, http.StatusOK, preloginResponse{Encrypted: false})
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "prelogin failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, preloginResponse{
+		Encrypted: true,
+		Salt:      salt,
+		KDF:       &crypto.KDFParams{Time: uint32(t), MemoryK: uint32(m), Threads: uint8(p)},
+	})
 }
 
 // session is a freshly minted access token + its rotating refresh token.

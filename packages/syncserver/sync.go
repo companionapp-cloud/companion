@@ -124,7 +124,6 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 	results := make([]protocol.PushResult, 0, len(req.Changes))
 	var maxSeq int64
 	seedIDs := map[string]bool{} // repeating-task seeds touched by this push
-	feedIDs := map[string]bool{} // calendar feeds touched by this push
 	for _, ch := range req.Changes {
 		e := handlers[ch.EntityType]
 		if e == nil {
@@ -143,17 +142,11 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 		if res.Status == protocol.StatusAccepted && ch.EntityType == protocol.EntityTask && isSeedRow(ch.Row) {
 			seedIDs[ch.ID] = true
 		}
-		if res.Status == protocol.StatusAccepted && ch.EntityType == protocol.EntityCalendarFeed {
-			feedIDs[ch.ID] = true
-		}
 		results = append(results, res)
 	}
-	// A pushed feed (added, its URL edited, or deleted) is fetched/cleaned right away on a
-	// background goroutine, so its events reach devices promptly rather than waiting for the
-	// periodic sweep (PLAN §6.7). The publish inside the trigger pokes the other devices.
-	for id := range feedIDs {
-		go s.triggerFeedFetch(uid, id)
-	}
+	// Calendar feeds and events are now fetched and pushed by the client (PLAN §E2EE), so the
+	// server no longer reacts to a feed push — the client's own push carries the expanded events.
+	//
 	// A pushed seed — created, its rule edited, or trashed/deleted — materializes its
 	// occurrences immediately, so the change reaches other devices via the same SSE poke as
 	// the push itself (PLAN §6.4). Materialization failures are logged, never failing the

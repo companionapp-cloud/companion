@@ -128,6 +128,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	// Credential endpoints are rate-limited per client IP (per path) to bound brute-force
 	// and account-creation abuse.
+	mux.Handle("POST /v1/auth/prelogin", s.authLimiter.Limit(IPPathKey, s.handlePrelogin))
 	mux.Handle("POST /v1/auth/register", s.authLimiter.Limit(IPPathKey, s.handleRegister))
 	mux.Handle("POST /v1/auth/login", s.authLimiter.Limit(IPPathKey, s.handleLogin))
 	mux.Handle("POST /v1/auth/refresh", s.authLimiter.Limit(IPPathKey, s.handleRefresh))
@@ -139,8 +140,13 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/sync/pull", s.authed(s.handlePull))
 	mux.Handle("POST /v1/sync/push", s.authed(s.handlePush))
 	mux.Handle("GET /v1/sync/events", s.authed(s.handleEvents))
-	// Manual calendar refresh: re-fetch this account's ICS feeds now (PLAN §6.7).
-	mux.Handle("POST /v1/calendar/refresh", s.authed(s.handleCalendarRefresh))
+
+	// End-to-end encryption key material (PLAN §E2EE): the server is a blind custodian.
+	mux.Handle("GET /v1/keys", s.authed(s.handleGetKeys))
+	mux.Handle("PUT /v1/keys", s.authed(s.handlePutKeys))
+	// Blind ICS proxy for web clients (PLAN §E2EE): clients fetch/expand feeds themselves; this
+	// only relays a URL's body for browsers blocked by CORS, storing/logging nothing.
+	mux.Handle("POST /v1/calendar/proxy", s.authed(s.handleCalendarProxy))
 	// Document bytes: content-addressed, streamed to/from object storage (PLAN §6.9).
 	mux.Handle("PUT /v1/blobs/{sha256}", s.authed(s.handleBlobPut))
 	mux.Handle("GET /v1/blobs/{sha256}", s.authed(s.handleBlobGet))

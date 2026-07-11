@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	cryptopkg "companion/core/crypto"
 	syncpkg "companion/core/sync"
 
 	"github.com/google/uuid"
@@ -44,6 +45,17 @@ func (c *Core) syncConfigure(payload []byte) ([]byte, error) {
 	return json.Marshal(map[string]bool{"ok": true})
 }
 
+// newSyncEngine builds a sync engine against the configured endpoint, enabling end-to-end
+// encryption when the store is unlocked. A nil master key leaves it in plaintext mode — the shell
+// must unlock before syncing an encrypted account, or it would push plaintext (PLAN §E2EE).
+func (c *Core) newSyncEngine() *syncpkg.Engine {
+	engine := syncpkg.New(c.store, syncpkg.NewHTTPTransport(c.sync.baseURL, c.sync.token), nil)
+	if mk := c.getMasterKey(); mk != nil {
+		engine.SetCipher(cryptopkg.NewCipher(mk))
+	}
+	return engine
+}
+
 // syncRun performs one push→pull cycle and signals the UI to refresh.
 func (c *Core) syncRun() ([]byte, error) {
 	if c.sync.baseURL == "" {
@@ -54,8 +66,7 @@ func (c *Core) syncRun() ([]byte, error) {
 	if err := c.uploadPendingBlobs(); err != nil {
 		return nil, err
 	}
-	engine := syncpkg.New(c.store, syncpkg.NewHTTPTransport(c.sync.baseURL, c.sync.token), nil)
-	if err := engine.Sync(); err != nil {
+	if err := c.newSyncEngine().Sync(); err != nil {
 		return nil, err
 	}
 	// A pull may have applied many rows (and re-derived their links); signal a bulk

@@ -207,14 +207,16 @@ export interface Area {
   dirty: boolean;
 }
 
-/** A user-authored ICS subscription (PLAN §6.7). Syncs bidirectionally; the server, not the
- *  client, fetches its URL and produces the CalendarEvent clones. */
+/** A user-authored ICS subscription (PLAN §6.7). Syncs bidirectionally. Under end-to-end
+ *  encryption (PLAN §E2EE) the client — not the server — fetches its URL and expands the events, so
+ *  the URL and event content stay opaque to the server. */
 export interface CalendarFeed {
   id: string;
   name: string;
-  /** Subscription URL the server re-fetches; empty for an uploaded feed. */
+  /** Subscription URL the client fetches (directly, or via the server's blind proxy on web);
+   *  empty for an uploaded feed. */
   url: string;
-  /** Raw contents of an uploaded .ics file, parsed server-side; null for URL feeds. */
+  /** Raw contents of an uploaded .ics file, parsed on-device; null for URL feeds. */
   icsText?: string | null;
   color?: string | null;
   createdAt: string;
@@ -224,8 +226,9 @@ export interface CalendarFeed {
   dirty: boolean;
 }
 
-/** A server-cloned event occurrence (PLAN §6.7). Read-only on clients — delivered via the
- *  normal sync pull and never authored locally. */
+/** An event occurrence expanded from a feed's ICS (PLAN §6.7). Under E2EE the client expands its
+ *  feeds and pushes events like any entity, so they are dirty-tracked; content is encrypted before
+ *  it leaves the device. */
 export interface CalendarEvent {
   id: string;
   feedId: string;
@@ -240,6 +243,7 @@ export interface CalendarEvent {
   updatedAt: string;
   deletedAt?: string | null;
   version: number;
+  dirty: boolean;
 }
 
 /** Origin of a merged calendar entry. Habit occurrences will join this when habits land. */

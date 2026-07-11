@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"companion/core/calendar"
 	"companion/core/domain"
 	"companion/core/sync/protocol"
 
@@ -142,8 +143,9 @@ func (r *CalendarFeedsRepo) Update(id string, in UpdateFeedInput) (*domain.Calen
 	return f, nil
 }
 
-// Delete soft-deletes a feed. Its cloned events are cleaned up server-side on the next
-// fetch sweep and tombstoned down to clients through normal sync.
+// Delete soft-deletes a feed and tombstones its events locally so the removal syncs to every
+// device. Under client-side fetching (PLAN §E2EE) the client owns the events, so it — not the
+// server — is responsible for cleaning them up when a feed goes away.
 func (r *CalendarFeedsRepo) Delete(id string) error {
 	now := r.clock.Now().UTC()
 	res, err := r.db.Exec(
@@ -155,6 +157,14 @@ func (r *CalendarFeedsRepo) Delete(id string) error {
 	}
 	if affected, _ := res.RowsAffected(); affected == 0 {
 		return ErrNotFound
+	}
+	// Tombstone the feed's live events (dirty, so they push as deletions).
+	if _, err := r.db.Exec(
+		`UPDATE calendar_events SET deleted_at = ?, updated_at = ?, dirty = 1
+		 WHERE feed_id = ? AND deleted_at IS NULL;`,
+		now.Format(timeFormat), now.Format(timeFormat), id,
+	); err != nil {
+		return fmt.Errorf("tombstone feed events: %w", err)
 	}
 	return nil
 }
@@ -299,25 +309,138 @@ func scanFeed(rows Rows) (*domain.CalendarFeed, error) {
 
 // ---- calendar events (server-owned, read-only on clients) ----------------
 
-// CalendarEventsRepo holds the cloned ICS occurrences (PLAN §6.7). It is a pull-only
-// SyncableRepo: Dirty is always empty (clients never push events) and Apply is the only
-// writer, invoked by the sync engine as server rows arrive. It also serves the merged
-// Range read model consumed by every calendar UI.
+// CalendarEventsRepo holds the ICS occurrences the client expands from its feeds (PLAN §6.7,
+// §E2EE). Since the client fetches feeds and pushes events (so their content can be encrypted),
+// events are a normal read/write SyncableRepo: ReconcileFeedEvents writes freshly-expanded rows
+// as dirty, and the sync engine pushes them. It also serves the merged Range read model consumed
+// by every calendar UI.
 type CalendarEventsRepo struct {
 	db    Driver
 	clock domain.Clock
 }
 
-const eventColumns = `id, feed_id, ics_uid, title, starts_at, ends_at, all_day, location, description, created_at, updated_at, deleted_at, version`
+const eventColumns = `id, feed_id, ics_uid, title, starts_at, ends_at, all_day, location, description, created_at, updated_at, deleted_at, version, dirty`
 
-// --- SyncableRepo[*domain.CalendarEvent] (pull-only) ----------------------
+// ReconcileFeedEvents updates the local events of one feed to match a freshly-expanded set: new or
+// changed occurrences are written dirty (so sync pushes them), and previously-stored occurrences
+// that vanished from the feed are tombstoned dirty. An unchanged occurrence is left untouched, so
+// a quiet feed produces no sync churn. Returns the number of rows written.
+func (r *CalendarEventsRepo) ReconcileFeedEvents(feedID string, fresh []*domain.CalendarEvent) (int, error) {
+	existing, err := r.liveEventsForFeed(feedID)
+	if err != nil {
+		return 0, err
+	}
+	now := r.clock.Now().UTC()
+	written := 0
+	seen := map[string]bool{}
+	for _, e := range fresh {
+		seen[e.ID] = true
+		old, ok := existing[e.ID]
+		if ok && !calendar.Changed(old, e) {
+			continue // quiet occurrence: no write, no push
+		}
+		e.UpdatedAt = now
+		if ok {
+			e.CreatedAt = old.CreatedAt
+			e.Version = old.Version
+		} else {
+			e.CreatedAt = now
+			e.Version = 0
+		}
+		e.DeletedAt = nil
+		e.Dirty = true
+		if err := r.writeEvent(e); err != nil {
+			return written, err
+		}
+		written++
+	}
+	// Tombstone occurrences no longer produced by the feed.
+	for id, old := range existing {
+		if seen[id] {
+			continue
+		}
+		old.DeletedAt = &now
+		old.UpdatedAt = now
+		old.Dirty = true
+		if err := r.writeEvent(old); err != nil {
+			return written, err
+		}
+		written++
+	}
+	return written, nil
+}
+
+// liveEventsForFeed loads a feed's non-deleted local events keyed by id.
+func (r *CalendarEventsRepo) liveEventsForFeed(feedID string) (map[string]*domain.CalendarEvent, error) {
+	rows, err := r.db.Query(`SELECT `+eventColumns+` FROM calendar_events WHERE feed_id = ? AND deleted_at IS NULL;`, feedID)
+	if err != nil {
+		return nil, fmt.Errorf("query feed events: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]*domain.CalendarEvent{}
+	for rows.Next() {
+		e, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[e.ID] = e
+	}
+	return out, rows.Err()
+}
+
+// writeEvent upserts one event row, preserving the dirty flag carried on the struct.
+func (r *CalendarEventsRepo) writeEvent(e *domain.CalendarEvent) error {
+	var endsAt, location, description, deletedAt any
+	if e.EndsAt != nil {
+		endsAt = e.EndsAt.UTC().Format(timeFormat)
+	}
+	if e.Location != nil {
+		location = *e.Location
+	}
+	if e.Description != nil {
+		description = *e.Description
+	}
+	if e.DeletedAt != nil {
+		deletedAt = e.DeletedAt.UTC().Format(timeFormat)
+	}
+	_, err := r.db.Exec(
+		`INSERT INTO calendar_events (id, feed_id, ics_uid, title, starts_at, ends_at, all_day, location, description, created_at, updated_at, deleted_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET
+		   feed_id = excluded.feed_id, ics_uid = excluded.ics_uid, title = excluded.title,
+		   starts_at = excluded.starts_at, ends_at = excluded.ends_at, all_day = excluded.all_day,
+		   location = excluded.location, description = excluded.description,
+		   updated_at = excluded.updated_at, deleted_at = excluded.deleted_at,
+		   version = excluded.version, dirty = excluded.dirty;`,
+		e.ID, e.FeedID, e.ICSUID, e.Title, e.StartsAt.UTC().Format(timeFormat), endsAt, boolToInt(e.AllDay),
+		location, description, e.CreatedAt.UTC().Format(timeFormat), e.UpdatedAt.UTC().Format(timeFormat), deletedAt, e.Version, boolToInt(e.Dirty),
+	)
+	if err != nil {
+		return fmt.Errorf("write calendar event: %w", err)
+	}
+	return nil
+}
+
+// --- SyncableRepo[*domain.CalendarEvent] ----------------------------------
 
 func (r *CalendarEventsRepo) EntityType() string { return protocol.EntityCalendarEvent }
 
-// Dirty is always empty: clients never author calendar events, so there is nothing to
-// push. The generic engine simply skips this repo on the push pass.
+// Dirty returns locally-changed events (freshly expanded or tombstoned) awaiting push.
 func (r *CalendarEventsRepo) Dirty() ([]*domain.CalendarEvent, error) {
-	return nil, nil
+	rows, err := r.db.Query(`SELECT ` + eventColumns + ` FROM calendar_events WHERE dirty = 1 ORDER BY updated_at ASC, id ASC;`)
+	if err != nil {
+		return nil, fmt.Errorf("query dirty calendar events: %w", err)
+	}
+	defer rows.Close()
+	out := []*domain.CalendarEvent{}
+	for rows.Next() {
+		e, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 func (r *CalendarEventsRepo) GetAny(id string) (*domain.CalendarEvent, error) {
@@ -335,45 +458,27 @@ func (r *CalendarEventsRepo) GetAny(id string) (*domain.CalendarEvent, error) {
 	return scanEvent(rows)
 }
 
+// Apply overwrites the local event with a server-canonical one, clearing dirty (the incoming
+// row wins). Events are derived data, so a losing local expansion is simply dropped.
 func (r *CalendarEventsRepo) Apply(e *domain.CalendarEvent) error {
-	var endsAt, location, description, deletedAt any
-	if e.EndsAt != nil {
-		endsAt = e.EndsAt.UTC().Format(timeFormat)
-	}
-	if e.Location != nil {
-		location = *e.Location
-	}
-	if e.Description != nil {
-		description = *e.Description
-	}
-	if e.DeletedAt != nil {
-		deletedAt = e.DeletedAt.UTC().Format(timeFormat)
-	}
-	_, err := r.db.Exec(
-		`INSERT INTO calendar_events (id, feed_id, ics_uid, title, starts_at, ends_at, all_day, location, description, created_at, updated_at, deleted_at, version)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(id) DO UPDATE SET
-		   feed_id = excluded.feed_id, ics_uid = excluded.ics_uid, title = excluded.title,
-		   starts_at = excluded.starts_at, ends_at = excluded.ends_at, all_day = excluded.all_day,
-		   location = excluded.location, description = excluded.description,
-		   created_at = excluded.created_at, updated_at = excluded.updated_at,
-		   deleted_at = excluded.deleted_at, version = excluded.version;`,
-		e.ID, e.FeedID, e.ICSUID, e.Title, e.StartsAt.UTC().Format(timeFormat), endsAt, boolToInt(e.AllDay),
-		location, description, e.CreatedAt.UTC().Format(timeFormat), e.UpdatedAt.UTC().Format(timeFormat), deletedAt, e.Version,
-	)
-	if err != nil {
-		return fmt.Errorf("apply calendar event: %w", err)
+	e.Dirty = false
+	return r.writeEvent(e)
+}
+
+// MarkPushed clears dirty and records the server version after a successful push.
+func (r *CalendarEventsRepo) MarkPushed(id string, version int64) error {
+	if _, err := r.db.Exec(`UPDATE calendar_events SET dirty = 0, version = ? WHERE id = ?;`, version, id); err != nil {
+		return fmt.Errorf("mark pushed: %w", err)
 	}
 	return nil
 }
 
-// MarkPushed is a no-op: events are never pushed.
-func (r *CalendarEventsRepo) MarkPushed(id string, version int64) error { return nil }
-
-// MeaningfulDiff is always false: a pull-only entity never forks a conflicted copy.
+// MeaningfulDiff is always false: calendar events are derived (deterministically re-expandable)
+// from their feed, so a conflict never needs to preserve a losing local copy — the server row is
+// adopted and the next fetch re-derives anything missing.
 func (r *CalendarEventsRepo) MeaningfulDiff(a, b *domain.CalendarEvent) bool { return false }
 
-// ConflictedCopy is a no-op: there is never a local edit of an event to preserve.
+// ConflictedCopy is a no-op: derived events are never forked into a conflicted copy.
 func (r *CalendarEventsRepo) ConflictedCopy(local *domain.CalendarEvent, suffix string) error {
 	return nil
 }
@@ -393,11 +498,13 @@ func scanEvent(rows Rows) (*domain.CalendarEvent, error) {
 		deletedAt                      sql.NullString
 		startsAt, createdAt, updatedAt string
 		allDay                         int
+		dirty                          int
 	)
 	if err := rows.Scan(&e.ID, &e.FeedID, &e.ICSUID, &e.Title, &startsAt, &endsAt, &allDay,
-		&location, &description, &createdAt, &updatedAt, &deletedAt, &e.Version); err != nil {
+		&location, &description, &createdAt, &updatedAt, &deletedAt, &e.Version, &dirty); err != nil {
 		return nil, fmt.Errorf("scan calendar event: %w", err)
 	}
+	e.Dirty = dirty != 0
 	var err error
 	if e.StartsAt, err = time.Parse(timeFormat, startsAt); err != nil {
 		return nil, fmt.Errorf("parse starts_at: %w", err)

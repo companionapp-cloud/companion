@@ -65,13 +65,13 @@ func TestCalendarFeedCRUD(t *testing.T) {
 	}
 }
 
-// TestCalendarEventsPullOnly verifies events are applied (never authored) and never appear
-// as dirty push candidates.
-func TestCalendarEventsPullOnly(t *testing.T) {
+// TestReconcileFeedEvents covers the client-side reconcile that replaced server-side fetching
+// (PLAN §E2EE): fresh occurrences are written dirty for push, unchanged ones cause no churn, an
+// edited one re-dirties while preserving created_at, and a vanished one is tombstoned.
+func TestReconcileFeedEvents(t *testing.T) {
 	clk := &fixedClock{t: time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)}
 	s := newTestStore(t, clk)
 
-	// A feed must exist for Range's join to surface the event.
 	f, err := s.CalendarFeeds.Create(CreateFeedInput{Name: "Cal", URL: "https://example.com/c.ics"})
 	if err != nil {
 		t.Fatalf("create feed: %v", err)
@@ -79,24 +79,82 @@ func TestCalendarEventsPullOnly(t *testing.T) {
 
 	start := time.Date(2026, 7, 4, 9, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
-	ev := &domain.CalendarEvent{
-		ID: "event-1", FeedID: f.ID, ICSUID: "uid-1", Title: "Weekly sync",
-		StartsAt: start, EndsAt: &end, CreatedAt: clk.t, UpdatedAt: clk.t, Version: 1,
+	mk := func(id, title string) *domain.CalendarEvent {
+		return &domain.CalendarEvent{ID: id, FeedID: f.ID, ICSUID: id, Title: title, StartsAt: start, EndsAt: &end}
 	}
-	if err := s.CalendarEvents.Apply(ev); err != nil {
-		t.Fatalf("apply event: %v", err)
+
+	// First reconcile: two new events, both dirty.
+	n, err := s.CalendarEvents.ReconcileFeedEvents(f.ID, []*domain.CalendarEvent{mk("e1", "Standup"), mk("e2", "Review")})
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
 	}
-	dirty, err := s.CalendarEvents.Dirty()
+	if n != 2 {
+		t.Fatalf("expected 2 writes, got %d", n)
+	}
+	dirty, _ := s.CalendarEvents.Dirty()
+	if len(dirty) != 2 {
+		t.Fatalf("expected 2 dirty events, got %d", len(dirty))
+	}
+
+	// Simulate a successful push clearing dirty.
+	for _, e := range dirty {
+		s.CalendarEvents.MarkPushed(e.ID, 1)
+	}
+
+	// Second reconcile, same content → no writes (a quiet feed produces no churn).
+	n, _ = s.CalendarEvents.ReconcileFeedEvents(f.ID, []*domain.CalendarEvent{mk("e1", "Standup"), mk("e2", "Review")})
+	if n != 0 {
+		t.Fatalf("unchanged feed should write nothing, wrote %d", n)
+	}
+
+	// Third reconcile: e1 retitled, e2 vanished → e1 re-dirtied (created_at preserved), e2 tombstoned.
+	e1Created, _ := s.CalendarEvents.GetAny("e1")
+	n, _ = s.CalendarEvents.ReconcileFeedEvents(f.ID, []*domain.CalendarEvent{mk("e1", "Daily standup")})
+	if n != 2 {
+		t.Fatalf("expected 2 writes (edit + tombstone), got %d", n)
+	}
+	got1, _ := s.CalendarEvents.GetAny("e1")
+	if got1.Title != "Daily standup" || !got1.Dirty {
+		t.Fatalf("e1 should be re-titled + dirty: %+v", got1)
+	}
+	if !got1.CreatedAt.Equal(e1Created.CreatedAt) {
+		t.Fatalf("e1 created_at should be preserved across edit")
+	}
+	got2, _ := s.CalendarEvents.GetAny("e2")
+	if got2.DeletedAt == nil || !got2.Dirty {
+		t.Fatalf("e2 should be tombstoned + dirty: %+v", got2)
+	}
+}
+
+// TestFeedDeleteTombstonesEvents verifies deleting a feed locally tombstones its events (dirty),
+// so the removal syncs — the client now owns this cleanup that the server used to do.
+func TestFeedDeleteTombstonesEvents(t *testing.T) {
+	clk := &fixedClock{t: time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)}
+	s := newTestStore(t, clk)
+	f, _ := s.CalendarFeeds.Create(CreateFeedInput{Name: "Cal", URL: "https://example.com/c.ics"})
+	start := time.Date(2026, 7, 4, 9, 0, 0, 0, time.UTC)
+	s.CalendarEvents.ReconcileFeedEvents(f.ID, []*domain.CalendarEvent{
+		{ID: "e1", FeedID: f.ID, ICSUID: "u1", Title: "X", StartsAt: start},
+	})
+	for _, e := range mustDirtyEvents(t, s) {
+		s.CalendarEvents.MarkPushed(e.ID, 1)
+	}
+	if err := s.CalendarFeeds.Delete(f.ID); err != nil {
+		t.Fatalf("delete feed: %v", err)
+	}
+	dirty := mustDirtyEvents(t, s)
+	if len(dirty) != 1 || dirty[0].DeletedAt == nil {
+		t.Fatalf("feed delete should tombstone its events dirty, got %+v", dirty)
+	}
+}
+
+func mustDirtyEvents(t *testing.T, s *Store) []*domain.CalendarEvent {
+	t.Helper()
+	d, err := s.CalendarEvents.Dirty()
 	if err != nil {
 		t.Fatalf("dirty: %v", err)
 	}
-	if len(dirty) != 0 {
-		t.Fatalf("events must never be dirty, got %d", len(dirty))
-	}
-	got, err := s.CalendarEvents.GetAny("event-1")
-	if err != nil || got.Title != "Weekly sync" {
-		t.Fatalf("get event: %v %+v", err, got)
-	}
+	return d
 }
 
 // TestCalendarRangeMerge asserts Range merges events, due tasks, and dated notes into one
@@ -165,5 +223,26 @@ func TestCalendarRangeMerge(t *testing.T) {
 	}
 	if items[0].Location != nil || items[2].Location != nil {
 		t.Fatalf("note/task must not carry a location")
+	}
+}
+
+// TestMarkAllForReencryption checks the migration flag marks live content rows dirty (so they
+// re-push encrypted) without touching tombstones.
+func TestMarkAllForReencryption(t *testing.T) {
+	clk := &fixedClock{t: time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)}
+	s := newTestStore(t, clk)
+
+	note, _ := s.Notes.Create(CreateNoteInput{Title: "Keep", ContentMD: "x"})
+	s.Notes.MarkPushed(note.ID, 1) // clean it first
+	trashed, _ := s.Notes.Create(CreateNoteInput{Title: "Gone"})
+	s.Notes.MarkPushed(trashed.ID, 1)
+	s.Notes.Delete(trashed.ID) // tombstone (dirty, but deleted)
+
+	if _, err := s.MarkAllForReencryption(); err != nil {
+		t.Fatalf("mark: %v", err)
+	}
+	got, _ := s.Notes.Get(note.ID)
+	if !got.Dirty {
+		t.Fatal("live note should be flagged dirty for re-encryption")
 	}
 }

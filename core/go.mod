@@ -6,6 +6,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/olebedev/when v1.1.0
 	github.com/teambition/rrule-go v1.8.2
+	golang.org/x/crypto v0.53.0
 	golang.org/x/mobile v0.0.0-20260611195102-4dd8f1dbf5d2
 	modernc.org/sqlite v1.53.0
 )
@@ -13,6 +14,7 @@ require (
 require (
 	github.com/AlekSi/pointer v1.2.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/emersion/go-ical v0.0.0-20250609112844-439c63cef608 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect

@@ -1,11 +1,14 @@
 package bridge
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
+	"strings"
 	"time"
 
+	"companion/core/calendar"
 	"companion/core/store"
-	syncpkg "companion/core/sync"
 )
 
 // calendarChangedEvent lets calendar views refresh after a local feed change; data.changed
@@ -69,25 +72,63 @@ func (c *Core) calendarFeedsDelete(payload []byte) ([]byte, error) {
 	return json.Marshal(map[string]bool{"ok": true})
 }
 
-// calendarRefresh forces the server to re-fetch this account's ICS feeds now, then pulls the
-// freshly-cloned events (PLAN §6.7) — the calendar view's manual "Refresh". When sync isn't
-// configured (local-only), it just signals a refresh so the view re-queries local data.
+// calendarRefresh fetches this account's ICS feeds on-device, reconciles their events into the
+// local store, then syncs so the (encrypted) event changes propagate (PLAN §6.7, §E2EE). Moving
+// the fetch client-side is what keeps event content and feed URLs opaque to the server. This is
+// the calendar view's "Refresh", also triggered on mount/focus; between refreshes a device shows
+// the last-fetched window. When sync isn't configured (local-only), it still parses uploaded-text
+// feeds so their events render, with no network.
 func (c *Core) calendarRefresh() ([]byte, error) {
+	if err := c.fetchFeeds(); err != nil {
+		return nil, err
+	}
 	if c.sync.baseURL == "" {
 		c.emitCalendarChanged("")
 		return json.Marshal(map[string]bool{"ok": true, "synced": false})
 	}
-	transport := syncpkg.NewHTTPTransport(c.sync.baseURL, c.sync.token)
-	if err := transport.RefreshCalendars(); err != nil {
-		return nil, err
-	}
-	// Pull the freshly-cloned events (and anything else pending), then refresh the view.
-	if err := syncpkg.New(c.store, transport, nil).Sync(); err != nil {
+	if err := c.newSyncEngine().Sync(); err != nil {
 		return nil, err
 	}
 	c.emitCalendarChanged("")
 	c.emitDataChanged("", "")
 	return json.Marshal(map[string]bool{"ok": true, "synced": true})
+}
+
+// fetchFeeds expands every live feed and reconciles its events into the local store, marking
+// changed occurrences dirty for the next push. A URL feed is fetched (natively, or via the server's
+// blind proxy on web — see fetchICS); an uploaded-text feed is parsed in place with no network. A
+// single feed's fetch/parse failure is logged and skipped so one bad feed can't wedge the rest.
+func (c *Core) fetchFeeds() error {
+	feeds, err := c.store.CalendarFeeds.List()
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, f := range feeds {
+		var body []byte
+		switch {
+		case f.ICSText != nil && strings.TrimSpace(*f.ICSText) != "":
+			body = []byte(*f.ICSText)
+		case strings.TrimSpace(f.URL) != "":
+			b, err := c.fetchICS(f.URL)
+			if err != nil {
+				log.Printf("calendar: fetch feed %s: %v", f.ID, err)
+				continue
+			}
+			body = b
+		default:
+			continue
+		}
+		events, err := calendar.ParseAndExpand(bytes.NewReader(body), f.ID, now)
+		if err != nil {
+			log.Printf("calendar: parse feed %s: %v", f.ID, err)
+			continue
+		}
+		if _, err := c.store.CalendarEvents.ReconcileFeedEvents(f.ID, events); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // calendarRange returns the merged, read-only calendar for a window: feed events, due
