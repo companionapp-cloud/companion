@@ -4,8 +4,9 @@ import { SyncSettings } from "./SyncSettings";
 import { LlmSettings } from "./LlmSettings";
 import { ObjectTypeSettings } from "./ObjectTypeSettings";
 import { ToolSettings } from "./ToolSettings";
+import { CalendarSettings } from "./CalendarSettings";
 
-export type SettingsSectionId = "sync" | "ai" | "objects" | "tools";
+export type SettingsSectionId = "sync" | "ai" | "objects" | "calendar" | "tools";
 
 /** One entry in the settings navigation list (PLAN §3.1 shell). Each section is a
  *  self-contained component that reads its own data through the app providers, so the
@@ -39,6 +40,13 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
     description: "Archetypes that give notes and tasks structured fields",
     icon: "file",
     Component: ObjectTypeSettings,
+  },
+  {
+    id: "calendar",
+    label: "Calendar",
+    description: "Subscribe to ICS calendar feeds",
+    icon: "calendar",
+    Component: CalendarSettings,
   },
   {
     id: "tools",

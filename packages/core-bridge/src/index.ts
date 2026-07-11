@@ -27,11 +27,17 @@ export type {
   ObjectField,
   ObjectFieldType,
   AppliesTo,
+  CalendarFeed,
+  CalendarEvent,
+  CalendarItem,
+  CalendarItemKind,
 } from "./types";
 export { notesApi } from "./notes";
 export type { NotesApi, CreateNoteInput, UpdateNoteInput, NoteConflict, NoteConflictAction } from "./notes";
 export { tasksApi } from "./tasks";
 export type { TasksApi, CreateTaskInput, UpdateTaskInput } from "./tasks";
+export { calendarApi } from "./calendar";
+export type { CalendarApi, CreateFeedInput, UpdateFeedInput } from "./calendar";
 export { documentsApi } from "./documents";
 export type { DocumentsApi, CreateDocumentInput, EnsureLocalResult, LocalPathResult, DataUrlResult } from "./documents";
 export { notifyApi } from "./notify";

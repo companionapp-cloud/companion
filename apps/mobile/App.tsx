@@ -3,7 +3,7 @@ import { ActivityIndicator, AppState, StyleSheet, Text, View } from 'react-nativ
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import EventSource from 'react-native-sse';
-import { CoreProvider, NotesProvider, TasksProvider, RemindersProvider, NotificationsProvider, ProjectsProvider, ObjectTypesProvider, SyncProvider, ToolVisibilityProvider, type NotificationScheduler } from '@companion/app';
+import { CoreProvider, NotesProvider, TasksProvider, RemindersProvider, NotificationsProvider, ProjectsProvider, ObjectTypesProvider, CalendarProvider, SyncProvider, ToolVisibilityProvider, type NotificationScheduler } from '@companion/app';
 import { createNativeSyncNotifier, type CoreBridge, type SyncNotifier } from '@companion/core-bridge';
 import { MobileShell } from './src/MobileShell';
 import { openCore } from './src/core';
@@ -11,6 +11,11 @@ import { createMobileNotificationScheduler, REMINDER_HORIZON_DAYS } from './src/
 import { registerReminderRefresh } from './src/backgroundReminders';
 import { nativeSyncStorage } from './src/syncStorage';
 import { nativeToolsStorage } from './src/toolsStorage';
+import { registerIcsFilePicker } from './src/icsFilePicker';
+
+// Register the native .ics file picker so the shared CalendarSettings can upload calendars
+// on mobile (web uses its own DOM picker). Module-scope: runs once at import.
+registerIcsFilePicker();
 
 // Opens the on-device SQLite database via the shared core singleton, wraps it in the
 // shared CoreBridge, then mounts the shared data layer (Core/Sync/Notes providers)
@@ -74,9 +79,11 @@ function Root() {
               <NotificationsProvider>
                 <ProjectsProvider>
                   <ObjectTypesProvider>
-                    <ToolVisibilityProvider storage={nativeToolsStorage}>
-                      <MobileShell />
-                    </ToolVisibilityProvider>
+                    <CalendarProvider>
+                      <ToolVisibilityProvider storage={nativeToolsStorage}>
+                        <MobileShell />
+                      </ToolVisibilityProvider>
+                    </CalendarProvider>
                   </ObjectTypesProvider>
                 </ProjectsProvider>
               </NotificationsProvider>

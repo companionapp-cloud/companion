@@ -208,6 +208,44 @@ CREATE TABLE IF NOT EXISTS notification_reads (
 );
 CREATE INDEX IF NOT EXISTS idx_notification_reads_user_seq ON notification_reads (user_id, server_seq);
 
+CREATE TABLE IF NOT EXISTS calendar_feeds (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  url        TEXT NOT NULL DEFAULT '',
+  ics_text   TEXT,                          -- raw uploaded .ics (parsed in place); NULL for URL feeds
+  color      TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  version    BIGINT NOT NULL DEFAULT 1,
+  server_seq BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_calendar_feeds_user_seq ON calendar_feeds (user_id, server_seq);
+
+-- Server-owned clones of expanded ICS occurrences (PLAN §6.7). Written only by the
+-- server's fetcher; clients pull them read-only. The event id is deterministic
+-- (UUIDv5 of feed|uid|occurrence-start) so re-fetches upsert in place.
+CREATE TABLE IF NOT EXISTS calendar_events (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  feed_id     TEXT NOT NULL,
+  ics_uid     TEXT NOT NULL,
+  title       TEXT NOT NULL DEFAULT '',
+  starts_at   TEXT NOT NULL,
+  ends_at     TEXT,
+  all_day     BIGINT NOT NULL DEFAULT 0,
+  location    TEXT,
+  description TEXT,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  deleted_at  TEXT,
+  version     BIGINT NOT NULL DEFAULT 1,
+  server_seq  BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_calendar_events_user_seq ON calendar_events (user_id, server_seq);
+CREATE INDEX IF NOT EXISTS idx_calendar_events_feed ON calendar_events (feed_id);
+
 CREATE TABLE IF NOT EXISTS user_secrets (
   user_id    TEXT NOT NULL,
   key        TEXT NOT NULL,
@@ -259,6 +297,8 @@ func migrate(db *sql.DB, dialect string) error {
 		`ALTER TABLE tasks ADD COLUMN props_json TEXT NOT NULL DEFAULT '{}'`,
 		// Per-chat model selection (PLAN §6.8): the model moved out of llm_configs onto the chat.
 		`ALTER TABLE chats ADD COLUMN model TEXT`,
+		// Uploaded .ics feeds (PLAN §6.7), retrofitted onto pre-upload dev DBs.
+		`ALTER TABLE calendar_feeds ADD COLUMN ics_text TEXT`,
 	}
 	for _, alter := range alters {
 		if dialect == "postgres" {

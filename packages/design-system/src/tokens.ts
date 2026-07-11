@@ -63,6 +63,8 @@ export const colors = {
   danger: "#d64545",
   dangerSoft: "#fbecec",
   info: "#3b74d6",
+  infoSoft: "#eaf1fb",
+  infoActive: "#2b579e",
 } as const;
 
 /** 4px base grid. */

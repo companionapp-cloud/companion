@@ -4,12 +4,29 @@ import { useCore } from "./CoreContext";
 import { useSync } from "./SyncProvider";
 import type { MembershipFilter } from "./NotesProvider";
 
+/** The task browse-list filter: the two membership scopes (PLAN §6.6) plus two due-date
+ *  views — "upcoming" (due now or later) and "overdue" (due in the past). */
+export type TaskFilter = MembershipFilter | "upcoming" | "overdue";
+
+/** Narrow a task list to its upcoming or overdue members. A task counts only when it's not
+ *  done and carries a valid due date: "overdue" = due before now, "upcoming" = due now or
+ *  later. Shared by the global list and per-project task views so the semantics never drift. */
+export function filterTasksByDue(tasks: Task[], mode: "upcoming" | "overdue"): Task[] {
+  const now = Date.now();
+  return tasks.filter((t) => {
+    if (t.status === "done" || !t.dueAt) return false;
+    const due = new Date(t.dueAt).getTime();
+    if (Number.isNaN(due)) return false;
+    return mode === "overdue" ? due < now : due >= now;
+  });
+}
+
 export interface TasksStore {
   tasks: Task[];
   /** The list the global browse view shows: `tasks` narrowed by `filter` (PLAN §6.6). */
   visible: Task[];
-  filter: MembershipFilter;
-  setFilter: (f: MembershipFilter) => void;
+  filter: TaskFilter;
+  setFilter: (f: TaskFilter) => void;
   /** Repeating-task definitions (seeds), each with its next occurrence. Seeds are excluded
    *  from `tasks` — they're not actionable; their materialized occurrences are (PLAN §6.4). */
   seeds: RepeatingTask[];
@@ -38,7 +55,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
   const [seeds, setSeeds] = useState<RepeatingTask[]>([]);
   // Ids of tasks that belong to ≥1 project, so `filter: "unsorted"` can subtract them.
   const [memberIds, setMemberIds] = useState<Set<string>>(new Set());
-  const [filter, setFilter] = useState<MembershipFilter>("unsorted");
+  const [filter, setFilter] = useState<TaskFilter>("unsorted");
   const [loading, setLoading] = useState(true);
   const mutating = useRef(0); // suppress refresh clobber while an optimistic write is in flight
 
@@ -125,10 +142,17 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     [api, syncTrigger],
   );
 
-  const visible = useMemo(
-    () => (filter === "all" ? tasks : tasks.filter((t) => !memberIds.has(t.id))),
-    [tasks, memberIds, filter],
-  );
+  const visible = useMemo(() => {
+    switch (filter) {
+      case "all":
+        return tasks;
+      case "unsorted":
+        return tasks.filter((t) => !memberIds.has(t.id));
+      case "upcoming":
+      case "overdue":
+        return filterTasksByDue(tasks, filter);
+    }
+  }, [tasks, memberIds, filter]);
 
   const value = useMemo<TasksStore>(
     () => ({

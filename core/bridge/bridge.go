@@ -258,6 +258,18 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.chatsSend(payload)
 	case "chats.working":
 		return c.chatsWorking()
+	case "calendar.feeds.list":
+		return c.calendarFeedsList()
+	case "calendar.feeds.create":
+		return c.calendarFeedsCreate(payload)
+	case "calendar.feeds.update":
+		return c.calendarFeedsUpdate(payload)
+	case "calendar.feeds.delete":
+		return c.calendarFeedsDelete(payload)
+	case "calendar.range":
+		return c.calendarRange(payload)
+	case "calendar.refresh":
+		return c.calendarRefresh()
 	default:
 		return nil, fmt.Errorf("unknown method %q", method)
 	}

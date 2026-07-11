@@ -13,7 +13,9 @@ import {
   space,
   type PressState,
 } from "@companion/design-system";
+import type { CalendarItem } from "@companion/core-bridge";
 import { Editor, type EditorController, type FormatState, type LinkRef } from "@companion/editor";
+import { Agenda } from "./CalendarAgenda";
 import { FormattingBar } from "./FormattingBar";
 import { tableMenuPresenter } from "./tableMenu";
 import { useNav } from "./nav-context";
@@ -69,7 +71,14 @@ export function TodayScreen() {
       minWidth={260}
       maxWidth={420}
       aside={
-        <CalendarPane selected={selected} today={today} onSelect={setSelected} />
+        <CalendarPane
+          selected={selected}
+          today={today}
+          onSelect={setSelected}
+          onOpenItem={(item) => {
+            if (item.kind === "task" || item.kind === "note") nav.openInNewTab({ kind: item.kind, id: item.sourceId });
+          }}
+        />
       }
     >
       <View style={styles.content}>
@@ -102,15 +111,30 @@ export function TodayScreen() {
  *  a live placeholder: it creates the note (stamped with `date`) on the first keystroke and
  *  routes edits to it thereafter — nothing is written until the user types. `onOpenRef` is
  *  wired by the host shell (a new workspace tab on desktop, a pushed screen on mobile). */
-export function DailyNote({
+export function DailyNote(props: {
+  date: string;
+  onOpenRef?: (ref: LinkRef) => void;
+  /** Horizontal inset for the date heading, to align it with the editor body. Desktop nests
+   *  this in a padded page already (0); mobile passes the editor's 20px body inset. */
+  headingPadding?: number;
+}) {
+  const notes = useNotes();
+  // `DailyNoteBody` resolves the day's existing note once, at mount, and deliberately never
+  // re-derives (the editor owns its content once seeded). So it must not mount until the note
+  // list has loaded — otherwise it seeds from an empty list, shows a blank editor for a day
+  // that already has a note, and the first keystroke creates a *duplicate* note instead of
+  // editing the existing one. Wait for the list; the body then mounts fresh with the real seed.
+  if (notes.loading) return <View style={styles.page} />;
+  return <DailyNoteBody {...props} />;
+}
+
+function DailyNoteBody({
   date,
   onOpenRef,
   headingPadding = 0,
 }: {
   date: string;
   onOpenRef?: (ref: LinkRef) => void;
-  /** Horizontal inset for the date heading, to align it with the editor body. Desktop nests
-   *  this in a padded page already (0); mobile passes the editor's 20px body inset. */
   headingPadding?: number;
 }) {
   const notes = useNotes();
@@ -235,26 +259,38 @@ export function DailyNote({
   );
 }
 
-/** Desktop aside wrapper: the mini calendar in a scrollable, bordered side panel. */
-function CalendarPane(props: { selected: string; today: string; onSelect: (date: string) => void }) {
+/** Desktop aside wrapper: the mini calendar plus the selected day's agenda in a scrollable,
+ *  bordered side panel. */
+function CalendarPane(props: {
+  selected: string;
+  today: string;
+  onSelect: (date: string) => void;
+  onOpenItem?: (item: CalendarItem) => void;
+}) {
   return (
     <ScrollView style={styles.aside} contentContainerStyle={{ padding: space.xl }}>
-      <TodayCalendar {...props} />
+      <TodayCalendar selected={props.selected} today={props.today} onSelect={props.onSelect} />
+      <View style={styles.agendaBlock}>
+        <Agenda date={props.selected} onOpenItem={props.onOpenItem} />
+      </View>
     </ScrollView>
   );
 }
 
 /** A mini month calendar. Days with a note show a dot; today is outlined; the selected day
- *  is filled. Past days and today are clickable (selecting a day never creates a note);
- *  future days are disabled. Layout-neutral so either shell can place it. */
+ *  is filled. Past days and today are always clickable; future days are disabled in the
+ *  daily-note picker (you don't write tomorrow's note) but selectable when `allowFuture` is
+ *  set — the Calendar tool browses upcoming events. Layout-neutral so either shell can place it. */
 export function TodayCalendar({
   selected,
   today,
   onSelect,
+  allowFuture = false,
 }: {
   selected: string;
   today: string;
   onSelect: (date: string) => void;
+  allowFuture?: boolean;
 }) {
   const notes = useNotes();
   const daysWithNotes = useMemo(() => {
@@ -327,7 +363,7 @@ export function TodayCalendar({
               label={formatFullDate(date)}
               selected={isSel}
               today={isToday}
-              future={isFuture}
+              disabled={isFuture && !allowFuture}
               hasNote={hasNote}
               onPress={() => onSelect(date)}
             />
@@ -343,7 +379,7 @@ function DayCell({
   label,
   selected,
   today,
-  future,
+  disabled,
   hasNote,
   onPress,
 }: {
@@ -351,15 +387,17 @@ function DayCell({
   label: string;
   selected: boolean;
   today: boolean;
-  future: boolean;
+  disabled: boolean;
   hasNote: boolean;
   onPress: () => void;
 }) {
-  const fg = selected ? colors.onAccent : future ? colors.textTertiary : colors.textPrimary;
+  // Future days read muted only when they're also disabled (the daily-note picker); when the
+  // Calendar tool lets you browse ahead, upcoming days render as normal selectable days.
+  const fg = selected ? colors.onAccent : disabled ? colors.textTertiary : colors.textPrimary;
   return (
     <View style={styles.cell}>
       <Pressable
-        disabled={future}
+        disabled={disabled}
         onPress={onPress}
         aria-label={label}
         // react-native-web supplies `hovered`; it's always false on native (no hover), which
@@ -367,7 +405,7 @@ function DayCell({
         style={({ hovered }: PressState) => [
           styles.day,
           {
-            backgroundColor: selected ? colors.accent : hovered && !future ? colors.surfaceHover : "transparent",
+            backgroundColor: selected ? colors.accent : hovered && !disabled ? colors.surfaceHover : "transparent",
           },
           !selected && today ? styles.dayToday : null,
         ]}
@@ -406,6 +444,7 @@ const styles = {
   meta: { marginTop: space.sm, marginBottom: space.xxl },
 
   aside: { flex: 1, backgroundColor: colors.surfaceCard, borderLeftWidth: 1, borderLeftColor: colors.borderSubtle },
+  agendaBlock: { marginTop: space.xxl, paddingTop: space.xl, borderTopWidth: 1, borderTopColor: colors.borderSubtle },
   calHeader: { flexDirection: "row" as const, alignItems: "center" as const, marginBottom: space.lg },
   grid: { flexDirection: "row" as const, flexWrap: "wrap" as const },
   cell: { width: `${100 / 7}%` as const, aspectRatio: 1, padding: 2 },

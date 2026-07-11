@@ -42,6 +42,8 @@ import { AppToolbar } from "./AppToolbar";
 import { WorkspaceScreen } from "./WorkspaceScreen";
 import { TodayScreen } from "./TodayScreen";
 import { GraphScreen } from "./GraphScreen";
+import { CalendarScreen } from "./CalendarScreen";
+import { CalendarProvider } from "./CalendarProvider";
 import { TrashScreen } from "./TrashScreen";
 import { ChatsScreen } from "./ChatScreen";
 import { DndProvider, useDnd } from "./DndContext";
@@ -431,11 +433,12 @@ export function AppShell({ topInset = 0, notificationScheduler, toolsStorage }: 
         <NotificationsProvider>
         <ProjectsProvider>
          <ObjectTypesProvider>
+          <CalendarProvider>
           <NavigationContainer linking={linking} documentTitle={{ enabled: false }}>
             <Nav.Navigator initialRouteName="notes" topInset={topInset}>
               <Nav.Screen name="today" component={TodayScreen} />
               <Nav.Screen name="chat" component={ChatsScreen} />
-              <Nav.Screen name="calendar" component={ViewScreen} />
+              <Nav.Screen name="calendar" component={CalendarScreen} />
               <Nav.Screen name="notes" component={NotesRouteScreen} />
               <Nav.Screen name="tasks" component={TasksRouteScreen} />
               <Nav.Screen name="habits" component={ViewScreen} />
@@ -446,6 +449,7 @@ export function AppShell({ topInset = 0, notificationScheduler, toolsStorage }: 
               <Nav.Screen name="project" component={ProjectView} />
             </Nav.Navigator>
           </NavigationContainer>
+          </CalendarProvider>
          </ObjectTypesProvider>
         </ProjectsProvider>
         </NotificationsProvider>

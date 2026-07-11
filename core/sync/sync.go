@@ -198,6 +198,11 @@ func New(st *store.Store, t Transport, clock domain.Clock) *Engine {
 	e.register(newRepoSyncer[*domain.ChatMessage](st.ChatMessages, clock))
 	// Notification read receipts (§6.4): deterministic ids make cross-device reads converge.
 	e.register(newRepoSyncer[*domain.NotificationRead](st.NotificationReads, clock))
+	// Calendar (§6.7): feeds are user-authored (bidirectional); events are server-owned
+	// clones — a pull-only repo whose Dirty() is empty, so the push pass skips it and only
+	// applies server rows on pull.
+	e.register(newRepoSyncer[*domain.CalendarFeed](st.CalendarFeeds, clock))
+	e.register(newRepoSyncer[*domain.CalendarEvent](st.CalendarEvents, clock))
 	return e
 }
 

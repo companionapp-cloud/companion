@@ -207,6 +207,62 @@ export interface Area {
   dirty: boolean;
 }
 
+/** A user-authored ICS subscription (PLAN §6.7). Syncs bidirectionally; the server, not the
+ *  client, fetches its URL and produces the CalendarEvent clones. */
+export interface CalendarFeed {
+  id: string;
+  name: string;
+  /** Subscription URL the server re-fetches; empty for an uploaded feed. */
+  url: string;
+  /** Raw contents of an uploaded .ics file, parsed server-side; null for URL feeds. */
+  icsText?: string | null;
+  color?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+  version: number;
+  dirty: boolean;
+}
+
+/** A server-cloned event occurrence (PLAN §6.7). Read-only on clients — delivered via the
+ *  normal sync pull and never authored locally. */
+export interface CalendarEvent {
+  id: string;
+  feedId: string;
+  icsUid: string;
+  title: string;
+  startsAt: string;
+  endsAt?: string | null;
+  allDay: boolean;
+  location?: string | null;
+  description?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+  version: number;
+}
+
+/** Origin of a merged calendar entry. Habit occurrences will join this when habits land. */
+export type CalendarItemKind = "event" | "task" | "note";
+
+/** One entry in the merged, read-only calendar view produced by `calendar.range` — feed
+ *  events, due tasks, and dated notes on one timeline (PLAN §6.7). */
+export interface CalendarItem {
+  id: string;
+  kind: CalendarItemKind;
+  title: string;
+  startsAt: string;
+  endsAt?: string | null;
+  allDay: boolean;
+  /** Id of the backing row (event/task/note) so the UI can open it. */
+  sourceId: string;
+  /** Event location/description (shown on hover / in the mobile detail view); null otherwise. */
+  location?: string | null;
+  description?: string | null;
+  /** Feed color for events; null for tasks and notes. */
+  color?: string | null;
+}
+
 /** A project — belongs to exactly one area (mirrors core/domain.Project). */
 export interface Project {
   id: string;

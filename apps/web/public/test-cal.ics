@@ -1,0 +1,19 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Companion//Verify//EN
+BEGIN:VEVENT
+UID:standup-verify
+SUMMARY:Team standup
+LOCATION:Room 2 / Zoom
+DESCRIPTION:Daily sync. Review the board and unblock each other.
+DTSTART:20260708T090000Z
+DTEND:20260708T093000Z
+END:VEVENT
+BEGIN:VEVENT
+UID:review-verify
+SUMMARY:Design review
+LOCATION:Studio
+DESCRIPTION:Walk through the calendar redesign and the hover states.
+DTSTART:20260710T140000Z
+DTEND:20260710T150000Z
+END:VEVENT

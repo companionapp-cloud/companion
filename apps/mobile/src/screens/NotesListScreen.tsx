@@ -4,7 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { Note } from '@companion/core-bridge';
 import { useCore, useNotes, useProjects, ListFilterTabs } from '@companion/app';
-import { Icon, Spinner, Text, colors, space } from '@companion/design-system';
+import { Icon, Input, Spinner, Text, colors, space } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
 import { useProjectScope } from '../ProjectContext';
 import { CardRow } from '../ui/native';
@@ -41,11 +41,18 @@ export function NotesListScreen() {
     };
   }, [projectId, membershipsForProject, core]);
 
+  const [query, setQuery] = useState('');
+
   const notes = useMemo(() => {
-    if (!projectId) return store.visible; // global list honours the Unsorted/All filter
-    if (!memberIds) return [];
-    return store.notes.filter((n) => memberIds.has(n.id));
-  }, [store.visible, store.notes, projectId, memberIds]);
+    const base = !projectId
+      ? store.visible // global list honours the Unsorted/All filter
+      : !memberIds
+        ? []
+        : store.notes.filter((n) => memberIds.has(n.id));
+    const q = query.trim().toLowerCase();
+    if (!q) return base;
+    return base.filter((n) => n.title.toLowerCase().includes(q) || n.contentMd.toLowerCase().includes(q));
+  }, [store.visible, store.notes, projectId, memberIds, query]);
 
   const openNote = (id: string) => nav.navigate('NoteEditor', { id });
   const createNote = async () => {
@@ -72,13 +79,26 @@ export function NotesListScreen() {
           />
         </View>
       ) : null}
+      <View style={styles.search}>
+        <Input
+          size="sm"
+          placeholder="Search notes"
+          value={query}
+          onChangeText={setQuery}
+          leadingIcon={<Icon name="search" size={15} color={colors.textTertiary} />}
+        />
+      </View>
       <FlatList
         data={notes}
         keyExtractor={(n) => n.id}
         contentContainerStyle={styles.list}
         ListEmptyComponent={
           <Text tone="tertiary" style={styles.empty}>
-            {projectId ? 'No notes in this project yet. Tap + to add one.' : 'Nothing here yet. Tap + to start a note.'}
+            {query
+              ? 'No notes match that.'
+              : projectId
+                ? 'No notes in this project yet. Tap + to add one.'
+                : 'Nothing here yet. Tap + to start a note.'}
           </Text>
         }
         renderItem={({ item }) => (
@@ -126,6 +146,7 @@ function relTime(iso: string): string {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceApp },
   filterBar: { paddingHorizontal: space.md, paddingTop: space.sm },
+  search: { paddingHorizontal: space.md, paddingTop: space.sm },
   list: { paddingHorizontal: space.md, paddingVertical: space.sm, gap: 2, flexGrow: 1 },
   time: { fontSize: 11 },
   empty: { textAlign: 'center', marginTop: space.xxl },

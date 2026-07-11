@@ -2,7 +2,7 @@ import { useLayoutEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { DailyNote, TodayCalendar, todayISO, formatFullDate } from '@companion/app';
+import { DailyNote, TodayCalendar, Agenda, todayISO } from '@companion/app';
 import type { LinkRef } from '@companion/editor';
 import { Icon, IconButton, Text, colors, font, radius, space } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
@@ -72,6 +72,16 @@ export function TodayScreen() {
               setShowCalendar(false);
             }}
           />
+          <View style={styles.agenda}>
+            <Agenda
+              date={selected}
+              onOpenItem={(item) => {
+                if (item.kind === 'task') nav.push('TaskEditor', { id: item.sourceId });
+                else if (item.kind === 'note') nav.push('NoteEditor', { id: item.sourceId });
+                else nav.push('CalendarEvent', { item });
+              }}
+            />
+          </View>
         </View>
       ) : null}
       <View style={styles.note}>
@@ -91,6 +101,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.borderSubtle,
     backgroundColor: colors.surfaceCard,
   },
+  agenda: { marginTop: space.lg, paddingTop: space.lg, borderTopWidth: 1, borderTopColor: colors.borderSubtle },
   // Top padding so the date heading breathes under the nav header; the editor body brings
   // its own horizontal inset, so only the vertical gap is added here.
   note: { flex: 1, paddingTop: space.xl },

@@ -27,6 +27,10 @@ type Store struct {
 	// NotificationReads marks in-app notifications read; the feed itself is derived
 	// from tasks (PLAN §6.4).
 	NotificationReads *NotificationReadsRepo
+	// CalendarFeeds are user-authored ICS subscriptions; CalendarEvents are the server's
+	// read-only clones of their expanded occurrences (PLAN §6.7).
+	CalendarFeeds  *CalendarFeedsRepo
+	CalendarEvents *CalendarEventsRepo
 }
 
 // New builds a Store over an already-open Driver, applying pending migrations. A nil
@@ -73,6 +77,10 @@ func New(d Driver, clock domain.Clock) (*Store, error) {
 	s.ChatMessages = &ChatMessagesRepo{db: d, clock: clock}
 	// Read receipts for the in-app notification feed (PLAN §6.4).
 	s.NotificationReads = &NotificationReadsRepo{db: d, clock: clock}
+	// Calendar feeds (user-authored, synced) + the server's read-only event clones. The
+	// events repo also serves the merged Range view every calendar UI reads (PLAN §6.7).
+	s.CalendarFeeds = &CalendarFeedsRepo{db: d, clock: clock}
+	s.CalendarEvents = &CalendarEventsRepo{db: d, clock: clock}
 	return s, nil
 }
 

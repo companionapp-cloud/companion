@@ -64,6 +64,8 @@ func (s *Server) handlers() map[string]*entityHandler {
 			protocol.EntityChat:             chatHandler,
 			protocol.EntityChatMessage:      chatMessageHandler,
 			protocol.EntityNotificationRead: notificationReadHandler,
+			protocol.EntityCalendarFeed:     calendarFeedHandler,
+			protocol.EntityCalendarEvent:    calendarEventHandler,
 		}
 	}
 	return s.entities
@@ -116,6 +118,7 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 	results := make([]protocol.PushResult, 0, len(req.Changes))
 	var maxSeq int64
 	seedIDs := map[string]bool{} // repeating-task seeds touched by this push
+	feedIDs := map[string]bool{} // calendar feeds touched by this push
 	for _, ch := range req.Changes {
 		e := handlers[ch.EntityType]
 		if e == nil {
@@ -134,7 +137,16 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 		if res.Status == protocol.StatusAccepted && ch.EntityType == protocol.EntityTask && isSeedRow(ch.Row) {
 			seedIDs[ch.ID] = true
 		}
+		if res.Status == protocol.StatusAccepted && ch.EntityType == protocol.EntityCalendarFeed {
+			feedIDs[ch.ID] = true
+		}
 		results = append(results, res)
+	}
+	// A pushed feed (added, its URL edited, or deleted) is fetched/cleaned right away on a
+	// background goroutine, so its events reach devices promptly rather than waiting for the
+	// periodic sweep (PLAN §6.7). The publish inside the trigger pokes the other devices.
+	for id := range feedIDs {
+		go s.triggerFeedFetch(uid, id)
 	}
 	// A pushed seed — created, its rule edited, or trashed/deleted — materializes its
 	// occurrences immediately, so the change reaches other devices via the same SSE poke as

@@ -37,6 +37,9 @@ func main() {
 	// Per-minute repeat-task generator: creates each seed's occurrence just in time, only
 	// once its due instant has arrived (never ahead); seed writes also check on push (PLAN §6.4).
 	srv.StartRepeatMaterializer(context.Background())
+	// Periodic ICS fetcher: clones each feed's expanded events into calendar_events, which
+	// clients pull read-only (PLAN §6.7).
+	srv.StartCalendarFetcher(context.Background())
 
 	log.Printf("companion server listening on %s (store=%s)", addr, dialect)
 	if err := http.ListenAndServe(addr, srv.Handler()); err != nil {

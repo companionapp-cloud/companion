@@ -59,6 +59,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/sync/pull", s.authed(s.handlePull))
 	mux.Handle("POST /v1/sync/push", s.authed(s.handlePush))
 	mux.Handle("GET /v1/sync/events", s.authed(s.handleEvents))
+	// Manual calendar refresh: re-fetch this account's ICS feeds now (PLAN §6.7).
+	mux.Handle("POST /v1/calendar/refresh", s.authed(s.handleCalendarRefresh))
 	// Document bytes: content-addressed, streamed to/from object storage (PLAN §6.9).
 	mux.Handle("PUT /v1/blobs/{sha256}", s.authed(s.handleBlobPut))
 	mux.Handle("GET /v1/blobs/{sha256}", s.authed(s.handleBlobGet))

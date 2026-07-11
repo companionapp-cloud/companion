@@ -281,6 +281,8 @@ function TasksList() {
             options={[
               { value: "unsorted", label: "Unsorted tasks" },
               { value: "all", label: "All tasks" },
+              { value: "upcoming", label: "Upcoming tasks" },
+              { value: "overdue", label: "Overdue tasks" },
             ]}
           />
         </View>

@@ -43,6 +43,14 @@ func (t *HTTPTransport) Pull(cursor int64, limit int) (*protocol.PullResponse, e
 	return &out, nil
 }
 
+// RefreshCalendars asks the server to re-fetch this account's ICS feeds now (PLAN §6.7),
+// so a following Pull sees the freshly-cloned events. Server-owned; there is nothing to
+// send but the bearer token.
+func (t *HTTPTransport) RefreshCalendars() error {
+	var out map[string]int
+	return t.do(http.MethodPost, "/v1/calendar/refresh", struct{}{}, &out)
+}
+
 func (t *HTTPTransport) do(method, path string, body, out any) error {
 	var reader io.Reader
 	if body != nil {

@@ -30,6 +30,7 @@ export const ICON_PATHS = {
   dot: "M12 12h.01",
   graph: "M18 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM6 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm12 4a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM8.6 13.5l6.8 4M15.4 6.5l-6.8 4",
   repeat: "M17 2l4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v1a4 4 0 0 1-4 4H3",
+  refresh: "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M3 21v-5h5",
   // Text-formatting icons for the editor toolbar (Lucide-style outlines).
   bold: "M6 12h9a4 4 0 0 1 0 8H6zM6 4h7a4 4 0 0 1 0 8H6z",
   italic: "M19 4h-9M14 20H5M15 4 9 20",

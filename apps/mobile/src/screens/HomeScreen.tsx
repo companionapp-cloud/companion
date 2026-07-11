@@ -18,7 +18,7 @@ const SECTIONS: { route: SectionRoute; label: string; subtitle: string; icon: Ic
   { route: 'Notes', label: 'Notes', subtitle: 'Your graph of linked ideas', icon: 'notes' },
   { route: 'Tasks', label: 'Tasks', subtitle: 'What needs doing', icon: 'tasks' },
   { route: 'Habits', label: 'Habits', subtitle: 'Streaks and daily builders', icon: 'habits' },
-  { route: 'Calendar', label: 'Calendar', subtitle: 'Events and habit streaks', icon: 'calendar' },
+  { route: 'Calendar', label: 'Calendar', subtitle: 'Events, tasks, and notes', icon: 'calendar' },
   { route: 'Graph', label: 'Graph', subtitle: 'See how everything connects', icon: 'graph' },
   { route: 'Trash', label: 'Trash', subtitle: 'Recently deleted, kept 30 days', icon: 'trash' },
 ];

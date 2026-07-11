@@ -25,6 +25,11 @@ const (
 	EntityChatMessage   = "chat_message"
 	// A read receipt for one in-app notification fire (PLAN §6.4).
 	EntityNotificationRead = "notification_read"
+	// A user-authored ICS subscription (PLAN §6.7). Feeds sync bidirectionally.
+	EntityCalendarFeed = "calendar_feed"
+	// A server-cloned event occurrence (PLAN §6.7). Server-owned: clients only ever
+	// pull these; they are never pushed.
+	EntityCalendarEvent = "calendar_event"
 )
 
 // Push statuses.

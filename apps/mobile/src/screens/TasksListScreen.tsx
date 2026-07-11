@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { FlatList, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { Task } from '@companion/core-bridge';
-import { useCore, useTasks, useProjects, Checkbox, ListFilterTabs } from '@companion/app';
+import { useCore, useTasks, useProjects, Checkbox, ListFilterTabs, filterTasksByDue } from '@companion/app';
 import { Icon, Spinner, Text, colors, space } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
 import { useProjectScope } from '../ProjectContext';
@@ -39,11 +39,16 @@ export function TasksListScreen() {
     };
   }, [projectId, membershipsForProject, core]);
 
+  // Project-scoped lists don't use the global Unsorted/All filter; they carry their own
+  // due-date filter (all / upcoming / overdue) instead.
+  const [dueFilter, setDueFilter] = useState<'all' | 'upcoming' | 'overdue'>('all');
+
   const tasks = useMemo(() => {
-    if (!projectId) return store.visible; // global list honours the Unsorted/All filter
+    if (!projectId) return store.visible; // global list honours the Unsorted/All/Upcoming/Overdue filter
     if (!memberIds) return [];
-    return store.tasks.filter((t) => memberIds.has(t.id));
-  }, [store.visible, store.tasks, projectId, memberIds]);
+    const members = store.tasks.filter((t) => memberIds.has(t.id));
+    return dueFilter === 'all' ? members : filterTasksByDue(members, dueFilter);
+  }, [store.visible, store.tasks, projectId, memberIds, dueFilter]);
 
   const openTask = (id: string) => nav.navigate('TaskEditor', { id });
   const createTask = async () => {
@@ -58,25 +63,48 @@ export function TasksListScreen() {
 
   return (
     <View style={styles.container}>
-      {!projectId ? (
-        <View style={styles.filterBar}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.filterBar}
+        contentContainerStyle={styles.filterBarContent}
+      >
+        {!projectId ? (
           <ListFilterTabs
             value={store.filter}
             onChange={store.setFilter}
             options={[
               { value: 'unsorted', label: 'Unsorted' },
               { value: 'all', label: 'All' },
+              { value: 'upcoming', label: 'Upcoming' },
+              { value: 'overdue', label: 'Overdue' },
             ]}
           />
-        </View>
-      ) : null}
+        ) : (
+          <ListFilterTabs
+            value={dueFilter}
+            onChange={setDueFilter}
+            options={[
+              { value: 'all', label: 'All' },
+              { value: 'upcoming', label: 'Upcoming' },
+              { value: 'overdue', label: 'Overdue' },
+            ]}
+          />
+        )}
+      </ScrollView>
       <FlatList
         data={tasks}
         keyExtractor={(t) => t.id}
         contentContainerStyle={styles.list}
         ListEmptyComponent={
           <Text tone="tertiary" style={styles.empty}>
-            {projectId ? 'No tasks in this project yet. Tap + to add one.' : 'Nothing to do. Tap + to add a task.'}
+            {projectId
+              ? dueFilter === 'upcoming'
+                ? 'No upcoming tasks in this project.'
+                : dueFilter === 'overdue'
+                  ? 'No overdue tasks in this project.'
+                  : 'No tasks in this project yet. Tap + to add one.'
+              : 'Nothing to do. Tap + to add a task.'}
           </Text>
         }
         renderItem={({ item }) => (
@@ -113,7 +141,8 @@ function dueLabel(task: Task): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceApp },
-  filterBar: { paddingHorizontal: space.md, paddingTop: space.sm },
+  filterBar: { paddingTop: space.sm, flexGrow: 0 },
+  filterBarContent: { paddingHorizontal: space.md },
   list: { paddingHorizontal: space.md, paddingVertical: space.sm, gap: 2, flexGrow: 1 },
   empty: { textAlign: 'center', marginTop: space.xxl },
   fab: {

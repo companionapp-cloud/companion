@@ -230,11 +230,15 @@ const TYPE_ICON: Record<string, IconName> = {
 function typeColor(type: string): string {
   switch (type) {
     case "note":
-      return colors.accent;
+      return colors.success;
     case "task":
       return colors.info;
     case "habit":
       return colors.success;
+    case "project":
+      return colors.accent;
+    case "document":
+      return colors.gray300;
     default:
       return colors.textSecondary;
   }

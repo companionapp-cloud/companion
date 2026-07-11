@@ -6,6 +6,7 @@ import {
   Center,
   Icon,
   IconButton,
+  Input,
   ListRow,
   SplitView,
   Text,
@@ -21,7 +22,8 @@ import { useToolVisibility, type ToolId } from "./ToolVisibilityProvider";
 import { useCore } from "./CoreContext";
 import { useProjects } from "./ProjectsProvider";
 import { useNotes } from "./NotesProvider";
-import { useTasks } from "./TasksProvider";
+import { useTasks, filterTasksByDue } from "./TasksProvider";
+import { ListFilterMenu } from "./ListFilterMenu";
 import { NoteEditor } from "./NoteEditor";
 import { TaskEditor, TaskRow } from "./TaskEditor";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -114,14 +116,29 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
   const { hidden } = useToolVisibility();
   const loc = nav.current;
 
+  // Per-section list controls: a search box narrows the notes list, a due-date filter
+  // narrows the tasks list (all / upcoming / overdue). Local to this column.
+  const [noteQuery, setNoteQuery] = useState("");
+  const [taskFilter, setTaskFilter] = useState<"all" | "upcoming" | "overdue">("all");
+  const filteredNotes = useMemo(() => {
+    const q = noteQuery.trim().toLowerCase();
+    if (!q) return notes;
+    return notes.filter((n) => n.title.toLowerCase().includes(q) || n.contentMd.toLowerCase().includes(q));
+  }, [notes, noteQuery]);
+  const filteredTasks = useMemo(
+    () => (taskFilter === "all" ? tasks : filterTasksByDue(tasks, taskFilter)),
+    [tasks, taskFilter],
+  );
+
   // Register the on-screen section list for multiselect (notes / actionable tasks; seeds
   // stay single-select). Scoped per project+section so switching lists drops the selection.
+  // Registers the filtered order so range-select matches what's shown.
   const secProjectId = loc.kind === "project" ? loc.projectId : "";
   const secSection = loc.kind === "project" ? loc.section : undefined;
   useEffect(() => {
-    if (secSection === "notes") ms.register(`project:${secProjectId}:notes`, "note", notes.map((n) => n.id));
-    else if (secSection === "tasks") ms.register(`project:${secProjectId}:tasks`, "task", tasks.map((t) => t.id));
-  }, [ms.register, secProjectId, secSection, notes, tasks]);
+    if (secSection === "notes") ms.register(`project:${secProjectId}:notes`, "note", filteredNotes.map((n) => n.id));
+    else if (secSection === "tasks") ms.register(`project:${secProjectId}:tasks`, "task", filteredTasks.map((t) => t.id));
+  }, [ms.register, secProjectId, secSection, filteredNotes, filteredTasks]);
 
   if (loc.kind !== "project") return null;
   const { projectId, section, itemId } = loc;
@@ -158,10 +175,33 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
             </IconButton>
           ) : null}
         </View>
+        {section === "notes" ? (
+          <View style={styles.search}>
+            <Input
+              size="sm"
+              placeholder="Search notes"
+              value={noteQuery}
+              onChangeText={setNoteQuery}
+              leadingIcon={<Icon name="search" size={15} color={colors.textTertiary} />}
+            />
+          </View>
+        ) : section === "tasks" ? (
+          <View style={styles.filterBar}>
+            <ListFilterMenu
+              value={taskFilter}
+              onChange={setTaskFilter}
+              options={[
+                { value: "all", label: "All tasks" },
+                { value: "upcoming", label: "Upcoming tasks" },
+                { value: "overdue", label: "Overdue tasks" },
+              ]}
+            />
+          </View>
+        ) : null}
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.md, gap: 2 }}>
           {section === "notes" ? (
-            notes.length ? (
-              notes.map((n) => {
+            filteredNotes.length ? (
+              filteredNotes.map((n) => {
                 const selected = ms.active ? ms.isSelected(n.id) : n.id === itemId;
                 return (
                   <ListRow
@@ -178,13 +218,15 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
               })
             ) : (
               <Text tone="tertiary" variant="caption" style={styles.empty}>
-                No notes yet. Add one with ＋, or add existing notes from a note’s “Projects” menu.
+                {noteQuery
+                  ? "No notes match that."
+                  : "No notes yet. Add one with ＋, or add existing notes from a note’s “Projects” menu."}
               </Text>
             )
           ) : section === "tasks" ? (
-            tasks.length || seeds.length ? (
+            filteredTasks.length || (taskFilter === "all" && seeds.length) ? (
               <>
-                {tasks.map((t) => (
+                {filteredTasks.map((t) => (
                   <TaskRow
                     key={t.id}
                     task={t}
@@ -195,7 +237,8 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
                     onToggle={() => void tasksStore.setStatus(t.id, t.status === "done" ? "open" : "done")}
                   />
                 ))}
-                {seeds.length ? (
+                {/* Repeating definitions have no concrete due date, so hide them under a due filter. */}
+                {taskFilter === "all" && seeds.length ? (
                   <>
                     <Text variant="caption" tone="tertiary" style={styles.sectionLabel}>
                       REPEATING · {seeds.length}
@@ -215,7 +258,11 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
               </>
             ) : (
               <Text tone="tertiary" variant="caption" style={styles.empty}>
-                No tasks yet. Add one with ＋, or add existing tasks from a task’s “Projects” menu.
+                {taskFilter === "upcoming"
+                  ? "No upcoming tasks in this project."
+                  : taskFilter === "overdue"
+                    ? "No overdue tasks in this project."
+                    : "No tasks yet. Add one with ＋, or add existing tasks from a task’s “Projects” menu."}
               </Text>
             )
           ) : (
@@ -440,11 +487,18 @@ const styles = {
     flexDirection: "row" as const,
     alignItems: "center" as const,
     gap: space.xs,
+    // Match the height of the section headers (which carry 28px IconButtons) so the
+    // "Sections" menu, which is text-only, doesn't render a shorter bar. The +1 covers
+    // the bottom border, which border-box folds into minHeight but not the taller rows.
+    minHeight: 28 + space.md * 2 + 1,
     paddingHorizontal: space.md,
     paddingVertical: space.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
   },
+  search: { paddingHorizontal: space.md, paddingBottom: space.md, zIndex: 1 },
+  // Sit above the list so the filter dropdown paints over the rows below it.
+  filterBar: { paddingHorizontal: space.lg, paddingBottom: space.md, zIndex: 2 },
   empty: { padding: space.xl, lineHeight: 20, textAlign: "center" as const },
   sectionLabel: { fontWeight: "600" as const, letterSpacing: 0.5, paddingHorizontal: space.md, paddingTop: space.lg, paddingBottom: space.xs },
   home: { maxWidth: layout.contentMax, width: "100%" as const, marginHorizontal: "auto" as const, padding: space.xxl, gap: space.lg },

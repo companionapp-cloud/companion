@@ -7,6 +7,8 @@ import { taskIdFromResponse } from './notifications';
 import { TrashScreen } from '@companion/app';
 import { HomeScreen } from './screens/HomeScreen';
 import { TodayScreen } from './screens/TodayScreen';
+import { CalendarScreen } from './screens/CalendarScreen';
+import { CalendarEventScreen } from './screens/CalendarEventScreen';
 import { NotesListScreen } from './screens/NotesListScreen';
 import { NoteEditorScreen } from './screens/NoteEditorScreen';
 import { TasksListScreen } from './screens/TasksListScreen';
@@ -21,6 +23,7 @@ import { PlaceholderScreen } from './screens/PlaceholderScreen';
 import { ProjectScreen } from './screens/ProjectScreen';
 import { SettingsScreen, SettingsSectionScreen } from './screens/SettingsScreen';
 import type { SettingsSectionId } from '@companion/app';
+import type { CalendarItem } from '@companion/core-bridge';
 
 // Mobile navigation. The root is a list (HomeScreen): the global sections
 // (Chat/Notes/Tasks/Calendar) plus the areas → projects tree. Global sections open as
@@ -39,6 +42,7 @@ export type RootStackParamList = {
   Tasks: undefined;
   Habits: undefined;
   Calendar: undefined;
+  CalendarEvent: { item: CalendarItem };
   Graph: undefined;
   Trash: undefined;
   Notifications: undefined;
@@ -112,7 +116,8 @@ export function MobileShell() {
         <RootStack.Screen name="Notes" component={NotesListScreen} options={{ title: 'All notes' }} />
         <RootStack.Screen name="Tasks" component={TasksListScreen} options={{ title: 'All tasks' }} />
         <RootStack.Screen name="Habits" component={PlaceholderScreen} options={{ title: 'Habits' }} />
-        <RootStack.Screen name="Calendar" component={PlaceholderScreen} options={{ title: 'Calendar' }} />
+        <RootStack.Screen name="Calendar" component={CalendarScreen} options={{ title: 'Calendar' }} />
+        <RootStack.Screen name="CalendarEvent" component={CalendarEventScreen} options={{ title: 'Event' }} />
         <RootStack.Screen name="Graph" component={GraphScreen} options={{ title: 'Graph' }} />
         <RootStack.Screen name="Trash" component={TrashScreen} options={{ title: 'Trash' }} />
         <RootStack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifications' }} />
