@@ -50,6 +50,7 @@ import { DndProvider, useDnd } from "./DndContext";
 import { MultiSelectProvider } from "./MultiSelectProvider";
 import { SettingsScreen } from "./SettingsScreen";
 import { useSync } from "./SyncProvider";
+import { SyncHealthBanner } from "./SyncHealthBanner";
 
 // Monotonic tab uid so React keys are stable across reorders/overwrites even when two
 // tabs hold the same document.
@@ -555,6 +556,8 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
       </View>
 
       <View style={{ flex: 1, minWidth: 0 }}>
+        {/* Sync health: prompts re-auth / unlock in Settings when sync is blocked (§7). */}
+        <SyncHealthBanner onOpenSettings={() => nav.goView("settings")} />
         <Frame toolbar={<AppToolbar />}>
           {/* The workspace (notes/tasks list + shared tab strip) is mounted once and only
               shown on those sections; keeping it alive across route changes is what makes

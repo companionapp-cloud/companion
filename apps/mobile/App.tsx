@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, AppState, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, Linking, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import EventSource from 'react-native-sse';
-import { CoreProvider, NotesProvider, TasksProvider, RemindersProvider, NotificationsProvider, ProjectsProvider, ObjectTypesProvider, CalendarProvider, SyncProvider, ToolVisibilityProvider, type NotificationScheduler } from '@companion/app';
+import { CoreProvider, NotesProvider, TasksProvider, RemindersProvider, NotificationsProvider, ProjectsProvider, ObjectTypesProvider, CalendarProvider, SyncProvider, ToolVisibilityProvider, RecoveryResetScreen, type NotificationScheduler } from '@companion/app';
 import { createNativeSyncNotifier, type CoreBridge, type SyncNotifier } from '@companion/core-bridge';
 import { MobileShell } from './src/MobileShell';
 import { openCore } from './src/core';
@@ -56,6 +56,12 @@ function Root() {
     void registerReminderRefresh();
   }, []);
 
+  // Forgot-password recovery deep link. Linking.useURL() yields the URL the app was opened with (or
+  // navigated to); a reset link carries resetToken + server. Dismissed once the flow finishes.
+  const url = Linking.useURL();
+  const [resetDismissed, setResetDismissed] = useState(false);
+  const reset = resetDismissed ? null : parseResetUrl(url);
+
   if (error) {
     return (
       <View style={styles.center}>
@@ -68,6 +74,16 @@ function Root() {
       <View style={styles.center}>
         <ActivityIndicator />
       </View>
+    );
+  }
+  // A forgot-password reset deep link (companion://…?resetToken=…&server=…) takes over: run the
+  // recovery flow with the local crypto core before the normal app. Needs `scheme` in app.json and
+  // an `expo prebuild` to receive the link (PLAN §E2EE).
+  if (reset) {
+    return (
+      <CoreProvider core={bridge}>
+        <RecoveryResetScreen baseUrl={reset.baseUrl} token={reset.token} onDone={() => setResetDismissed(true)} />
+      </CoreProvider>
     );
   }
   return (
@@ -93,6 +109,18 @@ function Root() {
       </SyncProvider>
     </CoreProvider>
   );
+}
+
+// parseResetUrl extracts a reset deep link's token + server API base from an opened URL, or null.
+// Handles both custom-scheme (companion://…) and universal (https://…) links by parsing the query.
+function parseResetUrl(url: string | null): { token: string; baseUrl: string } | null {
+  if (!url) return null;
+  const q = url.indexOf('?');
+  if (q < 0) return null;
+  const params = new URLSearchParams(url.slice(q + 1));
+  const token = params.get('resetToken');
+  const server = params.get('server');
+  return token && server ? { token, baseUrl: server } : null;
 }
 
 export default function App() {

@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { View } from "react-native";
 import { Button, Input, Text, space } from "@companion/design-system";
+import { auth } from "@companion/core-bridge";
 import { useSync, type AuthMode } from "./SyncProvider";
+import { RecoveryResetScreen } from "./RecoveryResetScreen";
+import { parseResetLink } from "./resetLink";
 
 /** The sync settings section: connect to a server + account, then see live sync status
  *  (PLAN §7). New accounts are end-to-end encrypted (PLAN §E2EE): registration surfaces a
@@ -19,6 +22,46 @@ export function SyncSettings() {
   const [unlockPassword, setUnlockPassword] = useState("");
   const [enabling, setEnabling] = useState(false);
   const [enablePassword, setEnablePassword] = useState("");
+  const [changing, setChanging] = useState(false);
+  const [currentPw, setCurrentPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [changed, setChanged] = useState(false);
+  const [forgot, setForgot] = useState(false);
+  const [linkInput, setLinkInput] = useState("");
+  const [forgotNote, setForgotNote] = useState("");
+  const [resetTarget, setResetTarget] = useState<{ baseUrl: string; token: string } | null>(null);
+
+  const sendReset = async () => {
+    setBusy(true);
+    setError(null);
+    setForgotNote("");
+    try {
+      await auth.forgotPassword(baseUrl.trim(), email.trim());
+      setForgotNote("If that email has an account, a reset link is on its way. Paste it below when it arrives.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const continueWithLink = () => {
+    setError(null);
+    const parsed = parseResetLink(linkInput);
+    if (!parsed) {
+      setError("That doesn't look like a valid reset link.");
+      return;
+    }
+    setResetTarget({ baseUrl: parsed.baseUrl ?? baseUrl.trim(), token: parsed.token });
+  };
+
+  const exitForgot = () => {
+    setResetTarget(null);
+    setForgot(false);
+    setLinkInput("");
+    setForgotNote("");
+    setError(null);
+  };
 
   const connect = async (mode: AuthMode) => {
     setBusy(true);
@@ -47,6 +90,21 @@ export function SyncSettings() {
     }
   };
 
+  // Re-authenticate a dead session in place, reusing the connected account's endpoint + email.
+  const reauth = async () => {
+    if (!sync.baseUrl || !sync.email) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await sync.connect(sync.baseUrl, sync.email, password, "login");
+      setPassword("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const enableEncryption = async () => {
     setBusy(true);
     setError(null);
@@ -61,6 +119,62 @@ export function SyncSettings() {
       setBusy(false);
     }
   };
+
+  const changePassword = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await sync.changePassword(currentPw, newPw);
+      setCurrentPw("");
+      setNewPw("");
+      setChanging(false);
+      setChanged(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Recovery in progress: the user pasted a reset link, so run the recovery flow inline.
+  if (resetTarget) {
+    return <RecoveryResetScreen baseUrl={resetTarget.baseUrl} token={resetTarget.token} onDone={exitForgot} />;
+  }
+
+  // Forgot-password entry point: request a reset email and/or paste a reset link to recover.
+  if (forgot) {
+    return (
+      <View style={{ gap: space.lg }}>
+        <SettingsField label="Forgot your password">
+          <Text tone="secondary">
+            Enter your email to get a reset link, then paste the link from that email below. For an
+            encrypted account you'll also need your recovery code.
+          </Text>
+        </SettingsField>
+        <SettingsField label="Email">
+          <Input value={email} onChangeText={setEmail} placeholder="you@example.com" autoCapitalize="none" />
+        </SettingsField>
+        <Button label={busy ? "…" : "Send reset link"} variant="secondary" onPress={sendReset} disabled={busy} />
+        {forgotNote ? (
+          <Text tone="secondary" variant="caption">
+            {forgotNote}
+          </Text>
+        ) : null}
+        <SettingsField label="Paste your reset link">
+          <Input value={linkInput} onChangeText={setLinkInput} placeholder="Reset link from your email" autoCapitalize="none" />
+        </SettingsField>
+        {error ? (
+          <Text tone="danger" variant="caption">
+            {error}
+          </Text>
+        ) : null}
+        <View style={styles.row}>
+          <Button label="Continue" onPress={continueWithLink} disabled={!linkInput.trim()} />
+          <Button label="Back to sign in" variant="secondary" onPress={exitForgot} />
+        </View>
+      </View>
+    );
+  }
 
   // One-time recovery code, shown right after registering an encrypted account. It is the only way
   // to recover data if the password is forgotten — the server holds only ciphertext.
@@ -104,6 +218,29 @@ export function SyncSettings() {
     );
   }
 
+  // The session died (refresh failed): re-authenticate in place with the stored email + endpoint.
+  if (sync.connected && sync.needsReauth) {
+    return (
+      <View style={{ gap: space.lg }}>
+        <SettingsField label="Session expired">
+          <Text tone="secondary">Your session for {sync.email} ended. Enter your password to sign back in.</Text>
+        </SettingsField>
+        <SettingsField label="Password">
+          <Input value={password} onChangeText={setPassword} placeholder="••••••••" secureTextEntry autoCapitalize="none" />
+        </SettingsField>
+        {error ? (
+          <Text tone="danger" variant="caption">
+            {error}
+          </Text>
+        ) : null}
+        <View style={styles.row}>
+          <Button label={busy ? "…" : "Sign in"} onPress={reauth} disabled={busy} />
+          <Button label="Sign out" variant="secondary" onPress={sync.disconnect} />
+        </View>
+      </View>
+    );
+  }
+
   if (sync.connected) {
     return (
       <View style={{ gap: space.lg }}>
@@ -130,6 +267,32 @@ export function SyncSettings() {
               </View>
             </View>
           ) : null}
+        </SettingsField>
+        <SettingsField label="Password">
+          {!changing ? (
+            <View style={{ gap: space.sm }}>
+              {changed ? (
+                <Text tone="secondary" variant="caption">
+                  Password changed.{sync.encrypted ? " Your data stayed encrypted — no re-upload needed." : ""}
+                </Text>
+              ) : null}
+              <Button label="Change password" variant="secondary" onPress={() => { setChanging(true); setChanged(false); }} />
+            </View>
+          ) : (
+            <View style={{ gap: space.sm }}>
+              {sync.encrypted ? (
+                <Text tone="tertiary" variant="caption">
+                  Your notes won't be re-encrypted — only the key is rewrapped, so this is instant.
+                </Text>
+              ) : null}
+              <Input value={currentPw} onChangeText={setCurrentPw} placeholder="Current password" secureTextEntry autoCapitalize="none" />
+              <Input value={newPw} onChangeText={setNewPw} placeholder="New password" secureTextEntry autoCapitalize="none" />
+              <View style={styles.row}>
+                <Button label={busy ? "…" : "Update password"} onPress={changePassword} disabled={busy} />
+                <Button label="Cancel" variant="secondary" onPress={() => setChanging(false)} />
+              </View>
+            </View>
+          )}
         </SettingsField>
         <SettingsField label="Status">
           <Text tone={sync.status === "error" ? "danger" : "secondary"}>{statusText(sync)}</Text>
@@ -162,6 +325,14 @@ export function SyncSettings() {
         <Button label={busy ? "…" : "Log in"} onPress={() => connect("login")} disabled={busy} />
         <Button label="Register" variant="secondary" onPress={() => connect("register")} disabled={busy} />
       </View>
+      <Button
+        label="Forgot password?"
+        variant="ghost"
+        onPress={() => {
+          setError(null);
+          setForgot(true);
+        }}
+      />
       <Text tone="tertiary" variant="caption">
         Point web, desktop, and mobile at the same server + account to sync everything. New accounts
         are end-to-end encrypted — the server can't read your notes.

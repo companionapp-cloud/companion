@@ -2,6 +2,8 @@
 // localStorage so a reload keeps the session; refresh-token rotation is out of scope for
 // this portal shell (the product apps own long-lived sessions).
 
+import { deriveAuthKey, type KdfParams } from "./authkey";
+
 const TOKEN_KEY = "companion.cloud.token";
 
 export function getToken(): string | null {
@@ -41,8 +43,20 @@ export function register(
   });
 }
 
-export function login(email: string, password: string): Promise<AuthResult> {
-  return req("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+// prelogin tells the portal how to form the login credential: an E2EE account returns the salt +
+// KDF params so the portal can derive its auth key; a plaintext (or unknown) account returns
+// encrypted=false and the raw password is used.
+export function prelogin(email: string): Promise<{ encrypted: boolean; salt?: string; kdf?: KdfParams }> {
+  return req("/auth/prelogin", { method: "POST", body: JSON.stringify({ email }) });
+}
+
+export async function login(email: string, password: string): Promise<AuthResult> {
+  // For an end-to-end-encrypted account the server credential is a derived auth key, not the
+  // password (PLAN §E2EE), so the portal derives it the same way the app does — deriving only the
+  // auth key, never the encryption key. A plaintext account logs in with the raw password.
+  const pre = await prelogin(email);
+  const credential = pre.encrypted && pre.salt && pre.kdf ? await deriveAuthKey(password, pre.salt, pre.kdf) : password;
+  return req("/auth/login", { method: "POST", body: JSON.stringify({ email, password: credential }) });
 }
 
 // forgotPassword requests a reset link. Always resolves (the server never reveals whether
@@ -56,6 +70,12 @@ export function resetPassword(token: string, newPassword: string): Promise<unkno
   return req("/auth/reset", { method: "POST", body: JSON.stringify({ token, newPassword }) });
 }
 
+// resetInfo reports whether the account behind a reset token is end-to-end encrypted. The portal
+// can't rewrap the master key, so an encrypted reset is handed off to the app (PLAN §E2EE).
+export function resetInfo(token: string): Promise<{ encrypted: boolean; recoveryWrapped?: string }> {
+  return req("/auth/reset/info", { method: "POST", body: JSON.stringify({ token }) });
+}
+
 // ---- account (shared with the open-core server) ---------------------------
 
 export type Account = {
@@ -64,6 +84,9 @@ export type Account = {
   firstName: string;
   lastName: string;
   emailVerified: boolean;
+  /** End-to-end encryption is enabled (PLAN §E2EE). This portal can't run the crypto core, so it
+   *  can't rewrap the master key — an encrypted account must change its password in the app. */
+  encrypted: boolean;
 };
 
 export function getAccount(): Promise<Account> {
@@ -272,9 +295,10 @@ export function adminDeletePlan(id: string): Promise<{ plans: Plan[] }> {
 
 // ---- config ---------------------------------------------------------------
 
-// getConfig returns public runtime config, including the sync base URL clients enter in
-// the Companion app.
-export function getConfig(): Promise<{ syncUrl: string }> {
+// getConfig returns public runtime config: the sync base URL clients enter in the Companion app,
+// and appUrl — where the portal deeplinks for app-only actions like changing an encrypted
+// account's password (empty when the operator hasn't set CLOUD_APP_URL).
+export function getConfig(): Promise<{ syncUrl: string; appUrl: string }> {
   return req("/config");
 }
 

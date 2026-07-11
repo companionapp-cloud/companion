@@ -55,7 +55,8 @@ func (s *Server) handleGetKeys(w http.ResponseWriter, r *http.Request) {
 // handlePutKeys stores (or replaces) the user's wrapped key material. Replacement is how a
 // password change rewraps the same master key under a new KEK — the content never re-encrypts,
 // only the wrapping does. The server validates only shape, never the cryptographic contents it
-// cannot read.
+// cannot read. (A password change carries its rewrapped material atomically via
+// handleUpdatePassword; this endpoint remains for the initial enable-encryption upload.)
 func (s *Server) handlePutKeys(w http.ResponseWriter, r *http.Request) {
 	uid := userID(r)
 	var km keyMaterial
@@ -63,26 +64,63 @@ func (s *Server) handlePutKeys(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	if strings.TrimSpace(km.WrappedMasterKey) == "" || strings.TrimSpace(km.KDFSalt) == "" || km.KDFTime <= 0 || km.KDFMemoryK <= 0 || km.KDFThreads <= 0 {
+	if !km.valid() {
 		writeErr(w, http.StatusBadRequest, "wrapped key, salt, and positive KDF params are required")
 		return
 	}
+	if err := s.upsertUserKeys(execer{s: s}, uid, km); err != nil {
+		writeErr(w, http.StatusInternalServerError, "key store failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// valid reports whether the key material has the required non-empty blob, salt, and positive KDF
+// params. The server checks shape only — it can't inspect the ciphertext.
+func (km keyMaterial) valid() bool {
+	return strings.TrimSpace(km.WrappedMasterKey) != "" && strings.TrimSpace(km.KDFSalt) != "" &&
+		km.KDFTime > 0 && km.KDFMemoryK > 0 && km.KDFThreads > 0
+}
+
+// sqlExecer is the subset of *sql.DB / *sql.Tx that upsertUserKeys needs, so it can write either
+// standalone (PUT /v1/keys) or inside the password-change transaction. *sql.Tx satisfies it
+// directly; the standalone path uses execer over the raw *sql.DB. Both receive an already-rebound
+// query, so neither must (double-)rebind.
+type sqlExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+// execer runs a pre-rebound query straight against the raw DB (no second rebind, unlike s.exec).
+type execer struct{ s *Server }
+
+func (e execer) Exec(query string, args ...any) (sql.Result, error) { return e.s.db.Exec(query, args...) }
+
+// upsertUserKeys writes the wrapped key material for a user via the given executor, having already
+// applied dialect rebind. Callers needing atomicity with another change (the password swap) pass
+// their *sql.Tx directly; the standalone endpoint passes execer over the raw DB.
+func (s *Server) upsertUserKeys(x sqlExecer, uid string, km keyMaterial) error {
 	now := s.clock.Now().UTC().Format(timeFormat)
-	_, err := s.exec(
+	q := s.rebind(
 		`INSERT INTO user_keys (user_id, wrapped_master_key, kdf_salt, kdf_time, kdf_memory_k, kdf_threads, recovery_wrapped, public_key, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (user_id) DO UPDATE SET
 		   wrapped_master_key = excluded.wrapped_master_key, kdf_salt = excluded.kdf_salt,
 		   kdf_time = excluded.kdf_time, kdf_memory_k = excluded.kdf_memory_k,
 		   kdf_threads = excluded.kdf_threads, recovery_wrapped = excluded.recovery_wrapped,
-		   public_key = excluded.public_key, updated_at = excluded.updated_at;`,
-		uid, km.WrappedMasterKey, km.KDFSalt, km.KDFTime, km.KDFMemoryK, km.KDFThreads,
+		   public_key = excluded.public_key, updated_at = excluded.updated_at;`)
+	_, err := x.Exec(q, uid, km.WrappedMasterKey, km.KDFSalt, km.KDFTime, km.KDFMemoryK, km.KDFThreads,
 		nullIfEmpty(km.RecoveryWrapped), nullIfEmpty(km.PublicKey), now)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "key store failed")
-		return
+	return err
+}
+
+// userIsEncrypted reports whether the account has key material (i.e. E2EE is enabled).
+func (s *Server) userIsEncrypted(uid string) (bool, error) {
+	var one int
+	err := s.queryRow(`SELECT 1 FROM user_keys WHERE user_id = ?;`, uid).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	return err == nil, err
 }
 
 // nullIfEmpty stores an empty optional string as SQL NULL rather than "".

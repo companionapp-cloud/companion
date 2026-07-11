@@ -239,3 +239,53 @@ func login(t *testing.T, baseURL, email, pw string) string {
 	}
 	return out.Token
 }
+
+// TestPasswordChangeRewrapEnforced verifies the server makes it impossible to change an encrypted
+// account's password without rewrapping: a bare change is rejected (400), and a change carrying new
+// key material atomically swaps both the credential and the wrapped key (PLAN §E2EE). A plaintext
+// account still changes its password with no key material.
+func TestPasswordChangeRewrapEnforced(t *testing.T) {
+	ts := newServer(t)
+	tok := register(t, ts.URL, "rewrap@b.co", "password")
+
+	// Plaintext account: a normal password change (no key material) works.
+	if resp := authedJSON(t, http.MethodPost, ts.URL+"/v1/account/password", tok,
+		map[string]any{"currentPassword": "password", "newPassword": "password2"}, nil); resp.StatusCode != http.StatusOK {
+		t.Fatalf("plaintext password change = %d, want 200", resp.StatusCode)
+	}
+	// Re-login after the session rotation.
+	tok = login(t, ts.URL, "rewrap@b.co", "password2")
+
+	// Enable encryption (store key material). The account is now encrypted.
+	orig := keyMaterial{WrappedMasterKey: "enc$v1$OLD", KDFSalt: "c2FsdDE", KDFTime: 3, KDFMemoryK: 65536, KDFThreads: 4}
+	authedJSON(t, http.MethodPut, ts.URL+"/v1/keys", tok, orig, nil)
+
+	// A bare credential change (no rewrapped material) must now be rejected.
+	if resp := authedJSON(t, http.MethodPost, ts.URL+"/v1/account/password", tok,
+		map[string]any{"currentPassword": "password2", "newPassword": "authkey-new"}, nil); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("encrypted bare password change = %d, want 400", resp.StatusCode)
+	}
+
+	// A change carrying the rewrapped material swaps credential + key atomically.
+	rewrapped := keyMaterial{WrappedMasterKey: "enc$v1$NEW", KDFSalt: "c2FsdDI", KDFTime: 3, KDFMemoryK: 65536, KDFThreads: 4}
+	var session authResponse
+	if resp := authedJSON(t, http.MethodPost, ts.URL+"/v1/account/password", tok,
+		map[string]any{"currentPassword": "password2", "newPassword": "authkey-new", "keyMaterial": rewrapped}, &session); resp.StatusCode != http.StatusOK {
+		t.Fatalf("encrypted rewrap change = %d, want 200", resp.StatusCode)
+	}
+
+	// The stored key material is now the rewrapped one.
+	var got keyMaterial
+	authedJSON(t, http.MethodGet, ts.URL+"/v1/keys", session.Token, nil, &got)
+	if got.WrappedMasterKey != "enc$v1$NEW" || got.KDFSalt != "c2FsdDI" {
+		t.Fatalf("key material not updated atomically: %+v", got)
+	}
+
+	// The new credential authenticates; the old one no longer does.
+	if resp := postJSON(t, ts.URL+"/v1/auth/login", map[string]string{"email": "rewrap@b.co", "password": "authkey-new"}, nil); resp.StatusCode != http.StatusOK {
+		t.Fatalf("login with new credential = %d, want 200", resp.StatusCode)
+	}
+	if resp := postJSON(t, ts.URL+"/v1/auth/login", map[string]string{"email": "rewrap@b.co", "password": "password2"}, nil); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("login with old credential = %d, want 401", resp.StatusCode)
+	}
+}

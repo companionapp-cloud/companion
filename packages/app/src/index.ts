@@ -64,6 +64,8 @@ export { SyncProvider, useSync } from "./SyncProvider";
 export type { SyncController, SyncStatus, SyncStorage } from "./SyncProvider";
 export { SettingsScreen } from "./SettingsScreen";
 export { SyncSettings, SettingsField } from "./SyncSettings";
+export { SyncHealthBanner } from "./SyncHealthBanner";
+export { RecoveryResetScreen } from "./RecoveryResetScreen";
 export { SETTINGS_SECTIONS, settingsSection } from "./settingsSections";
 export type { SettingsSectionId, SettingsSectionDef } from "./settingsSections";
 export { useNav } from "./nav-context";

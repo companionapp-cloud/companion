@@ -186,3 +186,52 @@ func TestCryptoUnlockFromCache(t *testing.T) {
 		t.Fatal("cached key should unlock without a password")
 	}
 }
+
+// TestCryptoRecoveryResetFlow exercises the exact forgot-password recovery sequence the app runs
+// (PLAN §E2EE): unlock the master key with the recovery code, rewrap it under a NEW password, and
+// confirm the new wrapped key unlocks with the new password while the recovery code still works.
+func TestCryptoRecoveryResetFlow(t *testing.T) {
+	c, _ := newTestCore(t)
+	orig := doSetup(t, c, "forgotten-pass")
+	c.Invoke("crypto.lock", nil)
+
+	// App fetched recoveryWrapped from the server; unlock with the recovery code.
+	rec, _ := json.Marshal(map[string]string{"recoveryCode": orig.RecoveryCode, "recoveryWrapped": orig.RecoveryWrapped})
+	if _, err := c.Invoke("crypto.unlockWithRecovery", rec); err != nil {
+		t.Fatalf("recovery unlock: %v", err)
+	}
+	// Rewrap under the new password (this is what the reset uploads to the server).
+	out, err := c.Invoke("crypto.rewrap", []byte(`{"newPassword":"brand-new-pass"}`))
+	if err != nil {
+		t.Fatalf("rewrap: %v", err)
+	}
+	var rw struct {
+		Salt             string          `json:"salt"`
+		KDF              json.RawMessage `json:"kdf"`
+		WrappedMasterKey string          `json:"wrappedMasterKey"`
+	}
+	json.Unmarshal(out, &rw)
+
+	// The new wrapped key unlocks with the new password.
+	c.Invoke("crypto.lock", nil)
+	newBody, _ := json.Marshal(map[string]any{
+		"password": "brand-new-pass", "wrappedMasterKey": rw.WrappedMasterKey, "salt": rw.Salt, "kdf": json.RawMessage(rw.KDF),
+	})
+	if _, err := c.Invoke("crypto.unlock", newBody); err != nil {
+		t.Fatalf("new password should unlock rewrapped key: %v", err)
+	}
+
+	// The recovery code still works (reset preserves the recovery-wrapped copy).
+	c.Invoke("crypto.lock", nil)
+	if _, err := c.Invoke("crypto.unlockWithRecovery", rec); err != nil {
+		t.Fatalf("recovery code should still work after reset: %v", err)
+	}
+	// The OLD password no longer unlocks the new blob.
+	c.Invoke("crypto.lock", nil)
+	oldBody, _ := json.Marshal(map[string]any{
+		"password": "forgotten-pass", "wrappedMasterKey": rw.WrappedMasterKey, "salt": rw.Salt, "kdf": json.RawMessage(rw.KDF),
+	})
+	if _, err := c.Invoke("crypto.unlock", oldBody); err == nil {
+		t.Fatal("old password must not unlock the rewrapped key")
+	}
+}

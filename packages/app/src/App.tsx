@@ -3,6 +3,8 @@ import type { DocumentSource } from "@companion/editor";
 import { CoreProvider } from "./CoreContext";
 import { DocumentSourceProvider } from "./DocumentSourceContext";
 import { SyncProvider } from "./SyncProvider";
+import { RecoveryResetScreen } from "./RecoveryResetScreen";
+import { resetLinkTarget, clearResetLink } from "./resetLink";
 import { NotesProvider } from "./NotesProvider";
 import { TasksProvider } from "./TasksProvider";
 import { ProjectsProvider } from "./ProjectsProvider";
@@ -38,6 +40,16 @@ export function App({
 }) {
   const target = focusTarget();
   const capture = captureRequested();
+  // A forgot-password reset deep link takes over the whole app: the recovery flow runs before (and
+  // instead of) the normal shell, needing only the core for its crypto — no sync/data providers.
+  const reset = resetLinkTarget();
+  if (reset) {
+    return (
+      <CoreProvider core={core}>
+        <RecoveryResetScreen baseUrl={reset.baseUrl} token={reset.token} onDone={clearResetLink} />
+      </CoreProvider>
+    );
+  }
   return (
     <CoreProvider core={core}>
       <DocumentSourceProvider documentSource={documentSource}>

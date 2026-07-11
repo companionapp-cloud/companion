@@ -19,6 +19,9 @@ type accountResponse struct {
 	FirstName     string `json:"firstName"`
 	LastName      string `json:"lastName"`
 	EmailVerified bool   `json:"emailVerified"`
+	// Encrypted is true when the account has E2EE enabled (PLAN §E2EE). A non-E2EE client (the
+	// cloud account portal) uses it to steer password changes to the app, which alone can rewrap.
+	Encrypted bool `json:"encrypted"`
 }
 
 // handleAccount returns the authenticated user's profile.
@@ -33,9 +36,14 @@ func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "account lookup failed")
 		return
 	}
+	encrypted, err := s.userIsEncrypted(uid)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "account lookup failed")
+		return
+	}
 	writeJSON(w, http.StatusOK, accountResponse{
 		UserID: uid, Email: email, FirstName: first, LastName: last,
-		EmailVerified: verifiedAt.Valid,
+		EmailVerified: verifiedAt.Valid, Encrypted: encrypted,
 	})
 }
 
@@ -95,10 +103,19 @@ func (s *Server) handleUpdateEmail(w http.ResponseWriter, r *http.Request) {
 type passwordRequest struct {
 	CurrentPassword string `json:"currentPassword"`
 	NewPassword     string `json:"newPassword"`
+	// KeyMaterial is the master key rewrapped under the new password (PLAN §E2EE). For an
+	// encryption-enabled account a password change MUST carry it — the server swaps the login
+	// credential and the wrapped key atomically, so the two can never drift out of sync and lock
+	// the user out. It is absent for a plaintext account's password change.
+	KeyMaterial *keyMaterial `json:"keyMaterial,omitempty"`
 }
 
 // handleUpdatePassword changes the account password after verifying the current one, then
-// revokes every other session so a stale/leaked token can't outlive the change.
+// revokes every other session so a stale/leaked token can't outlive the change. For an encrypted
+// account it also re-stores the rewrapped key material in the same transaction (and rejects a
+// change that omits it), so the credential and the wrapped master key always move together —
+// changing an encrypted account's password without rewrapping would leave the master key
+// undecryptable and is therefore forbidden.
 func (s *Server) handleUpdatePassword(w http.ResponseWriter, r *http.Request) {
 	uid := userID(r)
 	var req passwordRequest
@@ -108,6 +125,20 @@ func (s *Server) handleUpdatePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.NewPassword) < 6 {
 		writeErr(w, http.StatusBadRequest, "new password must be at least 6 characters")
+		return
+	}
+	encrypted, err := s.userIsEncrypted(uid)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "account lookup failed")
+		return
+	}
+	// An encrypted account must rewrap: reject a bare credential change that would desync the key.
+	if encrypted && req.KeyMaterial == nil {
+		writeErr(w, http.StatusBadRequest, "this account is encrypted; the password change must include rewrapped key material")
+		return
+	}
+	if req.KeyMaterial != nil && !req.KeyMaterial.valid() {
+		writeErr(w, http.StatusBadRequest, "invalid key material")
 		return
 	}
 	var hash string
@@ -133,6 +164,15 @@ func (s *Server) handleUpdatePassword(w http.ResponseWriter, r *http.Request) {
 	if _, err := tx.Exec(s.rebind(`UPDATE users SET password_hash = ? WHERE id = ?;`), string(newHash), uid); err != nil {
 		writeErr(w, http.StatusInternalServerError, "update failed")
 		return
+	}
+	// Re-store the rewrapped key material in the same transaction so the credential and the
+	// wrapped master key commit together (or not at all). This also covers the enable-encryption
+	// migration, where the account gains its first key material alongside the credential swap.
+	if req.KeyMaterial != nil {
+		if err := s.upsertUserKeys(tx, uid, *req.KeyMaterial); err != nil {
+			writeErr(w, http.StatusInternalServerError, "update failed")
+			return
+		}
 	}
 	// Invalidate all sessions and refresh tokens; the client re-authenticates with the new
 	// password. A brand-new session is minted below so the current device stays signed in.

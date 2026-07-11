@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Linking, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import * as api from "./api";
 import { styles as g } from "./theme";
 import type { Account } from "./api";
@@ -20,7 +20,7 @@ export default function Settings(props: {
 
       <NameBlock account={props.account} onAccountChanged={props.onAccountChanged} />
       <EmailBlock account={props.account} onAccountChanged={props.onAccountChanged} />
-      <PasswordBlock />
+      <PasswordBlock account={props.account} />
     </View>
   );
 }
@@ -138,10 +138,18 @@ function EmailBlock(props: { account: Account; onAccountChanged: (a: Account) =>
   );
 }
 
-function PasswordBlock() {
+function PasswordBlock(props: { account: Account }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const saver = useSaver();
+
+  // An end-to-end-encrypted account's password also wraps its encryption key, which only the app
+  // (running the crypto core) can rewrap. Changing it here would desync the credential from the
+  // wrapped key, so the server rejects it — deeplink the user to the app instead (PLAN §E2EE).
+  if (props.account.encrypted) {
+    return <EncryptedPasswordBlock />;
+  }
+
   return (
     <Block title="Password">
       <Field label="Current password" value={current} onChangeText={setCurrent} secureTextEntry />
@@ -157,6 +165,29 @@ function PasswordBlock() {
           })
         }
       />
+    </Block>
+  );
+}
+
+// EncryptedPasswordBlock steers an encrypted account to the app, which alone can rewrap the master
+// key. It deeplinks to CLOUD_APP_URL (a hosted web app or a custom-scheme URL) when the operator
+// set one; otherwise it falls back to guidance text.
+function EncryptedPasswordBlock() {
+  const [appUrl, setAppUrl] = useState("");
+  useEffect(() => {
+    api.getConfig().then((c) => setAppUrl(c.appUrl)).catch(() => {});
+  }, []);
+  return (
+    <Block title="Password">
+      <Text style={g.subtitle}>
+        This account is end-to-end encrypted, so your password also protects your encryption key.
+        Change it from the Companion app to rewrap that key safely — it can't be changed here.
+      </Text>
+      {appUrl ? (
+        <Pressable style={s.saveBtn} onPress={() => Linking.openURL(appUrl)}>
+          <Text style={g.link}>Change password in the app →</Text>
+        </Pressable>
+      ) : null}
     </Block>
   );
 }

@@ -291,3 +291,21 @@ func assertJSONEqual(t *testing.T, want, got []byte) {
 		t.Fatalf("json mismatch:\n want %s\n got  %s", wb, gb)
 	}
 }
+
+// TestAuthKeyCrossImplVector pins the exact auth-key derivation for a fixed input. The cloud
+// portal (apps/cloud/frontend) reimplements this derivation in JS (Argon2id + HKDF-SHA256) so it
+// can authenticate an E2EE account without the password; this vector is the contract both sides
+// must agree on. If this value changes, the portal's authkey.ts must change with it (and existing
+// encrypted accounts would be locked out), so treat a failure here as a breaking change.
+func TestAuthKeyCrossImplVector(t *testing.T) {
+	salt := []byte("companion-salt16") // 16 bytes
+	params := KDFParams{Time: 3, MemoryK: 65536, Threads: 4}
+	got, err := AuthKeyHex("correct horse battery staple", salt, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "d8046fc5a6b63f4972c0a423471b1d39fd1e4095bb440a205f4f35698afcdc7e"
+	if got != want {
+		t.Fatalf("auth-key vector changed:\n got  %s\n want %s\nThe portal's JS KDF must match this exactly.", got, want)
+	}
+}

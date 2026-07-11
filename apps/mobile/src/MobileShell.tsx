@@ -1,10 +1,12 @@
 import { useCallback, useEffect } from 'react';
+import { View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as Notifications from 'expo-notifications';
 import { colors } from '@companion/design-system';
 import { taskIdFromResponse } from './notifications';
-import { TrashScreen } from '@companion/app';
+import { TrashScreen, SyncHealthBanner } from '@companion/app';
 import { HomeScreen } from './screens/HomeScreen';
 import { TodayScreen } from './screens/TodayScreen';
 import { CalendarScreen } from './screens/CalendarScreen';
@@ -69,6 +71,7 @@ const RootStack = createNativeStackNavigator<RootStackParamList>();
 
 export function MobileShell() {
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
+  const insets = useSafeAreaInsets();
 
   // Deep-link a tapped reminder to its task (PLAN §6.4). navigate() is safe to call once the
   // container is ready; guard because a cold-start tap can resolve before that.
@@ -100,8 +103,12 @@ export function MobileShell() {
   }, [openTask]);
 
   return (
-    <NavigationContainer ref={navigationRef} onReady={handleReady}>
-      <RootStack.Navigator
+    <View style={{ flex: 1 }}>
+      {/* Global sync-health banner: prompts unlock / re-auth in Settings when sync is blocked. It
+          carries the top safe-area inset so it clears the status bar when visible (§7). */}
+      <SyncHealthBanner onOpenSettings={() => navigationRef.navigate('Settings')} topInset={insets.top} />
+      <NavigationContainer ref={navigationRef} onReady={handleReady}>
+        <RootStack.Navigator
         screenOptions={{
           headerStyle: { backgroundColor: colors.surfaceApp },
           headerTitleStyle: { color: colors.textPrimary },
@@ -128,7 +135,8 @@ export function MobileShell() {
         <RootStack.Screen name="TaskGraph" component={TaskGraphScreen} options={{ title: 'Graph' }} />
         <RootStack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
         <RootStack.Screen name="SettingsSection" component={SettingsSectionScreen} options={{ title: 'Settings' }} />
-      </RootStack.Navigator>
-    </NavigationContainer>
+        </RootStack.Navigator>
+      </NavigationContainer>
+    </View>
   );
 }

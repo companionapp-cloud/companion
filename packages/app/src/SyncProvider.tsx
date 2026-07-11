@@ -67,9 +67,13 @@ export interface ConnectResult {
 export interface SyncController {
   connected: boolean;
   email: string | null;
+  /** The connected server endpoint, so a re-auth prompt can reuse it. */
+  baseUrl: string | null;
   status: SyncStatus;
   /** The connected account is end-to-end encrypted. */
   encrypted: boolean;
+  /** The session is dead (refresh failed) and the user must sign in again — drives the banner. */
+  needsReauth: boolean;
   lastError: string | null;
   lastSyncedAt: number | null;
   connect: (baseUrl: string, email: string, password: string, mode: AuthMode) => Promise<ConnectResult>;
@@ -78,6 +82,9 @@ export interface SyncController {
   /** Migrate a connected plaintext account to end-to-end encryption: swap the credential, upload
    *  the wrapped key, and re-push every row encrypted. Returns the one-time recovery code. */
   enableEncryption: (password: string) => Promise<ConnectResult>;
+  /** Change the account password. For an encrypted account this always rewraps the master key
+   *  (never re-encrypting content); for a plaintext account it's a normal change. */
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   disconnect: () => void;
   /** Debounced sync — called on mutations and navigation. */
   trigger: () => void;
@@ -112,6 +119,10 @@ export function SyncProvider({
   const [status, setStatus] = useState<SyncStatus>(config ? "idle" : "disconnected");
   const [lastError, setLastError] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  // needsReauth is set when the session is truly dead (refresh token missing/expired/revoked), as
+  // opposed to a transient network error — so the UI can show a "sign in again" banner only when
+  // re-authentication is actually required, not on every sync blip.
+  const [needsReauth, setNeedsReauth] = useState(false);
 
   // configRef mirrors `config`, but is also updated directly on a silent token
   // refresh (which deliberately doesn't touch React state). Sync it only when the
@@ -178,7 +189,10 @@ export function SyncProvider({
       // where it expired while the app was closed).
       const cfg = configRef.current;
       if (cfg.expiresAt && Date.now() >= cfg.expiresAt - REFRESH_SKEW_MS) {
-        if (!(await refreshTokens())) throw new Error("Session expired — please sign in again.");
+        if (!(await refreshTokens())) {
+          setNeedsReauth(true);
+          throw new Error("Session expired — please sign in again.");
+        }
       }
       // Never sync an encrypted account whose key isn't loaded — that would leak plaintext.
       if (!(await ensureUnlocked())) {
@@ -189,12 +203,18 @@ export function SyncProvider({
         await api.run();
       } catch (e) {
         // Reactive fallback: the server rejected the token (clock skew / revoked).
-        // Try one refresh + retry before surfacing the error.
-        if (!isAuthError(e) || !(await refreshTokens())) throw e;
+        // Try one refresh + retry before surfacing the error. A refresh that fails on a genuine
+        // auth rejection means the session is dead — flag re-auth.
+        if (!isAuthError(e)) throw e;
+        if (!(await refreshTokens())) {
+          setNeedsReauth(true);
+          throw e;
+        }
         await api.run();
       }
       setLastSyncedAt(Date.now());
       setLastError(null);
+      setNeedsReauth(false);
       setStatus("idle");
     } catch (e) {
       setLastError(e instanceof Error ? e.message : String(e));
@@ -254,10 +274,47 @@ export function SyncProvider({
     [],
   );
 
+  // runEncryptionMigration transparently upgrades the currently-connected PLAINTEXT account to
+  // end-to-end encryption using the password just entered (PLAN §E2EE). Ordering matters: pull any
+  // existing plaintext data down first (so it exists locally to re-encrypt), then provision the key
+  // material and swap the login credential in one atomic server call, then flag every row dirty and
+  // push it back encrypted. configRef must already point at the plaintext account. Returns the
+  // one-time recovery code to surface.
+  const runEncryptionMigration = useCallback(async (rawPassword: string): Promise<string> => {
+    const cfg = configRef.current;
+    if (!cfg) throw new Error("not connected");
+    setStatus("syncing");
+    // 1. Pull existing plaintext rows so they're present locally.
+    await api.configure(cfg.baseUrl, cfg.token);
+    await api.run();
+    // 2. Generate master key + recovery code; swap credential and install the wrapped key atomically
+    //    (the two can never desync — see the server's password handler).
+    const setup = await crypto.setup(rawPassword);
+    const session = await auth.changePassword(cfg.baseUrl, cfg.token, rawPassword, setup.authKeyHex, keys.materialFromSetup(setup));
+    const next: PersistedConfig = {
+      ...cfg,
+      token: session.token,
+      refreshToken: session.refreshToken,
+      expiresAt: Date.parse(session.expiresAt),
+      encrypted: true,
+    };
+    configRef.current = next;
+    saveConfig(next, storageRef.current);
+    // 3. Flag every row dirty and push it back encrypted with the rotated token.
+    await crypto.reencryptAll();
+    await api.configure(next.baseUrl, next.token);
+    await api.run();
+    setStatus("idle");
+    setLastError(null);
+    setConfig(next);
+    return formatRecoveryCode(setup.recoveryCode);
+  }, [api, crypto]);
+
   const connect = useCallback(async (baseUrl: string, email: string, password: string, mode: AuthMode): Promise<ConnectResult> => {
     let res;
     let encrypted = false;
     let recoveryCode: string | null = null;
+    let migratePlaintext = false;
 
     if (mode === "register") {
       // New accounts are end-to-end encrypted by default (PLAN §E2EE): generate the key material
@@ -284,8 +341,10 @@ export function SyncProvider({
           encrypted = true;
         }
       } else {
-        // Legacy plaintext account: authenticate with the raw password, no encryption.
+        // Plaintext account — typically created via the web portal, which can't run the crypto core.
+        // Log in, then transparently upgrade it to encryption so every account ends up E2EE.
         res = await auth.login(baseUrl, email, password);
+        migratePlaintext = true;
       }
     }
 
@@ -297,12 +356,19 @@ export function SyncProvider({
       email,
       encrypted,
     };
+    configRef.current = cfg;
     saveConfig(cfg, storageRef.current);
-    setStatus("idle");
     setLastError(null);
-    setConfig(cfg); // effect re-configures + syncs
+    setNeedsReauth(false);
+
+    if (migratePlaintext) {
+      recoveryCode = await runEncryptionMigration(password);
+    } else {
+      setStatus("idle");
+      setConfig(cfg); // effect re-configures + syncs
+    }
     return { recoveryCode };
-  }, [crypto]);
+  }, [crypto, runEncryptionMigration]);
 
   // unlock re-derives the master key for a locked encrypted account (a web reload, typically),
   // then resumes syncing. Wrong password surfaces as an error and leaves the store locked.
@@ -318,35 +384,59 @@ export function SyncProvider({
     });
     setStatus("idle");
     setLastError(null);
+    setNeedsReauth(false);
     void runNow();
   }, [crypto, runNow]);
 
-  // enableEncryption migrates a connected plaintext account (PLAN §E2EE). It generates key material,
-  // swaps the server credential from the raw password to the derived auth key (via the account
-  // password-change endpoint, which rotates the session), uploads the wrapped key, then flags every
-  // row dirty and syncs so the server's plaintext copies are overwritten with ciphertext.
+  // enableEncryption migrates a connected plaintext account on demand (the settings toggle). New
+  // accounts are already encrypted at register/login; this covers a legacy plaintext account whose
+  // owner opts in explicitly. It shares the same atomic migration as auto-upgrade on login.
   const enableEncryption = useCallback(async (password: string): Promise<ConnectResult> => {
     const cfg = configRef.current;
     if (!cfg) throw new Error("not connected");
     if (cfg.encrypted) return { recoveryCode: null };
+    const recoveryCode = await runEncryptionMigration(password);
+    return { recoveryCode };
+  }, [runEncryptionMigration]);
 
-    const setup = await crypto.setup(password); // generates + unlocks the master key
-    const session = await auth.changePassword(cfg.baseUrl, cfg.token, password, setup.authKeyHex);
+  // changePassword always rewraps for an encrypted account: the master key (held unlocked in
+  // memory) is re-wrapped under the new password and the login credential is swapped in the same
+  // atomic server call. Content is never re-encrypted, so this is instant regardless of data size.
+  // The existing recovery-wrapped copy is carried through unchanged (the recovery code still
+  // works). A plaintext account just changes its password normally.
+  const changePassword = useCallback(async (currentPassword: string, newPassword: string): Promise<void> => {
+    const cfg = configRef.current;
+    if (!cfg) throw new Error("not connected");
+
+    let session;
+    if (cfg.encrypted) {
+      if (!(await crypto.status()).unlocked) throw new Error("unlock before changing your password");
+      // Current material gives us the salt/params to derive the current auth key (to authorize the
+      // change) and the recovery-wrapped copy to preserve.
+      const current = await keys.fetchKeys(cfg.baseUrl, cfg.token);
+      if (!current) throw new Error("missing key material for this account");
+      const currentAuth = await crypto.deriveAuthKey(currentPassword, current.kdfSalt, {
+        time: current.kdfTime,
+        memoryK: current.kdfMemoryK,
+        threads: current.kdfThreads,
+      });
+      const rw = await crypto.rewrap(newPassword);
+      const material = { ...keys.materialFromSetup(rw), recoveryWrapped: current.recoveryWrapped };
+      session = await auth.changePassword(cfg.baseUrl, cfg.token, currentAuth.authKeyHex, rw.authKeyHex, material);
+    } else {
+      session = await auth.changePassword(cfg.baseUrl, cfg.token, currentPassword, newPassword);
+    }
+
     const next: PersistedConfig = {
       ...cfg,
       token: session.token,
       refreshToken: session.refreshToken,
       expiresAt: Date.parse(session.expiresAt),
-      encrypted: true,
     };
     configRef.current = next;
     saveConfig(next, storageRef.current);
-    await keys.putKeys(next.baseUrl, next.token, keys.materialFromSetup(setup));
-    await crypto.reencryptAll(); // flag every row dirty
-    setConfig(next); // reconfigures with the rotated token + syncs (re-pushes encrypted)
-    void runNow();
-    return { recoveryCode: formatRecoveryCode(setup.recoveryCode) };
-  }, [crypto, runNow]);
+    setConfig(next);
+  }, [crypto]);
 
   const disconnect = useCallback(() => {
     // Drop the in-memory master key (and native cache) so signing out also locks the store.
@@ -356,23 +446,27 @@ export function SyncProvider({
     setStatus("disconnected");
     setLastError(null);
     setLastSyncedAt(null);
+    setNeedsReauth(false);
   }, [crypto]);
 
   const value = useMemo<SyncController>(
     () => ({
       connected: !!config,
       email: config?.email ?? null,
+      baseUrl: config?.baseUrl ?? null,
       status,
       encrypted: config?.encrypted ?? false,
+      needsReauth,
       lastError,
       lastSyncedAt,
       connect,
       unlock,
       enableEncryption,
+      changePassword,
       disconnect,
       trigger,
     }),
-    [config, status, lastError, lastSyncedAt, connect, unlock, enableEncryption, disconnect, trigger],
+    [config, status, needsReauth, lastError, lastSyncedAt, connect, unlock, enableEncryption, changePassword, disconnect, trigger],
   );
 
   return <SyncCtx.Provider value={value}>{children}</SyncCtx.Provider>;

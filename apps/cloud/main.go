@@ -107,8 +107,14 @@ func handler(srv *syncserver.Server, bill *billing, adm *admin, vrf *verifier, p
 			syncURL = base + "/api"
 		}
 	}
+	// appUrl is where the portal sends users for actions only the app can do — notably changing an
+	// encrypted account's password, which requires the crypto core to rewrap the master key (PLAN
+	// §E2EE). CLOUD_APP_URL can be a hosted web-app URL or a custom-scheme deeplink
+	// (e.g. companion://settings/security); empty disables the link and the portal shows guidance
+	// text only.
+	appURL := strings.TrimRight(os.Getenv("CLOUD_APP_URL"), "/")
 	mux.HandleFunc("GET /api/v1/config", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"syncUrl": syncURL})
+		writeJSON(w, http.StatusOK, map[string]string{"syncUrl": syncURL, "appUrl": appURL})
 	})
 
 	// Coarse abuse protection for the cloud-only credential/email flows: cap attempts so
@@ -129,6 +135,9 @@ func handler(srv *syncserver.Server, bill *billing, adm *admin, vrf *verifier, p
 	// Forgot password (cloud-only, both public and token-based).
 	mux.Handle("POST /api/v1/auth/forgot", emailLim.Limit(syncserver.IPPathKey, pwr.handleForgot))
 	mux.Handle("POST /api/v1/auth/reset", emailLim.Limit(syncserver.IPPathKey, pwr.handleReset))
+	// Pre-auth lookup the app does on a reset deep link: is the account encrypted, and its
+	// recovery-wrapped key blob (needed to recover with the recovery code).
+	mux.Handle("POST /api/v1/auth/reset/info", emailLim.Limit(syncserver.IPPathKey, pwr.handleResetInfo))
 
 	// Billing (cloud-only). Checkout + status require a session; the webhook is
 	// authenticated by its Stripe signature instead.
