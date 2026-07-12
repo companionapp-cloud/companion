@@ -4,19 +4,29 @@ group: The basics
 groupIcon: notes
 groupOrder: 2
 order: 3
-excerpt: See how your notes link together.
+excerpt: See how everything in your workspace connects.
 badge: The basics
 readTime: 2 min read
 updated: Jul 2026
-related: [linking-notes, your-first-note]
+related: [linking-notes, object-types]
 ---
 
-The graph is a live map of your notes and the links between them. It's the fastest way to rediscover something you wrote and forgot.
+The graph is a live map of your workspace and the links between its pieces. It's the fastest way to rediscover something you wrote and forgot.
 
-## Reading the graph
+![The graph, with a project at the centre of its notes and tasks](/docs/graph.png)
 
-Each dot is a note; each line is a link. Notes you reference often grow larger and pull related ideas close, so clusters of thinking emerge on their own.
+## Reading it
 
-## Finding your way
+Every node is something real: a note, a task, a project, or an attached file. Every line is a link you made — a `[[wikilink]]`, an embedded file, or a project membership. Nodes with more connections draw bigger, so the hubs of your thinking surface without you arranging anything.
 
-Click any node to open it, or focus a note to see just its neighborhood. It's a great way to notice connections you didn't plan — the quiet payoff of [linking your notes](/docs/linking-notes) as you write.
+Notes and tasks that carry an [object type](/docs/object-types) take that type's colour and icon, which makes a family of things — all your meetings, all your reading notes — visible at a glance.
+
+## Getting around
+
+Click any node to open it. Zoom with the controls in the corner, or fit everything back into view. For a smaller, more focused version, open any note or task and click the **graph** icon in its toolbar to see just that item's neighbourhood.
+
+> **Note:** The graph is available on the web and desktop apps. The mobile apps don't render it yet.
+
+## Next steps
+
+The links behind all this come from [writing & linking notes](/docs/linking-notes).

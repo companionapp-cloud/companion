@@ -230,6 +230,18 @@ a:hover {
   color: #1a1a18;
 }
 
+/* Screenshots in docs: full-bleed within the column, with the app's own chrome
+   implied by a soft border rather than a drop shadow. */
+.prose img {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 28px 0;
+  border: 1px solid #e0e0dc;
+  border-radius: 12px;
+  background: #f5f5f3;
+}
+
 /* markdown-generated inline code renders like the prototype's <span class="kbd"> */
 .prose code {
   font-family: "Geist Mono", monospace;

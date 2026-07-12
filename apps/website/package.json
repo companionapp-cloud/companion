@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "expo start --web",
     "build": "expo export --platform web",
+    "capture:docs": "node scripts/capture-docs.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -27,6 +28,7 @@
   "devDependencies": {
     "@types/react": "19.2.2",
     "markdown-it": "14.3.0",
+    "playwright": "1.49.1",
     "typescript": "5.9.3"
   }
 }

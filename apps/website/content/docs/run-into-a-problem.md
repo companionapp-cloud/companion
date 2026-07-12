@@ -12,14 +12,24 @@ updated: Jul 2026
 related: [app-wont-sync, self-hosting]
 ---
 
-Most hiccups have a quick fix. Start here before reaching out — chances are you'll be back up and running in a minute.
+Most hiccups have a quick fix. Start here before reaching out — odds are you'll be back to work in a minute.
 
 ## The quick checklist
 
-- **Restart the app.** It clears the most common transient issues.
-- **Check for updates.** You may be a version behind a fix.
-- **Confirm you're online.** Sync needs a connection to reconcile.
+- **Reload or restart the app.** It clears most transient weirdness.
+- **Check Settings → Sync.** The Status line names the problem more often than not — see [app won't sync](/docs/app-wont-sync).
+- **Confirm you're online**, if you're expecting things to move between devices.
+
+## I deleted something
+
+Deleted notes and tasks go to **Trash** and stay there for 30 days. Open it, pick the item, and choose **Restore**. **Delete forever** and **Empty trash** are what they sound like, and they don't come back.
+
+Projects and areas are the exception: deleting one takes effect immediately, though the notes and tasks inside it aren't deleted — they just become unsorted.
+
+## Something isn't there at all
+
+A few things exist in the app's shape but not yet in your hands. **Habits** is a placeholder. The **graph** doesn't render on mobile yet. **Quick capture** and **web browsing in chat** are desktop-only. If a feature seems missing, it may simply not have shipped — that's on us, not on you.
 
 ## Still stuck?
 
-If a specific feature is misbehaving, see [app won't sync](/docs/app-wont-sync), or [contact us](/contact) — we're happy to help.
+[Contact us](/contact) with your platform, what you were doing, and what happened instead. Companion is [open source](https://github.com/chrisdmacrae/companion), so an issue with a reproduction is welcome too.

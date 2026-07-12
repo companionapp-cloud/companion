@@ -4,34 +4,34 @@ group: Get started
 groupIcon: today
 groupOrder: 1
 order: 1
-excerpt: Install Companion on Mac, iPhone, Android, Windows, and Linux — and sign in everywhere.
+excerpt: Use Companion on the web today, and sync it everywhere when you're ready.
 featured: true
 badge: Get started
-readTime: 3 min read
+readTime: 2 min read
 updated: Jul 2026
 related: [your-first-note, using-our-cloud]
 ---
 
-Companion runs on every platform you do — web, macOS, iOS, Android, Windows, and Linux. Use it for free on the web, or install it once on each device and your workspace follows you everywhere.
+Companion runs in your browser, works offline, and doesn't ask for an account until you want your work on more than one device.
 
-## Use on the web
+## Start on the web
 
-You can use Companion for free on the web at [web.companionapp.cloud](https://web.companionapp.cloud]) without sync across browsers and devices. To sign in everywhere, you must have a [cloud account](https://portal.companionapp.cloud) or [self-host](/docs/self-hosting).
+Open [web.companionapp.cloud](https://web.companionapp.cloud) and start writing. Everything lives in your browser: notes, tasks, projects, the graph. No sign-up, no server, nothing leaves the machine.
 
-## Download
+The catch is the obvious one — a workspace held in one browser stays in that browser. Sign in and it follows you.
 
-Desktop and mobile apps are coming soon.
+## Desktop and mobile
 
-- **macOS** — a universal build for Apple Silicon and Intel.
-- **iOS & Android** — install from your device's app store.
-- **Windows & Linux** — a standard installer and an AppImage.
+Companion has macOS, Windows, Linux, iOS, and Android builds in the repo, but none of them ship yet. The web app is the one to use today; we'd rather say that plainly than list downloads that aren't there.
 
-## Sign in everywhere
+The desktop build is where a few extras live when it lands — a global quick-capture shortcut, native reminder notifications, and focus windows.
 
-Companion works fully offline with no account. To keep devices in sync, sign into [Companion Cloud](/docs/using-our-cloud) — or point each device at [your own server](/docs/self-hosting).
+## Sync when you want it
 
-Once you're in, your notes, tasks, and habits appear on every device within seconds.
+To keep two devices in step, connect a server in **Settings → Sync**: either [Companion Cloud](/docs/using-our-cloud) or [one you host yourself](/docs/self-hosting). New accounts are end-to-end encrypted, so the server stores your notes without being able to read them.
+
+A couple of features need a server, because they're computed there: repeating tasks, and calendar feed refreshes.
 
 ## Next steps
 
-Ready to start? Create [your first note](/docs/your-first-note), then track [your first task](/docs/your-first-task).
+Write [your first note](/docs/your-first-note), then track [your first task](/docs/your-first-task).
