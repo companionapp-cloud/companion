@@ -6,6 +6,9 @@ import { useSync, type AuthMode } from "./SyncProvider";
 import { RecoveryResetScreen } from "./RecoveryResetScreen";
 import { parseResetLink } from "./resetLink";
 
+/** The hosted cloud server, used as the default when the Server URL field is left blank. */
+const DEFAULT_BASE_URL = "https://portal.companionapp.cloud/api";
+
 /** The sync settings section: connect to a server + account, then see live sync status
  *  (PLAN §7). New accounts are end-to-end encrypted (PLAN §E2EE): registration surfaces a
  *  one-time recovery code, and an encrypted account that has lost its in-memory key (e.g. after a
@@ -13,7 +16,7 @@ import { parseResetLink } from "./resetLink";
  *  render as a settings page section on every platform. */
 export function SyncSettings() {
   const sync = useSync();
-  const [baseUrl, setBaseUrl] = useState("http://localhost:8080");
+  const [baseUrl, setBaseUrl] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -31,12 +34,15 @@ export function SyncSettings() {
   const [forgotNote, setForgotNote] = useState("");
   const [resetTarget, setResetTarget] = useState<{ baseUrl: string; token: string } | null>(null);
 
+  /** The Server URL to use, falling back to the hosted cloud when the field is left blank. */
+  const resolvedBaseUrl = baseUrl.trim() || DEFAULT_BASE_URL;
+
   const sendReset = async () => {
     setBusy(true);
     setError(null);
     setForgotNote("");
     try {
-      await auth.forgotPassword(baseUrl.trim(), email.trim());
+      await auth.forgotPassword(resolvedBaseUrl, email.trim());
       setForgotNote("If that email has an account, a reset link is on its way. Paste it below when it arrives.");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -52,7 +58,7 @@ export function SyncSettings() {
       setError("That doesn't look like a valid reset link.");
       return;
     }
-    setResetTarget({ baseUrl: parsed.baseUrl ?? baseUrl.trim(), token: parsed.token });
+    setResetTarget({ baseUrl: parsed.baseUrl ?? resolvedBaseUrl, token: parsed.token });
   };
 
   const exitForgot = () => {
@@ -67,7 +73,7 @@ export function SyncSettings() {
     setBusy(true);
     setError(null);
     try {
-      const { recoveryCode } = await sync.connect(baseUrl.trim(), email.trim(), password, mode);
+      const { recoveryCode } = await sync.connect(resolvedBaseUrl, email.trim(), password, mode);
       setPassword("");
       if (recoveryCode) setRecoveryCode(recoveryCode);
     } catch (e) {
@@ -246,7 +252,7 @@ export function SyncSettings() {
       <View style={{ gap: space.lg }}>
         <SettingsField label="Signed in">
           <Text tone="secondary">
-            {sync.email} · {baseUrlLabel(baseUrl)}
+            {sync.email} · {baseUrlLabel(sync.baseUrl ?? resolvedBaseUrl)}
           </Text>
         </SettingsField>
         <SettingsField label="Encryption">
@@ -308,7 +314,7 @@ export function SyncSettings() {
   return (
     <View style={{ gap: space.lg }}>
       <SettingsField label="Server URL">
-        <Input value={baseUrl} onChangeText={setBaseUrl} placeholder="http://localhost:8080" autoCapitalize="none" />
+        <Input value={baseUrl} onChangeText={setBaseUrl} placeholder={DEFAULT_BASE_URL} autoCapitalize="none" />
       </SettingsField>
       <SettingsField label="Email">
         <Input value={email} onChangeText={setEmail} placeholder="you@example.com" autoCapitalize="none" />

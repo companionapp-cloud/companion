@@ -80,7 +80,7 @@ export function ProjectsSidebar({
     <View style={{ gap: 2 }}>
       <View style={styles.sectionHeader}>
         <Text variant="caption" tone="tertiary" style={{ flex: 1, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.5 }}>
-          Projects
+          Areas
         </Text>
         <IconButton label="New area" size="sm" onPress={() => setAddingArea((v) => !v)}>
           <Icon name="plus" size={15} color={colors.textTertiary} />
