@@ -5,10 +5,13 @@
     <!-- viewport-fit=cover lets the app paint under the iPhone notch/home bar (the
          safe-area env() padding on #root keeps content clear of them);
          interactive-widget=resizes-content keeps the editor above the software keyboard
-         on Android. -->
+         on Android. maximum-scale=1 + user-scalable=no disable pinch/double-tap zoom on
+         touch devices so the app feels native (and iOS stops auto-zooming focused
+         inputs); desktop browsers ignore the viewport meta, so Cmd/Ctrl zoom still
+         works there. -->
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content"
     />
     <title>Companion</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
