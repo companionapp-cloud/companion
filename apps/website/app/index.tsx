@@ -76,7 +76,7 @@ export default function Landing() {
                 links={[
                   {
                     label: "Get started",
-                    href: "/docs",
+                    href: "/docs/getting-the-apps",
                     variant: "primary",
                     size: "lg",
                     onClick: () => posthog.capture("hero_cta_clicked", { label: "Get started" }),

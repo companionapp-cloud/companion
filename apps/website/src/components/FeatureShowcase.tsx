@@ -7,6 +7,7 @@ const FEATURES: { key: FeatureKey; label: string }[] = [
   { key: "notes", label: "Notes" },
   { key: "tasks", label: "Tasks" },
   { key: "habits", label: "Habits" },
+  { key: "graph", label: "Graph" },
 ];
 
 function chipStyle(on: boolean): React.CSSProperties {
@@ -103,7 +104,7 @@ export function FeatureShowcase() {
                 <rect x="4" y="10" width="16" height="10" rx="2" fill="#a7a7a1" />
               </svg>
               <span style={{ fontFamily: "'Geist', sans-serif", fontSize: 13, color: "#595954" }}>
-                companion.app/{feature}
+                web.companionapp.cloud/{feature}
               </span>
             </div>
           </div>

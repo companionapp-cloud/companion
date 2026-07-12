@@ -12,11 +12,15 @@ updated: Jul 2026
 related: [your-first-note, using-our-cloud]
 ---
 
-Companion runs on every platform you do — macOS, iOS, Android, Windows, and Linux. Install it once on each device and your workspace follows you everywhere.
+Companion runs on every platform you do — web, macOS, iOS, Android, Windows, and Linux. Use it for free on the web, or install it once on each device and your workspace follows you everywhere.
+
+## Use on the web
+
+You can use Companion for free on the web at [web.companionapp.cloud](https://web.companionapp.cloud]) without sync across browsers and devices. To sign in everywhere, you must have a [cloud account](https://portal.companionapp.cloud) or [self-host](/docs/self-hosting).
 
 ## Download
 
-Grab the build for your platform from the downloads page. The desktop apps are notarized and signed; the mobile apps ship through the App Store and Google Play.
+Desktop and mobile apps are coming soon.
 
 - **macOS** — a universal build for Apple Silicon and Intel.
 - **iOS & Android** — install from your device's app store.

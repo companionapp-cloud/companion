@@ -16,7 +16,7 @@ Companion Cloud is the one-click way to keep every device in sync. Your data is 
 
 ## Create an account
 
-Open **Settings → Sync** and sign up with your email. That's the only personal detail we need — everything else stays encrypted on your devices and in transit.
+Visit the [web portal](https://portal.companionapp.cloud) to create your account, subscribe, and get instructions for logging in the apps.
 
 ## Sync everywhere
 
