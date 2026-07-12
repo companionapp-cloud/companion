@@ -25,6 +25,8 @@ function Group({ group }: { group: DocGroup }) {
         display: "flex",
         flexDirection: "column",
         height: "100%",
+        minWidth: 0,
+        overflow: "hidden",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: space.md, padding: `${space.md}px ${space.lg}px` }}>
@@ -43,8 +45,12 @@ function Group({ group }: { group: DocGroup }) {
         >
           <Icon name={group.icon} size={18} color={colors.accent} />
         </div>
-        <Text variant="title">{group.title}</Text>
-        <div style={{ marginLeft: "auto" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Text variant="title" numberOfLines={1}>
+            {group.title}
+          </Text>
+        </div>
+        <div style={{ flexShrink: 0 }}>
           <Badge label={`${docs.length} ${docs.length === 1 ? "guide" : "guides"}`} tone="neutral" />
         </div>
       </div>

@@ -426,14 +426,16 @@ a:hover {
 
 .docs-index {
   display: grid;
-  grid-template-columns: 1.35fr 1fr;
+  /* minmax(0, …) lets the cards shrink below their content's min width — without it a
+     1fr track is minmax(auto,1fr) and the cards overflow on narrow screens. */
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
   gap: 24px;
   align-items: start;
   font-family: "Geist", sans-serif;
 }
 @media (max-width: 860px) {
   .docs-index {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
