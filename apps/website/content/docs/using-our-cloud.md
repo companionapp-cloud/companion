@@ -14,17 +14,21 @@ related: [self-hosting, app-wont-sync]
 
 Companion Cloud keeps your devices in step. New accounts are end-to-end encrypted: your notes are encrypted on your device, and the server stores them without the ability to read them.
 
+## Create your account
+
+Accounts are created in the [Companion Cloud portal](https://portal.companionapp.cloud) — sign up, pick a plan, and it'll give you the server URL to point your apps at.
+
 ## Sign in
 
-Go to **Settings → Sync**, enter the **Server URL**, your **Email** and a **Password**, and choose **Register** (or **Log in** if you have an account).
+Then, in the app, open **Settings → Sync**, enter that **Server URL** along with the **Email** and **Password** you registered with, and choose **Log in**.
 
 ![Settings → Sync, before signing in](/docs/sync-settings.png)
 
-Do the same on your other devices, pointing them at the same server with the same account, and everything flows between them. Work offline and it reconciles when you reconnect.
+Do the same on your other devices — same server, same account — and everything flows between them. Work offline and it reconciles the moment you reconnect.
 
 ## Your recovery code
 
-Registering shows you a **recovery code** exactly once. Save it somewhere safe.
+The first time your account is encrypted, Companion shows you a **recovery code** exactly once. Save it somewhere safe.
 
 Your password unlocks the key that decrypts your notes, and we don't have that key. If you forget your password, the recovery code is the only way back in — without it, the data is unrecoverable, by design.
 

@@ -1,8 +1,11 @@
 name: Release
 
 # Fires when a version tag is pushed (e.g. v0.0.0, v1.2.3). Builds the server for
-# every desktop/server OS + a Linux Docker image, and the cloud as a Linux Docker
-# image, then attaches the binaries and image links to the GitHub release.
+# every desktop/server OS + a Linux Docker image, the cloud as a Linux Docker
+# image, and the offline WASM web app as a Linux Docker image, then attaches the
+# binaries and image links to the GitHub release. Building the web image here (vs.
+# on every push to main) keeps the web app in lockstep with the server/cloud
+# releases — one tag ships all three at the same version.
 on:
   push:
     tags:
@@ -23,6 +26,7 @@ env:
   # the images job lowercases defensively regardless.
   SERVER_IMAGE: companion-server
   CLOUD_IMAGE: companion-cloud
+  WEB_IMAGE: companion-web
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -68,7 +72,10 @@ jobs:
           files: dist/companion-server-*
 
   # ---------------------------------------------------------------------------
-  # Multi-arch Linux Docker images for the server and the cloud, pushed to GHCR.
+  # Linux Docker images for the server, cloud, and web app, pushed to GHCR.
+  # server/cloud are multi-arch; the web image is amd64-only (Go -> wasm + Vite
+  # build served by Caddy). The Railway services watch each image's :latest tag
+  # and auto-deploy the new digest — no deploy call from CI is needed.
   # ---------------------------------------------------------------------------
   images:
     name: image (${{ matrix.name }})
@@ -77,8 +84,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: server, image: companion-server, dockerfile: apps/server/Dockerfile }
-          - { name: cloud, image: companion-cloud, dockerfile: apps/cloud/Dockerfile }
+          - { name: server, image: companion-server, dockerfile: apps/server/Dockerfile, platforms: "linux/amd64,linux/arm64" }
+          - { name: cloud, image: companion-cloud, dockerfile: apps/cloud/Dockerfile, platforms: "linux/amd64,linux/arm64" }
+          - { name: web, image: companion-web, dockerfile: apps/web/Dockerfile, platforms: "linux/amd64" }
     steps:
       - uses: actions/checkout@v4
 
@@ -105,7 +113,7 @@ jobs:
         with:
           context: .
           file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platforms }}
           push: true
           tags: |
             ${{ steps.meta.outputs.ref }}:${{ steps.meta.outputs.version }}
