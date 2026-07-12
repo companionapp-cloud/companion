@@ -1,0 +1,465 @@
+/* Shared site styles, ported from the design handoff prototypes. Values mirror the
+   design-system tokens (warm-gray ramp + #f76808 accent, Geist typography). Classes
+   live here (not in scoped <style> blocks) because several target markup rendered
+   inside React islands, which Astro's scoped styles can't reach. */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  margin: 0;
+  padding: 0;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: "Geist", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  color: #1a1a18;
+}
+
+a {
+  color: #f76808;
+  text-decoration: none;
+}
+a:hover {
+  color: #d95a05;
+}
+
+/* ---- header ---- */
+
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22px 32px;
+}
+.site-header--border {
+  border-bottom: 1px solid #ededea;
+}
+.site-header--sticky {
+  position: sticky;
+  top: 0;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(10px);
+  z-index: 10;
+}
+.site-header .wordmark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+}
+.site-header .wordmark span {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1a1a18;
+}
+
+/* ---- footer ---- */
+
+.site-footer {
+  border-top: 1px solid #e0e0dc;
+  padding: 64px 24px 40px;
+  font-family: "Geist", sans-serif;
+}
+.site-footer--sunken {
+  background: #f5f5f3;
+}
+.site-footer--card {
+  background: #ffffff;
+}
+.site-footer a {
+  color: #595954;
+  text-decoration: none;
+  transition: color 0.15s ease;
+  font-size: 15px;
+}
+.site-footer a:hover {
+  color: #f76808;
+}
+.site-footer .brand-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.site-footer .brand-link span {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1a1a18;
+}
+.site-footer .cols {
+  max-width: 1040px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1.7fr 1fr 1fr 1fr;
+  gap: 48px;
+}
+.site-footer .col {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.site-footer .col-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: #a7a7a1;
+  text-transform: uppercase;
+}
+.site-footer .rule {
+  max-width: 1040px;
+  margin: 48px auto 24px;
+  height: 1px;
+  background: #e0e0dc;
+}
+.site-footer .legal {
+  max-width: 1040px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.site-footer .legal span {
+  font-size: 13px;
+  color: #a7a7a1;
+}
+@media (max-width: 860px) {
+  .site-footer .cols {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media (max-width: 520px) {
+  .site-footer .cols {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- shared type helpers ---- */
+
+.eyebrow {
+  font-family: "Geist Mono", "Geist", monospace;
+  font-size: 12.5px;
+  letter-spacing: 0.12em;
+  color: #f76808;
+  font-weight: 600;
+}
+
+.kbd {
+  font-family: "Geist Mono", monospace;
+  font-size: 13px;
+  background: #f5f5f3;
+  border: 1px solid #e0e0dc;
+  border-radius: 6px;
+  padding: 2px 8px;
+  color: #3e3e3a;
+  white-space: nowrap;
+}
+
+/* ---- prose (legal pages + article body) ---- */
+
+.prose h2 {
+  font-family: "Geist", sans-serif;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #1a1a18;
+  margin: 44px 0 16px;
+  scroll-margin-top: 96px;
+}
+.prose--article h2 {
+  font-size: 27px;
+  margin: 44px 0 18px;
+}
+.prose p {
+  font-size: 17px;
+  line-height: 1.7;
+  color: #3e3e3a;
+  margin: 0 0 18px;
+}
+.prose li {
+  font-size: 17px;
+  line-height: 1.7;
+  color: #3e3e3a;
+  margin: 0 0 10px;
+}
+.prose ul,
+.prose ol {
+  margin: 0 0 18px;
+  padding-left: 22px;
+}
+.prose a {
+  color: #f76808;
+  text-decoration: none;
+}
+.prose a:hover {
+  text-decoration: underline;
+}
+.prose strong {
+  color: #1a1a18;
+}
+
+/* markdown-generated inline code renders like the prototype's <span class="kbd"> */
+.prose code {
+  font-family: "Geist Mono", monospace;
+  font-size: 0.9em;
+  background: #f5f5f3;
+  border: 1px solid #e0e0dc;
+  border-radius: 6px;
+  padding: 2px 8px;
+  color: #3e3e3a;
+  white-space: nowrap;
+}
+
+/* fenced code blocks (e.g. the self-hosting docker command) */
+.prose pre {
+  margin: 0 0 20px;
+  padding: 16px 18px;
+  background: #f5f5f3;
+  border: 1px solid #e0e0dc;
+  border-radius: 12px;
+  overflow-x: auto;
+}
+.prose pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  white-space: pre;
+  color: #3e3e3a;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+/* callouts authored as blockquotes ( > **Tip:** … ) */
+.prose blockquote {
+  margin: 28px 0;
+  padding: 18px 20px;
+  background: #fff4ed;
+  border: 1px solid #feccab;
+  border-radius: 14px;
+}
+.prose blockquote p {
+  margin: 0;
+  font-size: 15.5px;
+  line-height: 1.6;
+  color: #7a3d10;
+}
+.prose blockquote strong {
+  color: #b83a05;
+}
+
+/* shortcut / reference tables */
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 24px;
+  border: 1px solid #e0e0dc;
+  border-radius: 14px;
+  overflow: hidden;
+}
+.prose th,
+.prose td {
+  text-align: left;
+  padding: 13px 20px;
+  border-bottom: 1px solid #ededea;
+  font-size: 16px;
+  color: #3e3e3a;
+}
+.prose th {
+  background: #f5f5f3;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #7b7b75;
+}
+.prose tr:last-child td {
+  border-bottom: none;
+}
+.prose td:last-child {
+  text-align: right;
+}
+
+/* ---- table of contents / breadcrumb / related ---- */
+
+.toc {
+  padding: 20px 22px;
+  background: #f5f5f3;
+  border: 1px solid #e0e0dc;
+  border-radius: 14px;
+}
+.toc .toc-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: #a7a7a1;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.toc nav {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  font-size: 15px;
+}
+.toc a,
+.crumb a,
+.rel a {
+  text-decoration: none;
+  color: #7b7b75;
+  transition: color 0.15s ease;
+}
+.toc a:hover,
+.crumb a:hover,
+.rel a:hover {
+  color: #f76808;
+}
+
+/* ---- docs index page ---- */
+
+.docpage a {
+  text-decoration: none;
+  display: block;
+}
+.docpage .t {
+  color: #1a1a18;
+  font-weight: 600;
+  transition: color 0.15s ease;
+}
+.docpage a:hover .t {
+  color: #f76808;
+}
+.docpage .d {
+  color: #7b7b75;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.docpage .group-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px 40px;
+}
+@media (max-width: 640px) {
+  .docpage .group-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* related-articles grid (docs article footer) */
+.rel-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 560px) {
+  .rel-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.chip {
+  font-family: "Geist", sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: #595954;
+  padding: 5px 12px;
+  border: 1px solid #e0e0dc;
+  border-radius: 999px;
+  transition: all 0.15s ease;
+}
+.chip:hover {
+  border-color: #f76808 !important;
+  color: #f76808 !important;
+}
+
+/* docs search results (rendered by the DocsSearch island) */
+.sr {
+  display: block;
+  text-decoration: none;
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.sr:hover {
+  background: #f5f5f3;
+}
+.sr mark,
+.hl {
+  background: #ffe0c7;
+  color: #b83a05;
+  border-radius: 3px;
+  padding: 0 1px;
+  font-weight: 600;
+}
+
+/* ---- docs index cards on the landing page (DocsIndex island) ---- */
+
+.docs-index {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: 24px;
+  align-items: start;
+  font-family: "Geist", sans-serif;
+}
+@media (max-width: 860px) {
+  .docs-index {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- contact form ---- */
+
+.field {
+  width: 100%;
+  font-family: "Geist", sans-serif;
+  font-size: 15px;
+  color: #1a1a18;
+  background: #fff;
+  border: 1px solid #cececa;
+  border-radius: 10px;
+  padding: 12px 14px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.field::placeholder {
+  color: #a7a7a1;
+}
+.field:focus {
+  border-color: #f76808;
+  box-shadow: 0 0 0 3px rgba(247, 104, 8, 0.12);
+}
+textarea.field {
+  min-height: 152px;
+  resize: vertical;
+  line-height: 1.55;
+}
+.rtype:hover {
+  border-color: #a7a7a1;
+}
+
+/* ---- landing page responsive type ---- */
+
+.hero-title {
+  font-family: "Geist", sans-serif;
+  font-weight: 600;
+  font-size: clamp(40px, 8vw, 64px);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  color: #1c1917;
+  max-width: 14ch;
+  text-wrap: balance;
+}
+.section-title {
+  font-family: "Geist", sans-serif;
+  font-weight: 600;
+  font-size: clamp(32px, 5.5vw, 44px);
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+  color: #1a1a18;
+  text-align: center;
+  text-wrap: balance;
+}

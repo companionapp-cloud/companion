@@ -296,9 +296,17 @@ export function adminDeletePlan(id: string): Promise<{ plans: Plan[] }> {
 // ---- config ---------------------------------------------------------------
 
 // getConfig returns public runtime config: the sync base URL clients enter in the Companion app,
-// and appUrl — where the portal deeplinks for app-only actions like changing an encrypted
-// account's password (empty when the operator hasn't set CLOUD_APP_URL).
-export function getConfig(): Promise<{ syncUrl: string; appUrl: string }> {
+// appUrl — where the portal deeplinks for app-only actions like changing an encrypted
+// account's password (empty when the operator hasn't set CLOUD_APP_URL) — and the PostHog
+// analytics config (empty when POSTHOG_PROJECT_TOKEN is unset, which disables analytics).
+export interface RuntimeConfig {
+  syncUrl: string;
+  appUrl: string;
+  posthogProjectToken: string;
+  posthogHost: string;
+}
+
+export function getConfig(): Promise<RuntimeConfig> {
   return req("/config");
 }
 

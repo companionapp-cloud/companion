@@ -1,0 +1,16 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "moduleSuffixes": [
+      ".web",
+      ""
+    ]
+  },
+  "include": [
+    "app",
+    "src",
+    "../../packages/design-system/src/react-native.d.ts"
+  ]
+}

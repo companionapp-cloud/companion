@@ -1,0 +1,74 @@
+name: Deploy website
+
+# On every merge to main that touches the site: build the marketing + docs site
+# (apps/website, an Expo Router static export) into a Docker image (Caddy static server)
+# and push it to GHCR. The Railway service watches this image tag and auto-deploys the
+# new digest — no deploy call from CI is needed.
+#
+# The PostHog project token is a PUBLIC client key inlined into the bundle at build time;
+# it's provided to the Docker build as a build arg sourced from the POSTHOG_PROJECT_TOKEN
+# repository secret (Settings → Secrets and variables → Actions).
+#
+# One-time setup:
+#   - Add the POSTHOG_PROJECT_TOKEN Actions secret.
+#   - Point the Railway service at ghcr.io/<owner>/companion-website:latest and enable
+#     auto-deploy on the image. If the package is private, give Railway registry
+#     credentials (a PAT with read:packages); otherwise make the package public.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/website/**"
+      - "packages/design-system/**"
+      - "package-lock.json"
+      - ".github/workflows/deploy-website.yml"
+  workflow_dispatch:
+
+# A newer merge supersedes an in-flight build.
+concurrency:
+  group: deploy-website
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write # push the image to GHCR
+
+jobs:
+  image:
+    name: build + push image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image ref (lowercase owner)
+        id: meta
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "ref=ghcr.io/${owner}/companion-website" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/website/Dockerfile
+          platforms: linux/amd64
+          push: true
+          # Public PostHog client token, inlined into the static bundle by expo export.
+          build-args: |
+            POSTHOG_PROJECT_TOKEN=${{ secrets.POSTHOG_PROJECT_TOKEN }}
+          # :latest is the tag Railway watches for auto-deploy; the :<sha> tag is an
+          # immutable record of each build for traceability and rollback.
+          tags: |
+            ${{ steps.meta.outputs.ref }}:${{ github.sha }}
+            ${{ steps.meta.outputs.ref }}:latest
+          cache-from: type=gha,scope=website
+          cache-to: type=gha,mode=max,scope=website

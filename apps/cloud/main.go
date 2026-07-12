@@ -113,8 +113,18 @@ func handler(srv *syncserver.Server, bill *billing, adm *admin, vrf *verifier, p
 	// (e.g. companion://settings/security); empty disables the link and the portal shows guidance
 	// text only.
 	appURL := strings.TrimRight(os.Getenv("CLOUD_APP_URL"), "/")
+	// PostHog analytics config for the frontend. These are injected at runtime (not baked
+	// into the Vite build) so the same embedded assets work across environments. The
+	// project token is a public client-side key; analytics stay disabled when it's unset.
+	posthogToken := strings.TrimSpace(os.Getenv("POSTHOG_PROJECT_TOKEN"))
+	posthogHost := strings.TrimSpace(os.Getenv("POSTHOG_HOST"))
 	mux.HandleFunc("GET /api/v1/config", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"syncUrl": syncURL, "appUrl": appURL})
+		writeJSON(w, http.StatusOK, map[string]string{
+			"syncUrl":             syncURL,
+			"appUrl":              appURL,
+			"posthogProjectToken": posthogToken,
+			"posthogHost":         posthogHost,
+		})
 	})
 
 	// Coarse abuse protection for the cloud-only credential/email flows: cap attempts so

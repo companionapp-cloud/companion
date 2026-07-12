@@ -46,3 +46,10 @@ apps/cloud/emails/dist/*
 apps/mobile/ios/
 apps/mobile/android/
 apps/mobile/.expo/
+
+# design-sync (claude.ai/design system import)
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules

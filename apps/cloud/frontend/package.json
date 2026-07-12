@@ -12,6 +12,7 @@
   "dependencies": {
     "@companion/design-system": "*",
     "hash-wasm": "4.12.0",
+    "posthog-js": "1.399.2",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native-web": "0.21.2"

@@ -1,0 +1,35 @@
+# Serves the marketing + docs site (apps/website) as static files on Railway. Based on
+# Railway's recommended Caddy config (docs.railway.com/guides/spa-routing-configuration):
+# binds Railway's $PORT. Expo Router static export emits a real .html per route
+# (contact.html, docs/your-first-note.html, …), so clean URLs map to those files and
+# unknown paths fall back to the 404 page.
+{
+	admin off
+	persist_config off
+	auto_https off
+	log {
+		format json
+	}
+	servers {
+		trusted_proxies static private_ranges 100.0.0.0/8
+	}
+}
+
+:{$PORT:3000} {
+	log {
+		format json
+	}
+
+	root * /srv/dist
+
+	encode gzip zstd
+
+	@webmanifest path *.webmanifest
+	header @webmanifest Content-Type application/manifest+json
+
+	# Resolve clean URLs to the exported files: exact file, then <path>.html, then a
+	# directory index; anything else serves the exported not-found page.
+	try_files {path} {path}.html {path}/index.html /+not-found.html
+
+	file_server
+}

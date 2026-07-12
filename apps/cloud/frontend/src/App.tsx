@@ -3,6 +3,8 @@ import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 import * as api from "./api";
 import { styles as g } from "./theme";
 import { navigate, usePath } from "./router";
+import { useAnalytics } from "./useAnalytics";
+import { resetAnalytics } from "./config/posthog";
 import Auth from "./Auth";
 import Toolbar from "./Toolbar";
 import Home from "./Home";
@@ -24,6 +26,8 @@ export default function App() {
   const [sub, setSub] = useState<api.Subscription | null>(null);
   const [admin, setAdmin] = useState(false);
   const [error, setError] = useState("");
+
+  useAnalytics(account);
 
   const load = async () => {
     try {
@@ -78,6 +82,7 @@ export default function App() {
   }, [screen, admin, path]);
 
   const signOut = () => {
+    resetAnalytics();
     api.setToken(null);
     setAccount(null);
     setSub(null);
