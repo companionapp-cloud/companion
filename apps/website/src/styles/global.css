@@ -29,6 +29,32 @@ a:hover {
   color: #d95a05;
 }
 
+/* ---- hero glow "breathing" ---- */
+
+/* The hero glow slowly expands/contracts and brightens — a calm ambient pulse. The
+   translateX(-50%) keeps it horizontally centered (the inline style sets the same, so
+   there's no jump before the first keyframe). */
+@keyframes hero-breathe {
+  0%,
+  100% {
+    transform: translateX(-50%) scale(0.8);
+    opacity: 0.45;
+  }
+  50% {
+    transform: translateX(-50%) scale(1.35);
+    opacity: 1;
+  }
+}
+.hero-glow {
+  animation: hero-breathe 6s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-glow {
+    animation: none;
+  }
+}
+
 /* ---- header ---- */
 
 .site-header {

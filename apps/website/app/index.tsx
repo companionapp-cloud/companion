@@ -31,7 +31,7 @@ export default function Landing() {
           background: "radial-gradient(120% 90% at 50% -10%, #fff7f0 0%, #fbfaf9 46%, #fbfaf9 100%)",
         }}
       >
-        <div aria-hidden style={glow} />
+        <div aria-hidden className="hero-glow" style={glow} />
 
         <SiteHeader
           border={false}
@@ -163,10 +163,10 @@ const glow: React.CSSProperties = {
   top: "-6%",
   left: "50%",
   transform: "translateX(-50%)",
-  width: 720,
-  height: 720,
+  width: 780,
+  height: 780,
   borderRadius: "50%",
-  background: "radial-gradient(circle, #f768082e 0%, #f7680810 38%, transparent 68%)",
+  background: "radial-gradient(circle, #f7680855 0%, #f768081f 40%, transparent 70%)",
   filter: "blur(10px)",
   pointerEvents: "none",
 };
