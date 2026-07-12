@@ -1,0 +1,38 @@
+# Serves the offline WASM PWA (apps/web) as a static SPA on Railway. Based on
+# Railway's recommended Caddy config (docs.railway.com/guides/spa-routing-configuration):
+# binds Railway's $PORT and falls back to index.html so client-side routes resolve.
+{
+	admin off
+	persist_config off
+	auto_https off
+	log {
+		format json
+	}
+	servers {
+		trusted_proxies static private_ranges 100.0.0.0/8
+	}
+}
+
+:{$PORT:3000} {
+	log {
+		format json
+	}
+
+	root * /srv/dist
+
+	encode gzip zstd
+
+	# Content types Caddy's default mime table doesn't set. .wasm is covered by Go's
+	# builtin table, but pin both explicitly so serving is correct regardless of the
+	# image's /etc/mime.types. Streaming instantiation of core.wasm requires application/wasm.
+	@wasm path *.wasm
+	header @wasm Content-Type application/wasm
+	@webmanifest path *.webmanifest
+	header @webmanifest Content-Type application/manifest+json
+
+	file_server
+
+	# SPA fallback: unknown paths serve the app shell. Also makes Railway's healthcheck
+	# (default /) return 200 without a dedicated route.
+	try_files {path} /index.html
+}

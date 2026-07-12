@@ -1,96 +1,116 @@
 name: Deploy web
 
-# Builds the offline WASM web app (apps/web) and uploads the static bundle to the
-# Railway object-storage bucket on every merge to main. The bucket is S3-compatible,
-# so we sync with the AWS CLI (preinstalled on the runner) — this is a plain file
-# upload, not `railway up`; a static/CDN layer in front of the bucket serves it.
+# On every merge to main: build the offline WASM web app (apps/web) into a Docker
+# image (Go -> wasm, Vite build, Caddy static server with SPA routing), push it to
+# GHCR, then point an existing Railway service at the new image and redeploy it.
+#
+# One-time setup:
+#   - GHCR: the pushed package must be pullable by Railway. Either make the
+#     `companion-web` package public, or set the repo secret GHCR_PULL_TOKEN to a PAT
+#     with `read:packages` (Railway stores it as durable registry credentials).
+#   - Railway: an existing service (image-based). Provide its ids/token:
+#       secret RAILWAY_API_TOKEN   account or team API token (railway.com/account/tokens)
+#       var    RAILWAY_SERVICE_ID  target service id
+#       var    RAILWAY_ENVIRONMENT_ID  target environment id
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-# A newer merge supersedes an in-flight deploy — no point finishing the old upload.
+# A newer merge supersedes an in-flight deploy.
 concurrency:
   group: deploy-web
   cancel-in-progress: true
 
 permissions:
   contents: read
+  packages: write # push the image to GHCR
 
 jobs:
-  deploy:
-    name: build + upload apps/web
+  # ---------------------------------------------------------------------------
+  # Build apps/web into a Docker image and push it to GHCR (amd64 — Railway's
+  # runtime arch). Emits the immutable, digest-pinned-by-sha ref for the deploy job.
+  # ---------------------------------------------------------------------------
+  image:
+    name: build + push image
     runs-on: ubuntu-latest
-    env:
-      # --- Railway bucket connection (add these as GitHub repo secrets) ---
-      #   RAILWAY_S3_BUCKET             bucket name
-      #   RAILWAY_S3_ENDPOINT           S3 endpoint URL, e.g. https://<host>
-      #   RAILWAY_S3_ACCESS_KEY_ID      bucket access key
-      #   RAILWAY_S3_SECRET_ACCESS_KEY  bucket secret key
-      #   RAILWAY_S3_REGION (optional)  defaults to us-east-1
-      AWS_ACCESS_KEY_ID: ${{ secrets.RAILWAY_S3_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.RAILWAY_S3_SECRET_ACCESS_KEY }}
-      AWS_REGION: ${{ secrets.RAILWAY_S3_REGION || 'us-east-1' }}
-      AWS_ENDPOINT: ${{ secrets.RAILWAY_S3_ENDPOINT }}
-      BUCKET: ${{ secrets.RAILWAY_S3_BUCKET }}
-      # AWS CLI v2 sends flexible (CRC32) checksums by default, which many
-      # S3-compatible stores reject. Only send them when the operation requires it.
-      AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
-      AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.26.1"
-          cache-dependency-path: core/go.sum
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
-
-      - name: Build wasm core + static bundle
+      - name: Resolve image ref (lowercase owner)
+        id: meta
         run: |
-          make web-assets                     # core.wasm (GOOS=js) + wasm_exec.js -> public/
-          npm run build -w @companion/web     # vite build -> apps/web/dist
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          ref="ghcr.io/${owner}/companion-web"
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+          echo "image=${ref}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
-      - name: Upload to Railway bucket
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.ref }}:${{ github.sha }}
+            ${{ steps.meta.outputs.ref }}:latest
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+  # ---------------------------------------------------------------------------
+  # Point the Railway service at the freshly pushed image and trigger a deploy.
+  # serviceInstanceUpdate sets source.image (+ optional pull credentials), then
+  # serviceInstanceDeployV2 rolls it out. GraphQL runs root fields serially, so a
+  # single request updates before it deploys.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: update Railway service
+    needs: image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update image + redeploy
+        env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          SERVICE_ID: ${{ vars.RAILWAY_SERVICE_ID }}
+          ENVIRONMENT_ID: ${{ vars.RAILWAY_ENVIRONMENT_ID }}
+          IMAGE: ${{ needs.image.outputs.image }}
+          GHCR_USER: ${{ github.repository_owner }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
         run: |
           set -euo pipefail
-          dist=apps/web/dist
-          s3="s3://$BUCKET"
-          aws="aws s3 --endpoint-url $AWS_ENDPOINT"
 
-          # 1. Content-hashed assets are immutable — cache them hard. No --delete so
-          #    stale hashes older clients may still request keep resolving.
-          $aws sync "$dist" "$s3" \
-            --exclude "*" --include "assets/*" \
-            --cache-control "public, max-age=31536000, immutable"
+          # source.image is required; registryCredentials is added only when a durable
+          # pull token is provided (otherwise the GHCR package must be public).
+          input=$(jq -nc \
+            --arg img "$IMAGE" --arg u "$GHCR_USER" --arg p "$GHCR_PULL_TOKEN" \
+            'if $p == "" then { source: { image: $img } }
+             else { source: { image: $img }, registryCredentials: { username: $u, password: $p } } end')
 
-          # 2. Everything else (index.html, sw.js, manifest, icons, core.wasm, wasm_exec.js)
-          #    must revalidate. --delete prunes files removed from the build.
-          $aws sync "$dist" "$s3" \
-            --exclude "assets/*" \
-            --cache-control "public, max-age=0, must-revalidate" \
-            --delete
+          body=$(jq -nc \
+            --arg s "$SERVICE_ID" --arg e "$ENVIRONMENT_ID" --argjson input "$input" \
+            '{ query: "mutation($serviceId:String!,$environmentId:String!,$input:ServiceInstanceUpdateInput!){ serviceInstanceUpdate(serviceId:$serviceId,environmentId:$environmentId,input:$input) serviceInstanceDeployV2(serviceId:$serviceId,environmentId:$environmentId) }",
+               variables: { serviceId: $s, environmentId: $e, input: $input } }')
 
-          # 3. Fix content-types the CLI's extension guessing gets wrong or generic.
-          #    Root core.wasm is regenerated each deploy, so keep it revalidating;
-          #    hashed assets/*.wasm (wa-sqlite) are immutable.
-          $aws cp "$s3/core.wasm" "$s3/core.wasm" \
-            --metadata-directive REPLACE --content-type application/wasm \
-            --cache-control "public, max-age=0, must-revalidate"
-          if aws s3 --endpoint-url "$AWS_ENDPOINT" ls "$s3/manifest.webmanifest" >/dev/null 2>&1; then
-            $aws cp "$s3/manifest.webmanifest" "$s3/manifest.webmanifest" \
-              --metadata-directive REPLACE --content-type application/manifest+json \
-              --cache-control "public, max-age=0, must-revalidate"
+          resp=$(curl -sS -X POST https://backboard.railway.com/graphql/v2 \
+            -H "Authorization: Bearer $RAILWAY_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data "$body")
+
+          echo "$resp"
+          if echo "$resp" | jq -e '.errors' >/dev/null 2>&1; then
+            echo "::error::Railway API returned errors"
+            exit 1
           fi
-          $aws cp "$s3" "$s3" --recursive \
-            --exclude "*" --include "assets/*.wasm" \
-            --metadata-directive REPLACE --content-type application/wasm \
-            --cache-control "public, max-age=31536000, immutable"
+          echo "Deployed $IMAGE to Railway service $SERVICE_ID"
