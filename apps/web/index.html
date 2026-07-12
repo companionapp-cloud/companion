@@ -2,7 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- viewport-fit=cover lets the app paint under the iPhone notch/home bar (the
+         safe-area env() padding on #root keeps content clear of them);
+         interactive-widget=resizes-content keeps the editor above the software keyboard
+         on Android. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+    />
     <title>Companion</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
@@ -18,9 +25,19 @@
     />
     <style>
       html, body, #root { height: 100%; margin: 0; }
+      /* dvh tracks the *visible* viewport on mobile (URL bar collapse, keyboard), so the
+         app never sits half under browser chrome. Desktop is unaffected (dvh == vh). */
+      @supports (height: 100dvh) {
+        html, body { height: 100dvh; }
+      }
       body { background: #f5f5f3; color: #1a1a18;
-             font-family: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
-      #root { display: flex; }
+             font-family: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+             /* Stop pull-to-refresh / rubber-banding from fighting in-app scrollers. */
+             overscroll-behavior-y: none; }
+      #root { display: flex; box-sizing: border-box;
+              /* Keep content clear of the notch / home bar (zero everywhere else). */
+              padding: env(safe-area-inset-top) env(safe-area-inset-right)
+                       env(safe-area-inset-bottom) env(safe-area-inset-left); }
       .boot { margin: auto; color: #7b7b75; font-size: 14px; }
     </style>
     <!-- Defines globalThis.Go; must load before the module that runs core.wasm. -->

@@ -78,6 +78,12 @@ declare module "react-native" {
     children?: ReactNode | ((state: PressableState) => ReactNode);
     "aria-label"?: string;
   }
+  interface ModalProps extends ViewProps {
+    visible?: boolean;
+    transparent?: boolean;
+    animationType?: "none" | "slide" | "fade";
+    onRequestClose?: () => void;
+  }
   interface FlatListProps<T> {
     data: readonly T[];
     renderItem: (info: { item: T; index: number }) => ReactNode;
@@ -120,11 +126,15 @@ declare module "react-native" {
   export const TextInput: ComponentType<TextInputProps>;
   export const Pressable: ComponentType<PressableProps>;
   export const ActivityIndicator: ComponentType<{ size?: "small" | "large"; color?: string }>;
+  export const Modal: ComponentType<ModalProps>;
   export function FlatList<T>(props: FlatListProps<T>): ReactNode;
+
+  export function useWindowDimensions(): { width: number; height: number; scale: number; fontScale: number };
 
   export const StyleSheet: {
     create<T extends Record<string, Style>>(styles: T): T;
     flatten(style: StyleProp): Style;
+    hairlineWidth: number;
   };
   export const Platform: { OS: string; select<T>(spec: Record<string, T>): T };
 

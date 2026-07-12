@@ -1,5 +1,8 @@
 export { App } from "./App";
 export { AppShell } from "./AppShell";
+export { MobileWebShell } from "./mobile/MobileShell";
+export type { MobileWebShellProps } from "./mobile/MobileShell";
+export { useMobileWebShell } from "./mobile/shellMode";
 export { AppToolbar } from "./AppToolbar";
 export { FocusView } from "./FocusView";
 export { NoteEditor } from "./NoteEditor";

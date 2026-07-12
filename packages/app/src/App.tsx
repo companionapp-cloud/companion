@@ -10,11 +10,33 @@ import { TasksProvider } from "./TasksProvider";
 import { ProjectsProvider } from "./ProjectsProvider";
 import { ObjectTypesProvider } from "./ObjectTypesProvider";
 import { AppShell } from "./AppShell";
+import { MobileWebShell } from "./mobile/MobileShell";
+import { useMobileWebShell } from "./mobile/shellMode";
 import type { NotificationScheduler } from "./RemindersProvider";
 import { FocusView } from "./FocusView";
 import { focusTarget } from "./focus";
 import { CaptureView } from "./CaptureView";
 import { captureRequested } from "./capture";
+
+/** Mounts the shell matching the viewport: under-desktop widths get the mobile stacked
+ * shell, everything else the desktop rail + workspace (see shellMode.ts). A host that is
+ * never mobile (the desktop app) pins `shell="desktop"` and skips the switch entirely. */
+function ShellSwitch({
+  shell,
+  topInset,
+  notificationScheduler,
+}: {
+  shell?: "auto" | "desktop";
+  topInset?: number;
+  notificationScheduler?: NotificationScheduler;
+}) {
+  const mobile = useMobileWebShell() && shell !== "desktop";
+  return mobile ? (
+    <MobileWebShell topInset={topInset} notificationScheduler={notificationScheduler} />
+  ) : (
+    <AppShell topInset={topInset} notificationScheduler={notificationScheduler} />
+  );
+}
 
 /**
  * App is the shared root. The platform shell creates the CoreBridge (wasm on web,
@@ -25,11 +47,16 @@ import { captureRequested } from "./capture";
  */
 export function App({
   core,
+  shell = "auto",
   topInset,
   notificationScheduler,
   documentSource,
 }: {
   core: CoreBridge;
+  /** Which app shell to mount. "auto" (web) picks by viewport width — phone/tablet
+   *  widths get the mobile stacked shell. The desktop app pins "desktop": it must never
+   *  render the mobile shell, however narrow its window. */
+  shell?: "auto" | "desktop";
   topInset?: number;
   /** Platform reminder scheduler (PLAN §6.4). Desktop/mobile shells inject a native
    *  one; omitted, RemindersProvider falls back to the best-effort web scheduler. */
@@ -75,7 +102,7 @@ export function App({
             </TasksProvider>
           </NotesProvider>
         ) : (
-          <AppShell topInset={topInset} notificationScheduler={notificationScheduler} />
+          <ShellSwitch shell={shell} topInset={topInset} notificationScheduler={notificationScheduler} />
         )}
         </SyncProvider>
       </DocumentSourceProvider>

@@ -75,7 +75,9 @@ const rootTag = document.getElementById("root")!;
 rootTag.innerHTML = "";
 AppRegistry.registerComponent(
   "Companion",
-  () => () => createElement(App, { core, topInset, notificationScheduler, documentSource }),
+  // shell: "desktop" — the desktop app never renders the mobile shell, however narrow
+  // its window gets.
+  () => () => createElement(App, { core, shell: "desktop", topInset, notificationScheduler, documentSource }),
 );
 AppRegistry.runApplication("Companion", { rootTag });
 
