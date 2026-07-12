@@ -427,7 +427,6 @@ function ReminderNavigationBridge() {
 }
 
 export function AppShell({ topInset = 0, notificationScheduler, toolsStorage }: AppShellProps) {
-  const linking = useMemo(webLinking, []);
   return (
     <ToolVisibilityProvider storage={toolsStorage}>
     <NotesProvider>
@@ -437,21 +436,7 @@ export function AppShell({ topInset = 0, notificationScheduler, toolsStorage }: 
         <ProjectsProvider>
          <ObjectTypesProvider>
           <CalendarProvider>
-          <NavigationContainer linking={linking} documentTitle={{ enabled: false }}>
-            <Nav.Navigator initialRouteName="notes" topInset={topInset}>
-              <Nav.Screen name="today" component={TodayScreen} />
-              <Nav.Screen name="chat" component={ChatsScreen} />
-              <Nav.Screen name="calendar" component={CalendarScreen} />
-              <Nav.Screen name="notes" component={NotesRouteScreen} />
-              <Nav.Screen name="tasks" component={TasksRouteScreen} />
-              <Nav.Screen name="habits" component={ViewScreen} />
-              <Nav.Screen name="graph" component={GraphScreen} />
-              <Nav.Screen name="trash" component={TrashScreen} />
-              <Nav.Screen name="settings" component={SettingsScreen} />
-              <Nav.Screen name="notifications" component={NotificationsRouteScreen} />
-              <Nav.Screen name="project" component={ProjectView} />
-            </Nav.Navigator>
-          </NavigationContainer>
+          <ShellRoutes topInset={topInset} />
           </CalendarProvider>
          </ObjectTypesProvider>
         </ProjectsProvider>
@@ -460,6 +445,32 @@ export function AppShell({ topInset = 0, notificationScheduler, toolsStorage }: 
       </TasksProvider>
     </NotesProvider>
     </ToolVisibilityProvider>
+  );
+}
+
+/** The router + screens. Lives under ToolVisibilityProvider so a fresh landing (no URL
+ * path to restore) starts on the user's first *visible* tool, not a hardcoded section.
+ * Settings is the fallback — it's the one view that can't be hidden. */
+function ShellRoutes({ topInset }: { topInset: number }) {
+  const linking = useMemo(webLinking, []);
+  const { tools, hidden } = useToolVisibility();
+  const initialRoute = tools.find((t) => !hidden.has(t.id))?.id ?? "settings";
+  return (
+    <NavigationContainer linking={linking} documentTitle={{ enabled: false }}>
+      <Nav.Navigator initialRouteName={initialRoute} topInset={topInset}>
+        <Nav.Screen name="today" component={TodayScreen} />
+        <Nav.Screen name="chat" component={ChatsScreen} />
+        <Nav.Screen name="calendar" component={CalendarScreen} />
+        <Nav.Screen name="notes" component={NotesRouteScreen} />
+        <Nav.Screen name="tasks" component={TasksRouteScreen} />
+        <Nav.Screen name="habits" component={ViewScreen} />
+        <Nav.Screen name="graph" component={GraphScreen} />
+        <Nav.Screen name="trash" component={TrashScreen} />
+        <Nav.Screen name="settings" component={SettingsScreen} />
+        <Nav.Screen name="notifications" component={NotificationsRouteScreen} />
+        <Nav.Screen name="project" component={ProjectView} />
+      </Nav.Navigator>
+    </NavigationContainer>
   );
 }
 
