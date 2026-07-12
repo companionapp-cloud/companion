@@ -9,9 +9,12 @@ name: Deploy web
 #     `companion-web` package public, or set the repo secret GHCR_PULL_TOKEN to a PAT
 #     with `read:packages` (Railway stores it as durable registry credentials).
 #   - Railway: an existing service (image-based). Provide its ids/token:
-#       secret RAILWAY_API_TOKEN   account or team API token (railway.com/account/tokens)
-#       var    RAILWAY_SERVICE_ID  target service id
-#       var    RAILWAY_ENVIRONMENT_ID  target environment id
+#       secret RAILWAY_PROJECT_TOKEN  project token (Project Settings -> Tokens); it is
+#                                     scoped to one project+environment and sent via the
+#                                     Project-Access-Token header (not Authorization: Bearer).
+#       var    RAILWAY_SERVICE_ID     target service id
+#       var    RAILWAY_ENVIRONMENT_ID target environment id (must be the token's environment;
+#                                     find it via the projectToken query — see README/PR notes)
 on:
   push:
     branches: [main]
@@ -82,7 +85,7 @@ jobs:
     steps:
       - name: Update image + redeploy
         env:
-          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          RAILWAY_PROJECT_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
           SERVICE_ID: ${{ vars.RAILWAY_SERVICE_ID }}
           ENVIRONMENT_ID: ${{ vars.RAILWAY_ENVIRONMENT_ID }}
           IMAGE: ${{ needs.image.outputs.image }}
@@ -103,8 +106,10 @@ jobs:
             '{ query: "mutation($serviceId:String!,$environmentId:String!,$input:ServiceInstanceUpdateInput!){ serviceInstanceUpdate(serviceId:$serviceId,environmentId:$environmentId,input:$input) serviceInstanceDeployV2(serviceId:$serviceId,environmentId:$environmentId) }",
                variables: { serviceId: $s, environmentId: $e, input: $input } }')
 
+          # Project tokens authenticate via the Project-Access-Token header, not
+          # Authorization: Bearer. The token is scoped to $ENVIRONMENT_ID's environment.
           resp=$(curl -sS -X POST https://backboard.railway.com/graphql/v2 \
-            -H "Authorization: Bearer $RAILWAY_API_TOKEN" \
+            -H "Project-Access-Token: $RAILWAY_PROJECT_TOKEN" \
             -H "Content-Type: application/json" \
             --data "$body")
 
