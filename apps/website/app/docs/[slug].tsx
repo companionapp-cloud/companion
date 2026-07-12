@@ -2,6 +2,7 @@ import { Badge, Icon } from "@companion/design-system";
 import { useLocalSearchParams } from "expo-router";
 import { usePostHog } from "posthog-js/react";
 import { FeedbackRow } from "../../src/components/FeedbackRow";
+import { Seo } from "../../src/components/Seo";
 import { SiteFooter } from "../../src/components/SiteFooter";
 import { SiteHeader } from "../../src/components/SiteHeader";
 import { getAllDocs, getDoc } from "../../src/content/docs";
@@ -50,6 +51,12 @@ export default function DocArticle() {
 
   return (
     <div>
+      <Seo
+        title={`${frontmatter.title} — Companion Docs`}
+        description={frontmatter.excerpt}
+        path={`/docs/${doc.slug}`}
+        type="article"
+      />
       <SiteHeader
         sticky
         links={[

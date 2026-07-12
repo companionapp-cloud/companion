@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Seo } from "./Seo";
 import { SiteFooter } from "./SiteFooter";
 import { SiteHeader } from "./SiteHeader";
 
@@ -7,13 +8,16 @@ interface Props {
   updated: string;
   intro: string;
   toc: { href: string; label: string }[];
+  /** Route path for canonical/OG (e.g. "/privacy"). */
+  path: string;
   children: ReactNode;
 }
 
 /** Shared shell for the Privacy and Terms pages. */
-export function LegalPage({ heading, updated, intro, toc, children }: Props) {
+export function LegalPage({ heading, updated, intro, toc, path, children }: Props) {
   return (
     <div>
+      <Seo title={`${heading} — Companion`} description={intro} path={path} />
       <SiteHeader
         links={[
           { label: "Docs", href: "/docs", variant: "ghost" },

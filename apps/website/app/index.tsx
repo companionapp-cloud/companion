@@ -3,6 +3,7 @@ import { usePostHog } from "posthog-js/react";
 import { DocsIndex } from "../src/components/DocsIndex";
 import { FeatureShowcase } from "../src/components/FeatureShowcase";
 import { NavButtons } from "../src/components/NavButtons";
+import { Seo } from "../src/components/Seo";
 import { SiteFooter } from "../src/components/SiteFooter";
 import { SiteHeader } from "../src/components/SiteHeader";
 
@@ -14,6 +15,11 @@ export default function Landing() {
 
   return (
     <div style={{ background: "#fbfaf9" }}>
+      <Seo
+        title="Companion — Your open source home for your life"
+        description="Companion turns your ideas into actionable tasks, connected notes, and repeatable habits — and uses the power of AI to make it a natural conversation."
+        path="/"
+      />
       {/* hero */}
       <div
         style={{

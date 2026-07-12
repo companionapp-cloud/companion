@@ -4,6 +4,7 @@ export default function Privacy() {
   return (
     <LegalPage
       heading="Privacy Policy"
+      path="/privacy"
       updated="July 12, 2026"
       intro="Companion is local-first and open source. Your notes, tasks, and habits live on your own devices by default — this policy explains what little we collect, and why."
       toc={[

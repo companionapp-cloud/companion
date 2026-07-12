@@ -4,6 +4,7 @@ export default function Terms() {
   return (
     <LegalPage
       heading="Terms of Service"
+      path="/terms"
       updated="July 12, 2026"
       intro="These terms cover your use of the Companion apps and the optional Companion Cloud service. The app itself is free and open source; using it means you agree to what's below."
       toc={[

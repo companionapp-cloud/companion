@@ -1,4 +1,5 @@
 import { ContactForm } from "../src/components/ContactForm";
+import { Seo } from "../src/components/Seo";
 import { SiteFooter } from "../src/components/SiteFooter";
 import { SiteHeader } from "../src/components/SiteHeader";
 
@@ -7,6 +8,11 @@ const GITHUB_URL = "https://github.com/chrisdmacrae/companion";
 export default function Contact() {
   return (
     <div>
+      <Seo
+        title="Contact — Companion"
+        description="Questions, ideas, or a bug to report? Send us a note and we'll get back to you."
+        path="/contact"
+      />
       <SiteHeader
         links={[
           { label: "Docs", href: "/docs", variant: "ghost" },

@@ -1,6 +1,7 @@
 import { Icon } from "@companion/design-system";
 import { DocsSearch } from "../../src/components/DocsSearch";
 import { NavButtons } from "../../src/components/NavButtons";
+import { Seo } from "../../src/components/Seo";
 import { SiteFooter } from "../../src/components/SiteFooter";
 import { SiteHeader } from "../../src/components/SiteHeader";
 import { getGroups } from "../../src/content/docs";
@@ -10,6 +11,11 @@ const groups = getGroups();
 export default function DocsHome() {
   return (
     <div className="docpage">
+      <Seo
+        title="Docs — Companion"
+        description="Guides, tutorials, and answers for every part of Companion — from your first note to running your own sync server."
+        path="/docs"
+      />
       <SiteHeader
         sticky
         links={[
