@@ -1,26 +1,20 @@
 name: Deploy web
 
 # On every merge to main: build the offline WASM web app (apps/web) into a Docker
-# image (Go -> wasm, Vite build, Caddy static server with SPA routing), push it to
-# GHCR, then point an existing Railway service at the new image and redeploy it.
+# image (Go -> wasm, Vite build, Caddy static server with SPA routing) and push it to
+# GHCR. The Railway service watches this image tag and auto-deploys the new digest —
+# no deploy call from CI is needed.
 #
 # One-time setup:
-#   - GHCR: the pushed package must be pullable by Railway. Either make the
-#     `companion-web` package public, or set the repo secret GHCR_PULL_TOKEN to a PAT
-#     with `read:packages` (Railway stores it as durable registry credentials).
-#   - Railway: an existing service (image-based). Provide its ids/token:
-#       secret RAILWAY_PROJECT_TOKEN  project token (Project Settings -> Tokens); it is
-#                                     scoped to one project+environment and sent via the
-#                                     Project-Access-Token header (not Authorization: Bearer).
-#       var    RAILWAY_SERVICE_ID     target service id
-#       var    RAILWAY_ENVIRONMENT_ID target environment id (must be the token's environment;
-#                                     find it via the projectToken query — see README/PR notes)
+#   - Point the Railway service at ghcr.io/<owner>/companion-web:latest and enable
+#     auto-deploy on the image. If the package is private, give Railway registry
+#     credentials (a PAT with read:packages); otherwise make the package public.
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-# A newer merge supersedes an in-flight deploy.
+# A newer merge supersedes an in-flight build.
 concurrency:
   group: deploy-web
   cancel-in-progress: true
@@ -30,15 +24,9 @@ permissions:
   packages: write # push the image to GHCR
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # Build apps/web into a Docker image and push it to GHCR (amd64 — Railway's
-  # runtime arch). Emits the immutable, digest-pinned-by-sha ref for the deploy job.
-  # ---------------------------------------------------------------------------
   image:
     name: build + push image
     runs-on: ubuntu-latest
-    outputs:
-      image: ${{ steps.meta.outputs.image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -46,9 +34,7 @@ jobs:
         id: meta
         run: |
           owner="${GITHUB_REPOSITORY_OWNER,,}"
-          ref="ghcr.io/${owner}/companion-web"
-          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
-          echo "image=${ref}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "ref=ghcr.io/${owner}/companion-web" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -66,56 +52,10 @@ jobs:
           file: apps/web/Dockerfile
           platforms: linux/amd64
           push: true
+          # :latest is the tag Railway watches for auto-deploy; the :<sha> tag is an
+          # immutable record of each build for traceability and rollback.
           tags: |
             ${{ steps.meta.outputs.ref }}:${{ github.sha }}
             ${{ steps.meta.outputs.ref }}:latest
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
-
-  # ---------------------------------------------------------------------------
-  # Point the Railway service at the freshly pushed image and trigger a deploy.
-  # serviceInstanceUpdate sets source.image (+ optional pull credentials), then
-  # serviceInstanceDeployV2 rolls it out. GraphQL runs root fields serially, so a
-  # single request updates before it deploys.
-  # ---------------------------------------------------------------------------
-  deploy:
-    name: update Railway service
-    needs: image
-    runs-on: ubuntu-latest
-    steps:
-      - name: Update image + redeploy
-        env:
-          RAILWAY_PROJECT_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
-          SERVICE_ID: ${{ vars.RAILWAY_SERVICE_ID }}
-          ENVIRONMENT_ID: ${{ vars.RAILWAY_ENVIRONMENT_ID }}
-          IMAGE: ${{ needs.image.outputs.image }}
-          GHCR_USER: ${{ github.repository_owner }}
-          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
-        run: |
-          set -euo pipefail
-
-          # source.image is required; registryCredentials is added only when a durable
-          # pull token is provided (otherwise the GHCR package must be public).
-          input=$(jq -nc \
-            --arg img "$IMAGE" --arg u "$GHCR_USER" --arg p "$GHCR_PULL_TOKEN" \
-            'if $p == "" then { source: { image: $img } }
-             else { source: { image: $img }, registryCredentials: { username: $u, password: $p } } end')
-
-          body=$(jq -nc \
-            --arg s "$SERVICE_ID" --arg e "$ENVIRONMENT_ID" --argjson input "$input" \
-            '{ query: "mutation($serviceId:String!,$environmentId:String!,$input:ServiceInstanceUpdateInput!){ serviceInstanceUpdate(serviceId:$serviceId,environmentId:$environmentId,input:$input) serviceInstanceDeployV2(serviceId:$serviceId,environmentId:$environmentId) }",
-               variables: { serviceId: $s, environmentId: $e, input: $input } }')
-
-          # Project tokens authenticate via the Project-Access-Token header, not
-          # Authorization: Bearer. The token is scoped to $ENVIRONMENT_ID's environment.
-          resp=$(curl -sS -X POST https://backboard.railway.com/graphql/v2 \
-            -H "Project-Access-Token: $RAILWAY_PROJECT_TOKEN" \
-            -H "Content-Type: application/json" \
-            --data "$body")
-
-          echo "$resp"
-          if echo "$resp" | jq -e '.errors' >/dev/null 2>&1; then
-            echo "::error::Railway API returned errors"
-            exit 1
-          fi
-          echo "Deployed $IMAGE to Railway service $SERVICE_ID"
