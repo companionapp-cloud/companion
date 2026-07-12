@@ -1,0 +1,96 @@
+name: Deploy web
+
+# Builds the offline WASM web app (apps/web) and uploads the static bundle to the
+# Railway object-storage bucket on every merge to main. The bucket is S3-compatible,
+# so we sync with the AWS CLI (preinstalled on the runner) — this is a plain file
+# upload, not `railway up`; a static/CDN layer in front of the bucket serves it.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer merge supersedes an in-flight deploy — no point finishing the old upload.
+concurrency:
+  group: deploy-web
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: build + upload apps/web
+    runs-on: ubuntu-latest
+    env:
+      # --- Railway bucket connection (add these as GitHub repo secrets) ---
+      #   RAILWAY_S3_BUCKET             bucket name
+      #   RAILWAY_S3_ENDPOINT           S3 endpoint URL, e.g. https://<host>
+      #   RAILWAY_S3_ACCESS_KEY_ID      bucket access key
+      #   RAILWAY_S3_SECRET_ACCESS_KEY  bucket secret key
+      #   RAILWAY_S3_REGION (optional)  defaults to us-east-1
+      AWS_ACCESS_KEY_ID: ${{ secrets.RAILWAY_S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.RAILWAY_S3_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.RAILWAY_S3_REGION || 'us-east-1' }}
+      AWS_ENDPOINT: ${{ secrets.RAILWAY_S3_ENDPOINT }}
+      BUCKET: ${{ secrets.RAILWAY_S3_BUCKET }}
+      # AWS CLI v2 sends flexible (CRC32) checksums by default, which many
+      # S3-compatible stores reject. Only send them when the operation requires it.
+      AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
+      AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+          cache-dependency-path: core/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build wasm core + static bundle
+        run: |
+          make web-assets                     # core.wasm (GOOS=js) + wasm_exec.js -> public/
+          npm run build -w @companion/web     # vite build -> apps/web/dist
+
+      - name: Upload to Railway bucket
+        run: |
+          set -euo pipefail
+          dist=apps/web/dist
+          s3="s3://$BUCKET"
+          aws="aws s3 --endpoint-url $AWS_ENDPOINT"
+
+          # 1. Content-hashed assets are immutable — cache them hard. No --delete so
+          #    stale hashes older clients may still request keep resolving.
+          $aws sync "$dist" "$s3" \
+            --exclude "*" --include "assets/*" \
+            --cache-control "public, max-age=31536000, immutable"
+
+          # 2. Everything else (index.html, sw.js, manifest, icons, core.wasm, wasm_exec.js)
+          #    must revalidate. --delete prunes files removed from the build.
+          $aws sync "$dist" "$s3" \
+            --exclude "assets/*" \
+            --cache-control "public, max-age=0, must-revalidate" \
+            --delete
+
+          # 3. Fix content-types the CLI's extension guessing gets wrong or generic.
+          #    Root core.wasm is regenerated each deploy, so keep it revalidating;
+          #    hashed assets/*.wasm (wa-sqlite) are immutable.
+          $aws cp "$s3/core.wasm" "$s3/core.wasm" \
+            --metadata-directive REPLACE --content-type application/wasm \
+            --cache-control "public, max-age=0, must-revalidate"
+          if aws s3 --endpoint-url "$AWS_ENDPOINT" ls "$s3/manifest.webmanifest" >/dev/null 2>&1; then
+            $aws cp "$s3/manifest.webmanifest" "$s3/manifest.webmanifest" \
+              --metadata-directive REPLACE --content-type application/manifest+json \
+              --cache-control "public, max-age=0, must-revalidate"
+          fi
+          $aws cp "$s3" "$s3" --recursive \
+            --exclude "*" --include "assets/*.wasm" \
+            --metadata-directive REPLACE --content-type application/wasm \
+            --cache-control "public, max-age=31536000, immutable"
