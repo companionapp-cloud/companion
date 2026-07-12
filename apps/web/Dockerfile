@@ -28,10 +28,12 @@ COPY --from=wasm /out/wasm_exec.js apps/web/public/wasm_exec.js
 RUN npm ci --no-audit --no-fund \
  && npm run build -w @companion/web
 
-# 3. Static file server. Caddy binds Railway's $PORT and does SPA fallback.
+# 3. Static file server. Caddy binds Railway's $PORT (falling back to 3000), which is
+#    the port EXPOSE advertises and Railway's networking targets.
 FROM caddy:2-alpine
 WORKDIR /srv
 COPY apps/web/Caddyfile ./Caddyfile
 RUN caddy fmt --overwrite Caddyfile
 COPY --from=build /src/apps/web/dist ./dist
+EXPOSE 3000
 CMD ["caddy", "run", "--config", "Caddyfile", "--adapter", "caddyfile"]
