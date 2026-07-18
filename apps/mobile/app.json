@@ -9,7 +9,10 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "cloud.companion.app"
+      "bundleIdentifier": "cloud.companion.app",
+      "entitlements": {
+        "com.apple.security.application-groups": ["group.cloud.companion.app"]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -30,7 +33,8 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-background-task"
+      "expo-background-task",
+      "@bacons/apple-targets"
     ]
   }
 }
