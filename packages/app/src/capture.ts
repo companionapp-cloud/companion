@@ -1,6 +1,6 @@
 // Quick capture: a compact, frameless window (desktop) that jots down a new note or task
 // and closes itself. Reached via the `?capture=1` URL the desktop shell's global
-// Cmd/Ctrl+Shift+N shortcut opens (apps/desktop/main.go). Web/native ignore it.
+// Option/Alt+Space shortcut opens (apps/desktop/main.go). Web/native ignore it.
 
 function browserLocation(): Location | null {
   return typeof window !== "undefined" && window.location ? window.location : null;

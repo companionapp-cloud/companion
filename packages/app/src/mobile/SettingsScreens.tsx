@@ -1,7 +1,7 @@
 import { ScrollView, StyleSheet } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { Icon, colors, space } from "@companion/design-system";
-import { SETTINGS_SECTIONS, type SettingsSectionId } from "../settingsSections";
+import { visibleSettingsSections, type SettingsSectionId } from "../settingsSections";
 import { Card, CardRow, IconTile } from "./ui";
 
 // Mobile web settings — a port of the native app's list → detail settings: a card of
@@ -13,10 +13,11 @@ type NavLike = any;
 
 export function SettingsListScreen() {
   const navigation = useNavigation<NavLike>();
+  const sections = visibleSettingsSections();
   return (
     <ScrollView contentContainerStyle={styles.content}>
       <Card>
-        {SETTINGS_SECTIONS.map((s, i) => (
+        {sections.map((s, i) => (
           <CardRow
             key={s.id}
             leading={
@@ -26,7 +27,7 @@ export function SettingsListScreen() {
             }
             title={s.label}
             subtitle={s.description}
-            isLast={i === SETTINGS_SECTIONS.length - 1}
+            isLast={i === sections.length - 1}
             onPress={() => navigation.navigate("settingsSection", { section: s.id })}
           />
         ))}
@@ -37,7 +38,7 @@ export function SettingsListScreen() {
 
 export function SettingsSectionScreen() {
   const params = (useRoute().params ?? {}) as { section?: SettingsSectionId };
-  const section = SETTINGS_SECTIONS.find((s) => s.id === params.section);
+  const section = visibleSettingsSections().find((s) => s.id === params.section);
   if (!section) return null;
   const Detail = section.Component;
   return (

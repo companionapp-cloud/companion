@@ -120,6 +120,7 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
   // narrows the tasks list (all / upcoming / overdue). Local to this column.
   const [noteQuery, setNoteQuery] = useState("");
   const [taskFilter, setTaskFilter] = useState<"all" | "upcoming" | "overdue">("all");
+  const [taskDraft, setTaskDraft] = useState("");
   const filteredNotes = useMemo(() => {
     const q = noteQuery.trim().toLowerCase();
     if (!q) return notes;
@@ -129,6 +130,9 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
     () => (taskFilter === "all" ? tasks : filterTasksByDue(tasks, taskFilter)),
     [tasks, taskFilter],
   );
+  // Completed tasks drop to their own section at the bottom, as in the root task list (§6.4).
+  const openTasks = useMemo(() => filteredTasks.filter((t) => t.status !== "done"), [filteredTasks]);
+  const doneTasks = useMemo(() => filteredTasks.filter((t) => t.status === "done"), [filteredTasks]);
 
   // Register the on-screen section list for multiselect (notes / actionable tasks; seeds
   // stay single-select). Scoped per project+section so switching lists drops the selection.
@@ -137,8 +141,8 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
   const secSection = loc.kind === "project" ? loc.section : undefined;
   useEffect(() => {
     if (secSection === "notes") ms.register(`project:${secProjectId}:notes`, "note", filteredNotes.map((n) => n.id));
-    else if (secSection === "tasks") ms.register(`project:${secProjectId}:tasks`, "task", filteredTasks.map((t) => t.id));
-  }, [ms.register, secProjectId, secSection, filteredNotes, filteredTasks]);
+    else if (secSection === "tasks") ms.register(`project:${secProjectId}:tasks`, "task", [...openTasks, ...doneTasks].map((t) => t.id));
+  }, [ms.register, secProjectId, secSection, filteredNotes, openTasks, doneTasks]);
 
   if (loc.kind !== "project") return null;
   const { projectId, section, itemId } = loc;
@@ -148,10 +152,15 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
     await addMember(projectId, "note", note.id);
     nav.openProjectItem(projectId, "notes", note.id);
   };
-  const createTaskInProject = async () => {
-    const task = await tasksStore.create({ title: "Untitled task" });
+  const createTaskInProject = async (title?: string) => {
+    const task = await tasksStore.create({ title: title?.trim() || "Untitled task" });
     await addMember(projectId, "task", task.id);
     nav.openProjectItem(projectId, "tasks", task.id);
+  };
+  const addTaskFromDraft = async () => {
+    const title = taskDraft;
+    setTaskDraft("");
+    await createTaskInProject(title);
   };
 
   // Section list (level 1).
@@ -162,15 +171,31 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
           <IconButton label="Back to sections" size="sm" onPress={() => nav.openProject(projectId)}>
             <Icon name="chevronLeft" size={18} color={colors.textSecondary} />
           </IconButton>
-          <Text variant="caption" tone="secondary" style={{ flex: 1, fontWeight: "600" }}>
-            {SECTION_LABEL[section]}
-          </Text>
+          {/* The tasks section swaps the static title for its due-date filter, matching the
+              root task list; other sections keep the plain label. */}
+          {section === "tasks" ? (
+            <View style={{ flex: 1 }}>
+              <ListFilterMenu
+                value={taskFilter}
+                onChange={setTaskFilter}
+                options={[
+                  { value: "all", label: "All tasks" },
+                  { value: "upcoming", label: "Upcoming tasks" },
+                  { value: "overdue", label: "Overdue tasks" },
+                ]}
+              />
+            </View>
+          ) : (
+            <Text variant="caption" tone="secondary" style={{ flex: 1, fontWeight: "600" }}>
+              {SECTION_LABEL[section]}
+            </Text>
+          )}
           {section === "notes" ? (
             <IconButton label="New note" size="sm" onPress={createNoteInProject}>
               <Icon name="plus" size={16} color={colors.textSecondary} />
             </IconButton>
           ) : section === "tasks" ? (
-            <IconButton label="New task" size="sm" onPress={createTaskInProject}>
+            <IconButton label="New task" size="sm" onPress={() => void createTaskInProject()}>
               <Icon name="plus" size={16} color={colors.textSecondary} />
             </IconButton>
           ) : null}
@@ -186,15 +211,14 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
             />
           </View>
         ) : section === "tasks" ? (
-          <View style={styles.filterBar}>
-            <ListFilterMenu
-              value={taskFilter}
-              onChange={setTaskFilter}
-              options={[
-                { value: "all", label: "All tasks" },
-                { value: "upcoming", label: "Upcoming tasks" },
-                { value: "overdue", label: "Overdue tasks" },
-              ]}
+          <View style={styles.search}>
+            <Input
+              size="sm"
+              placeholder="Add a task, press Enter"
+              value={taskDraft}
+              onChangeText={setTaskDraft}
+              onSubmitEditing={() => void addTaskFromDraft()}
+              leadingIcon={<Icon name="plus" size={15} color={colors.textTertiary} />}
             />
           </View>
         ) : null}
@@ -226,7 +250,7 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
           ) : section === "tasks" ? (
             filteredTasks.length || (taskFilter === "all" && seeds.length) ? (
               <>
-                {filteredTasks.map((t) => (
+                {openTasks.map((t) => (
                   <TaskRow
                     key={t.id}
                     task={t}
@@ -234,7 +258,7 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
                     onPress={(e) => {
                       if (!ms.press(t.id, pressMods(e))) nav.openProjectItem(projectId, "tasks", t.id);
                     }}
-                    onToggle={() => void tasksStore.setStatus(t.id, t.status === "done" ? "open" : "done")}
+                    onToggle={() => void tasksStore.setStatus(t.id, "done")}
                   />
                 ))}
                 {/* Repeating definitions have no concrete due date, so hide them under a due filter. */}
@@ -251,6 +275,24 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
                         subtitle={repeatSubtitle(s.repeatRule, s.nextOccurrence)}
                         selected={s.id === itemId}
                         onPress={() => nav.openProjectItem(projectId, "tasks", s.id)}
+                      />
+                    ))}
+                  </>
+                ) : null}
+                {doneTasks.length ? (
+                  <>
+                    <Text variant="caption" tone="tertiary" style={styles.sectionLabel}>
+                      COMPLETED · {doneTasks.length}
+                    </Text>
+                    {doneTasks.map((t) => (
+                      <TaskRow
+                        key={t.id}
+                        task={t}
+                        selected={ms.active ? ms.isSelected(t.id) : t.id === itemId}
+                        onPress={(e) => {
+                          if (!ms.press(t.id, pressMods(e))) nav.openProjectItem(projectId, "tasks", t.id);
+                        }}
+                        onToggle={() => void tasksStore.setStatus(t.id, "open")}
                       />
                     ))}
                   </>
@@ -491,10 +533,11 @@ const styles = {
     paddingVertical: space.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
+    // Sit above the search row so the filter dropdown, which overflows the header,
+    // paints over the sibling input instead of behind it.
+    zIndex: 2,
   },
-  search: { paddingHorizontal: space.md, paddingBottom: space.md, zIndex: 1 },
-  // Sit above the list so the filter dropdown paints over the rows below it.
-  filterBar: { paddingHorizontal: space.lg, paddingBottom: space.md, zIndex: 2 },
+  search: { paddingHorizontal: space.md, paddingTop: space.md, paddingBottom: space.md, zIndex: 1 },
   empty: { padding: space.xl, lineHeight: 20, textAlign: "center" as const },
   sectionLabel: { fontWeight: "600" as const, letterSpacing: 0.5, paddingHorizontal: space.md, paddingTop: space.lg, paddingBottom: space.xs },
   home: { maxWidth: layout.contentMax, width: "100%" as const, marginHorizontal: "auto" as const, padding: space.xxl, gap: space.lg },
