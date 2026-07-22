@@ -5,7 +5,8 @@ import "@wailsio/runtime";
 import { Window } from "@wailsio/runtime";
 import { createElement } from "react";
 import { AppRegistry } from "react-native";
-import { App, setFocusWindowOpener, setCaptureWindowCloser, setTableMenuPresenter } from "@companion/app";
+import { App, setFocusWindowOpener, setCaptureWindowCloser, setTableMenuPresenter, setShortcutStore } from "@companion/app";
+import type { ShortcutBinding, ShortcutId } from "@companion/app";
 import { createHttpBridge, documentsApi } from "@companion/core-bridge";
 import type { CoreBridge } from "@companion/core-bridge";
 import type { DocumentSource } from "@companion/editor";
@@ -25,7 +26,7 @@ if (typeof window !== "undefined" && (window as unknown as { _wails?: unknown })
 }
 
 // Quick-capture window (main.go opens /?capture=1 in a frameless, transparent window on the
-// global Cmd/Ctrl+Shift+N shortcut). The page's default body/#root background (index.html)
+// global Option/Alt+Space shortcut). The page's default body/#root background (index.html)
 // is opaque; clear it so the window is see-through and CaptureView's rounded card + shadow
 // read against it. Harmless on the main window, which never carries ?capture.
 if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("capture")) {
@@ -48,6 +49,28 @@ setFocusWindowOpener(({ kind, id }) => {
 // Cancel / Esc / post-save dismiss through here.
 setCaptureWindowCloser(() => {
   void Window.Close();
+});
+
+// Global shortcuts: only the Go process can register an OS-wide hotkey, so Settings ›
+// Shortcuts reads and rebinds through it. Injecting this store is also what makes that
+// settings section appear — web and mobile leave it unset and never show it.
+setShortcutStore({
+  async list(): Promise<ShortcutBinding[]> {
+    const res = await fetch("/shortcuts");
+    if (!res.ok) throw new Error("Couldn’t read the current shortcuts.");
+    return (await res.json()) as ShortcutBinding[];
+  },
+  async set(id: ShortcutId, accelerator: string): Promise<ShortcutBinding> {
+    const res = await fetch("/shortcuts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, accelerator }),
+    });
+    // The Go side answers 422 with the OS/parser message ("'foo' is not a valid key"),
+    // which is more useful to show than a generic failure.
+    if (!res.ok) throw new Error((await res.text()).trim() || "The system wouldn’t take that shortcut.");
+    return (await res.json()) as ShortcutBinding;
+  },
 });
 
 // Editor tables: present a native Wails context menu instead of the built-in HTML popup. The

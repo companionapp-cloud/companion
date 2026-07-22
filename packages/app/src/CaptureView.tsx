@@ -6,7 +6,7 @@ import { useCaptureController, type CaptureKind } from "./useCaptureController";
 import { closeCaptureWindow } from "./capture";
 
 /**
- * Desktop quick-capture window (opened by the global Cmd/Ctrl+Shift+N shortcut, see
+ * Desktop quick-capture window (opened by the global Option/Alt+Space shortcut, see
  * apps/desktop/main.go): the shared capture controller in a frameless, rounded floating panel,
  * styled to match the desktop app (subtle segmented control, design-system inputs + buttons).
  * Fully keyboard-driven — focuses the input on open, Tab between fields, Cmd+Enter submits,

@@ -39,3 +39,8 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# @bacons/apple-targets: the watch source (*.swift, expo-target.config.js) is committed,
+# but the icon set and Info.plist are regenerated from config on every prebuild.
+/targets/*/Assets.xcassets
+/targets/*/Info.plist

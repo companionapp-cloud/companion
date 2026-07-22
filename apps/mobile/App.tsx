@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, AppState, Linking, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, StyleSheet, Text, View } from 'react-native';
+import { useURL } from 'expo-linking';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import EventSource from 'react-native-sse';
@@ -12,6 +13,7 @@ import { registerReminderRefresh } from './src/backgroundReminders';
 import { nativeSyncStorage } from './src/syncStorage';
 import { nativeToolsStorage } from './src/toolsStorage';
 import { registerIcsFilePicker } from './src/icsFilePicker';
+import { WatchTasksBridge } from './src/WatchTasksBridge';
 
 // Register the native .ics file picker so the shared CalendarSettings can upload calendars
 // on mobile (web uses its own DOM picker). Module-scope: runs once at import.
@@ -56,9 +58,11 @@ function Root() {
     void registerReminderRefresh();
   }, []);
 
-  // Forgot-password recovery deep link. Linking.useURL() yields the URL the app was opened with (or
-  // navigated to); a reset link carries resetToken + server. Dismissed once the flow finishes.
-  const url = Linking.useURL();
+  // Forgot-password recovery deep link. expo-linking's useURL() yields the URL the app was opened
+  // with (or navigated to); a reset link carries resetToken + server. (react-native's Linking has
+  // no useURL hook — using it crashed at launch with "undefined is not a function".) Dismissed
+  // once the flow finishes.
+  const url = useURL();
   const [resetDismissed, setResetDismissed] = useState(false);
   const reset = resetDismissed ? null : parseResetUrl(url);
 
@@ -96,6 +100,9 @@ function Root() {
                 <ProjectsProvider>
                   <ObjectTypesProvider>
                     <CalendarProvider>
+                      {/* Syncs tasks/projects/events to the watch + handles watch quick-adds (iOS-only;
+                          no-op elsewhere). Sits inside Tasks/Projects/Calendar since it reads all three. */}
+                      <WatchTasksBridge />
                       <ToolVisibilityProvider storage={nativeToolsStorage}>
                         <MobileShell />
                       </ToolVisibilityProvider>
