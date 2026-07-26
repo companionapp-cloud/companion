@@ -89,7 +89,8 @@ func main() {
 		})
 	}
 
-	// Quick capture (Cmd/Ctrl+Shift+N): a small, frameless panel for jotting a note or task.
+	// Quick capture (Option+Space on macOS, Option+Shift+Space elsewhere — rebindable in
+	// Settings › Shortcuts): a small, frameless panel for jotting a note or task.
 	// It's presented Spotlight-style — floating in over whatever you're doing without pulling
 	// Companion (or its main window) to the foreground, and dismissed by just closing that one
 	// window. Reused if already open so repeated presses resurface it; nilled on close so the
@@ -138,6 +139,11 @@ func main() {
 		presentCapturePanel(win)
 	}
 
+	// Owns the OS-wide quick-capture binding and the user's saved override. Built before the
+	// app so the asset handler can close over it; the actual OS registration waits for
+	// start(app) below, once the app exists.
+	shortcuts := newShortcutManager(shortcutPrefsPath(dbPath), openCaptureWindow)
+
 	app = application.New(application.Options{
 		Name:        "Companion",
 		Description: "Offline-first notes, tasks, habits, and calendar.",
@@ -160,7 +166,7 @@ func main() {
 		Assets: application.AssetOptions{
 			Handler: rootHandler(handler, notifHandler, openFocusWindow, func(w http.ResponseWriter, r *http.Request) {
 				tableCtxMenu.handleOpen(w, r)
-			}),
+			}, shortcuts.handleShortcuts),
 		},
 	})
 
@@ -218,13 +224,12 @@ func main() {
 	// route (set up above, capturing tableCtxMenu by reference) drives it.
 	tableCtxMenu = installTableMenu(app, mainWindow)
 
-	// Global quick-capture shortcut (PLAN §6.4): system-wide Cmd+Shift+N (Ctrl+Shift+N off
-	// macOS) opens the capture window even when Companion isn't focused — the whole point of
-	// staying resident in the menu bar. "CmdOrCtrl" resolves per-platform. The OS binding is
-	// deferred until Run(); registration only fails here on a malformed accelerator.
-	if err := app.GlobalShortcut.Register("CmdOrCtrl+Shift+N", openCaptureWindow); err != nil {
-		log.Printf("register quick-capture shortcut: %v", err)
-	}
+	// Global quick-capture shortcut (PLAN §6.4): a system-wide binding opens the capture
+	// window even when Companion isn't focused — the whole point of staying resident in the
+	// menu bar. The manager owns the registration and the user's saved override (see
+	// shortcuts.go); the webview rebinds it through /shortcuts. The OS binding itself is
+	// deferred until Run().
+	shortcuts.start(app)
 
 	if err := app.Run(); err != nil {
 		log.Fatalf("run app: %v", err)
@@ -235,7 +240,7 @@ func main() {
 // (/invoke, /events) to the bridge handler. /window spawns a focus-mode window for a
 // document (the workspace's expand/pop-out action) — browser window.open can't create a
 // real app window in the Wails webview, so the frontend asks the Go side here.
-func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusWindow func(url string), openTableMenu http.HandlerFunc) http.Handler {
+func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusWindow func(url string), openTableMenu http.HandlerFunc, shortcuts http.HandlerFunc) http.Handler {
 	frontend, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {
 		log.Fatalf("mount frontend assets: %v", err)
@@ -259,6 +264,8 @@ func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusW
 	})
 	// Present the native table context menu at a point (the editor posts the menu state here).
 	mux.HandleFunc("/table-menu", openTableMenu)
+	// Read/rebind the OS-wide shortcuts (Settings › Shortcuts).
+	mux.HandleFunc("/shortcuts", shortcuts)
 	mux.Handle("/", files)
 	return mux
 }

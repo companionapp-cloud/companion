@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import { Icon, SplitView, Text, colors, layout, radius, space, type PressState } from "@companion/design-system";
-import { SETTINGS_SECTIONS, settingsSection, type SettingsSectionId } from "./settingsSections";
+import { visibleSettingsSections, settingsSection, type SettingsSectionId } from "./settingsSections";
 
 /** The settings page (web/desktop): a content-details master-detail rendered in the main
  *  content area — not a modal. The list column is the settings navigation (Sync / AI /
@@ -42,7 +42,7 @@ function SettingsNav({ selected, onSelect }: { selected: SettingsSectionId; onSe
         Settings
       </Text>
       <View style={{ gap: 2 }}>
-        {SETTINGS_SECTIONS.map((s) => {
+        {visibleSettingsSections().map((s) => {
           const active = s.id === selected;
           return (
             <Pressable

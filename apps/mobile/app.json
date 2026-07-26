@@ -9,7 +9,10 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "cloud.companion.app"
+      "bundleIdentifier": "cloud.companion.app",
+      "entitlements": {
+        "com.apple.security.application-groups": ["group.cloud.companion.app"]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -31,7 +34,8 @@
     },
     "plugins": [
       "expo-background-task",
-      "./plugins/withAndroidSigning"
+      "./plugins/withAndroidSigning",
+      "@bacons/apple-targets"
     ]
   }
 }

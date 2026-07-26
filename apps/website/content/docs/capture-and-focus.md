@@ -15,7 +15,9 @@ Two small features that pull in opposite directions: one for getting something o
 
 ## Quick capture
 
-On the desktop app, press **⌘⇧N** (**Ctrl+Shift+N** off macOS) from anywhere — Companion doesn't even need to be the app you're looking at. A small panel appears over your work.
+On the desktop app, press **⌥Space** (**Alt+Shift+Space** on Windows and Linux, where plain Alt+Space is the window menu) from anywhere — Companion doesn't even need to be the app you're looking at. A small panel appears over your work.
+
+Don't like that chord? **Settings › Shortcuts** rebinds it: click the shortcut, press the keys you want. The binding is per-device and takes effect immediately; if the system won't give up the combination you picked, Companion says so and keeps the old one.
 
 Choose **Note** or **Task**, type, and press **⌘⏎** to save. **Esc** dismisses it. Tasks capture a due date and a reminder in the same breath, in plain language: "friday", "tomorrow 9am". The panel closes and you're back in whatever you were doing.
 
