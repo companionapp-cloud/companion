@@ -34,6 +34,7 @@
     },
     "plugins": [
       "expo-background-task",
+      "./plugins/withAndroidSigning",
       "@bacons/apple-targets"
     ]
   }

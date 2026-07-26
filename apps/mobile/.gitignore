@@ -40,6 +40,16 @@ yarn-error.*
 /ios
 /android
 
+# fastlane secrets + build artifacts (never commit; use .env.default as template)
+fastlane/.env
+fastlane/play-service-account.json
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/test_output/
+fastlane/*.mobileprovision
+build/
+vendor/bundle/
+
 # @bacons/apple-targets: the watch source (*.swift, expo-target.config.js) is committed,
 # but the icon set and Info.plist are regenerated from config on every prebuild.
 /targets/*/Assets.xcassets

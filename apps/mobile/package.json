@@ -7,7 +7,10 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prebuild": "expo prebuild --no-install",
+    "deploy:ios": "bundle exec fastlane ios beta",
+    "deploy:android": "bundle exec fastlane android beta"
   },
   "dependencies": {
     "@bacons/apple-targets": "5.0.0",
@@ -38,6 +41,7 @@
     "react-native-webview": "13.16.1"
   },
   "devDependencies": {
+    "@expo/config-plugins": "57.0.2",
     "@types/react": "19.2.2",
     "typescript": "5.9.3"
   }

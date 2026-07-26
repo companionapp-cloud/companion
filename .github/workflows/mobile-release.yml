@@ -1,0 +1,106 @@
+name: Mobile Release
+
+# Ships the Expo app to the internal test channels via fastlane:
+#   iOS     -> TestFlight (internal)      [ios beta lane]      macOS runner (needs Xcode)
+#   Android -> Play internal testing      [android beta lane]  Linux runner
+#
+# Fires on a version tag (so one tag can ship every platform alongside the server +
+# desktop workflows), or manually via "Run workflow" with a platform choice. All
+# credentials come from repo secrets — see RELEASING.md §6. Until those secrets exist
+# the lanes will fail fast at the auth step; that's expected before signing is set up.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Which platform(s) to ship"
+        type: choice
+        default: both
+        options: [both, ios, android]
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "20"
+  # Shared identity (non-secret); the Appfile/Fastfile read these from the environment.
+  APP_IDENTIFIER: cloud.companion.app
+  PACKAGE_NAME: cloud.companion.app
+
+jobs:
+  # ---------------------------------------------------------------------------
+  ios:
+    name: iOS -> TestFlight
+    if: ${{ github.event.inputs.platform != 'android' }}
+    runs-on: macos-14
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_TEAM_ID: ${{ secrets.ASC_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      # match pulls the encrypted certs from the private repo:
+      MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+      MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+      # base64 of "user:PAT" granting read access to the certs repo (git over HTTPS):
+      MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+          working-directory: apps/mobile
+      - name: Select latest Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+      - name: Ship to TestFlight
+        working-directory: apps/mobile
+        run: bundle exec fastlane ios beta
+
+  # ---------------------------------------------------------------------------
+  android:
+    name: Android -> Play internal
+    if: ${{ github.event.inputs.platform != 'ios' }}
+    runs-on: ubuntu-latest
+    env:
+      COMPANION_UPLOAD_STORE_PASSWORD: ${{ secrets.COMPANION_UPLOAD_STORE_PASSWORD }}
+      COMPANION_UPLOAD_KEY_ALIAS: ${{ secrets.COMPANION_UPLOAD_KEY_ALIAS }}
+      COMPANION_UPLOAD_KEY_PASSWORD: ${{ secrets.COMPANION_UPLOAD_KEY_PASSWORD }}
+      # Unique, monotonic versionCode per upload (Play rejects duplicates).
+      ANDROID_VERSION_CODE: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+          working-directory: apps/mobile
+      - name: Materialize signing keystore + Play key from secrets
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/upload-keystore.jks"
+          echo "COMPANION_UPLOAD_STORE_FILE=$RUNNER_TEMP/upload-keystore.jks" >> "$GITHUB_ENV"
+          echo "$PLAY_SERVICE_ACCOUNT_JSON" | base64 --decode > "$RUNNER_TEMP/play-key.json"
+          echo "PLAY_JSON_KEY_PATH=$RUNNER_TEMP/play-key.json" >> "$GITHUB_ENV"
+      - name: Ship to Play internal
+        working-directory: apps/mobile
+        run: bundle exec fastlane android beta

@@ -7,7 +7,7 @@ WASM_EXEC := $(shell $(GO) env GOROOT)/lib/wasm/wasm_exec.js
 WEB_PUBLIC := apps/web/public
 MOBILE_MODULE := apps/mobile/modules/companion-core
 
-.PHONY: all test test-go fmt vet desktop desktop-frontend desktop-run desktop-app desktop-app-run core-wasm web-assets \
+.PHONY: all test test-go fmt vet desktop desktop-frontend desktop-run desktop-app desktop-app-run desktop-dmg desktop-archive core-wasm web-assets \
         web-run server server-run cloud cloud-frontend cloud-emails cloud-run gomobile-init core-android core-ios android-lib \
         mobile-artifacts mobile-run db-up db-down db-logs db-reset clean
 
@@ -78,6 +78,50 @@ desktop-app-run: desktop-app
 ## desktop-run: build the frontend, then run the desktop app from source (dev)
 desktop-run: desktop-frontend
 	cd apps/desktop && $(GO) run .
+
+# ---- Desktop distribution artifacts (release page: macOS .dmg, Windows/Linux archives) ----
+# VERSION stamps artifact names; CI passes VERSION from the git tag. DIST_DIR collects
+# everything the release job uploads.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+DIST_DIR ?= $(BUILD_DIR)/dist
+ARCH := $(shell uname -m)
+
+## desktop-dmg: signed + notarized .dmg for external distribution (Developer ID — NOT the
+## App Store). Needs a "Developer ID Application" identity in the keychain and App Store
+## Connect API key envs for notarytool: NOTARY_KEY_P8 (base64 of the .p8), NOTARY_KEY_ID,
+## NOTARY_ISSUER. macOS only. See RELEASING.md.
+DEVELOPER_ID_APP ?= $(shell security find-identity -v -p codesigning 2>/dev/null | awk '/Developer ID Application/ {print $$2; exit}')
+DESKTOP_DMG := $(DIST_DIR)/Companion-$(VERSION)-macos-$(ARCH).dmg
+desktop-dmg: desktop-app
+	@test -n "$(DEVELOPER_ID_APP)" || { echo "error: no 'Developer ID Application' identity in keychain (see RELEASING.md)"; exit 1; }
+	mkdir -p "$(DIST_DIR)"
+	@# Re-sign inner binary then bundle WITH hardened runtime (required to notarize).
+	codesign --force --options runtime --timestamp --entitlements apps/desktop/packaging/entitlements.plist \
+	  --sign "$(DEVELOPER_ID_APP)" --identifier com.companion.desktop "$(DESKTOP_APP)/Contents/MacOS/companion-desktop"
+	codesign --force --options runtime --timestamp --entitlements apps/desktop/packaging/entitlements.plist \
+	  --sign "$(DEVELOPER_ID_APP)" --identifier com.companion.desktop "$(DESKTOP_APP)"
+	@# Build a read-only compressed dmg containing the app + an /Applications shortcut.
+	rm -f "$(DESKTOP_DMG)"
+	staging=$$(mktemp -d) && cp -R "$(DESKTOP_APP)" "$$staging/" && ln -s /Applications "$$staging/Applications" && \
+	  hdiutil create -volname Companion -srcfolder "$$staging" -ov -format UDZO "$(DESKTOP_DMG)" && rm -rf "$$staging"
+	@# Notarize + staple so Gatekeeper validates offline.
+	printf '%s' "$$NOTARY_KEY_P8" | base64 --decode > "$(DIST_DIR)/notary.p8"
+	xcrun notarytool submit "$(DESKTOP_DMG)" --wait --key "$(DIST_DIR)/notary.p8" --key-id "$$NOTARY_KEY_ID" --issuer "$$NOTARY_ISSUER"; \
+	  status=$$?; rm -f "$(DIST_DIR)/notary.p8"; test $$status -eq 0
+	xcrun stapler staple "$(DESKTOP_DMG)"
+	@echo "Built + notarized $(DESKTOP_DMG)"
+
+## desktop-archive: compressed binary for the release page on the CURRENT OS (Windows .zip /
+## Linux .tar.gz). No signing on Linux; Windows Authenticode signing happens in CI (signtool)
+## when a cert secret is present — see RELEASING.md.
+desktop-archive: desktop
+	mkdir -p "$(DIST_DIR)"
+ifeq ($(OS),Windows_NT)
+	cd $(BUILD_DIR) && 7z a -tzip "dist/Companion-$(VERSION)-windows-$(ARCH).zip" companion-desktop.exe
+else
+	tar -C $(BUILD_DIR) -czf "$(DIST_DIR)/Companion-$(VERSION)-linux-$(ARCH).tar.gz" companion-desktop
+endif
+	@echo "Archived desktop binary into $(DIST_DIR)"
 
 ## core-wasm: build the web core (GOOS=js GOARCH=wasm) -> build/core.wasm
 core-wasm:

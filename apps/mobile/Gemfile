@@ -1,0 +1,8 @@
+# Fastlane toolchain for the mobile app (iOS TestFlight + Android Play internal).
+# Pinned via Bundler so local + CI runs use the same fastlane. Install with:
+#   cd apps/mobile && bundle install
+# Then run lanes with `bundle exec fastlane ...` (never bare `fastlane`, so the
+# pinned version is used).
+source "https://rubygems.org"
+
+gem "fastlane"

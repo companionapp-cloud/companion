@@ -1,0 +1,15 @@
+# fastlane match config: distribution certs + provisioning profiles are stored
+# ENCRYPTED in a private git repo (never in this repo). Set MATCH_GIT_URL to that
+# repo and MATCH_PASSWORD to the encryption passphrase. See RELEASING.md §"match".
+#
+# First-time setup (creates the cert + App Store profile in your Apple account and
+# pushes the encrypted copies to the certs repo):
+#   bundle exec fastlane match appstore
+# Everywhere else (CI, second machine) just consumes them read-only:
+#   bundle exec fastlane match appstore --readonly
+
+git_url(ENV["MATCH_GIT_URL"])
+storage_mode("git")
+
+type("appstore") # default; lanes override to "development" when needed
+app_identifier([ENV.fetch("APP_IDENTIFIER", "cloud.companion.app")])

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the Developer ID (NOT App Store) build. Apple
+  requires the hardened runtime for notarization; these entitlements loosen it just
+  enough for a Wails/WKWebView + Go app. This is deliberately NOT sandboxed — that is
+  a Mac App Store requirement, and we ship a notarized .dmg outside the store.
+  If notarization passes but the app crashes on launch, try adding
+  com.apple.security.cs.disable-library-validation.
+-->
+<plist version="1.0">
+<dict>
+	<!-- WKWebView's JavaScript engine JIT-compiles; allow it under hardened runtime. -->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+</dict>
+</plist>
