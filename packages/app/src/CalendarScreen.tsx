@@ -74,6 +74,15 @@ export function CalendarScreen() {
   const [colWidth, setColWidth] = useState(0);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const colRef = useRef<any>(null);
+  // Which day column is hovered (or being dragged from). react-native-web gives every View
+  // `position: relative; z-index: 0`, so each column is its own stacking context: a hover card
+  // that spills into the next column can never paint over it from the inside, however high its
+  // own zIndex. Lifting the whole column while it's hovered is what actually raises the card.
+  const [hoverDay, setHoverDay] = useState<number | null>(null);
+  const setDayHovered = useCallback(
+    (day: number, on: boolean) => setHoverDay((prev) => (on ? day : prev === day ? null : prev)),
+    [],
+  );
 
   const onRefresh = async () => {
     if (refreshing) return;
@@ -284,9 +293,9 @@ export function CalendarScreen() {
             const iso = toISODate(d);
             const all = byDay.get(iso)?.allDay ?? [];
             return (
-              <View key={iso} style={styles.allDayCell}>
+              <View key={iso} style={[styles.allDayCell, hoverDay === di ? styles.columnLifted : null]}>
                 {all.map((it) => (
-                  <AllDayChip key={it.id} item={it} dayIndex={di} onOpen={openItem} />
+                  <AllDayChip key={it.id} item={it} dayIndex={di} onOpen={openItem} onHover={setDayHovered} />
                 ))}
               </View>
             );
@@ -317,13 +326,25 @@ export function CalendarScreen() {
               <View
                 key={iso}
                 ref={di === 0 ? colRef : undefined}
-                style={[styles.dayColumn, isToday ? { backgroundColor: colors.accentSoft } : null]}
+                style={[
+                  styles.dayColumn,
+                  isToday ? { backgroundColor: colors.accentSoft } : null,
+                  hoverDay === di ? styles.columnLifted : null,
+                ]}
               >
                 {HOURS.map((h) => (
                   <View key={h} style={styles.hourCell} />
                 ))}
                 {timed.map((it) => (
-                  <TimedBlock key={it.id} item={it} dayIndex={di} onOpen={openItem} onReschedule={reschedule} colWidth={colWidth} />
+                  <TimedBlock
+                    key={it.id}
+                    item={it}
+                    dayIndex={di}
+                    onOpen={openItem}
+                    onReschedule={reschedule}
+                    colWidth={colWidth}
+                    onHover={setDayHovered}
+                  />
                 ))}
                 {isToday ? <NowLine top={nowY} /> : null}
               </View>
@@ -345,12 +366,16 @@ function TimedBlock({
   onOpen,
   onReschedule,
   colWidth,
+  onHover,
 }: {
   item: CalendarItem;
   dayIndex: number;
   onOpen: (item: CalendarItem) => void;
   onReschedule?: (item: CalendarItem, dayIndex: number, dx: number, dy: number) => void;
   colWidth?: number;
+  /** Tells the grid this block's column is active, so the column can lift above its
+   *  neighbours while the hover card (or a drag) spills outside it. */
+  onHover?: (dayIndex: number, on: boolean) => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [drag, setDrag] = useState<{ dx: number; dy: number } | null>(null);
@@ -358,8 +383,15 @@ function TimedBlock({
 
   // A stable PanResponder that reads fresh props through a ref (mirrors useDraggable): claim
   // the gesture only once the pointer moves, so a tap still reaches the inner Pressable.
-  const latest = useRef({ item, dayIndex, onReschedule });
-  latest.current = { item, dayIndex, onReschedule };
+  const latest = useRef({ item, dayIndex, onReschedule, onHover });
+  latest.current = { item, dayIndex, onReschedule, onHover };
+  // Keep the column lift in sync with this block's own hover/drag state, and always release it
+  // on unmount (stepping to another week while hovered would otherwise strand a lifted column).
+  const setActive = useCallback((on: boolean) => latest.current.onHover?.(latest.current.dayIndex, on), []);
+  useEffect(() => () => setActive(false), [setActive]);
+  // Read by the drag handlers so releasing over the block keeps the column lifted for the
+  // hover card that reappears underneath the cursor.
+  const hoveredRef = useRef(false);
   // A drag ends with a synthetic click on web, which would fire the Pressable's onPress and
   // navigate. Record when a drag ended so that trailing press is ignored (a real tap much
   // later still opens the item).
@@ -369,20 +401,25 @@ function TimedBlock({
       PanResponder.create({
         onStartShouldSetPanResponder: () => false,
         onMoveShouldSetPanResponder: (_e, g: PanResponderGestureState) => Math.abs(g.dx) > 6 || Math.abs(g.dy) > 6,
-        onPanResponderGrant: () => setDrag({ dx: 0, dy: 0 }),
+        onPanResponderGrant: () => {
+          setDrag({ dx: 0, dy: 0 });
+          setActive(true);
+        },
         onPanResponderMove: (_e, g: PanResponderGestureState) => setDrag({ dx: g.dx, dy: g.dy }),
         onPanResponderTerminationRequest: () => false,
         onPanResponderRelease: (_e, g: PanResponderGestureState) => {
           setDrag(null);
+          setActive(hoveredRef.current);
           lastDragEnd.current = Date.now();
           latest.current.onReschedule?.(latest.current.item, latest.current.dayIndex, g.dx, g.dy);
         },
         onPanResponderTerminate: () => {
           setDrag(null);
+          setActive(hoveredRef.current);
           lastDragEnd.current = Date.now();
         },
       }),
-    [],
+    [setActive],
   );
 
   const start = new Date(item.startsAt);
@@ -405,12 +442,23 @@ function TimedBlock({
       style={[
         styles.block,
         { top: top + 2, height: height - 4 },
+        // The lift belongs on this positioned wrapper, not the inner card: the wrapper is the
+        // sibling that later blocks in the column would otherwise paint over, card and all.
+        hovered ? styles.blockLifted : null,
         dragging ? { transform: [{ translateX: drag.dx }, { translateY: drag.dy }], zIndex: 60, opacity: 0.92 } : null,
       ]}
     >
       <Pressable
-        onHoverIn={() => setHovered(true)}
-        onHoverOut={() => setHovered(false)}
+        onHoverIn={() => {
+          hoveredRef.current = true;
+          setHovered(true);
+          setActive(true);
+        }}
+        onHoverOut={() => {
+          hoveredRef.current = false;
+          setHovered(false);
+          if (!dragging) setActive(false);
+        }}
         onPress={() => {
           // Swallow the click that trails a drag (within a short window); a real tap opens it.
           if (Date.now() - lastDragEnd.current < 350) return;
@@ -443,16 +491,42 @@ function TimedBlock({
 /** An all-day item (dated note or all-day event) in the strip under the day headers. Like
  *  TimedBlock it reveals a detail card on hover and opens a task/note on click; its left bar
  *  uses the item's own kind/feed color so a note reads green here too. */
-function AllDayChip({ item, dayIndex, onOpen }: { item: CalendarItem; dayIndex: number; onOpen: (item: CalendarItem) => void }) {
+function AllDayChip({
+  item,
+  dayIndex,
+  onOpen,
+  onHover,
+}: {
+  item: CalendarItem;
+  dayIndex: number;
+  onOpen: (item: CalendarItem) => void;
+  /** See TimedBlock: lifts the whole all-day cell so the card can spill into the next day. */
+  onHover?: (dayIndex: number, on: boolean) => void;
+}) {
   const [hovered, setHovered] = useState(false);
   const openable = item.kind === "task" || item.kind === "note";
   const flipRight = dayIndex >= 4;
+  const latest = useRef({ dayIndex, onHover });
+  latest.current = { dayIndex, onHover };
+  const setActive = useCallback((on: boolean) => latest.current.onHover?.(latest.current.dayIndex, on), []);
+  useEffect(() => () => setActive(false), [setActive]);
   return (
     <Pressable
-      onHoverIn={() => setHovered(true)}
-      onHoverOut={() => setHovered(false)}
+      onHoverIn={() => {
+        setHovered(true);
+        setActive(true);
+      }}
+      onHoverOut={() => {
+        setHovered(false);
+        setActive(false);
+      }}
       onPress={() => openable && onOpen(item)}
-      style={[styles.allDayChip, { borderLeftColor: item.color ?? KIND[item.kind].bar }, hovered ? styles.blockHovered : null]}
+      style={[
+        styles.allDayChip,
+        { borderLeftColor: item.color ?? KIND[item.kind].bar },
+        hovered ? styles.blockHovered : null,
+        hovered ? styles.blockLifted : null,
+      ]}
     >
       <Text style={styles.allDayChipText} numberOfLines={1}>
         {item.title || "Untitled"}
@@ -577,6 +651,10 @@ const styles = {
     borderLeftColor: colors.borderSubtle,
   },
   hourCell: { height: ROW_H, borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
+  // Applied to the hovered day column (and its all-day cell): every RNW View is its own
+  // stacking context, so a card that spills sideways only clears the neighbouring columns
+  // once the column holding it outranks them.
+  columnLifted: { zIndex: 40 },
   // The positioned outer container (drag transform rides here); the inner holds the visual.
   block: {
     position: "absolute" as const,
@@ -590,8 +668,12 @@ const styles = {
     paddingHorizontal: 6,
     paddingVertical: 4,
   },
-  // A hovered/dragging block lifts above its neighbours so its popover isn't covered.
-  blockHovered: { zIndex: 30, boxShadow: "0 1px 6px rgba(0,0,0,0.18)" },
+  // The visual lift on the card itself; the stacking lift lives on the wrapper (blockLifted)
+  // and on the day column (columnLifted).
+  blockHovered: { boxShadow: "0 1px 6px rgba(0,0,0,0.18)" },
+  // A hovered block/chip rises above its siblings inside the column so its card isn't covered
+  // by a later block; the column itself rises via columnLifted.
+  blockLifted: { zIndex: 30 },
   blockTitle: { fontSize: 12, fontWeight: "600" as const },
   blockTime: { fontSize: 9, opacity: 0.75, marginTop: 1 },
 
