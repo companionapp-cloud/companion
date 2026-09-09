@@ -75,6 +75,11 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "session failed")
 		return
 	}
+	// Kick off the verification email when mail is actually deliverable. Without SMTP the
+	// send would only log a preview link, so it's left to an explicit /auth/verify/send.
+	if s.mailer.Configured() {
+		s.sendVerificationAsync(uid)
+	}
 	writeJSON(w, http.StatusOK, session.response(uid))
 }
 

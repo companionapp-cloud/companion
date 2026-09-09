@@ -1,4 +1,4 @@
-package main
+package syncserver
 
 import (
 	"crypto/tls"
@@ -12,16 +12,18 @@ import (
 	"strings"
 )
 
-// Rendered React Email templates (built from apps/cloud/emails). Each is HTML with
-// {{placeholder}} tokens the mailer substitutes per recipient. See apps/cloud/emails.
+// Rendered React Email templates (built from packages/syncserver/emails, committed so the
+// server needs no Node at build time). Each is HTML with {{placeholder}} tokens the mailer
+// substitutes per recipient.
 //
 //go:embed all:emails/dist
 var emailTemplates embed.FS
 
-// mailer sends transactional email over SMTP. Configuration is read from the environment
-// at runtime; when SMTP is unconfigured (dev), send() logs the message (and any verify
-// link) instead of erroring, so the flow is fully exercisable without a mail server.
-type mailer struct {
+// Mailer sends transactional email (verification, password reset) over SMTP. It is shared
+// by the open-core server and the cloud. When SMTP is unconfigured (dev, or a self-hosted
+// instance that hasn't set it up), Send logs the message (with any link) instead of
+// erroring, so every flow is exercisable without a mail server.
+type Mailer struct {
 	host string // SMTP_HOST
 	port string // SMTP_PORT (default 587)
 	user string // SMTP_USERNAME
@@ -29,8 +31,12 @@ type mailer struct {
 	from string // SMTP_FROM (envelope + header From)
 }
 
-func newMailer() *mailer {
-	m := &mailer{
+// NewMailerFromEnv reads SMTP configuration from the environment (SMTP_HOST, SMTP_PORT,
+// SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM) and announces it in the log, so "is SMTP set
+// up?" is answerable from boot output — the usual cause of "emails aren't sending" is
+// SMTP_HOST not reaching the process.
+func NewMailerFromEnv() *Mailer {
+	m := &Mailer{
 		host: os.Getenv("SMTP_HOST"),
 		port: os.Getenv("SMTP_PORT"),
 		user: os.Getenv("SMTP_USERNAME"),
@@ -43,8 +49,6 @@ func newMailer() *mailer {
 	if m.from == "" {
 		m.from = "no-reply@localhost"
 	}
-	// Announce the mail configuration at boot so "is SMTP set up?" is answerable from the
-	// logs — the usual cause of "emails aren't sending" is SMTP_HOST not reaching the process.
 	if m.host == "" {
 		slog.Warn("mail: SMTP not configured (SMTP_HOST unset) — verification/reset emails will be logged, not sent")
 	} else {
@@ -53,14 +57,15 @@ func newMailer() *mailer {
 	return m
 }
 
-func (m *mailer) configured() bool { return m.host != "" }
+// Configured reports whether a real SMTP host is set (otherwise Send only logs).
+func (m *Mailer) Configured() bool { return m != nil && m.host != "" }
 
-// template loads an embedded email template and substitutes {{key}} placeholders. Values are
-// HTML-escaped: they include user-controlled data (e.g. firstName from registration), and an
-// attacker could otherwise register a victim's address with markup in their name to inject
-// phishing content into a mail sent from our domain. Escaping is also correct for the URL
-// values, which sit inside href="…" attributes.
-func (m *mailer) template(name string, vars map[string]string) (string, error) {
+// Template loads an embedded email template and substitutes {{key}} placeholders. Values
+// are HTML-escaped: they include user-controlled data (e.g. firstName from registration),
+// and an attacker could otherwise register a victim's address with markup in their name to
+// inject phishing content into a mail sent from our domain. Escaping is also correct for
+// the URL values, which sit inside href="…" attributes.
+func (m *Mailer) Template(name string, vars map[string]string) (string, error) {
 	raw, err := emailTemplates.ReadFile("emails/dist/" + name)
 	if err != nil {
 		return "", fmt.Errorf("email template %s: %w", name, err)
@@ -72,10 +77,11 @@ func (m *mailer) template(name string, vars map[string]string) (string, error) {
 	return out, nil
 }
 
-// send delivers an HTML email. Without SMTP configured it logs the message (with any link)
-// so dev can proceed without a mail server. Every outcome is logged so failures are visible.
-func (m *mailer) send(to, subject, htmlBody string) error {
-	if !m.configured() {
+// Send delivers an HTML email. Without SMTP configured it logs the message (with any link)
+// so dev and unconfigured self-hosted instances can proceed without a mail server. Every
+// outcome is logged so failures are visible.
+func (m *Mailer) Send(to, subject, htmlBody string) error {
+	if !m.Configured() {
 		slog.Warn("mail: SMTP not configured; email NOT sent (set SMTP_HOST to send)",
 			"to", to, "subject", subject, "preview", previewLinks(htmlBody))
 		return nil
@@ -91,7 +97,7 @@ func (m *mailer) send(to, subject, htmlBody string) error {
 // deliver runs the SMTP conversation. It supports implicit TLS (port 465, dial TLS
 // directly) and STARTTLS (587/25, upgrade the plaintext connection when the server offers
 // it) — net/smtp.SendMail only handles the latter, so a 465 provider would otherwise fail.
-func (m *mailer) deliver(to string, msg []byte) error {
+func (m *Mailer) deliver(to string, msg []byte) error {
 	addr := net.JoinHostPort(m.host, m.port)
 	tlsCfg := &tls.Config{ServerName: m.host}
 
@@ -157,7 +163,7 @@ func buildMessage(from, to, subject, htmlBody string) []byte {
 }
 
 // previewLinks pulls href URLs out of an HTML body for the dev log, so the verification
-// link is visible without configuring SMTP.
+// or reset link is visible without configuring SMTP.
 func previewLinks(html string) string {
 	var links []string
 	for _, part := range strings.Split(html, `href="`)[1:] {

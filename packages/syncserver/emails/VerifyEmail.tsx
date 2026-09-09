@@ -12,22 +12,22 @@ import {
 } from "@react-email/components";
 
 // VerifyEmail is the account-confirmation email. It's rendered to static HTML at build
-// time with {{placeholder}} props, which the Go cloud binary substitutes per-recipient
-// before sending over SMTP.
-export function VerifyEmail(props: { verifyUrl: string; firstName: string; baseUrl: string }) {
+// time with {{placeholder}} props, which the Go sync server (open-core and cloud alike)
+// substitutes per-recipient before sending over SMTP.
+export function VerifyEmail(props: { verifyUrl: string; firstName: string }) {
   return (
     <Html>
       <Head />
-      <Preview>Confirm your Companion Cloud email address</Preview>
+      <Preview>Confirm your Companion email address</Preview>
       <Body style={body}>
         <Container style={container}>
           <Section>
-            <img src={`${props.baseUrl}/brandmark.png`} width="28" height="28" alt="Companion" style={logo} />
+            <div style={logo} />
             <Heading style={heading}>Confirm your email</Heading>
             <Text style={text}>Hi {props.firstName},</Text>
             <Text style={text}>
-              Thanks for signing up for Companion Cloud. Confirm this email address to
-              activate your account and subscribe.
+              Thanks for signing up for Companion. Confirm this email address to activate
+              your account.
             </Text>
             <Button style={button} href={props.verifyUrl}>
               Verify email
@@ -39,8 +39,7 @@ export function VerifyEmail(props: { verifyUrl: string; firstName: string; baseU
             </Text>
             <Hr style={hr} />
             <Text style={muted}>
-              If you didn’t create a Companion Cloud account, you can safely ignore this
-              email.
+              If you didn’t create a Companion account, you can safely ignore this email.
             </Text>
           </Section>
         </Container>

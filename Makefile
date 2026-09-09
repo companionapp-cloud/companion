@@ -8,7 +8,7 @@ WEB_PUBLIC := apps/web/public
 MOBILE_MODULE := apps/mobile/modules/companion-core
 
 .PHONY: all test test-go fmt vet desktop desktop-frontend desktop-run desktop-app desktop-app-run core-wasm web-assets \
-        web-run server server-run cloud cloud-frontend cloud-emails cloud-run gomobile-init core-android core-ios android-lib \
+        web-run server server-run emails cloud cloud-frontend cloud-run gomobile-init core-android core-ios android-lib \
         mobile-artifacts mobile-run db-up db-down db-logs db-reset clean
 
 all: test
@@ -109,20 +109,22 @@ server-run:
 cloud-frontend:
 	npm run build -w @companion/cloud-frontend
 
-## cloud-emails: render the React Email templates into apps/cloud/emails/dist (also
-## embedded by the cloud binary and sent over SMTP with per-recipient substitution).
-cloud-emails:
-	npm run build -w @companion/cloud-emails
+## emails: render the React Email templates (packages/syncserver/emails) into their dist/,
+## which syncserver embeds and sends over SMTP with per-recipient substitution. The render
+## is COMMITTED so `go build` of the server/cloud needs no Node; run this after editing a
+## template and commit the result.
+emails:
+	npm run build -w @companion/emails
 
 ## cloud: build the cloud binary (open-core sync API + Stripe billing + admin), embedding
 ## the freshly built frontend and email templates.
-cloud: cloud-frontend cloud-emails
+cloud: cloud-frontend
 	mkdir -p $(BUILD_DIR)
 	cd apps/cloud && $(GO) build -o ../../$(BUILD_DIR)/companion-cloud .
 
 ## cloud-run: run the cloud server from source (dev, :8080). Loads .env so DATABASE_URL,
 ## the STRIPE_* keys, and SMTP_* settings are picked up.
-cloud-run: cloud-frontend cloud-emails
+cloud-run: cloud-frontend
 	@set -a; if [ -f .env ]; then . ./.env; fi; set +a; cd apps/cloud && $(GO) run .
 
 ## gomobile-init: install + initialise gomobile (needs Xcode / Android NDK, PLAN §3.2)

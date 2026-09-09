@@ -1,7 +1,8 @@
-// Command server is the open-core Companion sync API: auth + push/pull, reusing the
-// shared companion/syncserver library (PLAN §5). It persists to its own store (SQLite
-// here; Postgres in production) and never touches the client sqlite store or client sync
-// engine. The cloud binary wraps the same library with billing/subscription authorization.
+// Command server is the open-core Companion sync API: auth (with email verification and
+// forgot-password over SMTP) + push/pull, reusing the shared companion/syncserver library
+// (PLAN §5). It persists to its own store (SQLite here; Postgres in production) and never
+// touches the client sqlite store or client sync engine. The cloud binary wraps the same
+// library with billing/subscription authorization.
 package main
 
 import (
@@ -35,7 +36,15 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
-	srv := syncserver.New(db, dialect)
+	// Email: SMTP_* configure delivery (unset = verification/reset links are logged, not
+	// sent). COMPANION_PUBLIC_URL is this API's externally reachable base URL — what users
+	// enter as the Server URL — and anchors the links in those emails; COMPANION_APP_URL
+	// optionally overrides where the reset page sends users (default: the app's deep link).
+	srv := syncserver.New(db, dialect,
+		syncserver.WithMailer(syncserver.NewMailerFromEnv()),
+		syncserver.WithPublicURL(os.Getenv("COMPANION_PUBLIC_URL")),
+		syncserver.WithAppURL(os.Getenv("COMPANION_APP_URL")),
+	)
 	// Hourly Trash collector: promotes expired trashed rows to tombstones (PLAN §7.6).
 	srv.StartTrashCollector(context.Background())
 	// Per-minute repeat-task generator: creates each seed's occurrence just in time, only

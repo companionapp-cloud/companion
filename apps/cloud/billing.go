@@ -101,7 +101,7 @@ func (b *billing) handleCheckout(w http.ResponseWriter, r *http.Request) {
 	uid := syncserver.UserID(r)
 	// Email verification is mandatory before subscribing (checked first so the user gets
 	// this actionable error regardless of billing configuration).
-	if !isEmailVerified(r.Context(), b.db, b.dialect, uid) {
+	if !syncserver.IsEmailVerified(r.Context(), b.db, b.dialect, uid) {
 		writeErr(w, http.StatusForbidden, "verify your email before subscribing")
 		return
 	}

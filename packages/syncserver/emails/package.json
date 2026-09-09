@@ -1,5 +1,5 @@
 {
-  "name": "@companion/cloud-emails",
+  "name": "@companion/emails",
   "version": "0.0.0",
   "private": true,
   "type": "module",

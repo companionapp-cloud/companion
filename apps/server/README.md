@@ -8,10 +8,16 @@ touches the client SQLite store or the client sync engine (PLAN §7).
 ## Endpoints
 
 ```
-POST /v1/auth/register  {email, password}      -> {token, userId}
-POST /v1/auth/login     {email, password}      -> {token, userId}
-GET  /v1/sync/pull?cursor=N&limit=500          -> {changes:[{entityType,row,serverSeq}], nextCursor}
-POST /v1/sync/push       {changes:[…]}         -> {results:[{id,status,version?,serverRow?}]}
+POST /v1/auth/register     {email, password}    -> {token, userId}
+POST /v1/auth/login        {email, password}    -> {token, userId}
+POST /v1/auth/verify/send  (bearer)             -> {sent, verified}   emails a confirmation link
+POST /v1/auth/verify       {token}              -> {verified}
+POST /v1/auth/forgot       {email}              -> {sent}             always 200 (no enumeration)
+POST /v1/auth/reset/info   {token}              -> {encrypted, recoveryWrapped?}
+POST /v1/auth/reset        {token, newPassword, keyMaterial?} -> {reset}
+GET  /v1/auth/verify?token=… / /v1/auth/reset?token=…  landing pages the emailed links open
+GET  /v1/sync/pull?cursor=N&limit=500           -> {changes:[{entityType,row,serverSeq}], nextCursor}
+POST /v1/sync/push          {changes:[…]}       -> {results:[{id,status,version?,serverRow?}]}
 ```
 
 - **Push** (`applyPush`, PLAN §5.2): per row, in a transaction —
@@ -22,6 +28,17 @@ POST /v1/sync/push       {changes:[…]}         -> {results:[{id,status,version
   LIMIT n`, returning `next_cursor`. Tombstones (`deleted_at`) propagate.
 - Client-side conflict resolution + **conflicted copies** live in `core/sync`
   (shared by every client).
+
+## Email
+
+Verification and forgot-password emails go over SMTP (`SMTP_HOST`, `SMTP_PORT`,
+`SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`); with `SMTP_HOST` unset the links are
+logged instead of sent. `COMPANION_PUBLIC_URL` (the API base users enter in the app)
+anchors the emailed links; `COMPANION_APP_URL` optionally overrides where the reset page
+hands off (default: the app's `companion://reset` deep link). Registration sends the
+first verification email automatically when SMTP is configured. Templates live in
+`packages/syncserver/emails` (React Email); their rendered `dist/` is committed and
+embedded, so `go build` needs no Node — run `make emails` after editing one.
 
 ## Storage
 

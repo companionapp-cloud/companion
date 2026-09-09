@@ -1,36 +1,41 @@
-package main
+package syncserver
 
 import (
 	"database/sql"
 	"net/http"
-	"os"
+	"net/url"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
-// passwordReset drives the forgot-password flow. The one-time token is stored on the user
-// row (syncserver's users table) and rotated on every request, so only the most recent
-// link works. Sending goes through the shared mailer (React Email template).
-type passwordReset struct {
-	db      *sql.DB
-	dialect string
-	mail    *mailer
-	baseURL string
-}
+// Forgot password (shared by the open-core server and the cloud). The one-time token is
+// stored on the user row and rotated on every request, so only the most recent link works.
+// An end-to-end-encrypted account can only be reset from the Companion app, which rewraps
+// the master key with the recovery code (PLAN §E2EE); the server stores what the app sends.
 
 const resetTokenTTL = time.Hour
 
-func newPasswordReset(db *sql.DB, dialect string, mail *mailer) *passwordReset {
-	base := os.Getenv("CLOUD_BASE_URL")
-	if base == "" {
-		base = "http://localhost:8080"
+// resetLink builds the URL the reset email points at: the custom EmailLinks when set (the
+// cloud's portal), else this server's own landing page, which hands off to the app.
+func (s *Server) resetLink(token string) string {
+	if s.links.Reset != nil {
+		return s.links.Reset(token)
 	}
-	return &passwordReset{db: db, dialect: dialect, mail: mail, baseURL: base}
+	return s.publicURL + "/v1/auth/reset?token=" + token
 }
 
-func (p *passwordReset) rebind(q string) string { return rebind(p.dialect, q) }
+// appResetLink is the link that opens the Companion app's recovery flow: appURL plus the
+// reset token and this API's base, so a not-yet-signed-in app knows where to send the reset.
+func (s *Server) appResetLink(token string) string {
+	query := "resetToken=" + url.QueryEscape(token) + "&server=" + url.QueryEscape(s.publicURL)
+	sep := "?"
+	if strings.Contains(s.appURL, "?") {
+		sep = "&"
+	}
+	return s.appURL + sep + query
+}
 
 type forgotRequest struct {
 	Email string `json:"email"`
@@ -39,9 +44,9 @@ type forgotRequest struct {
 // handleForgot issues a rotated reset token for the address and emails the link. It always
 // responds 200 regardless of whether the email exists, to avoid leaking which addresses
 // are registered.
-func (p *passwordReset) handleForgot(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleForgot(w http.ResponseWriter, r *http.Request) {
 	var req forgotRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decode(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
@@ -49,7 +54,7 @@ func (p *passwordReset) handleForgot(w http.ResponseWriter, r *http.Request) {
 	ok := func() { writeJSON(w, http.StatusOK, map[string]any{"sent": true}) }
 
 	var uid, first string
-	if err := p.db.QueryRowContext(r.Context(), p.rebind(
+	if err := s.db.QueryRowContext(r.Context(), s.rebind(
 		`SELECT id, first_name FROM users WHERE email = ?;`), email).Scan(&uid, &first); err != nil {
 		ok() // Unknown address: pretend success.
 		return
@@ -59,30 +64,25 @@ func (p *passwordReset) handleForgot(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "token generation failed")
 		return
 	}
-	now := time.Now().UTC()
+	now := s.clock.Now().UTC()
 	// Rotate: overwrite any prior token so only this link is valid.
-	if _, err := p.db.ExecContext(r.Context(), p.rebind(
+	if _, err := s.db.ExecContext(r.Context(), s.rebind(
 		`UPDATE users SET password_reset_token = ?, password_reset_expires_at = ? WHERE id = ?;`),
 		token, now.Add(resetTokenTTL).Format(timeFormat), uid); err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not create token")
 		return
 	}
-	firstName := strings.TrimSpace(first)
-	if firstName == "" {
-		firstName = "there"
-	}
-	html, err := p.mail.template("reset-password.html", map[string]string{
-		"resetUrl":  p.baseURL + "/reset?token=" + token,
-		"firstName": firstName,
-		"baseUrl":   p.baseURL,
+	html, err := s.mailer.Template("reset-password.html", map[string]string{
+		"resetUrl":  s.resetLink(token),
+		"firstName": greetingName(first),
 	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "template failed")
 		return
 	}
-	// send() logs any delivery failure; respond 200 regardless so we never reveal whether
+	// Send logs any delivery failure; respond 200 regardless so we never reveal whether
 	// the address is registered (account-enumeration guard).
-	_ = p.mail.send(email, "Reset your Companion Cloud password", html)
+	_ = s.mailer.Send(email, "Reset your Companion password", html)
 	ok()
 }
 
@@ -128,19 +128,19 @@ type resetInfoResponse struct {
 // handleResetInfo returns, for a valid reset token, whether the account is encrypted and its
 // recovery-wrapped key blob (ciphertext, useless without the recovery code). The app uses this to
 // drive the recovery flow before it can authenticate.
-func (p *passwordReset) handleResetInfo(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleResetInfo(w http.ResponseWriter, r *http.Request) {
 	var req resetInfoRequest
-	if err := decodeJSON(r, &req); err != nil || req.Token == "" {
+	if err := decode(r, &req); err != nil || req.Token == "" {
 		writeErr(w, http.StatusBadRequest, "token is required")
 		return
 	}
-	uid, ok := p.userForValidToken(r, req.Token)
+	uid, ok := s.userForValidResetToken(r, req.Token)
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "invalid or expired link")
 		return
 	}
 	var recoveryWrapped sql.NullString
-	err := p.db.QueryRowContext(r.Context(), p.rebind(
+	err := s.db.QueryRowContext(r.Context(), s.rebind(
 		`SELECT recovery_wrapped FROM user_keys WHERE user_id = ?;`), uid).Scan(&recoveryWrapped)
 	if err == sql.ErrNoRows {
 		writeJSON(w, http.StatusOK, resetInfoResponse{Encrypted: false})
@@ -153,16 +153,17 @@ func (p *passwordReset) handleResetInfo(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, resetInfoResponse{Encrypted: true, RecoveryWrapped: recoveryWrapped.String})
 }
 
-// userForValidToken returns the user id for a live (unexpired) reset token, without consuming it.
-func (p *passwordReset) userForValidToken(r *http.Request, token string) (string, bool) {
+// userForValidResetToken returns the user id for a live (unexpired) reset token, without
+// consuming it.
+func (s *Server) userForValidResetToken(r *http.Request, token string) (string, bool) {
 	var uid, expiresAt string
-	if err := p.db.QueryRowContext(r.Context(), p.rebind(
+	if err := s.db.QueryRowContext(r.Context(), s.rebind(
 		`SELECT id, password_reset_expires_at FROM users WHERE password_reset_token = ?;`), token).
 		Scan(&uid, &expiresAt); err != nil {
 		return "", false
 	}
 	exp, err := time.Parse(timeFormat, expiresAt)
-	if err != nil || time.Now().UTC().After(exp) {
+	if err != nil || s.clock.Now().UTC().After(exp) {
 		return "", false
 	}
 	return uid, true
@@ -170,9 +171,9 @@ func (p *passwordReset) userForValidToken(r *http.Request, token string) (string
 
 // handleReset consumes a token and sets a new password. It clears the token and revokes
 // all sessions/refresh tokens so the account is fully re-secured.
-func (p *passwordReset) handleReset(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
 	var req resetRequest
-	if err := decodeJSON(r, &req); err != nil || req.Token == "" {
+	if err := decode(r, &req); err != nil || req.Token == "" {
 		writeErr(w, http.StatusBadRequest, "token is required")
 		return
 	}
@@ -180,16 +181,8 @@ func (p *passwordReset) handleReset(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "new password must be at least 6 characters")
 		return
 	}
-	var uid, expiresAt string
-	err := p.db.QueryRowContext(r.Context(), p.rebind(
-		`SELECT id, password_reset_expires_at FROM users WHERE password_reset_token = ?;`), req.Token).
-		Scan(&uid, &expiresAt)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid or expired link")
-		return
-	}
-	exp, perr := time.Parse(timeFormat, expiresAt)
-	if perr != nil || time.Now().UTC().After(exp) {
+	uid, ok := s.userForValidResetToken(r, req.Token)
+	if !ok {
 		writeErr(w, http.StatusBadRequest, "invalid or expired link")
 		return
 	}
@@ -198,15 +191,8 @@ func (p *passwordReset) handleReset(w http.ResponseWriter, r *http.Request) {
 	// rewrapped under the new password (using the recovery code); the credential and wrapped key are
 	// then updated together. A plain reset (no material) on an encrypted account is refused — it
 	// would orphan the key and lock the clients out (PLAN §E2EE).
-	var one int
-	encrypted := false
-	switch kerr := p.db.QueryRowContext(r.Context(), p.rebind(
-		`SELECT 1 FROM user_keys WHERE user_id = ?;`), uid).Scan(&one); kerr {
-	case nil:
-		encrypted = true
-	case sql.ErrNoRows:
-		// Plaintext account: a normal reset is safe.
-	default:
+	encrypted, err := s.userIsEncrypted(uid)
+	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "reset failed")
 		return
 	}
@@ -220,14 +206,14 @@ func (p *passwordReset) handleReset(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "hash failed")
 		return
 	}
-	tx, err := p.db.Begin()
+	tx, err := s.db.Begin()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "reset failed")
 		return
 	}
 	defer tx.Rollback()
 	// Set the new password and consume the token in one step.
-	if _, err := tx.Exec(p.rebind(
+	if _, err := tx.Exec(s.rebind(
 		`UPDATE users SET password_hash = ?, password_reset_token = NULL, password_reset_expires_at = NULL WHERE id = ?;`),
 		string(hash), uid); err != nil {
 		writeErr(w, http.StatusInternalServerError, "reset failed")
@@ -239,16 +225,16 @@ func (p *passwordReset) handleReset(w http.ResponseWriter, r *http.Request) {
 		m := req.KeyMaterial
 		// recovery_wrapped uses COALESCE so an omitted value preserves the existing recovery blob
 		// (a password reset doesn't change the recovery code) rather than nulling it out.
-		if _, err := tx.Exec(p.rebind(
+		if _, err := tx.Exec(s.rebind(
 			`UPDATE user_keys SET wrapped_master_key = ?, kdf_salt = ?, kdf_time = ?, kdf_memory_k = ?, kdf_threads = ?, recovery_wrapped = COALESCE(?, recovery_wrapped), updated_at = ? WHERE user_id = ?;`),
-			m.WrappedMasterKey, m.KDFSalt, m.KDFTime, m.KDFMemoryK, m.KDFThreads, nullIfEmptyStr(m.RecoveryWrapped), time.Now().UTC().Format(timeFormat), uid); err != nil {
+			m.WrappedMasterKey, m.KDFSalt, m.KDFTime, m.KDFMemoryK, m.KDFThreads, nullIfEmpty(strings.TrimSpace(m.RecoveryWrapped)), s.clock.Now().UTC().Format(timeFormat), uid); err != nil {
 			writeErr(w, http.StatusInternalServerError, "reset failed")
 			return
 		}
 	}
 	// Revoke existing sessions/refresh tokens so a leaked one can't outlive the reset.
-	tx.Exec(p.rebind(`DELETE FROM sessions WHERE user_id = ?;`), uid)
-	tx.Exec(p.rebind(`DELETE FROM refresh_tokens WHERE user_id = ?;`), uid)
+	tx.Exec(s.rebind(`DELETE FROM sessions WHERE user_id = ?;`), uid)
+	tx.Exec(s.rebind(`DELETE FROM refresh_tokens WHERE user_id = ?;`), uid)
 	if err := tx.Commit(); err != nil {
 		writeErr(w, http.StatusInternalServerError, "reset failed")
 		return
@@ -256,10 +242,30 @@ func (p *passwordReset) handleReset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"reset": true})
 }
 
-// nullIfEmptyStr maps an empty optional string to SQL NULL (for COALESCE-preserving updates).
-func nullIfEmptyStr(s string) any {
-	if strings.TrimSpace(s) == "" {
-		return nil
+// handleResetPage is the landing page the emailed reset link opens on a server without an
+// external frontend. Passwords are reset in the Companion app (it alone can rewrap an
+// encrypted account's key), so the page hands off: a button that opens the app's recovery
+// deep link, and the same link as text to paste into Settings › Sync › Forgot password.
+func (s *Server) handleResetPage(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		renderPage(w, http.StatusBadRequest, pageData{
+			Title: "Reset link problem",
+			Lead:  "This reset link is missing its token. Request a new one from the Companion app.",
+		})
+		return
 	}
-	return s
+	if _, ok := s.userForValidResetToken(r, token); !ok {
+		renderPage(w, http.StatusBadRequest, pageData{
+			Title: "Reset link expired",
+			Lead:  "This reset link is invalid or has expired. Request a new one from the Companion app's sign-in screen.",
+		})
+		return
+	}
+	renderPage(w, http.StatusOK, pageData{
+		Title:     "Finish in the Companion app",
+		Lead:      "Passwords are reset in the Companion app, where your recovery code re-secures your encryption key.",
+		AppLink:   s.appResetLink(token),
+		PasteHint: "If the app doesn't open, go to Settings › Sync › Forgot password in the Companion app and paste this link:",
+	})
 }
