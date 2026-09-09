@@ -36,6 +36,44 @@ type Server struct {
 	// authLimiter rate-limits the unauthenticated credential endpoints (register/login/
 	// refresh) per client IP, so password stuffing and account-creation floods are bounded.
 	authLimiter *RateLimiter
+	// emailLimiter caps the email-sending / token-consuming flows (verification, forgot
+	// password) so mailbox flooding and token guessing are bounded. Anonymous routes are
+	// keyed per client IP + path; the authenticated resend is keyed per user.
+	emailLimiter *RateLimiter
+	// mailer delivers verification + reset emails. Defaults to an unconfigured Mailer (logs
+	// instead of sending); the binaries inject NewMailerFromEnv via WithMailer.
+	mailer *Mailer
+	// publicURL is the externally reachable base URL of this API (what clients enter as the
+	// Server URL). It anchors the links in emails when no custom EmailLinks are set.
+	publicURL string
+	// appURL is where the reset landing page sends users to finish a password reset (the
+	// Companion app alone can rewrap an encrypted account's key, PLAN §E2EE). Defaults to
+	// the app's custom-scheme deep link.
+	appURL string
+	// links, when set, overrides how email links are built (the cloud points them at its
+	// portal instead of the server's own landing pages).
+	links EmailLinks
+}
+
+// Default public/app URLs when a binary doesn't configure them (local dev).
+const (
+	defaultPublicURL = "http://localhost:8080"
+	defaultAppURL    = "companion://reset"
+)
+
+// Per-IP (or per-user) limits for the email flows: a handful of sends per minute is plenty
+// for a human, and tight enough to bound verification/reset-email flooding.
+const (
+	emailRatePerMinute = 10
+	emailBurst         = 5
+)
+
+// EmailLinks builds the URLs embedded in the verification and reset emails from the
+// one-time token. Unset fields fall back to the server's own landing pages under
+// publicURL (/v1/auth/verify?token=… and /v1/auth/reset?token=…).
+type EmailLinks struct {
+	Verify func(token string) string
+	Reset  func(token string) string
 }
 
 // Per-IP, per-endpoint limits for the credential routes: enough headroom for a human
@@ -67,6 +105,44 @@ func WithoutCORS() Option {
 	return func(s *Server) { s.corsMW = func(next http.Handler) http.Handler { return next } }
 }
 
+// WithMailer sets the Mailer used for verification and password-reset email. Without it
+// the server logs the emails (with their links) instead of sending them.
+func WithMailer(m *Mailer) Option {
+	return func(s *Server) {
+		if m != nil {
+			s.mailer = m
+		}
+	}
+}
+
+// WithPublicURL sets the externally reachable base URL of this API, used to build the links
+// in verification/reset emails and the `server` parameter of the app's reset deep link.
+// Trailing slashes are dropped; an empty value keeps the default.
+func WithPublicURL(u string) Option {
+	return func(s *Server) {
+		if u = strings.TrimRight(strings.TrimSpace(u), "/"); u != "" {
+			s.publicURL = u
+		}
+	}
+}
+
+// WithAppURL sets where the reset landing page sends users to finish a password reset: a
+// hosted web-app URL or a custom-scheme deep link (the default, companion://reset). The
+// page appends ?resetToken=…&server=… to it.
+func WithAppURL(u string) Option {
+	return func(s *Server) {
+		if u = strings.TrimRight(strings.TrimSpace(u), "/"); u != "" {
+			s.appURL = u
+		}
+	}
+}
+
+// WithEmailLinks overrides how email links are built (see EmailLinks). A wrapping binary
+// with its own web frontend (the cloud) points them at that frontend's pages.
+func WithEmailLinks(l EmailLinks) Option {
+	return func(s *Server) { s.links = l }
+}
+
 // New builds a Server over a SQL store (Postgres or SQLite). Options layer optional
 // behavior (e.g. WithSyncGuard) without changing the open-core defaults.
 func New(db *sql.DB, dialect string, opts ...Option) *Server {
@@ -79,7 +155,11 @@ func New(db *sql.DB, dialect string, opts ...Option) *Server {
 	s := &Server{
 		db: db, dialect: dialect, clock: domain.SystemClock{}, hub: NewHub(),
 		blobs: backend, maxBlobSize: maxBlobSizeFromEnv(),
-		authLimiter: NewRateLimiter(authRatePerMinute, authBurst),
+		authLimiter:  NewRateLimiter(authRatePerMinute, authBurst),
+		emailLimiter: NewRateLimiter(emailRatePerMinute, emailBurst),
+		mailer:       &Mailer{}, // unconfigured: logs instead of sending
+		publicURL:    defaultPublicURL,
+		appURL:       defaultAppURL,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -132,6 +212,22 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/auth/register", s.authLimiter.Limit(IPPathKey, s.handleRegister))
 	mux.Handle("POST /v1/auth/login", s.authLimiter.Limit(IPPathKey, s.handleLogin))
 	mux.Handle("POST /v1/auth/refresh", s.authLimiter.Limit(IPPathKey, s.handleRefresh))
+	// Email verification (shared by open-core + cloud). Sending needs a session (Authed
+	// populates the user id UserKey reads, so the per-user limit runs inside it); confirming
+	// is token-based so the link works from any browser. GET serves the landing page the
+	// emailed link opens when no external frontend handles it.
+	mux.Handle("POST /v1/auth/verify/send", s.authed(func(w http.ResponseWriter, r *http.Request) {
+		s.emailLimiter.Limit(UserKey, s.handleVerifySend).ServeHTTP(w, r)
+	}))
+	mux.Handle("POST /v1/auth/verify", s.emailLimiter.Limit(IPPathKey, s.handleVerify))
+	mux.Handle("GET /v1/auth/verify", s.emailLimiter.Limit(IPPathKey, s.handleVerifyPage))
+	// Forgot password (shared): request a reset email, look up an account's encryption state
+	// for a reset token, and consume the token. GET is the landing page that hands off to
+	// the app, which alone can rewrap an encrypted account's master key (PLAN §E2EE).
+	mux.Handle("POST /v1/auth/forgot", s.emailLimiter.Limit(IPPathKey, s.handleForgot))
+	mux.Handle("POST /v1/auth/reset", s.emailLimiter.Limit(IPPathKey, s.handleReset))
+	mux.Handle("POST /v1/auth/reset/info", s.emailLimiter.Limit(IPPathKey, s.handleResetInfo))
+	mux.Handle("GET /v1/auth/reset", s.emailLimiter.Limit(IPPathKey, s.handleResetPage))
 	// Account self-service (shared by open-core + cloud): profile + credential changes.
 	mux.Handle("GET /v1/account", s.authed(s.handleAccount))
 	mux.Handle("POST /v1/account/profile", s.authed(s.handleUpdateProfile))

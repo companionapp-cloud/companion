@@ -12,21 +12,21 @@ import {
 } from "@react-email/components";
 
 // ResetPassword is the forgot-password email. Rendered to static HTML at build time with
-// {{placeholder}} props the Go cloud binary substitutes per recipient before sending.
-export function ResetPassword(props: { resetUrl: string; firstName: string; baseUrl: string }) {
+// {{placeholder}} props the Go sync server substitutes per recipient before sending.
+export function ResetPassword(props: { resetUrl: string; firstName: string }) {
   return (
     <Html>
       <Head />
-      <Preview>Reset your Companion Cloud password</Preview>
+      <Preview>Reset your Companion password</Preview>
       <Body style={body}>
         <Container style={container}>
           <Section>
-            <img src={`${props.baseUrl}/brandmark.png`} width="28" height="28" alt="Companion" style={logo} />
+            <div style={logo} />
             <Heading style={heading}>Reset your password</Heading>
             <Text style={text}>Hi {props.firstName},</Text>
             <Text style={text}>
-              We received a request to reset your Companion Cloud password. Click below to
-              choose a new one. This link expires in one hour.
+              We received a request to reset your Companion password. Click below to choose
+              a new one. This link expires in one hour.
             </Text>
             <Button style={button} href={props.resetUrl}>
               Reset password

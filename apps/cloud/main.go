@@ -1,8 +1,9 @@
 // Command cloud is the hosted Companion service: the open-core sync API (companion/
-// syncserver, mounted 1:1 under /api/v1) wrapped with Stripe billing and a subscription
-// gate, plus an embedded account/billing frontend served at "/". Users can register, but
-// sync returns 403 until they hold an active subscription. All billing configuration is
-// read from the environment at runtime.
+// syncserver, mounted 1:1 under /api/v1, including its email verification and password
+// reset flows) wrapped with Stripe billing and a subscription gate, plus an embedded
+// account/billing frontend served at "/". Users can register, but sync returns 403 until
+// they hold an active subscription. All billing configuration is read from the environment
+// at runtime.
 package main
 
 import (
@@ -53,15 +54,29 @@ func main() {
 		addr = ":8080"
 	}
 
-	mail := newMailer()
 	bill := newBilling(db, dialect)
-	vrf := newVerifier(db, dialect, mail)
-	pwr := newPasswordReset(db, dialect, mail)
-	adm := newAdmin(db, dialect, bill, vrf)
+	// CLOUD_BASE_URL is the portal's origin: verification/reset emails link to its pages
+	// (/verify, /reset) rather than syncserver's own landing pages, and the client-facing API
+	// base (SYNC_API_URL) is what the reset hand-off tells the app to talk to.
+	baseURL := strings.TrimRight(os.Getenv("CLOUD_BASE_URL"), "/")
+	if baseURL == "" {
+		baseURL = "http://localhost:8080"
+	}
 	// The subscription gate: syncserver calls Guard before every sync-gated request.
 	// WithoutCORS: the cloud owns one CORS policy across its whole tree (API + billing +
 	// frontend) rather than letting syncserver wrap only the /api routes.
-	srv := syncserver.New(db, dialect, syncserver.WithSyncGuard(bill.Guard), syncserver.WithoutCORS())
+	srv := syncserver.New(db, dialect,
+		syncserver.WithSyncGuard(bill.Guard),
+		syncserver.WithoutCORS(),
+		syncserver.WithMailer(syncserver.NewMailerFromEnv()),
+		syncserver.WithPublicURL(syncAPIURL(baseURL)),
+		syncserver.WithAppURL(os.Getenv("CLOUD_APP_URL")),
+		syncserver.WithEmailLinks(syncserver.EmailLinks{
+			Verify: func(token string) string { return baseURL + "/verify?token=" + token },
+			Reset:  func(token string) string { return baseURL + "/reset?token=" + token },
+		}),
+	)
+	adm := newAdmin(db, dialect, bill, srv)
 	srv.StartTrashCollector(context.Background())
 	srv.StartRepeatMaterializer(context.Background())
 	// Calendar ICS fetching moved to the client (PLAN §E2EE); no server-side fetch sweep.
@@ -81,7 +96,7 @@ func main() {
 	}
 	// Outermost: request logging wraps CORS + routing so every request (including preflight)
 	// is logged once with its final status.
-	root := syncserver.LogRequests(logger)(syncserver.CORS(origins)(handler(srv, bill, adm, vrf, pwr)))
+	root := syncserver.LogRequests(logger)(syncserver.CORS(origins)(handler(srv, bill, adm)))
 
 	logger.Info("companion cloud listening", "addr", addr, "store", dialect, "cors", strings.Join(origins, ","))
 	if err := http.ListenAndServe(addr, root); err != nil {
@@ -94,19 +109,12 @@ func main() {
 // open-core sync API under /api/v1, with the embedded frontend at "/". The explicit
 // billing patterns are more specific than the "/api/" mount, so Go 1.22's method-aware
 // mux routes them first.
-func handler(srv *syncserver.Server, bill *billing, adm *admin, vrf *verifier, pwr *passwordReset) http.Handler {
+func handler(srv *syncserver.Server, bill *billing, adm *admin) http.Handler {
 	mux := http.NewServeMux()
 
 	// Public runtime config for the frontend. syncUrl is the base URL clients enter in the
-	// Companion app's sync settings; the client appends /v1/... so it must point at the API
-	// root (/api). Operators set SYNC_API_URL to the public URL; it defaults to
-	// CLOUD_BASE_URL + /api for local dev.
-	syncURL := strings.TrimRight(os.Getenv("SYNC_API_URL"), "/")
-	if syncURL == "" {
-		if base := strings.TrimRight(os.Getenv("CLOUD_BASE_URL"), "/"); base != "" {
-			syncURL = base + "/api"
-		}
-	}
+	// Companion app's sync settings (see syncAPIURL).
+	syncURL := syncAPIURL(strings.TrimRight(os.Getenv("CLOUD_BASE_URL"), "/"))
 	// appUrl is where the portal sends users for actions only the app can do — notably changing an
 	// encrypted account's password, which requires the crypto core to rewrap the master key (PLAN
 	// §E2EE). CLOUD_APP_URL can be a hosted web-app URL or a custom-scheme deeplink
@@ -127,27 +135,8 @@ func handler(srv *syncserver.Server, bill *billing, adm *admin, vrf *verifier, p
 		})
 	})
 
-	// Coarse abuse protection for the cloud-only credential/email flows: cap attempts so
-	// verification/reset-email flooding and token guessing are bounded. Anonymous routes are
-	// keyed per client IP; the authenticated resend is keyed per user.
-	emailLim := syncserver.NewRateLimiter(10, 5)
-	// verify/send needs the session first (Authed populates the user id UserKey reads), then
-	// the per-user limit runs inside it.
-	verifySend := srv.Authed(func(w http.ResponseWriter, r *http.Request) {
-		emailLim.Limit(syncserver.UserKey, vrf.handleSend).ServeHTTP(w, r)
-	})
-
-	// Email verification (cloud-only). Sending needs a session; verifying is token-based so
-	// the link works from any browser.
-	mux.Handle("POST /api/v1/auth/verify/send", verifySend)
-	mux.Handle("POST /api/v1/auth/verify", emailLim.Limit(syncserver.IPPathKey, vrf.handleVerify))
-
-	// Forgot password (cloud-only, both public and token-based).
-	mux.Handle("POST /api/v1/auth/forgot", emailLim.Limit(syncserver.IPPathKey, pwr.handleForgot))
-	mux.Handle("POST /api/v1/auth/reset", emailLim.Limit(syncserver.IPPathKey, pwr.handleReset))
-	// Pre-auth lookup the app does on a reset deep link: is the account encrypted, and its
-	// recovery-wrapped key blob (needed to recover with the recovery code).
-	mux.Handle("POST /api/v1/auth/reset/info", emailLim.Limit(syncserver.IPPathKey, pwr.handleResetInfo))
+	// Email verification and forgot-password live in syncserver now (shared with the
+	// open-core server) and arrive through the /api mount below at /api/v1/auth/....
 
 	// Billing (cloud-only). Checkout + status require a session; the webhook is
 	// authenticated by its Stripe signature instead.
@@ -182,6 +171,19 @@ func handler(srv *syncserver.Server, bill *billing, adm *admin, vrf *verifier, p
 	// The embedded account/billing frontend at the root.
 	mux.Handle("/", spaHandler())
 	return mux
+}
+
+// syncAPIURL is the base URL clients enter in the Companion app's sync settings; the client
+// appends /v1/... so it must point at the API root (/api). Operators set SYNC_API_URL to
+// the public URL; it defaults to CLOUD_BASE_URL + /api for local dev.
+func syncAPIURL(baseURL string) string {
+	if u := strings.TrimRight(os.Getenv("SYNC_API_URL"), "/"); u != "" {
+		return u
+	}
+	if baseURL != "" {
+		return baseURL + "/api"
+	}
+	return ""
 }
 
 // spaHandler serves the embedded Vite build, falling back to index.html for client-side

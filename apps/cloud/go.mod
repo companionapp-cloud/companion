@@ -35,7 +35,7 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/stripe/stripe-go/v81 v81.4.0
 	github.com/teambition/rrule-go v1.8.2 // indirect
-	golang.org/x/crypto v0.53.0
+	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
