@@ -19,11 +19,11 @@ type admin struct {
 	db      *sql.DB
 	dialect string
 	bill    *billing
-	vrf     *verifier
+	srv     *syncserver.Server // for the shared verification sender
 }
 
-func newAdmin(db *sql.DB, dialect string, bill *billing, vrf *verifier) *admin {
-	return &admin{db: db, dialect: dialect, bill: bill, vrf: vrf}
+func newAdmin(db *sql.DB, dialect string, bill *billing, srv *syncserver.Server) *admin {
+	return &admin{db: db, dialect: dialect, bill: bill, srv: srv}
 }
 
 func (a *admin) rebind(q string) string { return rebind(a.dialect, q) }
@@ -347,7 +347,7 @@ func (a *admin) handleRevoke(w http.ResponseWriter, r *http.Request) {
 // handleResendVerification re-issues + emails a verification link for a user.
 func (a *admin) handleResendVerification(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	already, err := a.vrf.sendVerification(r.Context(), id)
+	already, err := a.srv.SendVerification(r.Context(), id)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "could not send verification email")
 		return

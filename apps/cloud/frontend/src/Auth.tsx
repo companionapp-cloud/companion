@@ -38,8 +38,8 @@ export default function Auth(props: { onAuthed: () => void }) {
           ? await api.login(email.trim(), password)
           : await api.register(email.trim(), password, first.trim(), last.trim());
       api.setToken(res.token);
-      // Kick off the first verification email right after sign-up (best effort).
-      if (mode === "register") api.sendVerification().catch(() => {});
+      // The server sends the first verification email on registration itself (when SMTP is
+      // configured); the VerifyScreen's "Resend" covers dev setups that only log the link.
       props.onAuthed();
     } catch (e: any) {
       setError(e.message);

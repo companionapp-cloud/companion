@@ -34,15 +34,32 @@ Attachments are stored as blobs, and by default they're held in memory — meani
 
 If you never attach files, you can skip this.
 
+## Email: password reset and verification
+
+The server sends two kinds of email: an address-confirmation link after sign-up, and the "forgot password" reset link. Both go out over SMTP; point it at any provider (or your own relay):
+
+```
+-e SMTP_HOST=smtp.example.com \
+-e SMTP_PORT=587 \
+-e SMTP_USERNAME=… \
+-e SMTP_PASSWORD=… \
+-e SMTP_FROM=no-reply@example.com \
+-e COMPANION_PUBLIC_URL=https://sync.example.com
+```
+
+Port 465 uses implicit TLS; 587 and 25 upgrade with STARTTLS when the relay offers it. Set `COMPANION_PUBLIC_URL` to the address your users type into the app — the emailed links are built from it. Leave `SMTP_HOST` unset and nothing is sent; the server logs each link instead, which is handy while you're setting up.
+
+The reset link opens a small page on your server that hands off to the Companion app, because an encrypted account's password can only be changed where the recovery code is: on the device. If you host the web app somewhere, set `COMPANION_APP_URL` to it so that hand-off opens your instance instead of the desktop or mobile app.
+
 ## Point your devices at it
 
 In **Settings → Sync**, set the **Server URL** to your instance, then register an account there. That account is separate from any Companion Cloud account — it's your server, your users.
 
 ## What you don't get
 
-Password reset lives in the hosted cloud, not the open-core server: there's no "forgot password" email flow on a self-hosted instance. Combined with end-to-end encryption, that means a lost password plus a lost [recovery code](/docs/using-our-cloud) is unrecoverable data. Tell your users to keep the code.
+Billing, the account portal, and the admin back-office are the hosted cloud's — the open-core server has no concept of plans or subscriptions, and no web UI; accounts are created from the app.
 
-Billing, of course, is also absent. That one you're welcome to.
+One thing worth telling your users: a password reset still needs the [recovery code](/docs/using-our-cloud). The server never holds the encryption key, so a lost password plus a lost recovery code is unrecoverable data, on your server exactly as on ours.
 
 ## Next steps
 

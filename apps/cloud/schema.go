@@ -54,16 +54,7 @@ CREATE TABLE IF NOT EXISTS cloud_meta (
   value TEXT NOT NULL
 );
 
--- One-time email verification tokens. The email is captured at issue time so a later
--- address change invalidates in-flight tokens (they'd verify a stale address).
-CREATE TABLE IF NOT EXISTS email_verification_tokens (
-  token      TEXT PRIMARY KEY,
-  user_id    TEXT NOT NULL,
-  email      TEXT NOT NULL,
-  expires_at TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_email_verification_user ON email_verification_tokens (user_id);
+-- (email_verification_tokens moved to syncserver's schema: verification is shared now.)
 `
 
 // applyCloudSchema creates the billing + admin tables and retrofits new columns onto
