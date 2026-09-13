@@ -13,7 +13,7 @@ import { addTableNodes, enableTableTokenizer, tableParseTokens, tableSerializerN
 // round-trip as valid markdown (never bracket-escaped) and render as a chip. The
 // recognized target types mirror core/domain/links.go so what the editor writes is what
 // the link index parses.
-export const LINK_TYPES = new Set(["note", "task", "habit", "project", "document"]);
+export const LINK_TYPES = new Set(["note", "task", "habit", "project", "document", "canvas"]);
 
 // Short type tokens accepted in markdown, normalized to the canonical node type (mirrors
 // core/domain/links.go typeAliases). Documents are embedded as `![[doc:<id>]]` (PLAN §6.9)

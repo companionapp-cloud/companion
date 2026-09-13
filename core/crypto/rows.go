@@ -28,6 +28,11 @@ var protectedFields = map[string][]string{
 	protocol.EntityChatMessage:   {"text", "toolCalls", "toolResults"},
 	protocol.EntityCalendarFeed:  {"name", "url", "icsText"},
 	protocol.EntityCalendarEvent: {"title", "location", "description", "icsUid"},
+	// Canvas content: the board name, each node's kind-specific payload (sticky text, group label,
+	// link preview), and edge labels. Geometry, kinds, colors and entity refs stay plaintext.
+	protocol.EntityCanvas:     {"name"},
+	protocol.EntityCanvasNode: {"data"},
+	protocol.EntityCanvasEdge: {"label"},
 }
 
 // ProtectedFields returns the encrypted field names for an entity type (nil if none). Exposed so

@@ -41,6 +41,16 @@ export const ICON_PATHS = {
   listBullet: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
   listOrdered: "M10 6h11M10 12h11M10 18h11M4 6h1v4M4 10h2M6 18H4c0-1 2-2 2-3s-1-1.5-2-1",
   table: "M12 3v18M3 9h18M3 15h18M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z",
+  // Canvas tool + node kinds (PLAN-canvases.md).
+  canvas: "M4 4h6v6H4zM14 14h6v6h-6zM10 7h4a2 2 0 0 1 2 2v5M7 10v4a2 2 0 0 0 2 2h5",
+  sticky: "M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3ZM15 3v6h6",
+  group: "M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 9h10v6H7z",
+  arrow: "M5 12h14M13 6l6 6-6 6",
+  image: "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM9 9.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM21 15l-5-5L5 21",
+  undo: "M3 7v6h6M3 13a9 9 0 1 0 3-6.7L3 9",
+  redo: "M21 7v6h-6M21 13a9 9 0 1 1-3-6.7L21 9",
+  fit: "M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3",
+  palette: "M12 22a10 10 0 1 1 0-20 10 10 0 0 1 8 4 3 3 0 0 1-2 5h-2a2 2 0 0 0-1.5 3.3 2 2 0 0 1-1.5 3.4V22ZM7.5 10.5h.01M12 7h.01M16.5 10h.01",
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;

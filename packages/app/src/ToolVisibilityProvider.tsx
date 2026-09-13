@@ -21,6 +21,7 @@ export const TOOLS: ToolDef[] = [
   { id: "calendar", label: "Calendar", icon: "calendar" },
   { id: "notes", label: "Notes", icon: "notes" },
   { id: "tasks", label: "Tasks", icon: "tasks" },
+  { id: "canvases", label: "Canvases", icon: "canvas" },
   { id: "habits", label: "Habits", icon: "habits" },
   { id: "graph", label: "Graph", icon: "graph" },
   { id: "trash", label: "Trash", icon: "trash" },

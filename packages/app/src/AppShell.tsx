@@ -32,6 +32,7 @@ import { openFocusWindow } from "./focus";
 import { NotesProvider } from "./NotesProvider";
 import { TasksProvider } from "./TasksProvider";
 import { ListsProvider } from "./ListsProvider";
+import { CanvasesProvider } from "./canvas/CanvasesProvider";
 import { RemindersProvider, type NotificationScheduler } from "./RemindersProvider";
 import { NotificationsProvider } from "./NotificationsProvider";
 import { NotificationsScreen } from "./NotificationsScreen";
@@ -99,6 +100,7 @@ function webLinking(): LinkingOptions<ParamListBase> | undefined {
         // stay session-only.
         notes: "notes/:id?",
         tasks: "tasks/:id?",
+        canvases: "canvases/:id?",
         habits: "habits",
         graph: "graph",
         trash: "trash",
@@ -121,6 +123,13 @@ function NotesRouteScreen() {
 function TasksRouteScreen() {
   return null;
 }
+function CanvasesRouteScreen() {
+  return null;
+}
+
+/** The workspace section each tab kind browses in. */
+type WorkspaceSection = "notes" | "tasks" | "canvases";
+const SECTION_OF: Record<TabRef["kind"], WorkspaceSection> = { note: "notes", task: "tasks", canvas: "canvases" };
 
 // Adapts the navigator-free NotificationsScreen to this shell: opening an entry's task
 // selects it in the workspace tab strip.
@@ -199,15 +208,15 @@ function NavBridge({
 }) {
   const route = state.routes[state.index];
   const routeName = route.name;
-  const inWorkspace = routeName === "notes" || routeName === "tasks";
+  const inWorkspace = routeName === "notes" || routeName === "tasks" || routeName === "canvases";
 
-  // The workspace tab strip: notes and tasks share one set of slots (always ≥ 1). Tabs are
-  // session state; only the *active* tab's document is mirrored to the URL. Seed the first
-  // tab from a bookmarked /notes/:id or /tasks/:id so the link opens that document.
+  // The workspace tab strip: notes, tasks, and canvases share one set of slots (always ≥ 1).
+  // Tabs are session state; only the *active* tab's document is mirrored to the URL. Seed
+  // the first tab from a bookmarked /notes/:id, /tasks/:id, or /canvases/:id.
   const [tabs, setTabs] = useState<Tab[]>(() => {
     const first = freshTab();
     const id = route.params?.id;
-    const kind = routeName === "notes" ? "note" : routeName === "tasks" ? "task" : null;
+    const kind = routeName === "notes" ? "note" : routeName === "tasks" ? "task" : routeName === "canvases" ? "canvas" : null;
     if (id && kind) first.ref = { kind, id };
     return [first];
   });
@@ -227,7 +236,9 @@ function NavBridge({
         ? { kind: "tasks" }
         : routeName === "notes"
           ? { kind: "notes" }
-          : { kind: "view", view: routeName as Exclude<ViewId, "notes" | "tasks"> };
+          : routeName === "canvases"
+            ? { kind: "canvases", canvasId: route.params?.id }
+            : { kind: "view", view: routeName as Exclude<ViewId, "notes" | "tasks" | "canvases"> };
 
   const active = Math.min(activeIndex, tabs.length - 1);
   const activeTab = tabs[active];
@@ -238,9 +249,7 @@ function NavBridge({
   // route history — per-tab selection history (below) owns document navigation.
   useEffect(() => {
     if (!inWorkspace) return;
-    const matches =
-      activeRef &&
-      ((activeRef.kind === "note" && routeName === "notes") || (activeRef.kind === "task" && routeName === "tasks"));
+    const matches = activeRef && SECTION_OF[activeRef.kind] === routeName;
     const wantId = matches ? activeRef!.id : undefined;
     if ((route.params?.id ?? undefined) !== wantId) {
       navigation.dispatch(StackActions.replace(routeName, wantId ? { id: wantId } : {}));
@@ -257,7 +266,7 @@ function NavBridge({
     // project) pushes — so route Back returns there; switching sections *within* the
     // workspace replaces, so document selections never grow route history (the per-tab
     // history handles those). The :id param is filled by the effect above.
-    const ensureSection = (name: "notes" | "tasks") => {
+    const ensureSection = (name: WorkspaceSection) => {
       if (routeName === name) return;
       if (inWorkspace) navigation.dispatch(StackActions.replace(name));
       else goto(name);
@@ -283,10 +292,10 @@ function NavBridge({
       if (ref.projectId) {
         const here =
           current.kind === "project" && current.projectId === ref.projectId && current.itemId === ref.id;
-        if (!here) goto("project", { projectId: ref.projectId, section: ref.kind === "note" ? "notes" : "tasks", itemId: ref.id });
+        if (!here) goto("project", { projectId: ref.projectId, section: SECTION_OF[ref.kind], itemId: ref.id });
         return;
       }
-      ensureSection(ref.kind === "note" ? "notes" : "tasks");
+      ensureSection(SECTION_OF[ref.kind]);
     };
     // Restore a document from the active tab's Back (dir -1) or Forward (dir +1) stack.
     const stepTab = (dir: -1 | 1): boolean => {
@@ -359,11 +368,17 @@ function NavBridge({
         // addTab + openTask) so it doesn't depend on the active index updating first.
         setTabs((t) => [...t, { ...freshTab(), ref }]);
         setActiveIndex(tabs.length);
-        ensureSection(ref.kind === "note" ? "notes" : "tasks");
+        ensureSection(SECTION_OF[ref.kind]);
       },
       addTab: () => {
         setActiveIndex(tabs.length);
         setTabs((t) => [...t, freshTab()]);
+      },
+      // A board is a workspace tab like a note: it fills the active tab and the canvases
+      // section comes on screen (the URL mirrors it as /canvases/:id).
+      openCanvas: (id) => {
+        selectRef({ kind: "canvas", id });
+        ensureSection("canvases");
       },
       selectTab: (index) => {
         setActiveIndex(index);
@@ -373,7 +388,8 @@ function NavBridge({
       closeTab: (index) => removeTab(index),
       expandTab: (index) => {
         const ref = tabs[index]?.ref;
-        if (ref) openFocusWindow(ref.kind, ref.id);
+        // Boards have no focus window yet; the tab just closes.
+        if (ref && ref.kind !== "canvas") openFocusWindow(ref.kind, ref.id);
         removeTab(index);
       },
 
@@ -387,6 +403,13 @@ function NavBridge({
         // workspace). Other sections (calendars/habits) carry no document, so leave tabs alone.
         if (section === "notes") selectRef({ kind: "note", id: itemId, projectId });
         else if (section === "tasks") selectRef({ kind: "task", id: itemId, projectId });
+        else if (section === "canvases") selectRef({ kind: "canvas", id: itemId, projectId });
+        // Re-selecting within the same section (e.g. another canvas) replaces so the board
+        // list doesn't pile up route history.
+        if (current.kind === "project" && current.projectId === projectId && current.section === section && current.itemId) {
+          navigation.dispatch(StackActions.replace("project", { projectId, section, itemId }));
+          return;
+        }
         goto("project", { projectId, section, itemId });
       },
       // A task selected inside a list: the list stays the column's item, the task is the
@@ -445,11 +468,13 @@ export function AppShell({ topInset = 0, notificationScheduler, toolsStorage }: 
         <NotificationsProvider>
         <ProjectsProvider>
          <ListsProvider>
+         <CanvasesProvider>
          <ObjectTypesProvider>
           <CalendarProvider>
           <ShellRoutes topInset={topInset} />
           </CalendarProvider>
          </ObjectTypesProvider>
+         </CanvasesProvider>
          </ListsProvider>
         </ProjectsProvider>
         </NotificationsProvider>
@@ -475,6 +500,7 @@ function ShellRoutes({ topInset }: { topInset: number }) {
         <Nav.Screen name="calendar" component={CalendarScreen} />
         <Nav.Screen name="notes" component={NotesRouteScreen} />
         <Nav.Screen name="tasks" component={TasksRouteScreen} />
+        <Nav.Screen name="canvases" component={CanvasesRouteScreen} />
         <Nav.Screen name="habits" component={ViewScreen} />
         <Nav.Screen name="graph" component={GraphScreen} />
         <Nav.Screen name="trash" component={TrashScreen} />
@@ -491,7 +517,7 @@ function ShellRoutes({ topInset }: { topInset: number }) {
 function Shell({ topInset, children }: { topInset: number; children: ReactNode }) {
   const nav = useNav();
   // The notes/tasks workspace is shown for both those sections (it's one shared thing).
-  const inWorkspace = nav.current.kind === "notes" || nav.current.kind === "tasks";
+  const inWorkspace = nav.current.kind === "notes" || nav.current.kind === "tasks" || nav.current.kind === "canvases";
   const sync = useSync();
   const dnd = useDnd();
   const { deleteArea } = useProjects();
@@ -504,8 +530,30 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
   const rail = tools.filter((t) => !hidden.has(t.id));
   const [open, setOpen] = useState(false);
   const [pinned, setPinned] = usePersistentBoolean("companion.sidebar.pinned", false);
-  // Reveal the rail while dragging a document, so projects are available as drop targets.
-  const expanded = open || pinned || dnd.dragging != null;
+  // Reveal the rail while a dragged document approaches it, so projects become drop
+  // targets — but not on every drag: a note dragged onto a board in the content area
+  // shouldn't shove the layout sideways. Hysteresis: expand within the collapsed rail's
+  // width (plus a margin), collapse once the pointer leaves the expanded rail.
+  const [dragNearRail, setDragNearRail] = useState(false);
+  useEffect(() => {
+    if (!dnd.dragging) {
+      setDragNearRail(false);
+      return;
+    }
+    return dnd.subscribeMove((x) => {
+      setDragNearRail((prev) => {
+        const near = x < (prev ? layout.railOpenW + 16 : layout.railW + 12);
+        return near === prev ? prev : near;
+      });
+    });
+  }, [dnd.dragging, dnd.subscribeMove]);
+  // The rail's width transition takes ~200ms; re-measure the project targets once it lands.
+  useEffect(() => {
+    if (!dragNearRail) return;
+    const t = setTimeout(() => void dnd.remeasure(), 260);
+    return () => clearTimeout(t);
+  }, [dragNearRail, dnd.remeasure]);
+  const expanded = open || pinned || dragNearRail;
   const activeProjectId = nav.current.kind === "project" ? nav.current.projectId : null;
 
   // Sync on navigation (§5.4). Key on the location + active tab so param-only changes fire.

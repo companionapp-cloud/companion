@@ -68,6 +68,20 @@ func (c *Core) trashList() ([]byte, error) {
 		})
 	}
 
+	canvases, err := c.store.Canvases.ListTrash()
+	if err != nil {
+		return nil, err
+	}
+	for _, cv := range canvases {
+		items = append(items, trashItem{
+			EntityType: "canvas",
+			ID:         cv.ID,
+			Title:      cv.Name,
+			DeletingAt: cv.DeletingAt,
+			UpdatedAt:  cv.UpdatedAt,
+		})
+	}
+
 	// habits join here once they have repos + Trash support.
 
 	return json.Marshal(items)
@@ -105,6 +119,11 @@ func (c *Core) trashRestore(payload []byte) ([]byte, error) {
 			return nil, mapStoreErr(err)
 		}
 		c.emitDocumentChanged(id)
+	case "canvas":
+		if err := c.store.Canvases.Restore(id); err != nil {
+			return nil, mapStoreErr(err)
+		}
+		c.emitCanvasChanged(id)
 	default:
 		return nil, fmt.Errorf("cannot restore entity type %q", entityType)
 	}
@@ -158,6 +177,16 @@ func (c *Core) trashEmpty() ([]byte, error) {
 		}
 	}
 
+	canvases, err := c.store.Canvases.ListTrash()
+	if err != nil {
+		return nil, err
+	}
+	for _, cv := range canvases {
+		if err := c.deleteTrashItem("canvas", cv.ID); err != nil {
+			return nil, err
+		}
+	}
+
 	// One batch notification per affected surface, plus a single bulk data.changed.
 	if len(notes) > 0 {
 		c.emit(notesChangedEvent, nil)
@@ -169,7 +198,10 @@ func (c *Core) trashEmpty() ([]byte, error) {
 	if len(documents) > 0 {
 		c.emit(documentsChangedEvent, nil)
 	}
-	if len(notes)+len(tasks)+len(documents) > 0 {
+	if len(canvases) > 0 {
+		c.emit(canvasesChangedEvent, nil)
+	}
+	if len(notes)+len(tasks)+len(documents)+len(canvases) > 0 {
 		c.emitDataChanged("", "")
 	}
 
@@ -191,6 +223,8 @@ func (c *Core) purgeTrashItem(entityType, id string) error {
 		c.emitTaskChanged(id)
 	case "document":
 		c.emitDocumentChanged(id)
+	case "canvas":
+		c.emitCanvasChanged(id)
 	}
 	return nil
 }
@@ -209,6 +243,10 @@ func (c *Core) deleteTrashItem(entityType, id string) error {
 		}
 	case "document":
 		if err := c.purgeDocument(id); err != nil {
+			return mapStoreErr(err)
+		}
+	case "canvas":
+		if err := c.purgeCanvas(id); err != nil {
 			return mapStoreErr(err)
 		}
 	default:

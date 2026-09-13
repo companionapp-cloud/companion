@@ -15,8 +15,8 @@ import {
 import { useCore } from "./CoreContext";
 import { ConfirmDialog } from "./ConfirmDialog";
 
-const ENTITY_ICON: Record<TrashEntityType, IconName> = { note: "file", task: "tasks", document: "file", habit: "habits" };
-const ENTITY_LABEL: Record<TrashEntityType, string> = { note: "Note", task: "Task", document: "Document", habit: "Habit" };
+const ENTITY_ICON: Record<TrashEntityType, IconName> = { note: "file", task: "tasks", document: "file", habit: "habits", canvas: "canvas" };
+const ENTITY_LABEL: Record<TrashEntityType, string> = { note: "Note", task: "Task", document: "Document", habit: "Habit", canvas: "Canvas" };
 
 /** The Trash (PLAN §4.3): notes, tasks, and habits you've deleted, held for 30 days before
  *  they're permanently removed. Each row can be restored or deleted forever. Self-contained

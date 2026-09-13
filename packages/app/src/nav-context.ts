@@ -1,14 +1,14 @@
 import { createContext, useContext } from "react";
 
-export type ViewId = "today" | "chat" | "calendar" | "notes" | "tasks" | "habits" | "graph" | "trash" | "settings" | "notifications";
+export type ViewId = "today" | "chat" | "calendar" | "notes" | "tasks" | "canvases" | "habits" | "graph" | "trash" | "settings" | "notifications";
 
 /** The content types a project drills into (its sub-nav). */
-export type ProjectSection = "notes" | "tasks" | "lists" | "calendars" | "habits";
+export type ProjectSection = "notes" | "tasks" | "lists" | "canvases" | "calendars" | "habits";
 
 /** A document open in a workspace tab. `projectId` records that the document was opened from
  *  a project (via its detail pane), so re-selecting the tab returns to that project route
  *  rather than the bare workspace `/notes/:id` · `/tasks/:id`. Absent = a plain workspace tab. */
-export type TabRef = { kind: "note" | "task"; id: string; projectId?: string };
+export type TabRef = { kind: "note" | "task" | "canvas"; id: string; projectId?: string };
 
 /** One workspace tab slot: a stable uid, its (possibly empty) document, and that tab's own
  *  selection history. Notes and tasks share one strip; an empty slot renders as "Nothing
@@ -22,9 +22,11 @@ export type Tab = { uid: string; ref: TabRef | null; back: TabRef[]; fwd: TabRef
  * three-level drill-down, each a deep-linkable URL on web. The lists section goes one level
  * deeper: `itemId` is the list, `subItemId` the task selected inside it. */
 export type NavLocation =
-  | { kind: "view"; view: Exclude<ViewId, "notes" | "tasks"> }
+  | { kind: "view"; view: Exclude<ViewId, "notes" | "tasks" | "canvases"> }
   | { kind: "notes" }
   | { kind: "tasks" }
+  /** The canvases browse list, with the open board (if any) in the URL: /canvases/:id. */
+  | { kind: "canvases"; canvasId?: string }
   | { kind: "project"; projectId: string; section?: ProjectSection; itemId?: string; subItemId?: string };
 
 /** The app-facing navigation API. Implemented on top of React Navigation (routing +
@@ -51,6 +53,8 @@ export interface Navigator {
   openTask: (id: string) => void;
   /** Open a document in a new tab and make it active (e.g. following a link chip). */
   openInNewTab: (ref: TabRef) => void;
+  /** Open a canvas board in the canvases view (PLAN-canvases.md). */
+  openCanvas: (id: string) => void;
   /** Add a new empty tab and make it active. */
   addTab: () => void;
   /** Make the tab at `index` active. */

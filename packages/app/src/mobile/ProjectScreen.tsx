@@ -5,6 +5,7 @@ import { colors, space } from "@companion/design-system";
 import { ListFilterTabs } from "../ListFilterMenu";
 import { NotesListScreen, TasksListScreen } from "./ListScreens";
 import { ListsIndexScreen, ListRowsScreen } from "./ListsScreens";
+import { CanvasesListScreen } from "./CanvasScreens";
 
 // A project's scoped view for the mobile web shell: a Notes/Tasks switcher over the
 // shared list screens, each filtered to the project's members (PLAN §6.6). The native
@@ -13,8 +14,8 @@ import { ListsIndexScreen, ListRowsScreen } from "./ListsScreens";
 export function ProjectScreen() {
   const params = (useRoute().params ?? {}) as { projectId?: string; section?: string; itemId?: string };
   const projectId = params.projectId ?? "";
-  const [section, setSection] = useState<"notes" | "tasks" | "lists">(
-    params.section === "tasks" ? "tasks" : params.section === "lists" ? "lists" : "notes",
+  const [section, setSection] = useState<"notes" | "tasks" | "lists" | "canvases">(
+    params.section === "tasks" ? "tasks" : params.section === "lists" ? "lists" : params.section === "canvases" ? "canvases" : "notes",
   );
 
   if (!projectId) return null;
@@ -38,6 +39,7 @@ export function ProjectScreen() {
             { value: "notes", label: "Notes" },
             { value: "tasks", label: "Tasks" },
             { value: "lists", label: "Lists" },
+            { value: "canvases", label: "Canvases" },
           ]}
         />
       </View>
@@ -45,6 +47,8 @@ export function ProjectScreen() {
         <NotesListScreen key={projectId} projectId={projectId} />
       ) : section === "lists" ? (
         <ListsIndexScreen key={projectId} projectId={projectId} />
+      ) : section === "canvases" ? (
+        <CanvasesListScreen key={projectId} projectId={projectId} />
       ) : (
         <TasksListScreen key={projectId} projectId={projectId} />
       )}

@@ -16,6 +16,8 @@ const (
 	NodeHabit    = "habit"
 	NodeProject  = "project"
 	NodeDocument = "document"
+	// A canvas is a graph node: its embedded notes/tasks/images are authored 'canvas' edges.
+	NodeCanvas = "canvas"
 )
 
 // Edge kinds derived from content. Authored kinds ("stack", "member") are mirrored in
@@ -26,6 +28,7 @@ const (
 	// Authored kinds — mirrored into the index from their own synced tables, not parsed.
 	KindMember = "member" // project_members: project → note/task/habit
 	KindStack  = "stack"  // habit_links: habit → habit (arrives in the Habits milestone)
+	KindCanvas = "canvas" // canvas_nodes: canvas → note/task/document it embeds
 )
 
 // Ref is a single outgoing reference parsed from a source's markdown: the target it
@@ -75,6 +78,7 @@ var linkTypes = map[string]bool{
 	NodeHabit:    true,
 	NodeProject:  true,
 	NodeDocument: true,
+	NodeCanvas:   true,
 }
 
 // typeAliases maps the short type token a user writes in a wikilink to its canonical
@@ -119,4 +123,20 @@ func ParseRefs(markdown string) []Ref {
 		out = append(out, r)
 	}
 	return out
+}
+
+// wikilinkAliasRe matches a whole wikilink (embed or not) capturing the optional |alias so
+// previews can show the alias and drop the id.
+var wikilinkAliasRe = regexp.MustCompile(`!?\[\[\s*[a-zA-Z]+\s*:\s*[^\]|]+?\s*(?:\|([^\]]*))?\]\]`)
+
+// StripRefs rewrites every wikilink in a markdown body to its display alias (or removes
+// it when there is none), so excerpts and previews never surface a raw entity id.
+func StripRefs(markdown string) string {
+	return wikilinkAliasRe.ReplaceAllStringFunc(markdown, func(m string) string {
+		sub := wikilinkAliasRe.FindStringSubmatch(m)
+		if len(sub) > 1 {
+			return sub[1]
+		}
+		return ""
+	})
 }

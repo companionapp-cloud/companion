@@ -182,7 +182,7 @@ export interface NotificationFeedItem extends TaskNotification {
 }
 
 /** The kinds of entity that can be trashed (mirrors the server's trashable tables). */
-export type TrashEntityType = "note" | "task" | "document" | "habit";
+export type TrashEntityType = "note" | "task" | "document" | "habit" | "canvas";
 
 /** One row in the Trash, across entity types (mirrors bridge trashItem). */
 export interface TrashItem {
@@ -286,7 +286,7 @@ export interface Project {
 export interface ProjectMember {
   id: string;
   projectId: string;
-  entityType: "note" | "task" | "habit";
+  entityType: "note" | "task" | "habit" | "canvas";
   entityId: string;
   createdAt: string;
   updatedAt: string;
@@ -347,4 +347,112 @@ export interface SidebarArea {
 export interface SidebarData {
   areas: SidebarArea[];
   unsorted: SidebarProject[];
+}
+
+// ---- Canvases (PLAN-canvases.md) ----------------------------------------------------
+
+/** A canvas board (mirrors core/domain.Canvas). Trashable like a note; nodes and edges
+ *  are separate synced rows so devices editing different nodes merge cleanly. */
+export interface Canvas {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  deletingAt?: string | null;
+  deletedAt?: string | null;
+  version: number;
+  dirty: boolean;
+}
+
+/** Node kinds: text/group/link mirror the JSON Canvas spec; note/task/event/image embed
+ *  app entities by reference. */
+export type CanvasNodeKind = "text" | "group" | "note" | "task" | "event" | "image" | "link";
+export type CanvasRefType = "note" | "task" | "event" | "document";
+export type CanvasSide = "top" | "right" | "bottom" | "left";
+/** Edge endings: nothing, an open chevron, a solid triangle, a hollow dot, or a solid dot. */
+export type CanvasEnd = "none" | "arrow" | "arrowFilled" | "dot" | "dotFilled";
+/** Edge line styles: a bezier curve, orthogonal steps, or a direct line. */
+export type CanvasEdgeStyle = "curved" | "step" | "straight";
+
+/** One item on a board (mirrors core/domain.CanvasNode). Coordinates are absolute canvas
+ *  units, top-left origin. `data` carries the kind-specific content: `{text}` for stickies,
+ *  `{label}` for groups, `{url,title,description,imageUrl,siteName,faviconUrl}` for links,
+ *  `{title,startsAt}` cached for events. */
+export interface CanvasNode {
+  id: string;
+  canvasId: string;
+  kind: CanvasNodeKind;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  z: number;
+  color?: string | null;
+  refType?: CanvasRefType | null;
+  refId?: string | null;
+  data?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+  version: number;
+  dirty: boolean;
+}
+
+/** A connector between two nodes of one board. A missing side means "auto". */
+export interface CanvasEdge {
+  id: string;
+  canvasId: string;
+  fromNodeId: string;
+  toNodeId: string;
+  fromSide?: CanvasSide | null;
+  toSide?: CanvasSide | null;
+  fromEnd: CanvasEnd;
+  toEnd: CanvasEnd;
+  style: CanvasEdgeStyle;
+  label: string;
+  color?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+  version: number;
+  dirty: boolean;
+}
+
+/** This device's saved viewport for a board (local-only). */
+export interface CanvasView {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+/** Hydrated summaries of the entities a board embeds, resolved by the core in one call.
+ *  `missing` marks a trashed/deleted target so the node can render a "gone" state. */
+export interface CanvasRefs {
+  notes: Record<string, { title: string; excerpt: string; objectTypeId?: string | null; missing?: boolean }>;
+  tasks: Record<string, { title: string; status: TaskStatus; dueAt?: string | null; missing?: boolean }>;
+  events: Record<string, { title: string; startsAt: string; endsAt?: string | null; allDay: boolean; location?: string | null; missing?: boolean }>;
+  documents: Record<string, { filename: string; mime: string; missing?: boolean }>;
+}
+
+/** The wire shape of canvases.get. */
+export interface CanvasDocument {
+  canvas: Canvas;
+  nodes: CanvasNode[];
+  edges: CanvasEdge[];
+  refs: CanvasRefs;
+  view?: CanvasView | null;
+}
+
+/** Open Graph / Twitter-card metadata for a link node (mirrors core/unfurl.Preview). Empty
+ *  strings mean "not present"; `url` is the final URL after redirects. */
+export interface LinkPreview {
+  url: string;
+  title: string;
+  description: string;
+  imageUrl: string;
+  siteName: string;
+  faviconUrl: string;
+  /** Why the page couldn't be fetched (the card then carries only the URL). On web this is
+   *  the case until a sync server is configured to proxy the fetch. */
+  error?: string;
 }

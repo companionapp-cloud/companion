@@ -127,3 +127,48 @@ func hostOf(rest string) string {
 	}
 	return rest
 }
+
+// maxProxyPageBytes caps a proxied page body for link previews: metadata lives in <head>.
+const maxProxyPageBytes = 2 << 20 // 2 MiB
+
+// handleFetchProxy relays an HTML page for a web client's link preview (PLAN-canvases.md
+// §4.3), the same blind, non-logging shape as the ICS proxy: SSRF-guarded, size-capped, and
+// nothing stored. Non-HTML responses answer 415 so the client falls back to a bare-URL card
+// instead of pulling a binary through the server. The final URL after redirects rides in
+// X-Final-URL so relative links resolve correctly.
+func (s *Server) handleFetchProxy(w http.ResponseWriter, r *http.Request) {
+	var req proxyRequest
+	if err := decode(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	target := strings.TrimSpace(req.URL)
+	if err := guardProxyURL(target); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	preq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target, nil)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid url")
+		return
+	}
+	preq.Header.Set("User-Agent", "Mozilla/5.0 (compatible; Companion/1.0; +https://companion.app)")
+	preq.Header.Set("Accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5")
+	resp, err := icsClient.Do(preq)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "fetch failed")
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		writeErr(w, http.StatusBadGateway, fmt.Sprintf("page status %d", resp.StatusCode))
+		return
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.Contains(ct, "html") {
+		writeErr(w, http.StatusUnsupportedMediaType, "not an html page")
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("X-Final-URL", resp.Request.URL.String())
+	io.Copy(w, io.LimitReader(resp.Body, maxProxyPageBytes))
+}

@@ -325,6 +325,32 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.calendarRange(payload)
 	case "calendar.refresh":
 		return c.calendarRefresh()
+	case "canvases.list":
+		return c.canvasesList()
+	case "canvases.get":
+		return c.canvasesGet(payload)
+	case "canvases.create":
+		return c.canvasesCreate(payload)
+	case "canvases.update":
+		return c.canvasesUpdate(payload)
+	case "canvases.delete":
+		return c.canvasesDelete(payload)
+	case "canvases.deleteMany":
+		return c.canvasesDeleteMany(payload)
+	case "canvases.forEntity":
+		return c.canvasesForEntity(payload)
+	case "canvases.nodes.upsert":
+		return c.canvasesNodesUpsert(payload)
+	case "canvases.nodes.delete":
+		return c.canvasesNodesDelete(payload)
+	case "canvases.edges.upsert":
+		return c.canvasesEdgesUpsert(payload)
+	case "canvases.edges.delete":
+		return c.canvasesEdgesDelete(payload)
+	case "canvases.view.set":
+		return c.canvasesViewSet(payload)
+	case "canvases.linkPreview":
+		return c.canvasesLinkPreview(payload)
 	default:
 		return nil, fmt.Errorf("unknown method %q", method)
 	}

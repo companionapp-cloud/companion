@@ -13,6 +13,9 @@ import { ListFilterMenu } from "./ListFilterMenu";
 import { useMultiSelect, pressMods } from "./MultiSelectProvider";
 import { SelectionStack } from "./SelectionStack";
 import { MultiSelectBar } from "./MultiSelectBar";
+import { CanvasesList } from "./canvas/CanvasesList";
+import { CanvasPane } from "./canvas/CanvasPane";
+import { useCanvases } from "./canvas/CanvasesProvider";
 
 /** The web/desktop workspace: a persistent split of a browse list (notes or tasks, chosen
  * by the rail) and a shared tab strip. Notes and tasks share one set of tabs (in the
@@ -22,9 +25,10 @@ export function WorkspaceScreen() {
   const nav = useNav();
   // Keep the last browsed list so the aside doesn't flip while the workspace is hidden
   // (e.g. when the user is on the graph). Only a notes/tasks route changes it.
-  const browseRef = useRef<"notes" | "tasks">("notes");
+  const browseRef = useRef<"notes" | "tasks" | "canvases">("notes");
   if (nav.current.kind === "notes") browseRef.current = "notes";
   else if (nav.current.kind === "tasks") browseRef.current = "tasks";
+  else if (nav.current.kind === "canvases") browseRef.current = "canvases";
 
   return (
     <SplitView
@@ -32,7 +36,7 @@ export function WorkspaceScreen() {
       defaultWidth={layout.listW}
       minWidth={240}
       maxWidth={480}
-      aside={browseRef.current === "tasks" ? <TasksList /> : <NotesList />}
+      aside={browseRef.current === "tasks" ? <TasksList /> : browseRef.current === "canvases" ? <CanvasesBrowseList /> : <NotesList />}
     >
       <TabContent />
     </SplitView>
@@ -60,8 +64,10 @@ function TabContent() {
           <View key={tab.uid} style={[styles.fill, visible ? null : styles.hidden]}>
             {ref.kind === "note" ? (
               <NoteTabBody id={ref.id} onDelete={() => nav.closeTab(i)} />
-            ) : (
+            ) : ref.kind === "task" ? (
               <TaskTabBody id={ref.id} onDelete={() => nav.closeTab(i)} />
+            ) : (
+              <CanvasPane key={ref.id} canvasId={ref.id} onDeleted={() => nav.closeTab(i)} />
             )}
           </View>
         );
@@ -121,6 +127,7 @@ function NoteTabBody({ id, onDelete }: { id: string; onDelete: () => void }) {
       onOpenRef={(ref) => {
         // Clicking a chip opens its target in a new tab, leaving this note put.
         if (ref.type === "task" || ref.type === "note") nav.openInNewTab({ kind: ref.type, id: ref.id });
+        else if (ref.type === "canvas") nav.openCanvas(ref.id);
       }}
     />
   );
@@ -150,6 +157,7 @@ function TaskTabBody({ id, onDelete }: { id: string; onDelete: () => void }) {
       onOpenRef={(ref) => {
         // Clicking a chip in the notes opens its target in a new tab, leaving this task put.
         if (ref.type === "task" || ref.type === "note") nav.openInNewTab({ kind: ref.type, id: ref.id });
+        else if (ref.type === "canvas") nav.openCanvas(ref.id);
       }}
       onConnectSync={() => nav.goView("settings")}
     />
@@ -371,3 +379,21 @@ const styles = {
   fill: { position: "absolute" as const, top: 0, left: 0, right: 0, bottom: 0 },
   hidden: { display: "none" as const },
 };
+
+/** The canvases browse list (left column): every board, with the All/Unsorted filter.
+ *  Selecting one fills the active tab, like a note. */
+function CanvasesBrowseList() {
+  const nav = useNav();
+  const store = useCanvases();
+  const activeRef = nav.activeTab.ref;
+  const activeId = activeRef?.kind === "canvas" ? activeRef.id : null;
+  return (
+    <CanvasesList
+      selectedId={activeId}
+      onSelect={nav.openCanvas}
+      onCreate={() => {
+        void store.create().then((c) => nav.openCanvas(c.id));
+      }}
+    />
+  );
+}

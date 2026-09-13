@@ -11,12 +11,13 @@ import { Card, CardRow, CountPill, IconTile, SectionLabel } from '../ui/native';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-type SectionRoute = 'Today' | 'Chat' | 'Notes' | 'Tasks' | 'Habits' | 'Calendar' | 'Graph' | 'Trash';
+type SectionRoute = 'Today' | 'Chat' | 'Notes' | 'Tasks' | 'Canvases' | 'Habits' | 'Calendar' | 'Graph' | 'Trash';
 const SECTIONS: { route: SectionRoute; label: string; subtitle: string; icon: IconName; accent?: boolean }[] = [
   { route: 'Today', label: 'Today', subtitle: "Today's note and your month", icon: 'today' },
   { route: 'Chat', label: 'Chat', subtitle: 'Ask, capture, recall — anything', icon: 'chat', accent: true },
   { route: 'Notes', label: 'Notes', subtitle: 'Your graph of linked ideas', icon: 'notes' },
   { route: 'Tasks', label: 'Tasks', subtitle: 'What needs doing', icon: 'tasks' },
+  { route: 'Canvases', label: 'Canvases', subtitle: 'Boards for arranging ideas', icon: 'canvas' },
   { route: 'Habits', label: 'Habits', subtitle: 'Streaks and daily builders', icon: 'habits' },
   { route: 'Calendar', label: 'Calendar', subtitle: 'Events, tasks, and notes', icon: 'calendar' },
   { route: 'Graph', label: 'Graph', subtitle: 'See how everything connects', icon: 'graph' },

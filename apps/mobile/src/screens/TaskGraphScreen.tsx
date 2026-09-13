@@ -28,6 +28,7 @@ export function TaskGraphScreen() {
         if (type === 'note') nav.push('NoteEditor', { id });
         else if (type === 'task' && id !== taskId) nav.push('TaskEditor', { id });
         else if (type === 'project') nav.push('Project', { projectId: id });
+        else if (type === 'canvas') nav.push('Canvas', { id });
       }}
     />
   );

@@ -137,6 +137,7 @@ declare module "react-native" {
     hairlineWidth: number;
   };
   export const Platform: { OS: string; select<T>(spec: Record<string, T>): T };
+  export const Linking: { openURL(url: string): Promise<void>; canOpenURL(url: string): Promise<boolean> };
 
   export const AppRegistry: {
     registerComponent(appKey: string, getComponent: () => CT<unknown>): void;

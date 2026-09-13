@@ -26,6 +26,7 @@ export function GraphScreen() {
         if (type === 'note') nav.navigate('NoteEditor', { id });
         else if (type === 'task') nav.navigate('TaskEditor', { id });
         else if (type === 'project') nav.navigate('Project', { projectId: id });
+        else if (type === 'canvas') nav.navigate('Canvas', { id });
       }}
     />
   );

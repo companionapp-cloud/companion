@@ -222,6 +222,7 @@ const TYPE_ICON: Record<string, IconName> = {
   task: "tasks",
   habit: "dot",
   project: "folder",
+  canvas: "canvas",
 };
 
 // A small categorical palette for archetypes: nodes sharing an object type get the same
@@ -354,7 +355,8 @@ function toCircleNode(n: SimNode): CircleNode {
 
 function toFlowEdges(edges: Graph["edges"], large: boolean): Edge[] {
   return edges.map((e, i) => {
-    const embed = e.kind === "embed";
+    // A board's "embeds this" edge (canvas → note/task/file) reads like a note embed.
+    const embed = e.kind === "embed" || e.kind === "canvas";
     // Reference-prop edges are labeled with the field name (PLAN §5.3): kind "prop:author"
     // → "author". Only on small graphs, where labels are legible and cheap.
     const propField = e.kind.startsWith("prop:") ? e.kind.slice("prop:".length) : null;

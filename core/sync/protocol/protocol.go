@@ -33,6 +33,11 @@ const (
 	// A server-cloned event occurrence (PLAN §6.7). Server-owned: clients only ever
 	// pull these; they are never pushed.
 	EntityCalendarEvent = "calendar_event"
+	// A canvas board, its nodes, and its edges (PLAN-canvases.md). Three row types so two
+	// devices editing different nodes of one board merge per row instead of forking.
+	EntityCanvas     = "canvas"
+	EntityCanvasNode = "canvas_node"
+	EntityCanvasEdge = "canvas_edge"
 )
 
 // Push statuses.

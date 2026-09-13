@@ -45,6 +45,7 @@ export function GraphScreen() {
         if (type === "note") nav.openNote(id);
         else if (type === "task") nav.openTask(id);
         else if (type === "project") nav.openProject(id);
+        else if (type === "canvas") nav.openCanvas(id);
       }}
     />
   );

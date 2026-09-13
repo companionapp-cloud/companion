@@ -160,7 +160,8 @@ func (r *LinksRepo) hiddenKeys() (map[nodeKey]bool, error) {
 		 UNION ALL SELECT 'task', id     FROM tasks     WHERE deleted_at IS NOT NULL OR deleting_at IS NOT NULL
 		 UNION ALL SELECT 'habit', id    FROM habits    WHERE deleted_at IS NOT NULL OR deleting_at IS NOT NULL OR archived_at IS NOT NULL
 		 UNION ALL SELECT 'project', id  FROM projects  WHERE deleted_at IS NOT NULL OR archived_at IS NOT NULL
-		 UNION ALL SELECT 'document', id FROM documents WHERE deleted_at IS NOT NULL OR deleting_at IS NOT NULL;`)
+		 UNION ALL SELECT 'document', id FROM documents WHERE deleted_at IS NOT NULL OR deleting_at IS NOT NULL
+		 UNION ALL SELECT 'canvas', id   FROM canvases  WHERE deleted_at IS NOT NULL OR deleting_at IS NOT NULL;`)
 	if err != nil {
 		return nil, fmt.Errorf("hidden keys: %w", err)
 	}
@@ -327,6 +328,10 @@ func (r *LinksRepo) Rebuild() (nodeCount, edgeCount int, err error) {
 	// Re-mirror authored edges: project_members → 'member' edges (PLAN §5.1). Safe to
 	// rebuild because the edges re-derive from their own synced table.
 	if err = r.rebuildMemberEdges(); err != nil {
+		return 0, 0, err
+	}
+	// Canvas reference edges (canvas → embedded note/task/document) re-derive from canvas_nodes.
+	if err = r.rebuildCanvasEdges(); err != nil {
 		return 0, 0, err
 	}
 	if nodeCount, err = r.count(`SELECT count(*) FROM graph_nodes;`); err != nil {
@@ -569,4 +574,105 @@ func placeholders(ids []string) (string, []any) {
 		args[i] = id
 	}
 	return strings.Join(marks, ", "), args
+}
+
+// ---- canvas reference edges (authored, PLAN-canvases.md §1.4) --------------------------
+
+// canvasRefIndexed reports whether a node reference is mirrored into the graph. Notes,
+// tasks and documents are graph nodes; calendar events are not (they are derived rows
+// that re-expand with their feed), so event refs stay out of the index.
+func canvasRefIndexed(refType *string, refID *string) bool {
+	if refType == nil || refID == nil || *refID == "" {
+		return false
+	}
+	switch *refType {
+	case domain.NodeNote, domain.NodeTask, domain.NodeDocument:
+		return true
+	}
+	return false
+}
+
+// syncCanvasRef reconciles the single 'canvas' edge canvas → (refType, refID) against the
+// board's live nodes: present while at least one live node on a live board still embeds
+// the entity, absent otherwise. Idempotent, so it is safe to call for both the old and new
+// reference of an updated node.
+func (r *LinksRepo) syncCanvasRef(canvasID string, refType, refID *string) error {
+	if !canvasRefIndexed(refType, refID) {
+		return nil
+	}
+	n, err := r.count2(
+		`SELECT count(*) FROM canvas_nodes n JOIN canvases c ON c.id = n.canvas_id
+		 WHERE n.canvas_id = ? AND n.ref_type = ? AND n.ref_id = ? AND n.deleted_at IS NULL
+		   AND c.deleted_at IS NULL AND c.deleting_at IS NULL;`, canvasID, *refType, *refID)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return r.AddEdge(domain.NodeCanvas, canvasID, *refType, *refID, domain.KindCanvas)
+	}
+	return r.DeleteEdge(domain.NodeCanvas, canvasID, *refType, *refID, domain.KindCanvas)
+}
+
+// rebuildCanvasEdgesFor re-mirrors one board's reference edges from scratch (restore,
+// sync-apply of the board row).
+func (r *LinksRepo) rebuildCanvasEdgesFor(canvasID string) error {
+	if err := r.DeleteSource(domain.NodeCanvas, canvasID); err != nil {
+		return err
+	}
+	return r.mirrorCanvasEdges(`WHERE n.canvas_id = ? AND n.deleted_at IS NULL AND n.ref_type IS NOT NULL
+		AND c.deleted_at IS NULL AND c.deleting_at IS NULL`, canvasID)
+}
+
+// rebuildCanvasEdges re-mirrors every live board's reference edges (used by Rebuild).
+func (r *LinksRepo) rebuildCanvasEdges() error {
+	return r.mirrorCanvasEdges(`WHERE n.deleted_at IS NULL AND n.ref_type IS NOT NULL AND c.deleted_at IS NULL AND c.deleting_at IS NULL`)
+}
+
+func (r *LinksRepo) mirrorCanvasEdges(where string, args ...any) error {
+	rows, err := r.db.Query(`SELECT DISTINCT n.canvas_id, n.ref_type, n.ref_id FROM canvas_nodes n JOIN canvases c ON c.id = n.canvas_id `+where+`;`, args...)
+	if err != nil {
+		return fmt.Errorf("scan canvas refs: %w", err)
+	}
+	type edge struct{ canvasID, refType, refID string }
+	var batch []edge
+	func() {
+		defer rows.Close()
+		for rows.Next() {
+			var e edge
+			if err = rows.Scan(&e.canvasID, &e.refType, &e.refID); err != nil {
+				return
+			}
+			batch = append(batch, e)
+		}
+		err = rows.Err()
+	}()
+	if err != nil {
+		return err
+	}
+	for _, e := range batch {
+		rt, ri := e.refType, e.refID
+		if !canvasRefIndexed(&rt, &ri) {
+			continue
+		}
+		if err := r.AddEdge(domain.NodeCanvas, e.canvasID, e.refType, e.refID, domain.KindCanvas); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// count2 runs a scalar count query with bind args.
+func (r *LinksRepo) count2(query string, args ...any) (int, error) {
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("count: %w", err)
+	}
+	defer rows.Close()
+	var n int
+	if rows.Next() {
+		if err := rows.Scan(&n); err != nil {
+			return 0, err
+		}
+	}
+	return n, rows.Err()
 }

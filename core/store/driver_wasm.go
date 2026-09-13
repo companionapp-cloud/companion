@@ -117,6 +117,12 @@ func assign(dest any, v js.Value) error {
 		} else {
 			*p = int64(v.Float())
 		}
+	case *float64:
+		if isNull {
+			*p = 0
+		} else {
+			*p = v.Float()
+		}
 	case *sql.NullString:
 		if isNull {
 			*p = sql.NullString{}
@@ -155,6 +161,8 @@ func jsParam(a any) any {
 		return v
 	case int64:
 		return float64(v)
+	case float64:
+		return v
 	case bool:
 		return v
 	case []byte:

@@ -9,7 +9,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build:graph": "node scripts/build-graph.mjs"
+    "build:graph": "node scripts/build-graph.mjs",
+    "build:canvas": "node scripts/build-canvas.mjs"
   },
   "dependencies": {
     "@companion/core-bridge": "*",

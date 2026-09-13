@@ -405,6 +405,7 @@ export function GraphMenu({ graph, physics, filters, setPhysics, setFilters, res
           <CheckRow label="Complete" indent={22} checked={filters.tasksDone} onChange={(v) => setFilters({ tasksDone: v })} />
           <CheckRow label="Incomplete" indent={22} checked={filters.tasksOpen} onChange={(v) => setFilters({ tasksOpen: v })} />
           <CheckRow label="Files" color={typeColor("document")} checked={filters.files} onChange={(v) => setFilters({ files: v })} />
+          <CheckRow label="Canvases" color={typeColor("canvas")} checked={filters.canvases} onChange={(v) => setFilters({ canvases: v })} />
 
           {projects.length > 0 ? (
             <>

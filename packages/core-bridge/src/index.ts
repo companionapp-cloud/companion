@@ -34,6 +34,18 @@ export type {
   CalendarEvent,
   CalendarItem,
   CalendarItemKind,
+  Canvas,
+  CanvasNode,
+  CanvasEdge,
+  CanvasNodeKind,
+  CanvasRefType,
+  CanvasSide,
+  CanvasEnd,
+  CanvasEdgeStyle,
+  CanvasView,
+  CanvasRefs,
+  CanvasDocument,
+  LinkPreview,
 } from "./types";
 export { notesApi } from "./notes";
 export type { NotesApi, CreateNoteInput, UpdateNoteInput, NoteConflict, NoteConflictAction } from "./notes";
@@ -62,6 +74,8 @@ export type {
 } from "./projects";
 export { listsApi } from "./lists";
 export type { ListsApi, CreateListInput, UpdateListInput, ListDetail, CreatedListTask } from "./lists";
+export { canvasesApi } from "./canvases";
+export type { CanvasesApi, CreateCanvasInput, UpdateCanvasInput, CanvasNodeInput, CanvasEdgeInput } from "./canvases";
 export { syncApi } from "./sync";
 export type { SyncApi } from "./sync";
 export { graphApi } from "./graph";

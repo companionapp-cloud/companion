@@ -22,6 +22,8 @@ export function typeColor(type: string): string {
       return colors.accent;
     case "document":
       return colors.gray300;
+    case "canvas":
+      return colors.warning;
     default:
       return colors.textSecondary;
   }
@@ -107,6 +109,8 @@ export interface GraphFilters {
   tasksDone: boolean;
   /** Show files (documents). */
   files: boolean;
+  /** Show canvas boards (PLAN-canvases.md). */
+  canvases: boolean;
   /** Ids of projects that are hidden — the project node itself and everything that is a
    * member of it (unless that member also belongs to a visible project). Stored as the
    * hidden set, not the visible one, so newly created projects default to visible. */
@@ -120,6 +124,7 @@ export const DEFAULT_FILTERS: GraphFilters = {
   tasksOpen: true,
   tasksDone: true,
   files: true,
+  canvases: true,
   hiddenProjects: [],
   unassigned: true,
 };
@@ -134,13 +139,14 @@ export function sanitizeFilters(raw: unknown): GraphFilters {
     tasksOpen: bool("tasksOpen"),
     tasksDone: bool("tasksDone"),
     files: bool("files"),
+    canvases: bool("canvases"),
     hiddenProjects: hidden,
     unassigned: bool("unassigned"),
   };
 }
 
 export function isDefaultFilters(f: GraphFilters): boolean {
-  return f.notes && f.tasksOpen && f.tasksDone && f.files && f.unassigned && f.hiddenProjects.length === 0;
+  return f.notes && f.tasksOpen && f.tasksDone && f.files && f.canvases && f.unassigned && f.hiddenProjects.length === 0;
 }
 
 /** A task counts as complete when its status is the core's terminal "done"; anything else
@@ -197,6 +203,9 @@ export function applyGraphFilters(graph: Graph, filters: GraphFilters, focusKey:
       }
       case "document":
         if (!filters.files) return false;
+        break;
+      case "canvas":
+        if (!filters.canvases) return false;
         break;
       case "project":
         // A project is scoped by its own toggle, never by membership.

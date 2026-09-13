@@ -256,6 +256,11 @@ func New(st *store.Store, t Transport, clock domain.Clock) *Engine {
 	// applies server rows on pull.
 	e.register(newRepoSyncer[*domain.CalendarFeed](st.CalendarFeeds, clock))
 	e.register(newRepoSyncer[*domain.CalendarEvent](st.CalendarEvents, clock))
+	// Canvases (PLAN-canvases.md): the board first so its nodes/edges find it; a node or edge
+	// arriving before its board is a tolerated dangle.
+	e.register(newRepoSyncer[*domain.Canvas](st.Canvases, clock))
+	e.register(newRepoSyncer[*domain.CanvasNode](st.CanvasNodes, clock))
+	e.register(newRepoSyncer[*domain.CanvasEdge](st.CanvasEdges, clock))
 	return e
 }
 

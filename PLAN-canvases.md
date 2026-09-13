@@ -30,7 +30,7 @@ graph view.
 
 ## 1. Data model
 
-### 1.1 Client SQLite — `core/store/migrations/0015_canvases.sql`
+### 1.1 Client SQLite — `core/store/migrations/0016_canvases.sql`
 
 ```sql
 CREATE TABLE canvases (
@@ -484,3 +484,49 @@ Each phase ends green on `make test` and `npm run typecheck` in every workspace.
 | Touch edge creation is fiddly | `connectOnClick` + larger handle hit areas on touch; "connect selected" toolbar action as a fallback. |
 | `calendar_events` rows disappear when feeds re-expand | Cached label in `data_json`; node shows stale badge with "re-pick" action. |
 | Project deletion / trash semantics for canvases | Canvases follow notes' trash rules; project deletion only removes memberships (existing behavior). |
+
+---
+
+## 9. Status (2026-09-13)
+
+Implemented:
+
+- **Phase 1** in full: domain, migration `0016_canvases.sql`, store repos with authored
+  `canvas` graph edges, sync registration, E2EE field registry, bridge methods, trash
+  integration, server tables/handlers/collector cascade, Go tests (store + two-device sync).
+- **Phase 2** on web/desktop and the mobile-web shell: root Canvases view (`/canvases/:id`),
+  project Canvases section (`/project/:id/canvases/:canvasId`), sticky notes, groups that
+  carry their contents, arrows with per-end heads and inline labels, colors, z-order,
+  undo/redo, keyboard shortcuts, viewport persistence, live merge on change events.
+- **Phase 3**: note, task, and calendar-event nodes via search pickers (events cache their
+  title/time on the node so a dropped feed degrades gracefully); task checkboxes toggle
+  status; double-click opens the item. Notes/tasks dragged from the toolbar tab strip land
+  on the board under the pointer.
+- **Phase 4**: image nodes over the document/blob pipeline (OS picker, paste, drop; the card
+  adopts the image's aspect ratio), and link nodes with Open Graph previews parsed in
+  `core/unfurl` — fetched directly on native, through the server's blind
+  `POST /v1/proxy/fetch` on web (same SSRF guard as the ICS proxy). Paste a URL for a card.
+- **Phase 5**: the native mobile app hosts the same React Flow board in a WebView
+  (`scripts/build-canvas.mjs` → `canvasBundle.generated.ts`, `canvas/CanvasEditor.tsx`) with
+  the shared `CanvasHost` bridged over postMessage RPC; native Canvases list, project tab,
+  and board routes. Built and typechecked; not yet exercised in a simulator.
+- **Graph**: canvases render as graph nodes, with a "Canvases" filter and click-to-open;
+  `[[canvas:…]]` wikilinks resolve in the editor and open the board.
+
+- **Keyboard**: a full shortcut set with a `?` reference overlay and ⌘K card search —
+  single-letter adds (T/G/N/K/E/I/L), ⌘A / Tab cycling, Enter to edit or open, ⌘C/X/V
+  card clipboard (system clipboard under a `companion-canvas/v1:` marker, in-memory
+  fallback), 1–9/0 colors, ⌘]/[ z-order, ⌘⇧G/U group/ungroup, ⌘⇧H/V align, ⌘⇧D
+  distribute, Alt-drag copy, C connect, ⌘⇧A arrowheads, R reverse, ⌘0/1/2 and ⌘±
+  zoom, H snap, F minimap, ⌘⇧N new canvas.
+
+- **Connections**: five endings (none, open arrow, filled arrow, dot, filled dot) and three
+  line styles (curved, orthogonal steps, straight), stored on the edge (`style` column,
+  migration `0017`) and synced; endings are drawn by the edge component with proper insets
+  instead of React Flow's built-in markers. Selected edges show grab handles at each end to
+  replant them on another card (`onReconnect`). Cards always stack above groups.
+- **Workspace tabs**: a board fills a workspace tab like a note (`/canvases/:id` mirrors the
+  active tab), with the canvases browse list in the left column.
+
+Still open: JSON Canvas import/export, live ProseMirror inside note cards, caching link
+preview images into blobs, and a PNG export (all Phase 6/7 stretch items).

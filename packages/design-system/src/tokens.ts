@@ -145,4 +145,19 @@ export const layout = {
   contentMax: 760,
 } as const;
 
+/** A small categorical palette for user-picked colors (archetypes, feeds, canvas
+ * stickies/groups/arrows). One list so every picker offers the same swatches. */
+export const swatches = [
+  "#8b5cf6",
+  "#ec4899",
+  "#f59e0b",
+  "#14b8a6",
+  "#6366f1",
+  "#ef4444",
+  "#10b981",
+  "#eab308",
+  "#3b82f6",
+  "#64748b",
+] as const;
+
 export type Colors = typeof colors;

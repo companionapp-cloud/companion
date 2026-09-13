@@ -24,7 +24,7 @@ export interface UpdateProjectInput {
   archived?: boolean;
 }
 
-export type MemberEntityType = "note" | "task" | "habit";
+export type MemberEntityType = "note" | "task" | "habit" | "canvas";
 
 /** Typed wrappers over the areas.* / projects.* / nav.* core methods (PLAN §6.6). */
 export function projectsApi(core: CoreBridge) {
