@@ -23,9 +23,7 @@ WORKDIR /src
 COPY . .
 COPY --from=web /src/apps/cloud/frontend/dist ./apps/cloud/frontend/dist
 ARG TARGETOS TARGETARCH
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -C apps/cloud -trimpath -ldflags="-s -w" -o /out/companion-cloud .
 
 FROM gcr.io/distroless/static-debian12:nonroot
