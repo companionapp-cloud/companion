@@ -30,6 +30,14 @@
 	@webmanifest path *.webmanifest
 	header @webmanifest Content-Type application/manifest+json
 
+	# Vite content-hashes everything under /assets (JS, CSS, core.wasm), so those can be cached
+	# forever; the app shell, sw.js and manifest keep fixed URLs and must be revalidated on every
+	# load (ETag makes that a cheap 304) — otherwise browsers heuristically cache them for days
+	# and pair a new bundle with a stale shell.
+	@immutable path /assets/*
+	header @immutable Cache-Control "public, max-age=31536000, immutable"
+	header ?Cache-Control "no-cache"
+
 	file_server
 
 	# SPA fallback: unknown paths serve the app shell. Also makes Railway's healthcheck

@@ -11,6 +11,13 @@ import {
 import type { CoreBridge } from "@companion/core-bridge";
 import type { DocumentSource } from "@companion/editor";
 import { createElement } from "react";
+// Both wasm assets are staged into src/wasm/ (gitignored) by `make web-assets` / the Dockerfile
+// and imported here so Vite fingerprints them: the Go runtime shim is bundled into the hashed
+// main chunk, and core.wasm becomes /assets/core-<hash>.wasm. A fixed /core.wasm URL let
+// browsers pair a fresh JS bundle with a heuristically cached, stale core after a deploy
+// (every new core.* method then failed with "unknown method" and the UI silently did nothing).
+import "./wasm/wasm_exec.js";
+import coreWasmUrl from "./wasm/core.wasm?url";
 
 // Web shell (PLAN §3.2): build the SQLite driver (wa-sqlite/IndexedDB), hand it to
 // the core compiled to wasm, then mount the shared React Native UI via RNW.
@@ -19,9 +26,9 @@ async function boot() {
   // Document bytes live in OPFS (PLAN §6.9); degrade gracefully if the browser lacks it —
   // metadata still syncs, but bytes can't be stored or rendered locally.
   const blobs = isWebBlobStoreAvailable() ? createOpfsBlobStore() : undefined;
-  // core.wasm is an unhashed public asset, so bust the browser disk cache in dev — otherwise
-  // a rebuilt core silently keeps serving the stale binary. Production serves it plainly.
-  const wasmUrl = import.meta.env.DEV ? `/core.wasm?t=${Date.now()}` : "/core.wasm";
+  // In dev the URL is the plain source path, so bust the browser disk cache — otherwise a
+  // rebuilt core silently keeps serving the stale binary. Production URLs are content-hashed.
+  const wasmUrl = import.meta.env.DEV ? `${coreWasmUrl}?t=${Date.now()}` : coreWasmUrl;
   const core = await createWasmBridge({ sqlite, wasmUrl, blobs });
 
   // File embedding for the note editor (PLAN §6.9): stage bytes into OPFS, record the

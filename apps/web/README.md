@@ -34,7 +34,7 @@ the documented upgrade — faster, but needs a dedicated worker + COOP/COEP head
 ## Run it
 
 ```bash
-make web-assets            # build core.wasm + stage wasm_exec.js into public/
+make web-assets            # build core.wasm + stage wasm_exec.js into src/wasm/ (gitignored)
 npm run dev -w @companion/web
 # open http://localhost:5273
 ```
