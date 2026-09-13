@@ -4,6 +4,7 @@ import {
   chatsApi,
   datesApi,
   graphApi,
+  listsApi,
   llmApi,
   notesApi,
   notifyApi,
@@ -16,6 +17,7 @@ import {
   type CoreBridge,
   type DatesApi,
   type GraphApi,
+  type ListsApi,
   type LlmApi,
   type NotesApi,
   type NotifyApi,
@@ -31,6 +33,7 @@ interface CoreValue {
   tasks: TasksApi;
   graph: GraphApi;
   projects: ProjectsApi;
+  lists: ListsApi;
   objectTypes: ObjectTypesApi;
   trash: TrashApi;
   notify: NotifyApi;
@@ -51,6 +54,7 @@ export function CoreProvider({ core, children }: { core: CoreBridge; children: R
       tasks: tasksApi(core),
       graph: graphApi(core),
       projects: projectsApi(core),
+      lists: listsApi(core),
       objectTypes: objectTypesApi(core),
       trash: trashApi(core),
       notify: notifyApi(core),

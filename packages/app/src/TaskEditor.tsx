@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, View, type GestureResponderEvent } from "react-native";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Platform, Pressable, ScrollView, View, type GestureResponderEvent } from "react-native";
 import type { Task, UpdateTaskInput } from "@companion/core-bridge";
 import { Button, Icon, IconButton, Input, Text, TextField, colors, layout, radius, space, type IconName, type PressState } from "@companion/design-system";
 import { Editor, type EditorController, type LinkRef } from "@companion/editor";
@@ -313,11 +313,16 @@ export function TaskRow({
   selected,
   onPress,
   onToggle,
+  trailing,
 }: {
   task: Task;
   selected?: boolean;
   onPress: (e: GestureResponderEvent) => void;
   onToggle: () => void;
+  /** Optional trailing controls after the due chip (e.g. a remove-from-list button). Shown
+   *  only while the row is hovered, so a list of rows doesn't read as a wall of buttons;
+   *  on touch (no hover) they stay visible. */
+  trailing?: ReactNode;
 }) {
   const done = task.status === "done";
   return (
@@ -328,19 +333,27 @@ export function TaskRow({
         { backgroundColor: selected ? colors.accentSoft : hovered ? colors.surfaceHover : "transparent" },
       ]}
     >
-      <Checkbox checked={done} onPress={onToggle} size={18} />
-      <Text numberOfLines={1} style={[{ flex: 1 }, done ? styles.doneTitle : null]}>
-        {task.title || "Untitled task"}
-      </Text>
-      {task.repeatSeedId ? <Icon name="repeat" size={13} color={colors.textTertiary} /> : null}
-      {task.dueAt ? (
-        <Text variant="caption" tone={overdue(task) ? "accent" : "tertiary"}>
-          {formatDueShort(task.dueAt)}
-        </Text>
-      ) : null}
+      {(({ hovered }: PressState) => (
+        <>
+          <Checkbox checked={done} onPress={onToggle} size={18} />
+          <Text numberOfLines={1} style={[{ flex: 1 }, done ? styles.doneTitle : null]}>
+            {task.title || "Untitled task"}
+          </Text>
+          {task.repeatSeedId ? <Icon name="repeat" size={13} color={colors.textTertiary} /> : null}
+          {task.dueAt ? (
+            <Text variant="caption" tone={overdue(task) ? "accent" : "tertiary"}>
+              {formatDueShort(task.dueAt)}
+            </Text>
+          ) : null}
+          {trailing ? <View style={{ opacity: hovered || !canHover ? 1 : 0 }}>{trailing}</View> : null}
+        </>
+      )) as unknown as ReactNode}
     </Pressable>
   );
 }
+
+// Hover only exists with a pointer; touch platforms keep hover-revealed controls visible.
+const canHover = Platform.OS === "web" && typeof window !== "undefined" && !!window.matchMedia?.("(hover: hover)").matches;
 
 function overdue(task: Task): boolean {
   return task.status !== "done" && !!task.dueAt && new Date(task.dueAt).getTime() < Date.now();

@@ -35,8 +35,10 @@ function GraphApp() {
     };
   }, []);
 
+  // The settings menu belongs to the whole-knowledgebase graph (no focus node), matching
+  // GraphScreen on web; per-note neighborhoods stay uncluttered.
   return (
-    <GraphView graph={graph} focusKey={focusKey} onOpenNode={(type, id) => post("openNode", { type, id })} />
+    <GraphView graph={graph} focusKey={focusKey} menu={!focusKey} onOpenNode={(type, id) => post("openNode", { type, id })} />
   );
 }
 

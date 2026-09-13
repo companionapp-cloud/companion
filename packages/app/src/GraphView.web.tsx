@@ -24,12 +24,21 @@ import {
   forceSimulation,
   forceX,
   forceY,
+  type ForceCollide,
+  type ForceLink,
+  type ForceManyBody,
+  type ForceX,
+  type ForceY,
   type Simulation,
   type SimulationLinkDatum,
   type SimulationNodeDatum,
 } from "d3-force";
 import { Icon, colors, type IconName } from "@companion/design-system";
 import type { Graph, GraphNode } from "@companion/core-bridge";
+import { DEFAULT_PHYSICS, applyGraphFilters, nodeKey, typeColor, type GraphPhysics } from "./graphModel";
+import { GraphMenu, useGraphSettings } from "./GraphMenu.web";
+
+export { nodeKey };
 
 /** How a node open is dispatched. Decoupled from useNav() so the same renderer works in
  * the app (nav.openNote) and inside the mobile graph WebView (postMessage). */
@@ -83,29 +92,18 @@ const MIN_SIZE = 32;
 const MAX_SIZE = 72;
 const FOCUS_MIN_SIZE = 52;
 
-// ── Force-simulation knobs (Obsidian's "Forces" sliders) ────────────────────────────────
-// LINK_DISTANCE — a spring's resting length, the preferred gap between two linked nodes.
-// CHARGE_STRENGTH — how hard every node repels every other (negative = repel); this is
-//   what spreads the graph out instead of collapsing it to a point. Weaker on big graphs
-//   so a thousand-node vault doesn't explode off-screen.
+// ── Force-simulation knobs ──────────────────────────────────────────────────────────────
+// The user-tunable forces (link distance/strength, charge, centering, collision padding)
+// live in GraphPhysics (graphModel.ts) and are driven from the graph menu's sliders; only
+// the fixed knobs remain here.
 // CHARGE_DISTANCE_MAX — cap the repulsion range so far-apart nodes stop pushing (keeps
 //   clusters coherent and the Barnes-Hut sum cheap).
-// CENTER_STRENGTH — the gentle pull toward the origin so disconnected bits stay in frame.
-// COLLIDE_PAD — extra spacing added to each node's radius so circles don't overlap.
+// LARGE_CHARGE_SCALE — the repulsion is halved on big graphs so a thousand-node vault
+//   doesn't explode off-screen.
 // SEED_SPREAD — radius scale for the deterministic phyllotaxis seed the sim relaxes from.
-// These are scaled for our node sizes (32–72px circles), not d3's default unit nodes. The
-// balance we want: connected notes sit close (short, stiff link springs) while unconnected
-// notes shove hard apart (strong, long-range charge) — so clusters read as tight knots
-// separated by real gaps instead of one even hairball. LINK_STRENGTH stiffens the springs so
-// linked nodes stay pulled together even against the strong repulsion.
-const LINK_DISTANCE = 30;
-const LINK_STRENGTH = 0.9;
-const CHARGE_STRENGTH = -2400;
-const CHARGE_STRENGTH_LARGE = -1200;
 const CHARGE_DISTANCE_MAX = 2400;
 const CHARGE_DISTANCE_MAX_LARGE = 1600;
-const CENTER_STRENGTH = 0.05;
-const COLLIDE_PAD = 22;
+const LARGE_CHARGE_SCALE = 0.5;
 const SEED_SPREAD = 90;
 // Golden angle (~137.5°) — used only to seed initial positions in a spiral so the sim
 // starts from an evenly-spread, deterministic state rather than a random pile.
@@ -217,32 +215,14 @@ export const graphCodeStyle: CSSProperties = {
   borderRadius: 5,
 };
 
-// nodeKey is React Flow's node id: a composite so a note and a task can never collide.
-export const nodeKey = (type: string, id: string) => `${type}:${id}`;
-
-// Icon + accent color per node type. Ghosts (unresolved targets) render muted.
+// Icon per node type (the accent color per type is typeColor in graphModel.ts). Ghosts
+// (unresolved targets) render muted.
 const TYPE_ICON: Record<string, IconName> = {
   note: "notes",
   task: "tasks",
   habit: "dot",
   project: "folder",
 };
-function typeColor(type: string): string {
-  switch (type) {
-    case "note":
-      return colors.success;
-    case "task":
-      return colors.info;
-    case "habit":
-      return colors.success;
-    case "project":
-      return colors.accent;
-    case "document":
-      return colors.gray300;
-    default:
-      return colors.textSecondary;
-  }
-}
 
 // A small categorical palette for archetypes: nodes sharing an object type get the same
 // color, so archetyped nodes read as a cluster in the graph (PLAN §5.3). Keyed by a stable
@@ -418,35 +398,58 @@ function highlightEdges(edges: Edge[], hoveredId: string | null): Edge[] {
   return [...normal, ...lit];
 }
 
-/** Owns the d3-force simulation for a graph. Rebuilds (and re-heats from the seed) whenever
- * the node/link set changes. Bumps `frame` once per animation frame while the sim is live
- * so consumers can re-read the mutated positions; flips `running` false when it damps to
- * rest. Returns the sim handle so drag handlers can pin nodes (fx/fy) and re-heat. */
-function useForceLayout(simNodes: SimNode[], simLinks: SimLink[], large: boolean) {
+/** Push the tunable physics onto a sim's forces. Used both when a sim is built and, on the
+ * live sim, whenever a slider moves — the forces are mutated in place so the layout retunes
+ * from where it is instead of restarting from the seed. */
+function applyPhysics(sim: Simulation<SimNode, SimLink>, physics: GraphPhysics, large: boolean): void {
+  (sim.force("charge") as ForceManyBody<SimNode>)
+    .strength(-physics.repelForce * (large ? LARGE_CHARGE_SCALE : 1))
+    .distanceMax(large ? CHARGE_DISTANCE_MAX_LARGE : CHARGE_DISTANCE_MAX);
+  (sim.force("link") as ForceLink<SimNode, SimLink>).distance(physics.linkDistance).strength(physics.linkForce);
+  (sim.force("x") as ForceX<SimNode>).strength(physics.centerForce);
+  (sim.force("y") as ForceY<SimNode>).strength(physics.centerForce);
+  (sim.force("collide") as ForceCollide<SimNode>).radius((d) => d.size / 2 + physics.nodeSpacing);
+}
+
+/** Owns the d3-force simulation for a graph. Rebuilds (and re-heats) whenever the node/link
+ * set changes; nodes that survive the change resume from their last position rather than
+ * the seed, so filtering or a live data refresh nudges the layout instead of reshuffling
+ * it. Physics changes retune the running sim in place. Bumps `frame` once per animation
+ * frame while the sim is live so consumers can re-read the mutated positions; flips
+ * `running` false when it damps to rest. Returns the sim handle so drag handlers can pin
+ * nodes (fx/fy) and re-heat. */
+function useForceLayout(simNodes: SimNode[], simLinks: SimLink[], large: boolean, physics: GraphPhysics) {
   const [frame, setFrame] = useState(0);
   const [running, setRunning] = useState(true);
   const simRef = useRef<Simulation<SimNode, SimLink> | null>(null);
+  // Last known center of every node the previous sim laid out, keyed by node id, so a
+  // rebuilt sim can pick up where it left off for the nodes it still has.
+  const positionsRef = useRef(new Map<string, { x: number; y: number }>());
+  // The physics the current sim was built with — read via a ref so the build effect doesn't
+  // re-run (and re-seed) on every slider tick; the retune effect below handles those.
+  const physicsRef = useRef(physics);
+  physicsRef.current = physics;
+  const appliedRef = useRef<GraphPhysics | null>(null);
 
   useEffect(() => {
+    for (const n of simNodes) {
+      const prev = positionsRef.current.get(n.id);
+      // Pinned nodes (the focus) keep their fixed spot; everything else resumes in place.
+      if (prev && n.fx == null && n.fy == null) {
+        n.x = prev.x;
+        n.y = prev.y;
+      }
+    }
     const sim = forceSimulation<SimNode>(simNodes)
-      .force(
-        "charge",
-        forceManyBody<SimNode>()
-          .strength(large ? CHARGE_STRENGTH_LARGE : CHARGE_STRENGTH)
-          .distanceMax(large ? CHARGE_DISTANCE_MAX_LARGE : CHARGE_DISTANCE_MAX),
-      )
-      .force(
-        "link",
-        forceLink<SimNode, SimLink>(simLinks)
-          .id((d) => d.id)
-          .distance(LINK_DISTANCE)
-          .strength(LINK_STRENGTH),
-      )
-      .force("x", forceX<SimNode>(0).strength(CENTER_STRENGTH))
-      .force("y", forceY<SimNode>(0).strength(CENTER_STRENGTH))
-      .force("collide", forceCollide<SimNode>().radius((d) => d.size / 2 + COLLIDE_PAD))
+      .force("charge", forceManyBody<SimNode>())
+      .force("link", forceLink<SimNode, SimLink>(simLinks).id((d) => d.id))
+      .force("x", forceX<SimNode>(0))
+      .force("y", forceY<SimNode>(0))
+      .force("collide", forceCollide<SimNode>())
       .velocityDecay(large ? 0.6 : 0.5)
       .alphaDecay(large ? 0.08 : 0.06);
+    applyPhysics(sim, physicsRef.current, large);
+    appliedRef.current = physicsRef.current;
     simRef.current = sim;
     setRunning(true);
 
@@ -468,8 +471,22 @@ function useForceLayout(simNodes: SimNode[], simLinks: SimLink[], large: boolean
       sim.stop();
       if (raf) cancelAnimationFrame(raf);
       simRef.current = null;
+      // Remember where everything ended up for the next build (see positionsRef).
+      for (const n of simNodes) positionsRef.current.set(n.id, { x: n.x ?? 0, y: n.y ?? 0 });
     };
   }, [simNodes, simLinks, large]);
+
+  // Retune the live sim when a slider moves: mutate the forces in place and warm the sim
+  // back up so the layout visibly relaxes into the new balance. Skipped right after a build,
+  // which already applied these values.
+  useEffect(() => {
+    const sim = simRef.current;
+    if (!sim || appliedRef.current === physics) return;
+    applyPhysics(sim, physics, large);
+    appliedRef.current = physics;
+    setRunning(true);
+    sim.alpha(Math.max(sim.alpha(), 0.5)).restart();
+  }, [physics, large]);
 
   const reheat = useCallback(() => {
     const sim = simRef.current;
@@ -573,6 +590,10 @@ export interface GraphViewProps {
   focusKey?: string | null;
   /** Invoked when a node is opened (only notes are navigable today). */
   onOpenNode?: OpenNodeHandler;
+  /** Show the settings menu (force sliders + show/hide filters) in the canvas corner. Its
+   * settings persist per device and apply only to views that show the menu, so the whole-
+   * knowledgebase graph can be tuned without disturbing the per-note neighborhoods. */
+  menu?: boolean;
 }
 
 /** Flow-space rectangle currently visible for a given viewport transform, padded by
@@ -731,25 +752,42 @@ function GraphBaseLayer({
  * messaging live in the wrapper screens (GraphScreen, NoteGraph). Wrapped in its own
  * ReactFlowProvider so GraphCanvas can read the live viewport at the same level it
  * configures <ReactFlow>. */
-export function GraphView({ graph, focusKey = null, onOpenNode }: GraphViewProps) {
+export function GraphView({ graph, focusKey = null, onOpenNode, menu = false }: GraphViewProps) {
+  // Menu settings (physics + filters) are loaded regardless, but only take effect on views
+  // that show the menu — a view with no menu has no way to explain or undo them.
+  const settings = useGraphSettings();
+  const physics = menu ? settings.physics : DEFAULT_PHYSICS;
+  const shown = useMemo(
+    () => (menu ? applyGraphFilters(graph, settings.filters, focusKey) : graph),
+    [graph, settings.filters, focusKey, menu],
+  );
+
   const { simNodes, simLinks, flowEdges, large } = useMemo(() => {
-    const nodes = withGhosts(graph);
-    const degree = degreesOf(graph.edges);
+    const nodes = withGhosts(shown);
+    const degree = degreesOf(shown.edges);
     const large = nodes.length > LARGE_GRAPH_THRESHOLD;
     const focused = focusKey && nodes.some((n) => nodeKey(n.type, n.id) === focusKey) ? focusKey : null;
     const { simNodes } = buildSimGraph(nodes, degree, focused);
     // Links reference endpoint keys; d3-force swaps them for node objects on init.
-    const simLinks: SimLink[] = graph.edges.map((e) => ({
+    const simLinks: SimLink[] = shown.edges.map((e) => ({
       source: nodeKey(e.sourceType, e.sourceId),
       target: nodeKey(e.targetType, e.targetId),
     }));
-    return { simNodes, simLinks, flowEdges: toFlowEdges(graph.edges, large), large };
-  }, [graph, focusKey]);
+    return { simNodes, simLinks, flowEdges: toFlowEdges(shown.edges, large), large };
+  }, [shown, focusKey]);
 
   return (
     <GraphOpenContext.Provider value={onOpenNode ?? noop}>
       <ReactFlowProvider>
-        <GraphCanvas simNodes={simNodes} simLinks={simLinks} flowEdges={flowEdges} large={large} />
+        <GraphCanvas
+          simNodes={simNodes}
+          simLinks={simLinks}
+          flowEdges={flowEdges}
+          large={large}
+          physics={physics}
+          // The menu lists projects from the unfiltered graph so a hidden one can be re-shown.
+          overlay={menu ? <GraphMenu graph={graph} {...settings} /> : null}
+        />
       </ReactFlowProvider>
     </GraphOpenContext.Provider>
   );
@@ -760,14 +798,19 @@ function GraphCanvas({
   simLinks,
   flowEdges,
   large,
+  physics,
+  overlay,
 }: {
   simNodes: SimNode[];
   simLinks: SimLink[];
   flowEdges: Edge[];
   large: boolean;
+  physics: GraphPhysics;
+  /** Chrome layered over the canvas (the settings menu); it positions itself. */
+  overlay?: ReactNode;
 }) {
   const { setViewport } = useReactFlow();
-  const { frame, simRef } = useForceLayout(simNodes, simLinks, large);
+  const { frame, simRef } = useForceLayout(simNodes, simLinks, large, physics);
 
   // React Flow is controlled here, so it needs the change handlers from these hooks to
   // write back internal updates (selection, drag). On a large graph `nodes` holds only the
@@ -908,6 +951,7 @@ function GraphCanvas({
           <Background color={colors.borderSubtle} gap={24} />
           <Controls showInteractive={false} />
         </ReactFlow>
+        {overlay}
       </div>
     </GraphHoverContext.Provider>
   );

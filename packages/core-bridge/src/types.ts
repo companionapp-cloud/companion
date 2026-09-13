@@ -296,6 +296,37 @@ export interface ProjectMember {
 }
 
 /** One project in the sidebar tree, with its live indicators (null until data exists). */
+/** A project-scoped, drag-ordered task list. Lists are scaffolding like projects: never
+ *  trashed, they delete immediately (their items go with them; the tasks stay). */
+export interface List {
+  id: string;
+  projectId: string;
+  name: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+  version: number;
+  dirty: boolean;
+}
+export type ListItemKind = "task" | "heading";
+/** One row of a list: a task reference or a heading ("sublist") that groups the task rows
+ *  beneath it. Tasks and headings share a single flat sortOrder, so a task's sublist is the
+ *  nearest heading above it. */
+export interface ListItem {
+  id: string;
+  listId: string;
+  kind: ListItemKind;
+  taskId?: string | null;
+  /** Heading text; empty for task items. */
+  title: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+  version: number;
+  dirty: boolean;
+}
 export interface SidebarProject {
   id: string;
   name: string;

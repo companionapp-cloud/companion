@@ -3,7 +3,7 @@ import { createContext, useContext } from "react";
 export type ViewId = "today" | "chat" | "calendar" | "notes" | "tasks" | "habits" | "graph" | "trash" | "settings" | "notifications";
 
 /** The content types a project drills into (its sub-nav). */
-export type ProjectSection = "notes" | "tasks" | "calendars" | "habits";
+export type ProjectSection = "notes" | "tasks" | "lists" | "calendars" | "habits";
 
 /** A document open in a workspace tab. `projectId` records that the document was opened from
  *  a project (via its detail pane), so re-selecting the tab returns to that project route
@@ -19,12 +19,13 @@ export type Tab = { uid: string; ref: TabRef | null; back: TabRef[]; fwd: TabRef
 /** The current navigable location, derived from the React Navigation route. The workspace
  * sections (notes/tasks) only pick which list the left column browses — the content area
  * always shows the active tab (which may hold a note, a task, or nothing). A project is a
- * three-level drill-down, each a deep-linkable URL on web. */
+ * three-level drill-down, each a deep-linkable URL on web. The lists section goes one level
+ * deeper: `itemId` is the list, `subItemId` the task selected inside it. */
 export type NavLocation =
   | { kind: "view"; view: Exclude<ViewId, "notes" | "tasks"> }
   | { kind: "notes" }
   | { kind: "tasks" }
-  | { kind: "project"; projectId: string; section?: ProjectSection; itemId?: string };
+  | { kind: "project"; projectId: string; section?: ProjectSection; itemId?: string; subItemId?: string };
 
 /** The app-facing navigation API. Implemented on top of React Navigation (routing +
  * URL linking) plus a thin layer for the workspace tab strip and forward history. */
@@ -66,6 +67,8 @@ export interface Navigator {
   openProjectSection: (projectId: string, section: ProjectSection) => void;
   /** Push into a single item within a project section. */
   openProjectItem: (projectId: string, section: ProjectSection, itemId: string) => void;
+  /** Push into an item nested under a section item — a task inside a list. */
+  openProjectSubItem: (projectId: string, section: ProjectSection, itemId: string, subItemId: string) => void;
 }
 
 export const NavContext = createContext<Navigator | null>(null);

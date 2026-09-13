@@ -1,0 +1,346 @@
+import { useEffect, useMemo, useState } from "react";
+import { Pressable, ScrollView, View } from "react-native";
+import type { List, ListItem, Task } from "@companion/core-bridge";
+import { Button, Center, Icon, IconButton, Input, ListRow, Text, TextField, colors, layout, radius, space } from "@companion/design-system";
+import { useNav } from "./nav-context";
+import { useTasks } from "./TasksProvider";
+import { useLists, useListItems, useProjectLists } from "./ListsProvider";
+import { ListFilterMenu } from "./ListFilterMenu";
+import { SortableList } from "./SortableList";
+import { useDropTarget } from "./DndContext";
+import { TaskRow } from "./TaskEditor";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { AddTasksPicker } from "./AddTasksPicker";
+
+// The Lists section of a project (PLAN §6.6): drag-ordered task lists, each optionally
+// broken into sublists by headings. Lives in the project's list column; the selected list's
+// rows replace the tasks list, and selecting a task opens it in the detail pane. Routes:
+//   /project/<id>/lists                 → the lists index (ListsIndex)
+//   /project/<id>/lists/<listId>        → that list's rows (ListRows)
+//   /project/<id>/lists/<listId>/<task> → same, with the task open in the detail pane
+
+/** The column body for the lists section: the index of lists, or one list's rows. */
+export function ListsColumn({ projectId, listId, selectedTaskId, projectTasks }: { projectId: string; listId?: string; selectedTaskId?: string; projectTasks: Task[] }) {
+  if (listId) return <ListRows projectId={projectId} listId={listId} selectedTaskId={selectedTaskId} projectTasks={projectTasks} />;
+  return <ListsIndex projectId={projectId} />;
+}
+
+/** Level 1: the project's lists, drag-reorderable, each a drop target for dragged tasks. */
+function ListsIndex({ projectId }: { projectId: string }) {
+  const nav = useNav();
+  const lists = useProjectLists(projectId);
+  const { createList, reorderLists } = useLists();
+  const [draft, setDraft] = useState<string | null>(null);
+
+  const submit = async () => {
+    const name = draft?.trim();
+    setDraft(null);
+    if (!name) return;
+    const list = await createList(projectId, name);
+    nav.openProjectItem(projectId, "lists", list.id);
+  };
+
+  return (
+    <View style={styles.list}>
+      <View style={styles.listHeader}>
+        <IconButton label="Back to sections" size="sm" onPress={() => nav.openProject(projectId)}>
+          <Icon name="chevronLeft" size={18} color={colors.textSecondary} />
+        </IconButton>
+        <Text variant="caption" tone="secondary" style={{ flex: 1, fontWeight: "600" }}>
+          Lists
+        </Text>
+        <IconButton label="New list" size="sm" onPress={() => setDraft((d) => (d === null ? "" : null))}>
+          <Icon name="plus" size={16} color={colors.textSecondary} />
+        </IconButton>
+      </View>
+      {draft !== null ? (
+        <View style={styles.search}>
+          {/* Commit on blur (click away), as the sidebar's create inputs do; an empty value just closes. */}
+          <Input size="sm" placeholder="List name, press Enter" value={draft} onChangeText={setDraft} autoFocus onSubmitEditing={() => void submit()} onBlur={() => void submit()} />
+        </View>
+      ) : null}
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.md, gap: 2 }}>
+        {lists.length ? (
+          <SortableList
+            items={lists}
+            keyExtractor={(l) => l.id}
+            onReorder={(ids) => void reorderLists(projectId, ids)}
+            renderItem={({ item, isActive, drag }) => (
+              <View {...drag}>
+                <ListIndexRow list={item} dragging={isActive} onPress={() => nav.openProjectItem(projectId, "lists", item.id)} />
+              </View>
+            )}
+          />
+        ) : (
+          <Text tone="tertiary" variant="caption" style={styles.empty}>
+            No lists yet. Add one with ＋ to order this project’s tasks by priority.
+          </Text>
+        )}
+      </ScrollView>
+    </View>
+  );
+}
+
+function ListIndexRow({ list, dragging, onPress }: { list: List; dragging: boolean; onPress: () => void }) {
+  const { addTask } = useLists();
+  const items = useListItems(list.id);
+  // Dropping a dragged task on a list appends it (and joins the project if needed).
+  const { ref, isOver } = useDropTarget(`list:${list.id}`, (p) => {
+    if (p.kind === "task") void addTask(list.id, p.id);
+  });
+  const taskCount = items.filter((i) => i.kind === "task").length;
+  return (
+    <View ref={ref} style={[dragging ? styles.rowDragging : null, isOver ? styles.rowOver : null]}>
+      <ListRow
+        icon={<Icon name="listOrdered" size={17} color={isOver ? colors.accentHover : colors.textTertiary} />}
+        title={list.name}
+        trailing={taskCount ? String(taskCount) : undefined}
+        selected={isOver}
+        hasChildren
+        onPress={onPress}
+      />
+    </View>
+  );
+}
+
+/** Level 2: one list's rows. Tasks and headings share one drag order, so dragging a task
+ *  under a heading files it in that sublist. */
+function ListRows({ projectId, listId, selectedTaskId, projectTasks }: { projectId: string; listId: string; selectedTaskId?: string; projectTasks: Task[] }) {
+  const nav = useNav();
+  const tasksStore = useTasks();
+  const lists = useProjectLists(projectId);
+  const items = useListItems(listId);
+  const { addTasks, createTask, addHeading, renameHeading, removeItem, reorderItems } = useLists();
+  const [taskDraft, setTaskDraft] = useState("");
+  const [headingDraft, setHeadingDraft] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
+
+  // Resolve task rows against the live task store; rows whose task is trashed or not yet
+  // synced simply don't render (the row itself is kept so a restore brings it back).
+  const rows = useMemo(
+    () =>
+      items
+        .map((item) => ({ item, task: item.kind === "task" && item.taskId ? tasksStore.byId(item.taskId) : undefined }))
+        .filter((r) => r.item.kind === "heading" || r.task),
+    [items, tasksStore],
+  );
+  const inList = useMemo(() => new Set(items.filter((i) => i.taskId).map((i) => i.taskId as string)), [items]);
+  // Project tasks not yet in this list — the "add existing" picker's candidates.
+  const candidates = useMemo(() => projectTasks.filter((t) => !inList.has(t.id) && t.status !== "done"), [projectTasks, inList]);
+
+  // The header dropdown switches between this project's lists, or back to the plain tasks list.
+  const switchOptions = useMemo(
+    () => [...lists.map((l) => ({ value: l.id, label: l.name })), { value: "__tasks", label: "All tasks" }],
+    [lists],
+  );
+
+  const addTaskFromDraft = async () => {
+    const title = taskDraft.trim();
+    setTaskDraft("");
+    if (!title) return;
+    const task = await createTask(listId, title);
+    nav.openProjectSubItem(projectId, "lists", listId, task.id);
+  };
+  const addHeadingFromDraft = async () => {
+    const title = headingDraft?.trim();
+    setHeadingDraft(null);
+    if (title) await addHeading(listId, title);
+  };
+
+  return (
+    <View style={styles.list}>
+      <View style={styles.listHeader}>
+        <IconButton label="Back to lists" size="sm" onPress={() => nav.openProjectSection(projectId, "lists")}>
+          <Icon name="chevronLeft" size={18} color={colors.textSecondary} />
+        </IconButton>
+        <View style={{ flex: 1 }}>
+          <ListFilterMenu
+            value={listId}
+            options={switchOptions}
+            onChange={(v) => (v === "__tasks" ? nav.openProjectSection(projectId, "tasks") : nav.openProjectItem(projectId, "lists", v))}
+          />
+        </View>
+        <IconButton label="Add existing task" size="sm" active={picking} onPress={() => setPicking(true)}>
+          <Icon name="tasks" size={16} color={colors.textSecondary} />
+        </IconButton>
+        <IconButton label="New heading" size="sm" active={headingDraft !== null} onPress={() => setHeadingDraft((d) => (d === null ? "" : null))}>
+          <Icon name="listBullet" size={16} color={colors.textSecondary} />
+        </IconButton>
+      </View>
+      {/* One entry field: the heading field temporarily takes the task field's place. */}
+      <View style={styles.search}>
+        {headingDraft !== null ? (
+          <Input
+            size="sm"
+            placeholder="Heading, press Enter"
+            value={headingDraft}
+            onChangeText={setHeadingDraft}
+            autoFocus
+            onSubmitEditing={() => void addHeadingFromDraft()}
+            onBlur={() => void addHeadingFromDraft()}
+            leadingIcon={<Icon name="listBullet" size={15} color={colors.textTertiary} />}
+          />
+        ) : (
+          <Input
+            size="sm"
+            placeholder="Add a task, press Enter"
+            value={taskDraft}
+            onChangeText={setTaskDraft}
+            onSubmitEditing={() => void addTaskFromDraft()}
+            leadingIcon={<Icon name="plus" size={15} color={colors.textTertiary} />}
+          />
+        )}
+      </View>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.md, gap: 2 }}>
+        {rows.length ? (
+          <SortableList
+            items={rows}
+            keyExtractor={(r) => r.item.id}
+            onReorder={(ids) => void reorderItems(listId, ids)}
+            renderItem={({ item: r, isActive, drag }) =>
+              r.item.kind === "heading" ? (
+                <View {...drag}>
+                  <HeadingRow item={r.item} dragging={isActive} onRename={(title) => void renameHeading(r.item.id, title)} onRemove={() => void removeItem(r.item.id)} />
+                </View>
+              ) : (
+                <View {...drag} style={isActive ? styles.rowDragging : null}>
+                  <TaskRow
+                    task={r.task as Task}
+                    selected={r.task?.id === selectedTaskId}
+                    onPress={() => nav.openProjectSubItem(projectId, "lists", listId, (r.task as Task).id)}
+                    onToggle={() => void tasksStore.setStatus((r.task as Task).id, r.task?.status === "done" ? "open" : "done")}
+                    trailing={
+                      <IconButton label="Remove from list" size="sm" onPress={() => void removeItem(r.item.id)}>
+                        <Icon name="close" size={13} color={colors.textTertiary} />
+                      </IconButton>
+                    }
+                  />
+                </View>
+              )
+            }
+          />
+        ) : (
+          <Text tone="tertiary" variant="caption" style={styles.empty}>
+            This list is empty. Type a task above, or add existing project tasks with the ☰ button. Drag rows to set their priority; add headings to group them.
+          </Text>
+        )}
+      </ScrollView>
+      {picking ? <AddTasksPicker candidates={candidates} onAdd={(ids) => addTasks(listId, ids)} onClose={() => setPicking(false)} /> : null}
+    </View>
+  );
+}
+
+/** A heading row (sublist label). Press to rename inline; the ✕ removes the heading only —
+ *  the tasks beneath it simply join the sublist above. */
+function HeadingRow({ item, dragging, onRename, onRemove }: { item: ListItem; dragging: boolean; onRename: (title: string) => void; onRemove: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(item.title);
+  useEffect(() => setDraft(item.title), [item.title]);
+  const commit = () => {
+    setEditing(false);
+    const title = draft.trim();
+    if (title && title !== item.title) onRename(title);
+    else setDraft(item.title);
+  };
+  // The remove button only appears while the row is hovered (see TaskRow's trailing slot).
+  const [hovered, setHovered] = useState(false);
+  return (
+    <View
+      style={[styles.heading, dragging ? styles.rowDragging : null]}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+    >
+      {editing ? (
+        <View style={{ flex: 1 }}>
+          <Input size="sm" value={draft} onChangeText={setDraft} autoFocus onSubmitEditing={commit} onBlur={commit} />
+        </View>
+      ) : (
+        <Pressable onPress={() => setEditing(true)} style={{ flex: 1 }} aria-label="Rename heading">
+          <Text variant="caption" tone="tertiary" numberOfLines={1} style={styles.headingLabel}>
+            {item.title.toUpperCase() || "UNTITLED"}
+          </Text>
+        </Pressable>
+      )}
+      <View style={{ opacity: hovered ? 1 : 0 }}>
+        <IconButton label="Remove heading" size="sm" onPress={onRemove}>
+          <Icon name="close" size={13} color={colors.textTertiary} />
+        </IconButton>
+      </View>
+    </View>
+  );
+}
+
+/** The detail pane for a list with no task selected: rename, a summary, and delete. */
+export function ListHome({ projectId, listId }: { projectId: string; listId: string }) {
+  const nav = useNav();
+  const lists = useProjectLists(projectId);
+  const items = useListItems(listId);
+  const tasksStore = useTasks();
+  const { renameList, deleteList } = useLists();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const list = lists.find((l) => l.id === listId);
+  if (!list) {
+    return (
+      <Center>
+        <Text tone="tertiary">This list is gone.</Text>
+      </Center>
+    );
+  }
+  const taskItems = items.filter((i) => i.kind === "task" && i.taskId);
+  const done = taskItems.filter((i) => tasksStore.byId(i.taskId as string)?.status === "done").length;
+  const headings = items.filter((i) => i.kind === "heading").length;
+
+  return (
+    <View style={{ flex: 1 }}>
+      <ScrollView contentContainerStyle={styles.home}>
+        <View style={styles.titleRow}>
+          <Icon name="listOrdered" size={22} color={colors.textTertiary} />
+          <TextField variant="title" value={list.name} placeholder="List name" onChangeText={(t) => t.trim() && void renameList(list.id, t.trim())} />
+        </View>
+        <Text tone="secondary">
+          {taskItems.length === 0
+            ? "No tasks yet. Add tasks in the column on the left, then drag them into priority order."
+            : `${done} of ${taskItems.length} tasks done${headings ? ` · ${headings} ${headings === 1 ? "sublist" : "sublists"}` : ""}. Select a task on the left to open it.`}
+        </Text>
+        <View style={styles.footer}>
+          <Button label="Delete list" variant="secondary" onPress={() => setConfirmDelete(true)} />
+        </View>
+      </ScrollView>
+      {confirmDelete ? (
+        <ConfirmDialog
+          title={`Delete “${list.name}”?`}
+          message="The list and its headings are removed. Its tasks stay in the project."
+          onConfirm={async () => {
+            await deleteList(list.id);
+            nav.openProjectSection(projectId, "lists");
+          }}
+          onClose={() => setConfirmDelete(false)}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+const styles = {
+  list: { flex: 1, minHeight: 0, backgroundColor: colors.surfaceCard },
+  listHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: space.xs,
+    minHeight: 28 + space.md * 2 + 1,
+    paddingHorizontal: space.md,
+    paddingVertical: space.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+    zIndex: 2,
+  },
+  search: { paddingHorizontal: space.md, paddingTop: space.md, paddingBottom: space.md, zIndex: 1 },
+  empty: { padding: space.xl, lineHeight: 20, textAlign: "center" as const },
+  heading: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.xs, paddingLeft: space.md, paddingRight: 2, paddingTop: space.lg, paddingBottom: space.xs, borderRadius: radius.sm },
+  headingLabel: { fontWeight: "600" as const, letterSpacing: 0.5 },
+  rowDragging: { backgroundColor: colors.surfaceActive, borderRadius: radius.sm },
+  rowOver: { borderRadius: radius.sm, borderWidth: 1, borderColor: colors.accent, margin: -1 },
+  home: { maxWidth: layout.contentMax, width: "100%" as const, marginHorizontal: "auto" as const, padding: space.xxl, gap: space.lg },
+  titleRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.md },
+  footer: { marginTop: space.xl, alignItems: "flex-start" as const },
+};

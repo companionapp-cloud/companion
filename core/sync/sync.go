@@ -241,6 +241,10 @@ func New(st *store.Store, t Transport, clock domain.Clock) *Engine {
 	e.register(newRepoSyncer[*domain.Area](st.Areas, clock))
 	e.register(newRepoSyncer[*domain.Project](st.Projects, clock))
 	e.register(newRepoSyncer[*domain.ProjectMember](st.ProjectMembers, clock))
+	// Lists reference their project and items reference their list/task; either arriving
+	// before its parent is a tolerated dangle that resolves as rows land.
+	e.register(newRepoSyncer[*domain.List](st.Lists, clock))
+	e.register(newRepoSyncer[*domain.ListItem](st.ListItems, clock))
 	// Chats + their messages sync so a conversation continues across devices (§6.8). Messages
 	// reference their chat by id; a message arriving before its chat is a tolerated dangle.
 	e.register(newRepoSyncer[*domain.Chat](st.Chats, clock))
