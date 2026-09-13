@@ -14,6 +14,8 @@ import { CalendarEventScreen } from './screens/CalendarEventScreen';
 import { NotesListScreen } from './screens/NotesListScreen';
 import { NoteEditorScreen } from './screens/NoteEditorScreen';
 import { TasksListScreen } from './screens/TasksListScreen';
+import { CanvasesListScreen } from './screens/CanvasesListScreen';
+import { CanvasScreen } from './screens/CanvasScreen';
 import { NotificationsScreen } from './screens/NotificationsScreen';
 import { TaskEditorScreen } from './screens/TaskEditorScreen';
 import { TaskGraphScreen } from './screens/TaskGraphScreen';
@@ -43,6 +45,8 @@ export type RootStackParamList = {
   ChatConversation: { chatId: string };
   Notes: undefined;
   Tasks: undefined;
+  Canvases: undefined;
+  Canvas: { id: string };
   Habits: undefined;
   Calendar: undefined;
   CalendarEvent: { item: CalendarItem };
@@ -67,6 +71,7 @@ export type RootStackParamList = {
 export type ProjectTabParamList = {
   ProjectNotes: undefined;
   ProjectTasks: undefined;
+  ProjectCanvases: undefined;
   ProjectCalendar: undefined;
 };
 
@@ -125,6 +130,8 @@ export function MobileShell() {
         <RootStack.Screen name="ChatConversation" component={ChatScreen} options={{ title: '' }} />
         <RootStack.Screen name="Notes" component={NotesListScreen} options={{ title: 'All notes' }} />
         <RootStack.Screen name="Tasks" component={TasksListScreen} options={{ title: 'All tasks' }} />
+        <RootStack.Screen name="Canvases" component={CanvasesListScreen} options={{ title: 'All canvases' }} />
+        <RootStack.Screen name="Canvas" component={CanvasScreen} options={{ title: 'Canvas' }} />
         <RootStack.Screen name="Habits" component={PlaceholderScreen} options={{ title: 'Habits' }} />
         <RootStack.Screen name="Calendar" component={CalendarScreen} options={{ title: 'Calendar' }} />
         <RootStack.Screen name="CalendarEvent" component={CalendarEventScreen} options={{ title: 'Event' }} />

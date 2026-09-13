@@ -35,6 +35,10 @@ type Store struct {
 	// read-only clones of their expanded occurrences (PLAN §6.7).
 	CalendarFeeds  *CalendarFeedsRepo
 	CalendarEvents *CalendarEventsRepo
+	// Canvases are 2D boards (PLAN-canvases.md): the board row, its nodes, and its edges.
+	Canvases    *CanvasesRepo
+	CanvasNodes *CanvasNodesRepo
+	CanvasEdges *CanvasEdgesRepo
 }
 
 // New builds a Store over an already-open Driver, applying pending migrations. A nil
@@ -88,6 +92,10 @@ func New(d Driver, clock domain.Clock) (*Store, error) {
 	// events repo also serves the merged Range view every calendar UI reads (PLAN §6.7).
 	s.CalendarFeeds = &CalendarFeedsRepo{db: d, clock: clock}
 	s.CalendarEvents = &CalendarEventsRepo{db: d, clock: clock}
+	// Canvases: nodes that embed a note/task/document mirror 'canvas' edges into the link index.
+	s.Canvases = &CanvasesRepo{db: d, clock: clock, links: s.Links}
+	s.CanvasNodes = &CanvasNodesRepo{db: d, clock: clock, links: s.Links}
+	s.CanvasEdges = &CanvasEdgesRepo{db: d, clock: clock}
 	return s, nil
 }
 

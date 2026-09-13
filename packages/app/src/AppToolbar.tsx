@@ -3,6 +3,7 @@ import { Icon, IconButton, Tab, Toolbar, colors, space } from "@companion/design
 import { useNav } from "./nav-context";
 import { useNotes } from "./NotesProvider";
 import { useTasks } from "./TasksProvider";
+import { useCanvases } from "./canvas/CanvasesProvider";
 import { NotificationsBell } from "./NotificationsBell";
 import { Draggable } from "./DndContext";
 
@@ -13,17 +14,22 @@ export function AppToolbar() {
   const nav = useNav();
   const notes = useNotes();
   const tasks = useTasks();
+  const canvases = useCanvases();
 
   const inNotes = nav.current.kind === "notes";
   const inTasks = nav.current.kind === "tasks";
+  const inCanvases = nav.current.kind === "canvases";
 
-  const labelFor = (kind: "note" | "task", id: string) => {
-    const title = kind === "note" ? notes.byId(id)?.title : tasks.byId(id)?.title;
-    return title || "Untitled";
+  const labelFor = (kind: "note" | "task" | "canvas", id: string) => {
+    const title = kind === "note" ? notes.byId(id)?.title : kind === "task" ? tasks.byId(id)?.title : canvases.byId(id)?.name;
+    return title || (kind === "canvas" ? "Untitled canvas" : "Untitled");
   };
 
   const onCreate = async () => {
-    if (inTasks) {
+    if (inCanvases) {
+      const c = await canvases.create();
+      nav.openCanvas(c.id);
+    } else if (inTasks) {
       const task = await tasks.create({ title: "Untitled task" });
       nav.openTask(task.id);
     } else {
@@ -55,14 +61,14 @@ export function AppToolbar() {
             <Tab
               label={ref ? labelFor(ref.kind, ref.id) : "Nothing selected"}
               active={i === nav.activeIndex}
-              icon={ref ? <Icon name={ref.kind === "task" ? "tasks" : "file"} size={13} color={colors.textTertiary} /> : undefined}
+              icon={ref ? <Icon name={ref.kind === "task" ? "tasks" : ref.kind === "canvas" ? "canvas" : "file"} size={13} color={colors.textTertiary} /> : undefined}
               onPress={() => nav.selectTab(i)}
               onExpand={ref ? () => nav.expandTab(i) : undefined}
               onClose={() => nav.closeTab(i)}
             />
           );
-          // A tab holding a document can be dragged onto a project to add it there.
-          return ref ? (
+          // A tab holding a note/task can be dragged onto a project (or a board) to add it there.
+          return ref && ref.kind !== "canvas" ? (
             <Draggable key={tab.uid} payload={{ kind: ref.kind, id: ref.id, label: labelFor(ref.kind, ref.id) }}>
               {el}
             </Draggable>
@@ -78,8 +84,8 @@ export function AppToolbar() {
       </ScrollView>
 
       <NotificationsBell />
-      {inNotes || inTasks ? (
-        <IconButton label={inTasks ? "New task" : "New note"} onPress={onCreate}>
+      {inNotes || inTasks || inCanvases ? (
+        <IconButton label={inCanvases ? "New canvas" : inTasks ? "New task" : "New note"} onPress={onCreate}>
           <Icon name="plus" color={colors.textSecondary} />
         </IconButton>
       ) : null}

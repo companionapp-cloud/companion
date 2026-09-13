@@ -1,6 +1,7 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import {
   calendarApi,
+  canvasesApi,
   chatsApi,
   datesApi,
   graphApi,
@@ -13,6 +14,7 @@ import {
   tasksApi,
   trashApi,
   type CalendarApi,
+  type CanvasesApi,
   type ChatsApi,
   type CoreBridge,
   type DatesApi,
@@ -41,6 +43,7 @@ interface CoreValue {
   llm: LlmApi;
   chats: ChatsApi;
   calendar: CalendarApi;
+  canvases: CanvasesApi;
 }
 
 const CoreCtx = createContext<CoreValue | null>(null);
@@ -62,6 +65,7 @@ export function CoreProvider({ core, children }: { core: CoreBridge; children: R
       llm: llmApi(core),
       chats: chatsApi(core),
       calendar: calendarApi(core),
+      canvases: canvasesApi(core),
     }),
     [core],
   );

@@ -9,6 +9,7 @@ import type { ProjectTabParamList, RootStackParamList } from '../MobileShell';
 import { ProjectContext } from '../ProjectContext';
 import { NotesListScreen } from './NotesListScreen';
 import { TasksListScreen } from './TasksListScreen';
+import { CanvasesListScreen } from './CanvasesListScreen';
 import { PlaceholderScreen } from './PlaceholderScreen';
 
 const Tabs = createBottomTabNavigator<ProjectTabParamList>();
@@ -16,6 +17,7 @@ const Tabs = createBottomTabNavigator<ProjectTabParamList>();
 const TAB: Record<keyof ProjectTabParamList, { label: string; icon: IconName }> = {
   ProjectNotes: { label: 'Notes', icon: 'notes' },
   ProjectTasks: { label: 'Tasks', icon: 'tasks' },
+  ProjectCanvases: { label: 'Canvases', icon: 'canvas' },
   ProjectCalendar: { label: 'Calendar', icon: 'calendar' },
 };
 
@@ -68,6 +70,7 @@ export function ProjectScreen({ route }: NativeStackScreenProps<RootStackParamLi
       >
         <Tabs.Screen name="ProjectNotes" component={NotesListScreen} />
         <Tabs.Screen name="ProjectTasks" component={TasksListScreen} />
+        <Tabs.Screen name="ProjectCanvases" component={CanvasesListScreen} />
         <Tabs.Screen name="ProjectCalendar" component={PlaceholderScreen} />
       </Tabs.Navigator>
     </ProjectContext.Provider>

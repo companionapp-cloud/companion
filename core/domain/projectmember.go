@@ -40,7 +40,7 @@ type ProjectMember struct {
 var ErrInvalidProjectMember = errors.New("invalid project member")
 
 // MemberEntityTypes are the entity kinds a project can contain.
-var MemberEntityTypes = map[string]bool{NodeNote: true, NodeTask: true, NodeHabit: true}
+var MemberEntityTypes = map[string]bool{NodeNote: true, NodeTask: true, NodeHabit: true, NodeCanvas: true}
 
 // Validate checks the invariants that must hold before a membership is persisted.
 func (m *ProjectMember) Validate() error {
@@ -51,7 +51,7 @@ func (m *ProjectMember) Validate() error {
 		return errors.Join(ErrInvalidProjectMember, errors.New("projectId is required"))
 	}
 	if !MemberEntityTypes[m.EntityType] {
-		return errors.Join(ErrInvalidProjectMember, errors.New("entityType must be note, task, or habit"))
+		return errors.Join(ErrInvalidProjectMember, errors.New("entityType must be note, task, habit, or canvas"))
 	}
 	if strings.TrimSpace(m.EntityID) == "" {
 		return errors.Join(ErrInvalidProjectMember, errors.New("entityId is required"))

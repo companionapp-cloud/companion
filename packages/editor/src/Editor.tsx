@@ -81,6 +81,7 @@ const TYPES: { value: LinkType | "all"; label: string }[] = [
   { value: "task", label: "Tasks" },
   { value: "habit", label: "Habits" },
   { value: "project", label: "Projects" },
+  { value: "canvas", label: "Canvases" },
 ];
 
 interface PickerState {

@@ -3,7 +3,7 @@ import type { CoreBridge } from "./types";
 /** A node in the object graph — a slim projection, never the entity body (PLAN §5.2). */
 export interface GraphNode {
   id: string;
-  type: "note" | "task" | "habit" | "project" | "document";
+  type: "note" | "task" | "habit" | "project" | "document" | "canvas";
   title: string;
   objectTypeId?: string | null;
   status?: string | null;
@@ -15,7 +15,7 @@ export interface GraphNode {
 
 /** A derived edge in the link index. Beyond the fixed kinds, reference-typed object props
  *  produce dynamic `prop:<field>` kinds (PLAN §4.1, §6.3). */
-export type GraphEdgeKind = "ref" | "embed" | "stack" | "member" | `prop:${string}`;
+export type GraphEdgeKind = "ref" | "embed" | "stack" | "member" | "canvas" | `prop:${string}`;
 
 /** A derived edge in the link index. */
 export interface GraphEdge {

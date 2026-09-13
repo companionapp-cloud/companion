@@ -95,6 +95,7 @@ export function NoteEditorScreen() {
     (ref: LinkRef) => {
       if (ref.type === 'task') nav.push('TaskEditor', { id: ref.id });
       else if (ref.type === 'note') nav.push('NoteEditor', { id: ref.id });
+      else if (ref.type === 'canvas') nav.push('Canvas', { id: ref.id });
     },
     [nav],
   );

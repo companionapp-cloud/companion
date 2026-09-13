@@ -16,12 +16,13 @@ import { Card, CardRow, CountPill, IconTile, SectionLabel } from "./ui";
 // cards. A quick-add FAB opens a capture sheet. (Reorder/edit mode stays native-only for
 // now; section order still follows Settings › Tools.)
 
-type SectionView = Extract<ViewId, "today" | "chat" | "notes" | "tasks" | "habits" | "calendar" | "graph" | "trash">;
+type SectionView = Extract<ViewId, "today" | "chat" | "notes" | "tasks" | "canvases" | "habits" | "calendar" | "graph" | "trash">;
 const SECTIONS: { view: SectionView; label: string; subtitle: string; icon: IconName; accent?: boolean }[] = [
   { view: "today", label: "Today", subtitle: "Today's note and your month", icon: "today" },
   { view: "chat", label: "Chat", subtitle: "Ask, capture, recall — anything", icon: "chat", accent: true },
   { view: "notes", label: "Notes", subtitle: "Your graph of linked ideas", icon: "notes" },
   { view: "tasks", label: "Tasks", subtitle: "What needs doing", icon: "tasks" },
+  { view: "canvases", label: "Canvases", subtitle: "Boards for arranging ideas", icon: "canvas" },
   { view: "habits", label: "Habits", subtitle: "Streaks and daily builders", icon: "habits" },
   { view: "calendar", label: "Calendar", subtitle: "Events, tasks, and notes", icon: "calendar" },
   { view: "graph", label: "Graph", subtitle: "See how everything connects", icon: "graph" },

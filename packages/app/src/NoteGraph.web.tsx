@@ -48,6 +48,7 @@ export function NoteGraph({ noteId, depth = 2 }: { noteId: string; depth?: numbe
         if (type === "note") nav.openNote(id);
         else if (type === "task") nav.openTask(id);
         else if (type === "project") nav.openProject(id);
+        else if (type === "canvas") nav.openCanvas(id);
       }}
     />
   );

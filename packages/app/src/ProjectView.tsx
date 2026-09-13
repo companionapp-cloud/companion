@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Pressable, ScrollView, View } from "react-native";
-import type { Note, ProjectMember, RepeatingTask, Task } from "@companion/core-bridge";
+import type { Canvas, Note, ProjectMember, RepeatingTask, Task } from "@companion/core-bridge";
 import {
   Button,
   Center,
@@ -33,16 +33,20 @@ import { SelectionStack } from "./SelectionStack";
 import { MultiSelectBar } from "./MultiSelectBar";
 import { ListsColumn, ListHome } from "./ProjectLists";
 import { useProjectLists } from "./ListsProvider";
+import { useCanvases } from "./canvas/CanvasesProvider";
+import { CanvasesList } from "./canvas/CanvasesList";
+import { CanvasPane } from "./canvas/CanvasPane";
 
 const SECTIONS: { id: ProjectSection; label: string; icon: IconName; tool: ToolId }[] = [
   { id: "notes", label: "Notes", icon: "notes", tool: "notes" },
   { id: "tasks", label: "Tasks", icon: "tasks", tool: "tasks" },
   // Lists order a project's tasks, so they follow the Tasks tool's visibility.
   { id: "lists", label: "Lists", icon: "listOrdered", tool: "tasks" },
+  { id: "canvases", label: "Canvases", icon: "canvas", tool: "canvases" },
   { id: "calendars", label: "Calendars", icon: "calendar", tool: "calendar" },
   { id: "habits", label: "Habits", icon: "habits", tool: "habits" },
 ];
-const SECTION_LABEL: Record<ProjectSection, string> = { notes: "Notes", tasks: "Tasks", lists: "Lists", calendars: "Calendars", habits: "Habits" };
+const SECTION_LABEL: Record<ProjectSection, string> = { notes: "Notes", tasks: "Tasks", lists: "Lists", canvases: "Canvases", calendars: "Calendars", habits: "Habits" };
 
 /** The project content-details view (PLAN §6.6) — a master-detail rendered in the main
  * content area (not a modal). The list column carries a push sub-nav (Notes / Tasks /
@@ -90,6 +94,12 @@ export function ProjectView() {
     () => taskMembers.map((m) => tasksStore.seedById(m.entityId)).filter((s): s is RepeatingTask => !!s),
     [taskMembers, tasksStore],
   );
+  const canvasesStore = useCanvases();
+  const canvasMembers = useMemo(() => members.filter((m) => m.entityType === "canvas"), [members]);
+  const canvases = useMemo(
+    () => canvasMembers.map((m) => canvasesStore.byId(m.entityId)).filter((c): c is Canvas => !!c),
+    [canvasMembers, canvasesStore],
+  );
 
   if (loc.kind !== "project") return null;
   const project = projects.find((p) => p.id === loc.projectId);
@@ -102,7 +112,7 @@ export function ProjectView() {
   }
 
   return (
-    <SplitView storageKey="companion.project.listWidth" defaultWidth={layout.listW} minWidth={240} maxWidth={460} aside={<ListColumn notes={notes} tasks={tasks} seeds={seeds} noteCount={notes.length} taskCount={tasks.length + seeds.length} />}>
+    <SplitView storageKey="companion.project.listWidth" defaultWidth={layout.listW} minWidth={240} maxWidth={460} aside={<ListColumn notes={notes} tasks={tasks} seeds={seeds} canvases={canvases} noteCount={notes.length} taskCount={tasks.length + seeds.length} />}>
       <DetailPane notes={notes} />
     </SplitView>
   );
@@ -110,10 +120,11 @@ export function ProjectView() {
 
 /** The list column: a two-level push sub-nav. Level 0 shows the section menu; pressing
  * a section pushes to that section's item list (with a back to the menu). */
-function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note[]; tasks: Task[]; seeds: RepeatingTask[]; noteCount: number; taskCount: number }) {
+function ListColumn({ notes, tasks, seeds, canvases, noteCount, taskCount }: { notes: Note[]; tasks: Task[]; seeds: RepeatingTask[]; canvases: Canvas[]; noteCount: number; taskCount: number }) {
   const nav = useNav();
   const notesStore = useNotes();
   const tasksStore = useTasks();
+  const canvasesStore = useCanvases();
   const { addMember } = useProjects();
   const ms = useMultiSelect();
   // Hiding a tool in Settings › Tools also drops its project section from this menu.
@@ -156,6 +167,24 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
   // The lists section has its own column (index of lists → one list's rows).
   if (section === "lists") {
     return <ListsColumn projectId={projectId} listId={itemId} selectedTaskId={subItemId} projectTasks={tasks} />;
+  }
+  // Canvases: the project's member boards (PLAN-canvases.md); a new board joins the project.
+  if (section === "canvases") {
+    return (
+      <CanvasesList
+        canvases={canvases}
+        selectedId={itemId ?? null}
+        onSelect={(id) => nav.openProjectItem(projectId, "canvases", id)}
+        onBack={() => nav.openProject(projectId)}
+        onCreate={() => {
+          void (async () => {
+            const c = await canvasesStore.create();
+            await addMember(projectId, "canvas", c.id);
+            nav.openProjectItem(projectId, "canvases", c.id);
+          })();
+        }}
+      />
+    );
   }
 
   const createNoteInProject = async () => {
@@ -347,7 +376,7 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
             key={s.id}
             icon={<Icon name={s.icon} size={18} color={colors.textSecondary} />}
             title={s.label}
-            trailing={s.id === "notes" ? String(noteCount) : s.id === "tasks" ? String(taskCount) : s.id === "lists" ? String(projectLists.length) : undefined}
+            trailing={s.id === "notes" ? String(noteCount) : s.id === "tasks" ? String(taskCount) : s.id === "lists" ? String(projectLists.length) : s.id === "canvases" ? String(canvases.length) : undefined}
             hasChildren
             onPress={() => nav.openProjectSection(projectId, s.id)}
           />
@@ -461,6 +490,9 @@ function DetailPane({ notes }: { notes: Note[] }) {
   if (section === "lists" && itemId) {
     return <ListHome projectId={loc.projectId} listId={itemId} />;
   }
+  if (section === "canvases" && itemId) {
+    return <CanvasPane key={itemId} canvasId={itemId} onDeleted={() => nav.openProjectSection(loc.projectId, "canvases")} />;
+  }
 
   if (section) {
     const prompt =
@@ -470,7 +502,9 @@ function DetailPane({ notes }: { notes: Note[] }) {
           ? "Select a task, or add a new one."
           : section === "lists"
             ? "Select a list, or create one to order this project’s tasks."
-            : `${SECTION_LABEL[section]} land in a later milestone.`;
+            : section === "canvases"
+              ? "Select a canvas, or start a new board for this project."
+              : `${SECTION_LABEL[section]} land in a later milestone.`;
     return (
       <Center>
         <Text tone="tertiary">{prompt}</Text>

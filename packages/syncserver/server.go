@@ -243,6 +243,9 @@ func (s *Server) Handler() http.Handler {
 	// Blind ICS proxy for web clients (PLAN §E2EE): clients fetch/expand feeds themselves; this
 	// only relays a URL's body for browsers blocked by CORS, storing/logging nothing.
 	mux.Handle("POST /v1/calendar/proxy", s.authed(s.handleCalendarProxy))
+	// Blind page proxy for web clients' link previews (PLAN-canvases.md §4.3): same guard, same
+	// non-logging contract; HTML only.
+	mux.Handle("POST /v1/proxy/fetch", s.authed(s.handleFetchProxy))
 	// Document bytes: content-addressed, streamed to/from object storage (PLAN §6.9).
 	mux.Handle("PUT /v1/blobs/{sha256}", s.authed(s.handleBlobPut))
 	mux.Handle("GET /v1/blobs/{sha256}", s.authed(s.handleBlobGet))
@@ -278,6 +281,7 @@ func CORS(origins []string) func(http.Handler) http.Handler {
 			}
 			h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
 			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			h.Set("Access-Control-Expose-Headers", "X-Final-URL")
 			h.Set("Access-Control-Max-Age", "600")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)

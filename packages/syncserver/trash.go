@@ -13,7 +13,7 @@ import (
 
 // trashTables are the server tables carrying a deleting_at Trash marker. Projects and
 // areas are never trashed, so they are absent here.
-var trashTables = []string{"notes", "tasks", "documents"}
+var trashTables = []string{"notes", "tasks", "documents", "canvases"}
 
 // trashSweepInterval is how often the collector wakes. Trash retention is measured in
 // days, so hourly is ample precision (PLAN §7.6).
@@ -95,6 +95,17 @@ func (s *Server) PurgeExpired() (int, error) {
 					log.Printf("trash collector: blob gc for document %s: %v", r.id, err)
 				}
 			}
+			// A purged board takes its nodes and edges with it so they stop syncing
+			// (PLAN-canvases.md §1.5); the client does the same on "delete forever".
+			if table == "canvases" {
+				childSeq, err := s.purgeCanvasChildren(r.uid, r.id)
+				if err != nil {
+					return purged, err
+				}
+				if childSeq > maxSeqByUser[r.uid] {
+					maxSeqByUser[r.uid] = childSeq
+				}
+			}
 		}
 	}
 
@@ -156,4 +167,54 @@ func (s *Server) purgeOne(table, uid, id string) (int64, error) {
 		return 0, err
 	}
 	return seq, nil
+}
+
+// purgeCanvasChildren tombstones every live node and edge of a purged board under fresh
+// versions/sequences, returning the highest seq assigned (0 if there was nothing to do).
+func (s *Server) purgeCanvasChildren(uid, canvasID string) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	now := s.clock.Now().UTC().Format(timeFormat)
+	var maxSeq int64
+	for _, table := range []string{"canvas_nodes", "canvas_edges"} {
+		rows, err := tx.Query(s.rebind(`SELECT id FROM `+table+` WHERE canvas_id = ? AND user_id = ? AND deleted_at IS NULL;`), canvasID, uid)
+		if err != nil {
+			return 0, err
+		}
+		var ids []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return 0, err
+			}
+			ids = append(ids, id)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		rows.Close()
+		for _, id := range ids {
+			seq, err := s.nextSeq(tx, uid)
+			if err != nil {
+				return 0, err
+			}
+			if _, err := tx.Exec(s.rebind(
+				`UPDATE `+table+` SET deleted_at = ?, updated_at = ?, version = version + 1, server_seq = ? WHERE id = ? AND user_id = ?;`),
+				now, now, seq, id, uid); err != nil {
+				return 0, err
+			}
+			if seq > maxSeq {
+				maxSeq = seq
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return maxSeq, nil
 }

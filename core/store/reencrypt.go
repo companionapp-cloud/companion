@@ -19,6 +19,9 @@ var reencryptTables = []string{
 	"chat_messages",
 	"calendar_feeds",
 	"calendar_events",
+	"canvases",
+	"canvas_nodes",
+	"canvas_edges",
 }
 
 // MarkAllForReencryption flags every content row dirty so a following sync re-pushes it encrypted.

@@ -35,6 +35,7 @@ export function NoteEditorScreen() {
       onCreatedNote={(nid) => nav.openNote(nid)}
       onOpenRef={(ref) => {
         if (ref.type === "task" || ref.type === "note") nav.openInNewTab({ kind: ref.type, id: ref.id });
+        else if (ref.type === "canvas") nav.openCanvas(ref.id);
       }}
     />
   );
@@ -65,6 +66,7 @@ export function TaskEditorScreen() {
       }}
       onOpenRef={(ref) => {
         if (ref.type === "task" || ref.type === "note") nav.openInNewTab({ kind: ref.type, id: ref.id });
+        else if (ref.type === "canvas") nav.openCanvas(ref.id);
       }}
       onConnectSync={() => nav.goView("settings")}
     />

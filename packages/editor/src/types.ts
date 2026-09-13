@@ -100,7 +100,7 @@ export interface LinkRef {
 
 /** A link target the editor can offer or resolve — a slim projection, never a body. */
 export interface LinkSuggestion {
-  type: "note" | "task" | "habit" | "project" | "document";
+  type: "note" | "task" | "habit" | "project" | "document" | "canvas";
   id: string;
   title: string;
   /** Task-only extras, so a `[[task:…]]` chip can render like a todo (done state + dates).
@@ -111,7 +111,7 @@ export interface LinkSuggestion {
 }
 
 /** The entity types the `[[` menu can scope its search to. */
-export type LinkType = "note" | "task" | "habit" | "project" | "document";
+export type LinkType = "note" | "task" | "habit" | "project" | "document" | "canvas";
 
 /** How the editor reaches the host's object graph. Both calls are async so the native
  * WebView can satisfy them over the postMessage bridge. */

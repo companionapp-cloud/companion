@@ -16,6 +16,8 @@ import { setReminderActivationHandler } from "../reminderNav";
 import { NotesProvider } from "../NotesProvider";
 import { TasksProvider } from "../TasksProvider";
 import { ListsProvider } from "../ListsProvider";
+import { CanvasesProvider } from "../canvas/CanvasesProvider";
+import { CanvasesListScreen, CanvasScreen } from "./CanvasScreens";
 import { RemindersProvider, type NotificationScheduler } from "../RemindersProvider";
 import { NotificationsProvider } from "../NotificationsProvider";
 import { NotificationsScreen } from "../NotificationsScreen";
@@ -75,6 +77,8 @@ function mobileLinking(): LinkingOptions<ParamListBase> | undefined {
         note: "notes/:id",
         tasks: "tasks",
         task: "tasks/:id",
+        canvases: "canvases",
+        canvas: "canvases/:id",
         habits: "habits",
         graph: "graph",
         trash: "trash",
@@ -147,6 +151,8 @@ const TITLES: Record<string, string> = {
   note: "Note",
   tasks: "Tasks",
   task: "Task",
+  canvases: "Canvases",
+  canvas: "Canvas",
   habits: "Habits",
   graph: "Graph",
   trash: "Trash",
@@ -158,6 +164,7 @@ const TITLES: Record<string, string> = {
 const BACK_FALLBACK: Record<string, string> = {
   note: "notes",
   task: "tasks",
+  canvas: "canvases",
   chatConversation: "chat",
   settingsSection: "settings",
 };
@@ -166,6 +173,7 @@ const BACK_FALLBACK: Record<string, string> = {
 const ACTIVE_VIEW: Record<string, ViewId | "project"> = {
   note: "notes",
   task: "tasks",
+  canvas: "canvases",
   chatConversation: "chat",
   settingsSection: "settings",
   project: "project",
@@ -213,7 +221,9 @@ function MobileNavBridge({
           ? { kind: "notes" }
           : routeName === "tasks" || routeName === "task"
             ? { kind: "tasks" }
-            : { kind: "view", view: (ACTIVE_VIEW[routeName] ?? routeName) as Exclude<ViewId, "notes" | "tasks"> };
+            : routeName === "canvases" || routeName === "canvas"
+              ? { kind: "canvases", canvasId: routeName === "canvas" ? params.id : undefined }
+              : { kind: "view", view: (ACTIVE_VIEW[routeName] ?? routeName) as Exclude<ViewId, "notes" | "tasks" | "canvases"> };
 
     return {
       current,
@@ -238,7 +248,11 @@ function MobileNavBridge({
       openNote,
       openTask,
       // No tab strip here: "open in new tab" (link chips) pushes the editor route.
-      openInNewTab: (ref) => (ref.kind === "note" ? openNote(ref.id) : openTask(ref.id)),
+      openInNewTab: (ref) => (ref.kind === "note" ? openNote(ref.id) : ref.kind === "task" ? openTask(ref.id) : push("canvas", { id: ref.id })),
+      openCanvas: (id) => {
+        if (routeName === "canvas" && params.id === id) return;
+        push("canvas", { id });
+      },
       addTab: () => {},
       selectTab: () => {},
       closeTab: () => {},
@@ -251,6 +265,7 @@ function MobileNavBridge({
       openProjectItem: (projectId, section, itemId) => {
         if (section === "notes") openNote(itemId);
         else if (section === "tasks") openTask(itemId);
+        else if (section === "canvases") push("canvas", { id: itemId });
         else push("project", { projectId, section, itemId });
       },
       // A task inside a list opens as the full-screen task editor on this shell.
@@ -351,6 +366,7 @@ export function MobileWebShell({ topInset = 0, notificationScheduler, toolsStora
             <NotificationsProvider>
               <ProjectsProvider>
                 <ListsProvider>
+                <CanvasesProvider>
                 <ObjectTypesProvider>
                   <CalendarProvider>
                     <NavigationContainer linking={linking} documentTitle={{ enabled: false }}>
@@ -364,6 +380,8 @@ export function MobileWebShell({ topInset = 0, notificationScheduler, toolsStora
                         <Nav.Screen name="note" component={NoteEditorScreen} />
                         <Nav.Screen name="tasks" component={TasksListScreen} />
                         <Nav.Screen name="task" component={TaskEditorScreen} />
+                        <Nav.Screen name="canvases" component={CanvasesListScreen} />
+                        <Nav.Screen name="canvas" component={CanvasScreen} />
                         <Nav.Screen name="habits" component={HabitsScreen} />
                         <Nav.Screen name="graph" component={GraphScreen} />
                         <Nav.Screen name="trash" component={TrashScreen} />
@@ -375,6 +393,7 @@ export function MobileWebShell({ topInset = 0, notificationScheduler, toolsStora
                     </NavigationContainer>
                   </CalendarProvider>
                 </ObjectTypesProvider>
+                </CanvasesProvider>
                 </ListsProvider>
               </ProjectsProvider>
             </NotificationsProvider>

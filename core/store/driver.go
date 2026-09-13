@@ -19,7 +19,7 @@ type Result interface {
 }
 
 // Rows is a forward-only cursor. Callers must Close it. Scan supports the concrete
-// pointer targets the repositories use: *string, *int, *int64, and *sql.NullString.
+// pointer targets the repositories use: *string, *int, *int64, *float64, and *sql.NullString.
 type Rows interface {
 	Next() bool
 	Scan(dest ...any) error

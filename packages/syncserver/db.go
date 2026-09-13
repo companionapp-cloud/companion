@@ -209,6 +209,64 @@ CREATE TABLE IF NOT EXISTS list_items (
 );
 CREATE INDEX IF NOT EXISTS idx_list_items_user_seq ON list_items (user_id, server_seq);
 
+CREATE TABLE IF NOT EXISTS canvases (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  name        TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  deleting_at TEXT,
+  deleted_at  TEXT,
+  version     BIGINT NOT NULL DEFAULT 1,
+  server_seq  BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_canvases_user_seq ON canvases (user_id, server_seq);
+
+CREATE TABLE IF NOT EXISTS canvas_nodes (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  canvas_id  TEXT NOT NULL,
+  kind       TEXT NOT NULL,
+  x          DOUBLE PRECISION NOT NULL DEFAULT 0,
+  y          DOUBLE PRECISION NOT NULL DEFAULT 0,
+  width      DOUBLE PRECISION NOT NULL DEFAULT 200,
+  height     DOUBLE PRECISION NOT NULL DEFAULT 100,
+  z          BIGINT NOT NULL DEFAULT 0,
+  color      TEXT,
+  ref_type   TEXT,
+  ref_id     TEXT,
+  data_json  TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  version    BIGINT NOT NULL DEFAULT 1,
+  server_seq BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_canvas_nodes_user_seq ON canvas_nodes (user_id, server_seq);
+CREATE INDEX IF NOT EXISTS idx_canvas_nodes_canvas ON canvas_nodes (canvas_id);
+
+CREATE TABLE IF NOT EXISTS canvas_edges (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL,
+  canvas_id    TEXT NOT NULL,
+  from_node_id TEXT NOT NULL,
+  to_node_id   TEXT NOT NULL,
+  from_side    TEXT,
+  to_side      TEXT,
+  from_end     TEXT NOT NULL DEFAULT 'none',
+  to_end       TEXT NOT NULL DEFAULT 'arrow',
+  style        TEXT NOT NULL DEFAULT 'curved',
+  label        TEXT NOT NULL DEFAULT '',
+  color        TEXT,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL,
+  deleted_at   TEXT,
+  version      BIGINT NOT NULL DEFAULT 1,
+  server_seq   BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_canvas_edges_user_seq ON canvas_edges (user_id, server_seq);
+CREATE INDEX IF NOT EXISTS idx_canvas_edges_canvas ON canvas_edges (canvas_id);
+
 CREATE TABLE IF NOT EXISTS chats (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL,
@@ -369,6 +427,8 @@ func migrate(db *sql.DB, dialect string) error {
 		// Forgot-password token (rotated per request), retrofitted onto older DBs.
 		`ALTER TABLE users ADD COLUMN password_reset_token TEXT`,
 		`ALTER TABLE users ADD COLUMN password_reset_expires_at TEXT`,
+		// Canvas edge line style (PLAN-canvases.md), retrofitted onto pre-style dev DBs.
+		`ALTER TABLE canvas_edges ADD COLUMN style TEXT NOT NULL DEFAULT 'curved'`,
 	}
 	for _, alter := range alters {
 		if dialect == "postgres" {

@@ -4,44 +4,115 @@
     {
       "name": "website",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "-w", "@companion/website", "--", "--port", "5274"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@companion/website",
+        "--",
+        "--port",
+        "5274"
+      ],
       "port": 5274,
       "autoPort": false,
-      "env": { "EXPO_NO_TELEMETRY": "1" }
+      "env": {
+        "EXPO_NO_TELEMETRY": "1"
+      }
     },
     {
       "name": "cloud-frontend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "-w", "@companion/cloud-frontend", "--", "--port", "5288", "--strictPort"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@companion/cloud-frontend",
+        "--",
+        "--port",
+        "5288",
+        "--strictPort"
+      ],
       "port": 5288,
       "autoPort": false
     },
     {
       "name": "web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "-w", "@companion/web", "--", "--port", "5299", "--strictPort"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@companion/web",
+        "--",
+        "--port",
+        "5299",
+        "--strictPort"
+      ],
       "port": 5299,
       "autoPort": false
     },
     {
       "name": "web-verify",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "-w", "@companion/web", "--", "--port", "5301", "--strictPort"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@companion/web",
+        "--",
+        "--port",
+        "5301",
+        "--strictPort"
+      ],
       "port": 5301,
       "autoPort": false
     },
     {
       "name": "web-verify-2",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "-w", "@companion/web", "--", "--port", "5312", "--strictPort"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@companion/web",
+        "--",
+        "--port",
+        "5312",
+        "--strictPort"
+      ],
       "port": 5312,
       "autoPort": false
     },
     {
       "name": "web-verify-3",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "-w", "@companion/web", "--", "--port", "5321", "--strictPort"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@companion/web",
+        "--",
+        "--port",
+        "5321",
+        "--strictPort"
+      ],
       "port": 5321,
+      "autoPort": false
+    },
+    {
+      "name": "web-canvas",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@companion/web",
+        "--",
+        "--port",
+        "5341",
+        "--strictPort"
+      ],
+      "port": 5341,
       "autoPort": false
     }
   ]

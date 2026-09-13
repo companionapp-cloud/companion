@@ -6,7 +6,7 @@ import { Icon, Text, colors, radius, shadow, space } from "@companion/design-sys
 export type DragPayload = { kind: "note" | "task"; id: string; label: string };
 
 type Bounds = { x: number; y: number; width: number; height: number };
-type Target = { measure: () => Promise<Bounds | null>; onDrop: (p: DragPayload) => void; bounds: Bounds | null };
+type Target = { measure: () => Promise<Bounds | null>; onDrop: (p: DragPayload, x: number, y: number) => void; bounds: Bounds | null };
 
 interface DndValue {
   dragging: DragPayload | null;
@@ -17,6 +17,10 @@ interface DndValue {
   registerTarget: (id: string, target: Omit<Target, "bounds">) => void;
   unregisterTarget: (id: string) => void;
   position: { x: Animated.Value; y: Animated.Value };
+  /** Observe the pointer during a drag (window coords) without re-rendering the tree. */
+  subscribeMove: (cb: (x: number, y: number) => void) => () => void;
+  /** Re-measure every target's bounds (call after layout shifts mid-drag). */
+  remeasure: () => Promise<void>;
 }
 
 const DndCtx = createContext<DndValue | null>(null);
@@ -31,11 +35,23 @@ export function DndProvider({ children }: { children: ReactNode }) {
   const position = useRef({ x: new Animated.Value(0), y: new Animated.Value(0) }).current;
 
   const targets = useRef<Map<string, Target>>(new Map());
+  const moveListeners = useRef<Set<(x: number, y: number) => void>>(new Set());
   const draggingRef = useRef<DragPayload | null>(null);
   const hoverRef = useRef<string | null>(null);
+  // Last pointer position (window coords), handed to onDrop so a target can place the
+  // payload where it landed (e.g. a canvas adds the card under the pointer).
+  const lastPos = useRef({ x: 0, y: 0 });
 
   const registerTarget = useCallback((id: string, t: Omit<Target, "bounds">) => {
-    targets.current.set(id, { ...t, bounds: null });
+    const target: Target = { ...t, bounds: null };
+    targets.current.set(id, target);
+    // A target that mounts mid-drag (the rail's project rows appear when it expands) is
+    // measured right away so it can accept the drop.
+    if (draggingRef.current) {
+      void t.measure().then((b) => {
+        if (targets.current.get(id) === target) target.bounds = b;
+      });
+    }
   }, []);
   const unregisterTarget = useCallback((id: string) => {
     targets.current.delete(id);
@@ -63,20 +79,27 @@ export function DndProvider({ children }: { children: ReactNode }) {
     (payload: DragPayload, x: number, y: number) => {
       draggingRef.current = payload;
       setDragging(payload);
+      lastPos.current = { x, y };
       position.x.setValue(x);
       position.y.setValue(y);
       void remeasure();
-      // The sidebar expands on drag; give its transition a beat, then measure again.
-      setTimeout(() => void remeasure(), 260);
     },
     [position, remeasure],
   );
+  const subscribeMove = useCallback((cb: (x: number, y: number) => void) => {
+    moveListeners.current.add(cb);
+    return () => {
+      moveListeners.current.delete(cb);
+    };
+  }, []);
 
   const move = useCallback(
     (x: number, y: number) => {
       if (!draggingRef.current) return;
+      lastPos.current = { x, y };
       position.x.setValue(x);
       position.y.setValue(y);
+      for (const cb of moveListeners.current) cb(x, y);
       const hit = hitTest(x, y);
       if (hit !== hoverRef.current) {
         hoverRef.current = hit;
@@ -93,7 +116,7 @@ export function DndProvider({ children }: { children: ReactNode }) {
     hoverRef.current = null;
     setDragging(null);
     setHoverId(null);
-    if (payload && hit) targets.current.get(hit)?.onDrop(payload);
+    if (payload && hit) targets.current.get(hit)?.onDrop(payload, lastPos.current.x, lastPos.current.y);
   }, []);
 
   // While dragging, suppress the browser's native text selection (a mouse drag would
@@ -110,8 +133,8 @@ export function DndProvider({ children }: { children: ReactNode }) {
   }, [dragging]);
 
   const value = useMemo<DndValue>(
-    () => ({ dragging, hoverId, begin, move, end, registerTarget, unregisterTarget, position }),
-    [dragging, hoverId, begin, move, end, registerTarget, unregisterTarget, position],
+    () => ({ dragging, hoverId, begin, move, end, registerTarget, unregisterTarget, position, subscribeMove, remeasure }),
+    [dragging, hoverId, begin, move, end, registerTarget, unregisterTarget, position, subscribeMove, remeasure],
   );
 
   return (
@@ -166,9 +189,11 @@ export function Draggable({ payload, children }: { payload: DragPayload; childre
 
 /** Register an element as a drop target. Returns a ref to attach and whether a drag is
  *  currently hovering it (for highlight). onDrop fires with the dropped payload. */
-export function useDropTarget(id: string, onDrop: (payload: DragPayload) => void) {
-  const dnd = useDnd();
-  const { registerTarget, unregisterTarget } = dnd;
+export function useDropTarget(id: string, onDrop: (payload: DragPayload, x: number, y: number) => void) {
+  // Optional provider: shells without a drag layer (the mobile shells) simply never drop.
+  const dnd = useContext(DndCtx);
+  const registerTarget = dnd?.registerTarget;
+  const unregisterTarget = dnd?.unregisterTarget;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ref = useRef<any>(null);
   const onDropRef = useRef(onDrop);
@@ -178,6 +203,7 @@ export function useDropTarget(id: string, onDrop: (payload: DragPayload) => void
   // context change — e.g. hoverId updates mid-drag — would clear the measured bounds and
   // make the target flicker out from under the pointer.
   useEffect(() => {
+    if (!registerTarget || !unregisterTarget) return;
     registerTarget(id, {
       measure: () =>
         new Promise<Bounds | null>((resolve) => {
@@ -188,12 +214,12 @@ export function useDropTarget(id: string, onDrop: (payload: DragPayload) => void
             resolve(null);
           }
         }),
-      onDrop: (p) => onDropRef.current(p),
+      onDrop: (p, x, y) => onDropRef.current(p, x, y),
     });
     return () => unregisterTarget(id);
   }, [id, registerTarget, unregisterTarget]);
 
-  const isOver = dnd.dragging != null && dnd.hoverId === id;
+  const isOver = !!dnd && dnd.dragging != null && dnd.hoverId === id;
   return { ref, isOver };
 }
 
