@@ -17,14 +17,14 @@ COPY . .
 RUN GOOS=js GOARCH=wasm go build -C core -ldflags="-s -w" -o /out/core.wasm ./cmd/wasm \
  && cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" /out/wasm_exec.js
 
-# 2. Vite build. The staged wasm assets must land in public/ before the build so
-#    Vite copies them into dist/ (public/core.wasm + public/wasm_exec.js are gitignored
-#    and normally staged by `make web-assets`).
+# 2. Vite build. The staged wasm assets must land in src/wasm/ before the build: main.tsx
+#    imports them so Vite emits content-hashed URLs (src/wasm/ is gitignored and normally
+#    staged by `make web-assets`).
 FROM --platform=$BUILDPLATFORM node:20-alpine AS build
 WORKDIR /src
 COPY . .
-COPY --from=wasm /out/core.wasm apps/web/public/core.wasm
-COPY --from=wasm /out/wasm_exec.js apps/web/public/wasm_exec.js
+COPY --from=wasm /out/core.wasm apps/web/src/wasm/core.wasm
+COPY --from=wasm /out/wasm_exec.js apps/web/src/wasm/wasm_exec.js
 RUN npm ci --no-audit --no-fund \
  && npm run build -w @companion/web
 

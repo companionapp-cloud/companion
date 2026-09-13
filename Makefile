@@ -4,7 +4,7 @@
 GO ?= go
 BUILD_DIR ?= build
 WASM_EXEC := $(shell $(GO) env GOROOT)/lib/wasm/wasm_exec.js
-WEB_PUBLIC := apps/web/public
+WEB_WASM := apps/web/src/wasm
 MOBILE_MODULE := apps/mobile/modules/companion-core
 
 .PHONY: all test test-go fmt vet desktop desktop-frontend desktop-run desktop-app desktop-app-run core-wasm web-assets \
@@ -84,11 +84,12 @@ core-wasm:
 	mkdir -p $(BUILD_DIR)
 	cd core && GOOS=js GOARCH=wasm $(GO) build -ldflags="-s -w" -o ../$(BUILD_DIR)/core.wasm ./cmd/wasm
 
-## web-assets: build core.wasm and stage it + wasm_exec.js into the web app's public dir
+## web-assets: build core.wasm and stage it + wasm_exec.js into apps/web/src/wasm (imported by
+## main.tsx so Vite content-hashes both; never serve them from public/ at a fixed URL)
 web-assets: core-wasm
-	mkdir -p $(WEB_PUBLIC)
-	cp $(BUILD_DIR)/core.wasm $(WEB_PUBLIC)/core.wasm
-	cp "$(WASM_EXEC)" $(WEB_PUBLIC)/wasm_exec.js
+	mkdir -p $(WEB_WASM)
+	cp $(BUILD_DIR)/core.wasm $(WEB_WASM)/core.wasm
+	cp "$(WASM_EXEC)" $(WEB_WASM)/wasm_exec.js
 
 ## web-run: stage the wasm core, then run the web app (Vite dev server, :5273)
 web-run: web-assets
