@@ -20,6 +20,8 @@ var protectedFields = map[string][]string{
 	protocol.EntityTask:          {"title", "notesMd", "props"},
 	protocol.EntityArea:          {"name"},
 	protocol.EntityProject:       {"name"},
+	protocol.EntityList:          {"name"},
+	protocol.EntityListItem:      {"title"},
 	protocol.EntityObjectType:    {"name", "schemaJson"},
 	protocol.EntityDocument:      {"filename"},
 	protocol.EntityChat:          {"title"},

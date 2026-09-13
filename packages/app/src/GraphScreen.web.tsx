@@ -40,6 +40,7 @@ export function GraphScreen() {
   return (
     <GraphView
       graph={styledGraph}
+      menu
       onOpenNode={(type, id) => {
         if (type === "note") nav.openNote(id);
         else if (type === "task") nav.openTask(id);

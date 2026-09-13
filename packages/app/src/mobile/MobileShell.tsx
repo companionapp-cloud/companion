@@ -15,6 +15,7 @@ import { useCore } from "../CoreContext";
 import { setReminderActivationHandler } from "../reminderNav";
 import { NotesProvider } from "../NotesProvider";
 import { TasksProvider } from "../TasksProvider";
+import { ListsProvider } from "../ListsProvider";
 import { RemindersProvider, type NotificationScheduler } from "../RemindersProvider";
 import { NotificationsProvider } from "../NotificationsProvider";
 import { NotificationsScreen } from "../NotificationsScreen";
@@ -80,7 +81,7 @@ function mobileLinking(): LinkingOptions<ParamListBase> | undefined {
         settings: "settings",
         settingsSection: "settings/:section",
         notifications: "notifications",
-        project: "project/:projectId/:section?/:itemId?",
+        project: "project/:projectId/:section?/:itemId?/:subItemId?",
       },
     },
   };
@@ -92,6 +93,7 @@ interface RouteParams {
   projectId?: string;
   section?: string;
   itemId?: string;
+  subItemId?: string;
 }
 interface RouteLike {
   key: string;
@@ -205,6 +207,7 @@ function MobileNavBridge({
             projectId: params.projectId ?? "",
             section: params.section as ProjectSection | undefined,
             itemId: params.itemId,
+            subItemId: params.subItemId,
           }
         : routeName === "notes" || routeName === "note"
           ? { kind: "notes" }
@@ -248,10 +251,12 @@ function MobileNavBridge({
       openProjectItem: (projectId, section, itemId) => {
         if (section === "notes") openNote(itemId);
         else if (section === "tasks") openTask(itemId);
-        else push("project", { projectId, section });
+        else push("project", { projectId, section, itemId });
       },
+      // A task inside a list opens as the full-screen task editor on this shell.
+      openProjectSubItem: (_projectId, _section, _itemId, subItemId) => openTask(subItemId),
     };
-  }, [routeName, params.id, params.projectId, params.section, params.itemId, state.index, navigation]);
+  }, [routeName, params.id, params.projectId, params.section, params.itemId, params.subItemId, state.index, navigation]);
 
   // Sync on navigation (§5.4), same contract as the desktop Shell. Depend on the stable
   // `trigger`, not the whole `sync` memo (see AppShell for the loop this avoids).
@@ -345,6 +350,7 @@ export function MobileWebShell({ topInset = 0, notificationScheduler, toolsStora
           <RemindersProvider scheduler={notificationScheduler}>
             <NotificationsProvider>
               <ProjectsProvider>
+                <ListsProvider>
                 <ObjectTypesProvider>
                   <CalendarProvider>
                     <NavigationContainer linking={linking} documentTitle={{ enabled: false }}>
@@ -369,6 +375,7 @@ export function MobileWebShell({ topInset = 0, notificationScheduler, toolsStora
                     </NavigationContainer>
                   </CalendarProvider>
                 </ObjectTypesProvider>
+                </ListsProvider>
               </ProjectsProvider>
             </NotificationsProvider>
           </RemindersProvider>

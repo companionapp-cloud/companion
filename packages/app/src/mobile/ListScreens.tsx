@@ -17,7 +17,7 @@ import { CardRow, Fab } from "./ui";
 // items members of it (PLAN §6.6). Tapping a row pushes the full-screen editor.
 
 /** Tracks a project's member ids of one entity type, refreshed as memberships change. */
-function useMemberIds(projectId: string | undefined, entityType: "note" | "task"): Set<string> | null {
+export function useMemberIds(projectId: string | undefined, entityType: "note" | "task"): Set<string> | null {
   const { core } = useCore();
   const { membershipsForProject } = useProjects();
   const [memberIds, setMemberIds] = useState<Set<string> | null>(null);

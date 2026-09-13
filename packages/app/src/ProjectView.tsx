@@ -31,14 +31,18 @@ import { repeatSubtitle } from "./repeat";
 import { useMultiSelect, pressMods } from "./MultiSelectProvider";
 import { SelectionStack } from "./SelectionStack";
 import { MultiSelectBar } from "./MultiSelectBar";
+import { ListsColumn, ListHome } from "./ProjectLists";
+import { useProjectLists } from "./ListsProvider";
 
 const SECTIONS: { id: ProjectSection; label: string; icon: IconName; tool: ToolId }[] = [
   { id: "notes", label: "Notes", icon: "notes", tool: "notes" },
   { id: "tasks", label: "Tasks", icon: "tasks", tool: "tasks" },
+  // Lists order a project's tasks, so they follow the Tasks tool's visibility.
+  { id: "lists", label: "Lists", icon: "listOrdered", tool: "tasks" },
   { id: "calendars", label: "Calendars", icon: "calendar", tool: "calendar" },
   { id: "habits", label: "Habits", icon: "habits", tool: "habits" },
 ];
-const SECTION_LABEL: Record<ProjectSection, string> = { notes: "Notes", tasks: "Tasks", calendars: "Calendars", habits: "Habits" };
+const SECTION_LABEL: Record<ProjectSection, string> = { notes: "Notes", tasks: "Tasks", lists: "Lists", calendars: "Calendars", habits: "Habits" };
 
 /** The project content-details view (PLAN §6.6) — a master-detail rendered in the main
  * content area (not a modal). The list column carries a push sub-nav (Notes / Tasks /
@@ -120,6 +124,8 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
   // narrows the tasks list (all / upcoming / overdue). Local to this column.
   const [noteQuery, setNoteQuery] = useState("");
   const [taskFilter, setTaskFilter] = useState<"all" | "upcoming" | "overdue">("all");
+  // The project's lists, so the tasks header dropdown can jump straight into one.
+  const projectLists = useProjectLists(loc.kind === "project" ? loc.projectId : "");
   const [taskDraft, setTaskDraft] = useState("");
   const filteredNotes = useMemo(() => {
     const q = noteQuery.trim().toLowerCase();
@@ -145,7 +151,12 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
   }, [ms.register, secProjectId, secSection, filteredNotes, openTasks, doneTasks]);
 
   if (loc.kind !== "project") return null;
-  const { projectId, section, itemId } = loc;
+  const { projectId, section, itemId, subItemId } = loc;
+
+  // The lists section has its own column (index of lists → one list's rows).
+  if (section === "lists") {
+    return <ListsColumn projectId={projectId} listId={itemId} selectedTaskId={subItemId} projectTasks={tasks} />;
+  }
 
   const createNoteInProject = async () => {
     const note = await notesStore.create();
@@ -175,13 +186,18 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
               root task list; other sections keep the plain label. */}
           {section === "tasks" ? (
             <View style={{ flex: 1 }}>
-              <ListFilterMenu
+              <ListFilterMenu<"all" | "upcoming" | "overdue" | `list:${string}`>
                 value={taskFilter}
-                onChange={setTaskFilter}
+                onChange={(v) => {
+                  // List entries jump into that list's ordered view; the rest filter in place.
+                  if (v.startsWith("list:")) nav.openProjectItem(projectId, "lists", v.slice(5));
+                  else setTaskFilter(v as "all" | "upcoming" | "overdue");
+                }}
                 options={[
                   { value: "all", label: "All tasks" },
                   { value: "upcoming", label: "Upcoming tasks" },
                   { value: "overdue", label: "Overdue tasks" },
+                  ...projectLists.map((l) => ({ value: `list:${l.id}` as const, label: `List: ${l.name}` })),
                 ]}
               />
             </View>
@@ -331,7 +347,7 @@ function ListColumn({ notes, tasks, seeds, noteCount, taskCount }: { notes: Note
             key={s.id}
             icon={<Icon name={s.icon} size={18} color={colors.textSecondary} />}
             title={s.label}
-            trailing={s.id === "notes" ? String(noteCount) : s.id === "tasks" ? String(taskCount) : undefined}
+            trailing={s.id === "notes" ? String(noteCount) : s.id === "tasks" ? String(taskCount) : s.id === "lists" ? String(projectLists.length) : undefined}
             hasChildren
             onPress={() => nav.openProjectSection(projectId, s.id)}
           />
@@ -350,7 +366,7 @@ function DetailPane({ notes }: { notes: Note[] }) {
   const ms = useMultiSelect();
   const loc = nav.current;
   if (loc.kind !== "project") return null;
-  const { section, itemId } = loc;
+  const { section, itemId, subItemId } = loc;
 
   // A multiselection takes over the detail pane: the bulk sub-toolbar + the selection stack
   // showing the first selected item, instead of the single-item editor.
@@ -418,13 +434,43 @@ function DetailPane({ notes }: { notes: Note[] }) {
     );
   }
 
+  // A task selected inside a list opens here, exactly like one selected in the tasks
+  // section; closing/deleting it returns to the list.
+  if (section === "lists" && itemId && subItemId) {
+    const task = tasksStore.byId(subItemId);
+    if (!task) {
+      return (
+        <Center>
+          <Text tone="tertiary">This task is gone.</Text>
+        </Center>
+      );
+    }
+    return (
+      <TaskEditor
+        key={task.id}
+        task={task}
+        save={tasksStore.update}
+        onPopOut={(id) => nav.openInNewTab({ kind: "task", id })}
+        onDelete={async (id) => {
+          await tasksStore.remove(id);
+          nav.openProjectItem(loc.projectId, "lists", itemId);
+        }}
+      />
+    );
+  }
+  if (section === "lists" && itemId) {
+    return <ListHome projectId={loc.projectId} listId={itemId} />;
+  }
+
   if (section) {
     const prompt =
       section === "notes"
         ? "Select a note, or start a new one."
         : section === "tasks"
           ? "Select a task, or add a new one."
-          : `${SECTION_LABEL[section]} land in a later milestone.`;
+          : section === "lists"
+            ? "Select a list, or create one to order this project’s tasks."
+            : `${SECTION_LABEL[section]} land in a later milestone.`;
     return (
       <Center>
         <Text tone="tertiary">{prompt}</Text>

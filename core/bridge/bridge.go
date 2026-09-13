@@ -211,6 +211,36 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.projectsForEntity(payload)
 	case "projects.memberEntityIds":
 		return c.projectsMemberEntityIds(payload)
+	case "lists.list":
+		return c.listsList(payload)
+	case "lists.get":
+		return c.listsGet(payload)
+	case "lists.create":
+		return c.listsCreate(payload)
+	case "lists.update":
+		return c.listsUpdate(payload)
+	case "lists.reorder":
+		return c.listsReorder(payload)
+	case "lists.delete":
+		return c.listsDelete(payload)
+	case "lists.items":
+		return c.listsItems(payload)
+	case "lists.addTask":
+		return c.listsAddTask(payload)
+	case "lists.addTasks":
+		return c.listsAddTasks(payload)
+	case "lists.createTask":
+		return c.listsCreateTask(payload)
+	case "lists.addHeading":
+		return c.listsAddHeading(payload)
+	case "lists.updateItem":
+		return c.listsUpdateItem(payload)
+	case "lists.removeItem":
+		return c.listsRemoveItem(payload)
+	case "lists.reorderItems":
+		return c.listsReorderItems(payload)
+	case "lists.forTask":
+		return c.listsForTask(payload)
 	case "objectTypes.list":
 		return c.objectTypesList()
 	case "objectTypes.get":

@@ -179,6 +179,36 @@ CREATE TABLE IF NOT EXISTS project_members (
 );
 CREATE INDEX IF NOT EXISTS idx_project_members_user_seq ON project_members (user_id, server_seq);
 
+CREATE TABLE IF NOT EXISTS lists (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  project_id  TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  sort_order  BIGINT NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  deleted_at  TEXT,
+  version     BIGINT NOT NULL DEFAULT 1,
+  server_seq  BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_lists_user_seq ON lists (user_id, server_seq);
+
+CREATE TABLE IF NOT EXISTS list_items (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  list_id     TEXT NOT NULL,
+  kind        TEXT NOT NULL,
+  task_id     TEXT,
+  title       TEXT NOT NULL DEFAULT '',
+  sort_order  BIGINT NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  deleted_at  TEXT,
+  version     BIGINT NOT NULL DEFAULT 1,
+  server_seq  BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_list_items_user_seq ON list_items (user_id, server_seq);
+
 CREATE TABLE IF NOT EXISTS chats (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL,

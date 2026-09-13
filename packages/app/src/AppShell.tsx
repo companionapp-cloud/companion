@@ -31,6 +31,7 @@ import { setReminderActivationHandler } from "./reminderNav";
 import { openFocusWindow } from "./focus";
 import { NotesProvider } from "./NotesProvider";
 import { TasksProvider } from "./TasksProvider";
+import { ListsProvider } from "./ListsProvider";
 import { RemindersProvider, type NotificationScheduler } from "./RemindersProvider";
 import { NotificationsProvider } from "./NotificationsProvider";
 import { NotificationsScreen } from "./NotificationsScreen";
@@ -103,8 +104,9 @@ function webLinking(): LinkingOptions<ParamListBase> | undefined {
         trash: "trash",
         settings: "settings",
         notifications: "notifications",
-        // Deep-linkable project drill-down: /project/<id>[/<section>[/<itemId>]].
-        project: "project/:projectId/:section?/:itemId?",
+        // Deep-linkable project drill-down: /project/<id>[/<section>[/<itemId>[/<subItemId>]]].
+        // The fourth segment is the task selected inside a list (/lists/<listId>/<taskId>).
+        project: "project/:projectId/:section?/:itemId?/:subItemId?",
       },
     },
   };
@@ -168,6 +170,7 @@ interface RouteParams {
   projectId?: string;
   section?: string;
   itemId?: string;
+  subItemId?: string;
 }
 interface RouteLike {
   key: string;
@@ -218,6 +221,7 @@ function NavBridge({
           projectId: route.params?.projectId ?? "",
           section: route.params?.section as ProjectSection | undefined,
           itemId: route.params?.itemId,
+          subItemId: route.params?.subItemId,
         }
       : routeName === "tasks"
         ? { kind: "tasks" }
@@ -385,6 +389,12 @@ function NavBridge({
         else if (section === "tasks") selectRef({ kind: "task", id: itemId, projectId });
         goto("project", { projectId, section, itemId });
       },
+      // A task selected inside a list: the list stays the column's item, the task is the
+      // detail. Points the tab strip at the task like openProjectItem does for tasks.
+      openProjectSubItem: (projectId, section, itemId, subItemId) => {
+        if (section === "lists") selectRef({ kind: "task", id: subItemId, projectId });
+        goto("project", { projectId, section, itemId, subItemId });
+      },
     };
   }, [current, tabs, active, activeTab, routeName, inWorkspace, state, forwardStack, navigation]);
 
@@ -434,11 +444,13 @@ export function AppShell({ topInset = 0, notificationScheduler, toolsStorage }: 
        <RemindersProvider scheduler={notificationScheduler}>
         <NotificationsProvider>
         <ProjectsProvider>
+         <ListsProvider>
          <ObjectTypesProvider>
           <CalendarProvider>
           <ShellRoutes topInset={topInset} />
           </CalendarProvider>
          </ObjectTypesProvider>
+         </ListsProvider>
         </ProjectsProvider>
         </NotificationsProvider>
        </RemindersProvider>

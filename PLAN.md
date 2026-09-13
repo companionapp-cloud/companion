@@ -869,6 +869,22 @@ project tombstones its `project_members` rows but never touches the member entit
 Deleting a **note, task, or habit**, by contrast, moves it to the Trash for 30 days (§4.3);
 its `project_members` rows are left intact so restoring returns it to its projects.
 
+**Lists** (project-scoped priority lists). A project can hold any number of *lists*: a
+user-ordered collection of its member tasks, reordered by drag-and-drop. A list can be
+broken into *sublists* — headings that group the task rows beneath them. Both live in two
+synced tables (`lists`, `list_items`): a list belongs to exactly one project (`project_id`
+column, like a project's `area_id`); its rows share one flat `sort_order`, each row being
+either a task reference (`kind='task'`, deterministic UUIDv5 id from the `(list, task)`
+tuple so two devices adding the same task converge) or a heading (`kind='heading'`). A
+task's sublist is simply the nearest heading above it, so a drag under a heading is just a
+position change. Adding a task to a list also makes it a member of the list's project; a
+task leaving the project leaves its lists; deleting a list or project tombstones the rows
+but never the tasks. Lists are scaffolding like projects — never trashed. Bridge methods:
+`lists.*`; event `lists.changed`. UI: the project's **Lists** section (also reachable from
+the tasks-list header dropdown) renders in the content column — the index of lists, then
+a list's rows — and selecting a task opens it in the detail pane
+(`/project/<id>/lists/<listId>/<taskId>`).
+
 ### 6.7 Calendar
 
 - `calendar_feeds` are user data (synced). The **server** fetches each ICS URL every

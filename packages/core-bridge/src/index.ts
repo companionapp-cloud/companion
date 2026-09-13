@@ -19,6 +19,9 @@ export type {
   SidebarData,
   SidebarArea,
   SidebarProject,
+  List,
+  ListItem,
+  ListItemKind,
   TrashItem,
   TrashEntityType,
   ObjectProps,
@@ -57,6 +60,8 @@ export type {
   CreateProjectInput,
   UpdateProjectInput,
 } from "./projects";
+export { listsApi } from "./lists";
+export type { ListsApi, CreateListInput, UpdateListInput, ListDetail, CreatedListTask } from "./lists";
 export { syncApi } from "./sync";
 export type { SyncApi } from "./sync";
 export { graphApi } from "./graph";

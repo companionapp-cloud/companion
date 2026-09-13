@@ -173,8 +173,11 @@ func (c *Core) projectsDelete(payload []byte) ([]byte, error) {
 			return nil, err
 		}
 	}
-	// Tombstone the project's memberships (dropping their edges).
+	// Tombstone the project's memberships (dropping their edges) and its lists.
 	if err := c.store.ProjectMembers.DeleteForProject(args.ID); err != nil {
+		return nil, err
+	}
+	if err := c.deleteListsForProject(args.ID); err != nil {
 		return nil, err
 	}
 	if err := c.store.Projects.Delete(args.ID); err != nil {
@@ -274,6 +277,13 @@ func (c *Core) projectsRemoveMember(payload []byte) ([]byte, error) {
 	}
 	if err := c.store.ProjectMembers.Remove(args.ProjectID, args.EntityType, args.EntityID); err != nil {
 		return nil, mapStoreErr(err)
+	}
+	// A list only holds its project's tasks, so a task leaving the project leaves its lists.
+	if args.EntityType == domain.NodeTask {
+		if err := c.store.ListItems.RemoveTaskFromProject(args.ProjectID, args.EntityID); err != nil {
+			return nil, err
+		}
+		c.emitListsChanged(args.ProjectID, "")
 	}
 	c.emitNavChanged(args.EntityType, args.EntityID)
 	return json.Marshal(map[string]bool{"ok": true})

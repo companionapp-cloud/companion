@@ -17,12 +17,15 @@ const (
 	EntityArea          = "area"
 	EntityProject       = "project"
 	EntityProjectMember = "project_member"
-	EntityObjectType    = "object_type"
+	// A project-scoped, drag-ordered task list and its rows (task refs + headings).
+	EntityList       = "list"
+	EntityListItem   = "list_item"
+	EntityObjectType = "object_type"
 	// A document is a file embed: metadata syncs here; its bytes move out-of-band through
 	// the blob endpoints (PLAN §6.9).
-	EntityDocument = "document"
-	EntityChat     = "chat"
-	EntityChatMessage   = "chat_message"
+	EntityDocument    = "document"
+	EntityChat        = "chat"
+	EntityChatMessage = "chat_message"
 	// A read receipt for one in-app notification fire (PLAN §6.4).
 	EntityNotificationRead = "notification_read"
 	// A user-authored ICS subscription (PLAN §6.7). Feeds sync bidirectionally.

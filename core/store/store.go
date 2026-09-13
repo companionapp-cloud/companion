@@ -18,12 +18,16 @@ type Store struct {
 	Areas          *AreasRepo
 	Projects       *ProjectsRepo
 	ProjectMembers *ProjectMembersRepo
-	ObjectTypes    *ObjectTypesRepo
-	Links          *LinksRepo
-	Search         *SearchRepo
-	LLMConfigs     *LLMConfigsRepo
-	Chats          *ChatsRepo
-	ChatMessages   *ChatMessagesRepo
+	// Lists are project-scoped, drag-ordered task collections; ListItems are their rows
+	// (task references and grouping headings).
+	Lists        *ListsRepo
+	ListItems    *ListItemsRepo
+	ObjectTypes  *ObjectTypesRepo
+	Links        *LinksRepo
+	Search       *SearchRepo
+	LLMConfigs   *LLMConfigsRepo
+	Chats        *ChatsRepo
+	ChatMessages *ChatMessagesRepo
 	// NotificationReads marks in-app notifications read; the feed itself is derived
 	// from tasks (PLAN §6.4).
 	NotificationReads *NotificationReadsRepo
@@ -67,6 +71,9 @@ func New(d Driver, clock domain.Clock) (*Store, error) {
 	s.Projects = &ProjectsRepo{db: d, clock: clock}
 	// Project membership mirrors into the link index as authored 'member' edges.
 	s.ProjectMembers = &ProjectMembersRepo{db: d, clock: clock, links: s.Links}
+	// Project lists + their items (task refs and headings sharing one flat order).
+	s.Lists = &ListsRepo{db: d, clock: clock}
+	s.ListItems = &ListItemsRepo{db: d, clock: clock}
 	// Full-text search reads the trigger-maintained notes_fts / tasks_fts indexes; it backs
 	// the LLM search_notes retrieval tool (PLAN §6.8).
 	s.Search = &SearchRepo{db: d}

@@ -11,6 +11,8 @@ var reencryptTables = []string{
 	"tasks",
 	"areas",
 	"projects",
+	"lists",
+	"list_items",
 	"object_types",
 	"documents",
 	"chats",
