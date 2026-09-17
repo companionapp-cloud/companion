@@ -25,7 +25,7 @@ export function opensInNewTab(e?: GestureResponderEvent): boolean {
 export function transition(
   property: string,
   durationMs = 200,
-  timingFunction = "cubic-bezier(0.2, 0, 0, 1)",
+  timingFunction = "cubic-bezier(0.2, 0, 0.2, 1)",
 ): ViewStyle {
   return {
     transitionProperty: property,

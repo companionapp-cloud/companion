@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { Pressable, View } from "react-native";
-import { Button, Icon, Input, Text, colors, radius, space } from "@companion/design-system";
+import { View } from "react-native";
+import { Button, Divider, Icon, IconButton, Input, Text, colors, icon, radius, row, space, swatches, useDensity } from "@companion/design-system";
 import { useCalendar } from "./CalendarProvider";
-import { SettingsField } from "./SyncSettings";
+import { Segmented, SettingsField, SettingsNote, SwatchPicker } from "./settingsUi";
 import { canPickIcsFile, pickIcsFile } from "./icsFile";
 
-// A small swatch palette for feeds; a feed's color tints its events in the calendar.
-const SWATCHES = ["#6366f1", "#059669", "#d97706", "#dc2626", "#0891b2", "#7c3aed"];
+// A feed's color tints its events in the calendar; pickers offer the shared swatches.
+const DEFAULT_COLOR = swatches[4];
 
 type Source = "url" | "file";
 
@@ -22,7 +22,7 @@ export function CalendarSettings() {
   // For an uploaded file: its raw ICS text plus the picked filename (shown as confirmation).
   const [icsText, setIcsText] = useState<string | null>(null);
   const [fileLabel, setFileLabel] = useState<string | null>(null);
-  const [color, setColor] = useState(SWATCHES[0]);
+  const [color, setColor] = useState<string>(DEFAULT_COLOR);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,6 +42,8 @@ export function CalendarSettings() {
     // Prefill the feed name from the filename (minus extension) if empty.
     if (!name.trim()) setName(file.name.replace(/\.ics$/i, ""));
   };
+
+  const touch = useDensity() === "touch";
 
   const add = async () => {
     if (!name.trim()) {
@@ -74,120 +76,98 @@ export function CalendarSettings() {
   };
 
   return (
-    <View style={{ gap: space.xl }}>
+    <View style={styles.section}>
       {feeds.length > 0 ? (
-        <View style={{ gap: space.sm }}>
-          {feeds.map((f) => (
-            <View key={f.id} style={styles.feedRow}>
-              <View style={[styles.swatch, { backgroundColor: f.color ?? colors.gray400 }]} />
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text numberOfLines={1} style={{ fontWeight: "600" }}>
+        <View style={styles.stack}>
+          <Text variant="eyebrow" tone="quaternary">
+            Calendars · {feeds.length}
+          </Text>
+          <View style={styles.list}>
+            {feeds.map((f, i) => (
+              <View key={f.id} style={[styles.feedRow, { minHeight: touch ? row.touch : 32 }, i === feeds.length - 1 ? null : styles.rowDivider]}>
+                <View style={[styles.swatch, { backgroundColor: f.color ?? colors.borderStrong }]} />
+                <Text variant="label" numberOfLines={1} style={styles.feedName}>
                   {f.name}
                 </Text>
-                <Text tone="tertiary" variant="caption" numberOfLines={1}>
-                  {f.url ? f.url : "Uploaded .ics file"}
+                <Text variant="mono" tone="quaternary" numberOfLines={1} style={styles.feedUrl}>
+                  {f.url ? f.url : "uploaded .ics file"}
                 </Text>
+                <IconButton label={`Remove ${f.name}`} size={touch ? undefined : "sm"} onPress={() => void removeFeed(f.id)}>
+                  <Icon name="trash" size={touch ? icon.lg : 13} color={colors.textTertiary} />
+                </IconButton>
               </View>
-              <Pressable onPress={() => void removeFeed(f.id)} aria-label={`Remove ${f.name}`} style={styles.remove}>
-                <Icon name="trash" size={16} color={colors.textTertiary} />
-              </Pressable>
-            </View>
-          ))}
-        </View>
-      ) : (
-        <Text tone="tertiary" variant="caption">
-          No calendars yet. Subscribe to an ICS URL (Google Calendar, Fastmail, a holidays feed) or
-          upload an .ics file below.
-        </Text>
-      )}
-
-      <View style={{ gap: space.lg }}>
-        {/* Source toggle: URL vs uploaded file. */}
-        <View style={styles.segmented}>
-          <SegmentButton label="Subscribe by URL" active={source === "url"} onPress={() => setSource("url")} />
-          {canPickIcsFile() ? (
-            <SegmentButton label="Upload .ics file" active={source === "file"} onPress={() => setSource("file")} />
-          ) : null}
-        </View>
-
-        <SettingsField label="Name">
-          <Input value={name} onChangeText={setName} placeholder="Work" autoCapitalize="none" />
-        </SettingsField>
-
-        {source === "url" ? (
-          <SettingsField label="ICS URL">
-            <Input value={url} onChangeText={setUrl} placeholder="https://…/basic.ics" autoCapitalize="none" />
-          </SettingsField>
-        ) : (
-          <SettingsField label="File">
-            <View style={styles.fileRow}>
-              <Button variant="secondary" label={icsText ? "Replace file" : "Choose .ics file"} onPress={chooseFile} />
-              {fileLabel ? (
-                <Text tone="secondary" variant="caption" numberOfLines={1} style={{ flex: 1 }}>
-                  {fileLabel}
-                </Text>
-              ) : null}
-            </View>
-          </SettingsField>
-        )}
-
-        <SettingsField label="Color">
-          <View style={styles.swatchRow}>
-            {SWATCHES.map((c) => (
-              <Pressable
-                key={c}
-                onPress={() => setColor(c)}
-                aria-label={`Color ${c}`}
-                style={[styles.swatchPick, { backgroundColor: c }, color === c ? styles.swatchActive : null]}
-              />
             ))}
           </View>
-        </SettingsField>
-
-        {error ? (
-          <Text tone="danger" variant="caption">
-            {error}
-          </Text>
-        ) : null}
-        <View style={{ flexDirection: "row" }}>
-          <Button label={busy ? "Adding…" : "Add calendar"} onPress={add} disabled={busy} />
         </View>
-        <Text tone="tertiary" variant="caption">
-          The server parses each calendar and syncs its events to your devices; URL feeds refresh every
-          few minutes.
-        </Text>
+      ) : (
+        <SettingsNote>
+          No calendars yet. Subscribe to an ICS URL (Google Calendar, Fastmail, a holidays feed) or upload an .ics file
+          below.
+        </SettingsNote>
+      )}
+
+      <Divider />
+
+      <Text variant="eyebrow" tone="quaternary">
+        Add a calendar
+      </Text>
+      {/* Source toggle: URL vs uploaded file. */}
+      {canPickIcsFile() ? (
+        <Segmented
+          options={[
+            { value: "url", label: "Subscribe by URL" },
+            { value: "file", label: "Upload .ics file" },
+          ]}
+          value={source}
+          onChange={setSource}
+        />
+      ) : null}
+
+      <SettingsField label="Name">
+        <View style={styles.control}>
+          <Input value={name} onChangeText={setName} placeholder="Work" autoCapitalize="none" />
+        </View>
+      </SettingsField>
+
+      {source === "url" ? (
+        <SettingsField label="ICS URL" help="URL feeds refresh every few minutes.">
+          <Input mono value={url} onChangeText={setUrl} placeholder="https://…/basic.ics" autoCapitalize="none" />
+        </SettingsField>
+      ) : (
+        <SettingsField label="File">
+          <View style={styles.fileRow}>
+            <Button variant="secondary" label={icsText ? "Replace file" : "Choose .ics file"} onPress={chooseFile} />
+            {fileLabel ? (
+              <Text variant="mono" tone="tertiary" numberOfLines={1} style={{ flex: 1 }}>
+                {fileLabel}
+              </Text>
+            ) : null}
+          </View>
+        </SettingsField>
+      )}
+
+      <SettingsField label="Color">
+        <SwatchPicker value={color} onChange={(c) => setColor(c ?? DEFAULT_COLOR)} />
+      </SettingsField>
+
+      {error ? <SettingsNote tone="danger">{error}</SettingsNote> : null}
+      <View style={{ flexDirection: "row" }}>
+        <Button label={busy ? "Adding…" : "Add calendar"} onPress={add} disabled={busy} />
       </View>
+      <SettingsNote>The server parses each calendar and syncs its events to your devices.</SettingsNote>
     </View>
   );
 }
 
-function SegmentButton({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} style={[styles.segment, active ? styles.segmentActive : null]}>
-      <Text variant="caption" style={{ color: active ? colors.onAccent : colors.textSecondary, fontWeight: "600" }}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
 const styles = {
-  feedRow: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: space.md,
-    paddingVertical: space.sm,
-    paddingHorizontal: space.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surfaceApp,
-  },
-  swatch: { width: 12, height: 12, borderRadius: radius.full, flexShrink: 0 },
-  remove: { padding: space.xs },
-  segmented: { flexDirection: "row" as const, gap: space.xs },
-  segment: { paddingVertical: space.xs, paddingHorizontal: space.md, borderRadius: radius.md, backgroundColor: colors.surfaceApp },
-  segmentActive: { backgroundColor: colors.accent },
+  section: { gap: space.xl },
+  stack: { gap: space.md },
+  control: { width: "100%" as const, maxWidth: 320 },
+  list: { borderWidth: 1, borderColor: colors.borderSubtle, borderRadius: radius.lg, overflow: "hidden" as const },
+  feedRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.md, paddingLeft: space.ml, paddingRight: space.xs },
+  rowDivider: { borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
+  swatch: { width: 8, height: 8, borderRadius: radius.xs, flexShrink: 0 },
+  feedName: { flexShrink: 0, maxWidth: "50%" as const },
+  feedUrl: { flex: 1, minWidth: 0, textAlign: "right" as const },
   fileRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.md },
-  swatchRow: { flexDirection: "row" as const, gap: space.sm },
-  swatchPick: { width: 24, height: 24, borderRadius: radius.full },
-  swatchActive: { borderWidth: 2, borderColor: colors.textPrimary },
 };

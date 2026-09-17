@@ -125,7 +125,7 @@ export class WikilinkView implements NodeView {
         if (!meta) return;
         meta.textContent = "";
         if (hit.dueAt) meta.appendChild(metaChip("pm-wikilink-due", formatDue(hit.dueAt)));
-        if (hit.remindAt) meta.appendChild(metaChip("pm-wikilink-remind", "⏰ " + formatReminder(hit.remindAt)));
+        if (hit.remindAt) meta.appendChild(metaChip("pm-wikilink-remind", formatReminder(hit.remindAt)));
       })
       .catch(() => {
         /* transient error: leave the chip as it is */

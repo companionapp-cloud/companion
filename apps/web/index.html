@@ -26,6 +26,11 @@
       href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
+    <script>
+      try {
+        if (localStorage.getItem("companion.theme") === "dark") document.documentElement.setAttribute("data-theme", "dark");
+      } catch (e) {}
+    </script>
     <style>
       html, body, #root { height: 100%; margin: 0; }
       /* dvh tracks the *visible* viewport on mobile (URL bar collapse, keyboard), so the
@@ -41,7 +46,12 @@
               /* Keep content clear of the notch / home bar (zero everywhere else). */
               padding: env(safe-area-inset-top) env(safe-area-inset-right)
                        env(safe-area-inset-bottom) env(safe-area-inset-left); }
-      .boot { margin: auto; color: #7b7b75; font-size: 14px; }
+      .boot { margin: auto; color: #7b7b75; font-size: 13px; }
+      /* The boot frame follows the saved theme (set below, before first paint) so a dark
+         session never flashes light; once the app mounts, the design system's custom
+         properties take over. */
+      [data-theme="dark"] body { background: #121211; color: #ededea; }
+      [data-theme="dark"] .boot { color: #8a8a83; }
     </style>
   </head>
   <body>

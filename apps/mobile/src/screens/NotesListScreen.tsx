@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { FlatList, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { Note } from '@companion/core-bridge';
@@ -7,16 +8,18 @@ import { useCore, useNotes, useProjects, ListFilterTabs } from '@companion/app';
 import { Icon, Input, Spinner, Text, colors, space } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
 import { useProjectScope } from '../ProjectContext';
-import { CardRow } from '../ui/native';
+import { CardRow, EmptyCaption, FAB_CLEARANCE, Fab, GroupedItem, NavAction, NavBarSegments, ROW_ICON_INSET, RowIcon } from '../ui/native';
 
 // A list of notes with a create FAB. Used both globally (all notes) and inside a
 // project's tab bar, where ProjectContext scopes it to that project's member notes and
 // makes new notes members of the project (PLAN §6.6). Tapping a note pushes the
-// full-screen editor on the root stack.
+// full-screen editor on the root stack. Globally the Unsorted/All segments sit in the nav
+// bar's lower storey, search below the bar, then one grouped card of rows.
 export function NotesListScreen() {
   const store = useNotes();
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const projectId = useProjectScope();
+  const insets = useSafeAreaInsets();
   const { core } = useCore();
   const { membershipsForProject, addMember } = useProjects();
 
@@ -61,6 +64,18 @@ export function NotesListScreen() {
     nav.navigate('NoteEditor', { id: note.id });
   };
 
+  // The global list owns its stack header, so "new note" is also an action in the bar.
+  // (Inside a project the header belongs to ProjectScreen; the FAB covers it.) Routed
+  // through a ref so the header callback stays stable while the store's identity churns.
+  const createRef = useRef(createNote);
+  createRef.current = createNote;
+  useLayoutEffect(() => {
+    if (projectId) return;
+    nav.setOptions({
+      headerRight: () => <NavAction icon="plus" label="New note" onPress={() => void createRef.current()} />,
+    });
+  }, [nav, projectId]);
+
   if (store.loading) {
     return <Spinner label="Loading your notes…" />;
   }
@@ -68,7 +83,7 @@ export function NotesListScreen() {
   return (
     <View style={styles.container}>
       {!projectId ? (
-        <View style={styles.filterBar}>
+        <NavBarSegments>
           <ListFilterTabs
             value={store.filter}
             onChange={store.setFilter}
@@ -77,11 +92,10 @@ export function NotesListScreen() {
               { value: 'all', label: 'All' },
             ]}
           />
-        </View>
+        </NavBarSegments>
       ) : null}
       <View style={styles.search}>
         <Input
-          size="sm"
           placeholder="Search notes"
           value={query}
           onChangeText={setQuery}
@@ -91,34 +105,37 @@ export function NotesListScreen() {
       <FlatList
         data={notes}
         keyExtractor={(n) => n.id}
-        contentContainerStyle={styles.list}
+        // Project tabs sit above a tab bar that already clears the home indicator.
+        contentContainerStyle={[styles.list, { paddingBottom: FAB_CLEARANCE + space.xl + (projectId ? 0 : insets.bottom) }]}
+        keyboardShouldPersistTaps="handled"
         ListEmptyComponent={
-          <Text tone="tertiary" style={styles.empty}>
+          <EmptyCaption>
             {query
               ? 'No notes match that.'
               : projectId
                 ? 'No notes in this project yet. Tap + to add one.'
                 : 'Nothing here yet. Tap + to start a note.'}
-          </Text>
+          </EmptyCaption>
         }
-        renderItem={({ item }) => (
-          <CardRow
-            leading={<Icon name="file" size={19} color={colors.textTertiary} />}
-            title={item.title || 'Untitled'}
-            subtitle={preview(item)}
-            trailing={
-              <Text variant="mono" tone="tertiary" style={styles.time}>
-                {relTime(item.updatedAt)}
-              </Text>
-            }
-            divided={false}
-            onPress={() => openNote(item.id)}
-          />
+        renderItem={({ item, index }) => (
+          <GroupedItem index={index} count={notes.length}>
+            <CardRow
+              leading={<RowIcon name={item.date ? 'today' : 'file'} />}
+              separatorInset={ROW_ICON_INSET}
+              title={item.title || 'Untitled'}
+              subtitle={preview(item)}
+              trailing={
+                <Text variant="mono" tone="tertiary">
+                  {relTime(item.updatedAt)}
+                </Text>
+              }
+              isLast={index === notes.length - 1}
+              onPress={() => openNote(item.id)}
+            />
+          </GroupedItem>
         )}
       />
-      <Pressable style={styles.fab} onPress={createNote} aria-label="New note">
-        <Icon name="plus" size={24} color={colors.textInverse} />
-      </Pressable>
+      <Fab label="New note" onPress={() => void createNote()} bottomInset={projectId ? 0 : insets.bottom} />
     </View>
   );
 }
@@ -145,25 +162,6 @@ function relTime(iso: string): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceApp },
-  filterBar: { paddingHorizontal: space.md, paddingTop: space.sm },
-  search: { paddingHorizontal: space.md, paddingTop: space.sm },
-  list: { paddingHorizontal: space.md, paddingVertical: space.sm, gap: 2, flexGrow: 1 },
-  time: { fontSize: 11 },
-  empty: { textAlign: 'center', marginTop: space.xxl },
-  fab: {
-    position: 'absolute',
-    right: space.xl,
-    bottom: space.xl,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 4,
-  },
+  search: { paddingHorizontal: space.lg, paddingTop: space.md },
+  list: { paddingHorizontal: space.lg, paddingTop: space.md, flexGrow: 1 },
 });

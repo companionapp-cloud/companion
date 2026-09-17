@@ -1,5 +1,5 @@
 import { View } from "react-native";
-import { Text, Button, Icon, colors, space } from "@companion/design-system";
+import { Text, Button, Icon, colors, icon, layout, row, space, useDensity } from "@companion/design-system";
 import { useSync } from "./SyncProvider";
 
 /** A warning banner shown across the top of the app when sync can't proceed and the user must
@@ -21,25 +21,28 @@ export function SyncHealthBanner({ onOpenSettings, topInset = 0 }: { onOpenSetti
     : "You've been signed out. Sign in again to resume syncing.";
   const action = locked ? "Unlock" : "Sign in";
 
+  // A 28px strip with a pointer; on touch it grows to a 44px row and clears the status bar.
+  const touch = useDensity() === "touch";
   return (
     <View
       style={{
         flexDirection: "row",
         alignItems: "center",
         gap: space.md,
-        paddingTop: space.sm + topInset,
-        paddingBottom: space.sm,
-        paddingHorizontal: space.lg,
+        minHeight: (touch ? row.touch : layout.subToolbarH) + topInset,
+        paddingTop: topInset,
+        paddingHorizontal: touch ? space.xl : space.lg,
         backgroundColor: colors.dangerSoft,
         borderBottomWidth: 1,
         borderBottomColor: colors.danger,
+        flexShrink: 0,
       }}
     >
-      <Icon name="bell" size={16} color={colors.danger} />
-      <Text variant="caption" style={{ flex: 1, color: colors.danger }}>
+      <Icon name="lock" size={icon.sm} color={colors.danger} />
+      <Text variant="caption" tone="danger" numberOfLines={touch ? 2 : 1} style={{ flex: 1 }}>
         {message}
       </Text>
-      <Button label={action} variant="secondary" onPress={onOpenSettings} />
+      <Button label={action} variant="secondary" size={touch ? undefined : "sm"} onPress={onOpenSettings} />
     </View>
   );
 }

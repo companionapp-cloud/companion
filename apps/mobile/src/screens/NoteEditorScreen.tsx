@@ -1,16 +1,18 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useCore, useNotes, useTasks, MembershipPicker, ConfirmDialog, NoteConflictDialog, useNoteSyncGuard, useQuickCreateLink, ArchetypeChip, ObjectMetadataPanel } from '@companion/app';
-import { Center, Icon, IconButton, Text, TextField, colors, radius, shadow, space } from '@companion/design-system';
+import { useCore, useNotes, useTasks, MembershipPicker, ConfirmDialog, NoteConflictDialog, useNoteSyncGuard, useQuickCreateLink, ArchetypeChip, ObjectMetadataPanel, timeAgo } from '@companion/app';
+import { Center, Icon, IconButton, Text, TextField, colors, space } from '@companion/design-system';
 import type { ObjectProps } from '@companion/core-bridge';
 import { Editor, type EditorController, type LinkRef, type LinkSource } from '@companion/editor';
 import type { RootStackParamList } from '../MobileShell';
 import { useNativeDocumentSource } from '../useNativeDocumentSource';
+import { NavAction, NavActions, SheetSurface } from '../ui/native';
 
-// Full-screen editor for one note (pushed above the tab bar): a native title field
-// over the ProseMirror body (a WebView). Delete lives in the nav header.
+// Full-screen editor for one note (pushed above the tab bar): a mono edited line and a
+// native title field over the ProseMirror body (a WebView) — the same editor the desktop
+// tabs render; only the chrome differs. Note-scoped actions are icons in the nav bar.
 export function NoteEditorScreen() {
   const store = useNotes();
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -124,24 +126,12 @@ export function NoteEditorScreen() {
     nav.setOptions({
       title: title || 'Untitled',
       headerRight: () => (
-        <View style={styles.headerActions}>
-          <IconButton label="Add to projects" size="sm" onPress={() => setShowProjects(true)}>
-            <Icon name="folder" size={18} color={colors.textSecondary} />
-          </IconButton>
-          <IconButton label="Metadata" size="sm" onPress={() => setShowMeta(true)}>
-            <Icon name="panelRight" size={18} color={colors.textSecondary} />
-          </IconButton>
-          <IconButton
-            label="Note graph"
-            size="sm"
-            onPress={() => nav.navigate('NoteGraph', { id: noteId })}
-          >
-            <Icon name="graph" size={18} color={colors.textSecondary} />
-          </IconButton>
-          <IconButton label="Delete note" size="sm" onPress={() => setConfirmDelete(true)}>
-            <Icon name="trash" size={18} color={colors.textSecondary} />
-          </IconButton>
-        </View>
+        <NavActions>
+          <NavAction icon="folder" label="Add to projects" onPress={() => setShowProjects(true)} />
+          <NavAction icon="graph" label="Show note graph" onPress={() => nav.navigate('NoteGraph', { id: noteId })} />
+          <NavAction icon="panelRight" label="Show metadata" onPress={() => setShowMeta(true)} />
+          <NavAction icon="trash" label="Delete note" onPress={() => setConfirmDelete(true)} />
+        </NavActions>
       ),
     });
   }, [nav, noteId, title]);
@@ -157,6 +147,10 @@ export function NoteEditorScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.title}>
+        <Text variant="mono" tone="quaternary" style={styles.edited}>
+          edited {timeAgo(note.updatedAt)}
+        </Text>
+        {/* 20px under touch density — the 30px desktop display size clips at phone width. */}
         <TextField
           variant="title"
           value={title}
@@ -206,9 +200,10 @@ export function NoteEditorScreen() {
   );
 }
 
-// A modal sheet holding the object type selector + its structured-props form (PLAN §6.3).
+// A bottom sheet holding the object type selector + its structured-props form (PLAN §6.3).
 // The note body is a full-screen WebView, so unlike the task editor (which shows metadata
-// inline) mobile notes surface it in an overlay toggled from the header.
+// inline) mobile notes surface it in a sheet toggled from the nav bar. It stays in the
+// screen's own view tree (not a Modal) so the type menu it opens layers over it.
 function NoteMetadataSheet({
   objectTypeId,
   props,
@@ -225,17 +220,17 @@ function NoteMetadataSheet({
   onClose: () => void;
 }) {
   return (
-    <View style={styles.scrim}>
-      <Pressable style={styles.scrimFill} onPress={onClose} aria-label="Close" />
-      <View style={styles.card}>
+    <View style={styles.sheetLayer}>
+      <SheetSurface onClose={onClose} maxHeight="80%">
         <View style={styles.sheetHeader}>
-          <Text variant="title">Metadata</Text>
-          <View style={{ flex: 1 }} />
-          <IconButton label="Close" size="sm" onPress={onClose}>
+          <Text variant="title" style={styles.sheetTitle}>
+            Metadata
+          </Text>
+          <IconButton label="Close" onPress={onClose}>
             <Icon name="close" size={16} color={colors.textSecondary} />
           </IconButton>
         </View>
-        <ScrollView contentContainerStyle={styles.sheetBody}>
+        <ScrollView contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled">
           <ArchetypeChip
             kind="note"
             objectTypeId={objectTypeId}
@@ -244,7 +239,7 @@ function NoteMetadataSheet({
           />
           <ObjectMetadataPanel objectTypeId={objectTypeId} props={props} onChangeProps={onChangeProps} />
         </ScrollView>
-      </View>
+      </SheetSurface>
     </View>
   );
 }
@@ -253,38 +248,10 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceCard },
   // 20px matches the editor body's horizontal inset on mobile (.pm-wrap in
   // packages/editor/src/styles.ts) so the title lines up with the content beneath it.
-  title: { paddingHorizontal: 20, paddingTop: space.md },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
-  scrim: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(17,17,16,0.28)',
-    zIndex: 100,
-  },
-  scrimFill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  card: {
-    width: 380,
-    maxWidth: '92%',
-    maxHeight: '80%',
-    backgroundColor: colors.surfaceCard,
-    borderRadius: radius.xl,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    ...shadow.lg,
-    overflow: 'hidden',
-  },
-  sheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: space.xl,
-    paddingVertical: space.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderSubtle,
-  },
-  sheetBody: { padding: space.xl, gap: space.lg },
+  title: { paddingHorizontal: 20, paddingTop: space.lg },
+  edited: { marginBottom: space.md },
+  sheetLayer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
+  sheetHeader: { flexDirection: 'row', alignItems: 'center', paddingBottom: space.md },
+  sheetTitle: { flex: 1 },
+  sheetBody: { gap: space.lg, paddingBottom: space.md },
 });

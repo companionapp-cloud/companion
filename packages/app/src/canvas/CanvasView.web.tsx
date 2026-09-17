@@ -14,14 +14,12 @@ import {
   type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
-  type ReactNode,
   type Ref,
 } from "react";
 import {
   Background,
   BaseEdge,
   ConnectionMode,
-  Controls,
   EdgeLabelRenderer,
   Handle,
   MiniMap,
@@ -36,6 +34,7 @@ import {
   useEdgesState,
   useNodesState,
   useReactFlow,
+  useStore,
   type Connection,
   type Edge,
   type EdgeProps,
@@ -46,13 +45,14 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { CanvasDocument, CanvasEdge, CanvasEdgeInput, CanvasEdgeStyle, CanvasEnd, CanvasNode, CanvasNodeInput, CanvasRefs, CanvasSide } from "@companion/core-bridge";
-import { Icon, colors, swatches, type IconName } from "@companion/design-system";
+import { Icon, colors, control, font, layout, motion, radius, row, space, swatches, type IconName } from "@companion/design-system";
 import { NODE_DEFAULTS, type CanvasHost, type CanvasRefKind } from "./host";
 import { bounds, containedIds, nearestSides, type Rect } from "./geometry";
 
 // The canvas renderer (PLAN-canvases.md §3.3): React Flow with one custom node type that
 // switches on the node kind, one custom edge type with per-end arrowheads and an inline
-// label, a floating toolbar, and a selection toolbar. DOM-only — web/desktop render it
+// label, a 28px tool strip above the board, a floating selection toolbar, and a mono
+// status strip beneath. DOM-only — web/desktop render it
 // straight in the page; mobile hosts the same component inside a WebView. Everything it
 // reads or writes goes through CanvasHost, so this file imports nothing from the app's
 // provider tree.
@@ -238,11 +238,19 @@ const useActions = () => {
 };
 
 // ---- styles ----------------------------------------------------------------------------
+// Plain DOM + one injected stylesheet (hover/press fills and React Flow's own chrome need
+// selectors). This module also runs inside the native WebView bundle, so it stays off the
+// react-native design-system components and recreates their numbers from the tokens.
 
-const fillStyle: CSSProperties = { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, background: colors.surfaceApp };
-const cardFont = "Geist, ui-sans-serif, system-ui, -apple-system, sans-serif";
+const fillStyle: CSSProperties = { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, display: "flex", flexDirection: "column", background: colors.surfaceCard, fontFamily: font.sans, outline: "none" };
+const cardFont = font.sans;
+// Elevation is for things that float over the board: `md` for menus, `lg` for the dialog.
+const SHADOW_MD = "0 4px 12px rgba(17,17,16,0.1)";
+const SHADOW_LG = "0 12px 28px rgba(17,17,16,0.16)";
+const monoMeta: CSSProperties = { fontFamily: font.mono, fontSize: font.size.xs, lineHeight: "14px", color: colors.textQuaternary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
 
-/** Tints a hex color to a soft wash for card/group backgrounds. */
+/** A user swatch at the given alpha. Swatches are literal hex values, so the channel math is
+ *  safe here — theme roles are CSS variables and must never come through this. */
 function wash(hex: string | null | undefined, alpha: number): string {
   if (!hex || !/^#([0-9a-f]{6})$/i.test(hex)) return colors.surfaceCard;
   const r = parseInt(hex.slice(1, 3), 16);
@@ -250,15 +258,24 @@ function wash(hex: string | null | undefined, alpha: number): string {
   const b = parseInt(hex.slice(5, 7), 16);
   return `rgba(${r},${g},${b},${alpha})`;
 }
+/** A swatch tint laid over the card surface (so it reads the same on the dotted grid and
+ *  in either theme): the tint as a flat gradient layer above `surfaceCard`. */
+function washOverCard(hex: string, alpha: number): string {
+  const tint = wash(hex, alpha);
+  return `linear-gradient(${tint}, ${tint}), ${colors.surfaceCard}`;
+}
 
 const handleStyle: CSSProperties = {
-  width: 10,
-  height: 10,
+  width: 8,
+  height: 8,
+  minWidth: 0,
+  minHeight: 0,
+  boxSizing: "border-box",
   background: colors.surfaceCard,
-  border: `2px solid ${colors.accent}`,
-  borderRadius: 999,
+  border: `1px solid ${colors.accent}`,
+  borderRadius: "50%",
   opacity: 0,
-  transition: "opacity 120ms",
+  transition: `opacity ${motion.fast}ms ${motion.ease}`,
 };
 
 /** The four connection handles every non-group node carries. Hidden until the node is
@@ -274,39 +291,78 @@ function Handles() {
 }
 
 const CANVAS_CSS = `
+.canvas-flow.react-flow { --xy-background-color: transparent; --xy-edge-stroke: ${colors.borderStrong}; --xy-connectionline-stroke: ${colors.accent}; --xy-connectionline-stroke-width: 1.25; --xy-selection-background-color: ${colors.accentSoft}; --xy-selection-border: 1px solid ${colors.accent}; --xy-resize-background-color: ${colors.accent}; --xy-minimap-background-color: ${colors.surfaceCard}; --xy-minimap-mask-background-color: ${colors.scrim}; --xy-minimap-node-background-color: ${colors.borderStrong}; }
+.canvas-flow .react-flow__selection, .canvas-flow .react-flow__nodesselection-rect { opacity: 0.6; }
+.canvas-flow .react-flow__minimap { border: 1px solid ${colors.borderSubtle}; border-radius: ${radius.md}px; overflow: hidden; box-shadow: none; }
+.canvas-flow .react-flow__resize-control.handle { width: 6px; height: 6px; border-radius: 1px; border: 1px solid ${colors.accent}; background: ${colors.surfaceCard}; }
 .react-flow__node:hover .canvas-handle, .react-flow__node.selected .canvas-handle, .react-flow__connection ~ * .canvas-handle, .react-flow.connecting .canvas-handle { opacity: 1 !important; }
-.react-flow__node.selected > .canvas-card { box-shadow: 0 0 0 2px ${colors.accent}, 0 6px 20px rgba(0,0,0,0.10) !important; }
-.react-flow__node.selected > .canvas-group { box-shadow: 0 0 0 2px ${colors.accent} !important; }
-.react-flow__edge.selected .react-flow__edge-path { stroke-width: 3 !important; }
-.react-flow__edge.selected .canvas-edge-end { stroke-width: 3; }
-.react-flow__edgeupdater { fill: ${colors.surfaceCard}; stroke: ${colors.accent}; stroke-width: 2; r: 5px; cursor: grab; opacity: 0; transition: opacity 120ms; }
+.react-flow__node.selected > .canvas-card, .react-flow__node.selected > .canvas-group { outline: 1px solid ${colors.accent}; outline-offset: 0; }
+.react-flow__edge.selected .react-flow__edge-path, .react-flow__edge:hover .react-flow__edge-path { stroke: ${colors.accent} !important; }
+.react-flow__edge.selected .canvas-edge-end, .react-flow__edge:hover .canvas-edge-end { stroke: ${colors.accent}; }
+.react-flow__edge.selected .canvas-edge-end.filled, .react-flow__edge:hover .canvas-edge-end.filled { fill: ${colors.accent}; }
+.react-flow__edgeupdater { fill: ${colors.surfaceCard}; stroke: ${colors.accent}; stroke-width: 1; r: 4px; cursor: grab; opacity: 0; transition: opacity ${motion.fast}ms ${motion.ease}; }
 .react-flow__edge.selected .react-flow__edgeupdater, .react-flow__edge:hover .react-flow__edgeupdater { opacity: 1; }
-.canvas-textarea { font: inherit; color: inherit; background: transparent; border: 0; outline: 0; resize: none; width: 100%; height: 100%; padding: 0; margin: 0; line-height: 1.4; }
-.canvas-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid ${colors.borderSubtle}; background: ${colors.surfaceCard}; color: ${colors.textSecondary}; font: 500 12px ${cardFont}; cursor: pointer; }
-.canvas-btn:hover { background: ${colors.surfaceHover}; color: ${colors.textPrimary}; }
-.canvas-btn:disabled { opacity: 0.45; cursor: default; }
-.canvas-btn.icon { width: 30px; padding: 0; }
-.canvas-btn.on { background: ${colors.accentSoft}; border-color: ${colors.accentSoftBorder}; color: ${colors.accentHover}; }
-.canvas-swatch { width: 18px; height: 18px; border-radius: 999px; border: 2px solid transparent; cursor: pointer; padding: 0; }
-.canvas-swatch.on { border-color: ${colors.textPrimary}; }
+.canvas-textarea { font: inherit; color: inherit; background: transparent; border: 0; outline: 0; resize: none; width: 100%; height: 100%; padding: 0; margin: 0; line-height: inherit; }
+.canvas-textarea::placeholder, .canvas-input::placeholder { color: ${colors.textQuaternary}; }
+.canvas-btn { display: inline-flex; align-items: center; justify-content: center; gap: ${space.xs}px; flex-shrink: 0; box-sizing: border-box; min-width: ${control.sm}px; height: ${control.sm}px; padding: 0 ${space.sm}px; border: 0; border-radius: ${radius.sm}px; background: transparent; color: ${colors.textSecondary}; font: ${font.weight.medium} ${font.size.sm}px ${font.sans}; cursor: pointer; transition: background-color ${motion.instant}ms ${motion.ease}; }
+.canvas-btn:hover { background: ${colors.surfaceHover}; }
+.canvas-btn:active { background: ${colors.surfaceActive}; }
+.canvas-btn:disabled { opacity: 0.35; cursor: default; background: transparent; }
+.canvas-btn.icon { width: ${control.sm}px; padding: 0; }
+.canvas-btn.glyph { width: 30px; padding: 0; }
+.canvas-btn.on { background: ${colors.accentSoft}; color: ${colors.textAccent}; }
+.canvas-btn.mono { font-family: ${font.mono}; font-weight: ${font.weight.regular}; }
+.canvas-swatch { box-sizing: border-box; width: 11px; height: 11px; flex-shrink: 0; border: 0; border-radius: ${radius.xs}px; cursor: pointer; padding: 0; outline: 1px solid transparent; outline-offset: 1px; }
+.canvas-swatch.on { outline-color: ${colors.textPrimary}; }
+.canvas-swatch:disabled { opacity: 0.4; cursor: default; }
+.canvas-check { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 12px; height: 12px; flex-shrink: 0; margin-top: 3px; padding: 0; border: 1px solid ${colors.borderStrong}; border-radius: ${radius.xs}px; background: ${colors.surfaceCard}; cursor: pointer; transition: background-color ${motion.fast}ms ${motion.ease}, border-color ${motion.fast}ms ${motion.ease}; }
+.canvas-check.on { border-color: ${colors.accent}; background: ${colors.accent}; }
+.canvas-input { box-sizing: border-box; height: ${control.sm}px; padding: 0 ${space.sm}px; border: 1px solid ${colors.borderDefault}; border-radius: ${radius.md}px; background: ${colors.surfaceCard}; color: ${colors.textPrimary}; font: ${font.size.sm}px ${font.sans}; outline: 0; transition: border-color ${motion.fast}ms ${motion.ease}, box-shadow ${motion.fast}ms ${motion.ease}; }
+.canvas-input:focus { border-color: ${colors.borderFocus}; box-shadow: 0 0 0 2px ${colors.focusRing}; }
+.canvas-row { display: flex; width: 100%; align-items: center; gap: ${space.sm}px; box-sizing: border-box; min-height: ${row.h}px; padding: 0 ${space.sm}px; border: 0; border-radius: ${radius.sm}px; background: transparent; color: ${colors.textPrimary}; font: ${font.weight.medium} ${font.size.base}px ${font.sans}; text-align: left; cursor: pointer; transition: background-color ${motion.fast}ms ${motion.ease}; }
+.canvas-row:hover { background: ${colors.surfaceHover}; }
+.canvas-row:active { background: ${colors.surfaceActive}; }
+.canvas-bar-btn { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; box-sizing: border-box; min-width: 44px; height: 44px; padding: 0 ${space.sm}px; border: 0; border-radius: ${radius.md}px; background: transparent; color: ${colors.textSecondary}; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: background-color ${motion.instant}ms ${motion.ease}; }
+.canvas-bar-btn:active { background: ${colors.surfaceActive}; }
+.canvas-bar-btn.on { color: ${colors.textAccent}; }
+.canvas-bar-btn:disabled { opacity: 0.35; background: transparent; }
+.canvas-sheet-row { display: flex; width: 100%; align-items: center; gap: ${space.lg}px; box-sizing: border-box; min-height: 60px; padding: ${space.md}px ${space.lg}px; border: 0; background: transparent; text-align: left; font-family: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: background-color ${motion.instant}ms ${motion.ease}; }
+.canvas-sheet-row:active { background: ${colors.surfaceActive}; }
+/* Desktop density never applies to touch: inside the mobile WebView (a coarse pointer) the
+   controls take the 30px size and rows the 44px touch height. */
+@media (pointer: coarse) {
+  .canvas-btn { min-width: ${control.lg}px; height: ${control.lg}px; font-size: ${font.size.md}px; }
+  .canvas-btn.icon { width: ${control.lg}px; }
+  .canvas-swatch { width: 18px; height: 18px; }
+  .canvas-input { height: ${control.lg}px; font-size: ${font.size.md}px; }
+  .canvas-row { min-height: ${row.touch}px; }
+}
 `;
 
 // ---- node renderers --------------------------------------------------------------------
 
+// An embedded card: card surface, hairline, 4px radius, no shadow. Each kind adds a 2px left
+// border in its colour (KIND_COLOR) — the same colours the graph gives those entity types.
 const cardBase: CSSProperties = {
   position: "relative",
   width: "100%",
   height: "100%",
   boxSizing: "border-box",
-  borderRadius: 12,
+  borderRadius: radius.md,
   border: `1px solid ${colors.borderSubtle}`,
   background: colors.surfaceCard,
-  boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
   fontFamily: cardFont,
-  fontSize: 13,
+  fontSize: font.size.base,
+  lineHeight: "18px",
   color: colors.textPrimary,
   overflow: "hidden",
 };
+const KIND_COLOR = { note: colors.success, task: colors.info, event: colors.textPrimary, image: colors.textTertiary, link: colors.textTertiary } as const;
+const kindBar = (node: CanvasNode, kind: keyof typeof KIND_COLOR): string => `2px solid ${node.color ?? KIND_COLOR[kind]}`;
+const cardTitle: CSSProperties = { flex: 1, minWidth: 0, fontSize: font.size.base, fontWeight: font.weight.medium, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
+const cardHead: CSSProperties = { display: "flex", alignItems: "center", gap: 5, minWidth: 0, flexShrink: 0 };
+const cardBody: CSSProperties = { fontSize: font.size.sm, lineHeight: "16px", color: colors.textSecondary, overflow: "hidden" };
+const cardGone: CSSProperties = { fontSize: font.size.sm, color: colors.textTertiary };
 
 const CanvasNodeView = memo(function CanvasNodeView({ id, data, selected }: NodeProps<FlowNode>) {
   const { node, refs } = data;
@@ -320,7 +376,7 @@ const CanvasNodeView = memo(function CanvasNodeView({ id, data, selected }: Node
       minHeight={node.kind === "group" ? 80 : 40}
       color={colors.accent}
       lineStyle={{ borderWidth: 1 }}
-      handleStyle={{ width: 8, height: 8, borderRadius: 2 }}
+      handleStyle={{ width: 6, height: 6, borderRadius: 1 }}
       onResizeStart={() => actions.hold(id)}
       onResizeEnd={() => {
         actions.release(id);
@@ -389,7 +445,7 @@ const CanvasNodeView = memo(function CanvasNodeView({ id, data, selected }: Node
         <>
           {resizer}
           <div className="canvas-card" style={cardBase}>
-            <div style={{ padding: 12, color: colors.textTertiary }}>{node.kind} nodes arrive in a later phase.</div>
+            <div style={{ ...cardGone, padding: "4px 7px" }}>{node.kind} nodes arrive in a later phase.</div>
           </div>
           <Handles />
         </>
@@ -432,7 +488,8 @@ function StickyCard({ node, selected }: { node: CanvasNode; selected: boolean })
   return (
     <div
       className="canvas-card"
-      style={{ ...cardBase, background: wash(color, 0.22), border: `1px solid ${wash(color, 0.6)}`, padding: 12, cursor: editing ? "text" : undefined }}
+      // The swatch at 18% over the card surface, bordered at full strength; 12px caption text.
+      style={{ ...cardBase, background: washOverCard(color, 0.18), border: `1px solid ${color}`, padding: "4px 6px", fontSize: font.size.sm, lineHeight: "16px", cursor: editing ? "text" : undefined }}
       onDoubleClick={(e) => {
         e.stopPropagation();
         setEditing(true);
@@ -455,7 +512,7 @@ function StickyCard({ node, selected }: { node: CanvasNode; selected: boolean })
           }}
         />
       ) : (
-        <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", lineHeight: 1.4, height: "100%", overflow: "hidden", color: text ? colors.textPrimary : colors.textTertiary }}>
+        <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", height: "100%", overflow: "hidden", color: text ? colors.textPrimary : colors.textQuaternary }}>
           {text || "Double-click to edit"}
         </div>
       )}
@@ -493,14 +550,16 @@ function GroupCard({ node }: { node: CanvasNode }) {
         width: "100%",
         height: "100%",
         boxSizing: "border-box",
-        borderRadius: 14,
-        border: `1.5px dashed ${wash(color, 0.7)}`,
-        background: wash(color, 0.08),
+        borderRadius: radius.lg,
+        border: `1px solid ${wash(color, 0.45)}`,
+        background: wash(color, 0.07),
         fontFamily: cardFont,
       }}
     >
+      {/* The label is notched into the top edge: a mono caption on the board's own surface,
+          so it interrupts the border rather than sitting in a pill on top of it. */}
       <div
-        style={{ position: "absolute", top: -1, left: 12, transform: "translateY(-50%)", padding: "2px 10px", borderRadius: 999, background: wash(color, 0.9), color: "#fff", fontSize: 12, fontWeight: 600, maxWidth: "calc(100% - 24px)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+        style={{ position: "absolute", top: -1, left: 8, transform: "translateY(-50%)", padding: "0 4px", background: colors.surfaceCard, color: colors.textTertiary, fontFamily: font.mono, fontSize: font.size.xs, lineHeight: "14px", maxWidth: "calc(100% - 16px)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
         onDoubleClick={(e) => {
           e.stopPropagation();
           actions.hold(node.id);
@@ -537,22 +596,22 @@ function NoteCard({ node, refs }: { node: CanvasNode; refs: CanvasRefs }) {
   return (
     <div
       className="canvas-card"
-      style={{ ...cardBase, borderLeft: `4px solid ${node.color ?? colors.success}`, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6, cursor: "default" }}
+      style={{ ...cardBase, borderLeft: kindBar(node, "note"), padding: "4px 7px", display: "flex", flexDirection: "column", gap: 2, cursor: "default" }}
       onDoubleClick={(e) => {
         e.stopPropagation();
         if (node.refId && !missing) actions.openRef({ type: "note", id: node.refId });
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 6, color: colors.textTertiary, fontSize: 11 }}>
-        <Icon name="file" size={13} color={colors.textTertiary} />
-        <span>Note</span>
-      </div>
       {missing ? (
-        <div style={{ color: colors.textTertiary }}>This note is gone.</div>
+        <div style={cardGone}>This note is gone.</div>
       ) : (
         <>
-          <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{ref.title || "Untitled"}</div>
-          <div style={{ color: colors.textSecondary, lineHeight: 1.4, overflow: "hidden", flex: 1 }}>{ref.excerpt || "No additional text"}</div>
+          <div style={cardHead}>
+            <Icon name="file" size={11} color={colors.textQuaternary} />
+            <span style={cardTitle}>{ref.title || "Untitled"}</span>
+          </div>
+          <div style={{ ...monoMeta, flexShrink: 0 }}>note</div>
+          <div style={{ ...cardBody, flex: 1, minHeight: 0 }}>{ref.excerpt || "No additional text"}</div>
         </>
       )}
     </div>
@@ -568,35 +627,34 @@ function TaskCard({ node, refs }: { node: CanvasNode; refs: CanvasRefs }) {
   return (
     <div
       className="canvas-card"
-      style={{ ...cardBase, borderLeft: `4px solid ${node.color ?? colors.info}`, padding: "10px 12px", display: "flex", alignItems: "flex-start", gap: 10 }}
+      style={{ ...cardBase, borderLeft: kindBar(node, "task"), padding: "4px 7px", display: "flex", alignItems: "flex-start", gap: space.sm }}
       onDoubleClick={(e) => {
         e.stopPropagation();
         if (node.refId && !missing) actions.openRef({ type: "task", id: node.refId });
       }}
     >
       {missing ? (
-        <div style={{ color: colors.textTertiary }}>This task is gone.</div>
+        <div style={cardGone}>This task is gone.</div>
       ) : (
         <>
           <button
             type="button"
-            className="nodrag nopan"
+            className={`canvas-check nodrag nopan${done ? " on" : ""}`}
             aria-label={done ? "Mark open" : "Mark done"}
             onClick={(e) => {
               e.stopPropagation();
               if (node.refId) void actions.setTaskStatus(node.refId, done ? "open" : "done");
             }}
-            style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${done ? colors.accent : colors.borderStrong}`, background: done ? colors.accent : colors.surfaceCard, cursor: "pointer", padding: 0, flexShrink: 0, marginTop: 1, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
           >
-            {done ? <Icon name="check" size={12} color="#fff" /> : null}
+            {done ? <Icon name="check" size={9} color={colors.onAccent} strokeWidth={2.5} /> : null}
           </button>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontWeight: 600, fontSize: 14, textDecoration: done ? "line-through" : undefined, color: done ? colors.textTertiary : colors.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
+            <div style={{ ...cardTitle, flex: "none", textDecoration: done ? "line-through" : undefined, color: done ? colors.textTertiary : colors.textPrimary }}>
               {ref.title || "Untitled task"}
             </div>
-            {ref.dueAt ? (
-              <div style={{ color: colors.textTertiary, fontSize: 11, marginTop: 4 }}>Due {new Date(ref.dueAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</div>
-            ) : null}
+            <div style={monoMeta}>
+              task{ref.dueAt ? ` · due ${new Date(ref.dueAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }).toLowerCase()}` : ""}
+            </div>
           </div>
         </>
       )}
@@ -629,20 +687,19 @@ function EventCard({ node, refs }: { node: CanvasNode; refs: CanvasRefs }) {
   return (
     <div
       className="canvas-card"
-      style={{ ...cardBase, borderLeft: `4px solid ${node.color ?? colors.gray500}`, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4 }}
+      style={{ ...cardBase, borderLeft: kindBar(node, "event"), padding: "4px 7px", display: "flex", flexDirection: "column", gap: 2 }}
       onDoubleClick={(e) => {
         e.stopPropagation();
         if (node.refId) actions.openRef({ type: "event", id: node.refId });
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 6, color: colors.textTertiary, fontSize: 11 }}>
-        <Icon name="calendar" size={13} color={colors.textTertiary} />
-        <span>Event</span>
-        {stale ? <span style={{ marginLeft: "auto", color: colors.warning }}>not on the calendar anymore</span> : null}
+      <div style={cardHead}>
+        <Icon name="calendar" size={11} color={colors.textQuaternary} />
+        <span style={cardTitle}>{title}</span>
       </div>
-      <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{title}</div>
-      {startsAt ? <div style={{ color: colors.textSecondary }}>{eventWhen(startsAt, live?.endsAt ?? cached.endsAt, live?.allDay ?? !!cached.allDay)}</div> : null}
-      {live?.location ? <div style={{ color: colors.textTertiary, fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{live.location}</div> : null}
+      <div style={{ ...monoMeta, flexShrink: 0 }}>event{startsAt ? ` · ${eventWhen(startsAt, live?.endsAt ?? cached.endsAt, live?.allDay ?? !!cached.allDay).toLowerCase()}` : ""}</div>
+      {live?.location ? <div style={{ ...cardBody, whiteSpace: "nowrap", textOverflow: "ellipsis", flexShrink: 0 }}>{live.location}</div> : null}
+      {stale ? <div style={{ ...monoMeta, color: colors.warning, flexShrink: 0 }}>not on the calendar anymore</div> : null}
     </div>
   );
 }
@@ -676,9 +733,9 @@ function ImageCard({ node, refs }: { node: CanvasNode; refs: CanvasRefs }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [node.refId, missing]);
   return (
-    <div className="canvas-card" style={{ ...cardBase, padding: 0, background: colors.surfaceSunken, display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div className="canvas-card" style={{ ...cardBase, borderLeft: kindBar(node, "image"), padding: 0, background: colors.surfaceSunken, display: "flex", alignItems: "center", justifyContent: "center" }}>
       {missing ? (
-        <div style={{ color: colors.textTertiary, padding: 12 }}>This image is gone.</div>
+        <div style={{ ...cardGone, padding: space.md }}>This image is gone.</div>
       ) : url ? (
         <img
           src={url}
@@ -694,12 +751,13 @@ function ImageCard({ node, refs }: { node: CanvasNode; refs: CanvasRefs }) {
           }}
         />
       ) : failed ? (
-        <div style={{ color: colors.textTertiary, padding: 12, textAlign: "center" }}>
-          <Icon name="image" size={20} color={colors.textTertiary} />
-          <div style={{ marginTop: 6 }}>{doc?.filename ?? "Image"} isn't downloaded yet.</div>
+        <div style={{ ...cardGone, padding: space.md, display: "flex", flexDirection: "column", alignItems: "center", gap: space.xs, textAlign: "center" }}>
+          <Icon name="image" size={16} color={colors.textQuaternary} />
+          <div style={{ ...monoMeta, maxWidth: "100%" }}>{doc?.filename ?? "image"}</div>
+          <div>Not downloaded yet.</div>
         </div>
       ) : (
-        <div style={{ color: colors.textTertiary }}>Loading…</div>
+        <div style={cardGone}>Loading…</div>
       )}
     </div>
   );
@@ -726,7 +784,7 @@ function LinkCard({ node }: { node: CanvasNode }) {
   return (
     <div
       className="canvas-card"
-      style={{ ...cardBase, padding: 0, display: "flex", flexDirection: "column", cursor: "pointer" }}
+      style={{ ...cardBase, borderLeft: kindBar(node, "link"), padding: 0, display: "flex", flexDirection: "column", cursor: "pointer" }}
       onDoubleClick={(e) => {
         e.stopPropagation();
         if (d.url) actions.openUrl(d.url);
@@ -736,34 +794,36 @@ function LinkCard({ node }: { node: CanvasNode }) {
         <img src={d.imageUrl} alt="" draggable={false} referrerPolicy="no-referrer" onError={() => setImgFailed(true)} style={{ width: "100%", flex: "1 1 0", minHeight: 0, objectFit: "cover", display: "block", pointerEvents: "none", background: colors.surfaceSunken }} />
       ) : (
         <div style={{ flex: "1 1 0", minHeight: 0, background: colors.surfaceSunken, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <Icon name="link" size={22} color={colors.textTertiary} />
+          <Icon name="link" size={16} color={colors.textQuaternary} />
         </div>
       )}
-      <div style={{ padding: "8px 12px 10px", display: "flex", flexDirection: "column", gap: 3, flexShrink: 0, maxHeight: "60%" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, color: colors.textTertiary, fontSize: 11, minWidth: 0 }}>
-          {d.faviconUrl && !favFailed ? <img src={d.faviconUrl} alt="" width={12} height={12} referrerPolicy="no-referrer" onError={() => setFavFailed(true)} style={{ borderRadius: 2, flexShrink: 0 }} /> : null}
-          <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.siteName || host}</span>
+      <div style={{ padding: "4px 7px 5px", display: "flex", flexDirection: "column", gap: 2, flexShrink: 0, maxHeight: "60%", borderTop: `1px solid ${colors.borderSubtle}` }}>
+        <div style={cardHead}>
+          {d.faviconUrl && !favFailed ? (
+            <img src={d.faviconUrl} alt="" width={11} height={11} referrerPolicy="no-referrer" onError={() => setFavFailed(true)} style={{ borderRadius: radius.xs, flexShrink: 0 }} />
+          ) : (
+            <Icon name="link" size={11} color={colors.textQuaternary} />
+          )}
+          <span style={cardTitle}>{loading ? "Fetching preview…" : d.title || d.url}</span>
           <button
             type="button"
-            className="nodrag nopan"
+            className="canvas-btn icon nodrag nopan"
             title="Refresh preview"
             aria-label="Refresh preview"
             onClick={(e) => {
               e.stopPropagation();
               actions.refreshPreview(node.id);
             }}
-            style={{ marginLeft: "auto", border: 0, background: "transparent", color: colors.textTertiary, cursor: "pointer", padding: 2, display: "inline-flex" }}
+            style={{ width: 16, minWidth: 16, height: 16, borderRadius: radius.xs, color: colors.textQuaternary }}
           >
-            <Icon name="refresh" size={12} color="currentColor" />
+            <Icon name="refresh" size={11} color="currentColor" />
           </button>
         </div>
-        <div style={{ fontWeight: 600, fontSize: 13, lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
-          {loading ? "Fetching preview…" : d.title || d.url}
-        </div>
+        <div style={monoMeta}>{(d.siteName || host).toLowerCase()}</div>
         {d.description ? (
-          <div style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 1.35, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{d.description}</div>
+          <div style={{ ...cardBody, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{d.description}</div>
         ) : unavailable ? (
-          <div style={{ color: colors.textTertiary, fontSize: 11 }}>{unavailable}</div>
+          <div style={{ ...cardBody, color: colors.textTertiary }}>{unavailable}</div>
         ) : null}
       </div>
     </div>
@@ -787,9 +847,11 @@ function outward(p: Position): { x: number; y: number } {
 }
 
 /** How far the line stops short of the endpoint so it doesn't poke through the ending. */
-const END_INSET: Record<CanvasEnd, number> = { none: 0, arrow: 0, arrowFilled: 11, dot: 5, dotFilled: 0 };
-const END_SIZE = 12;
-const DOT_R = 5;
+const END_INSET: Record<CanvasEnd, number> = { none: 0, arrow: 0, arrowFilled: 7, dot: 3.5, dotFilled: 0 };
+// Endings are sized for the 1.25px line: an 8px arrowhead, 3.5px dots.
+const END_SIZE = 8;
+const DOT_R = 3.5;
+const EDGE_WIDTH = 1.25;
 
 /** One ending, drawn with its tip at (x, y) pointing along `dir` (a unit vector). */
 function EdgeEnding({ end, x, y, dir, color, edgeId }: { end: CanvasEnd; x: number; y: number; dir: { x: number; y: number }; color: string; edgeId: string }) {
@@ -799,13 +861,13 @@ function EdgeEnding({ end, x, y, dir, color, edgeId }: { end: CanvasEnd; x: numb
   const s = END_SIZE;
   switch (end) {
     case "arrow":
-      return <path className="canvas-edge-end" d={`M ${-s} ${-s / 2} L 0 0 L ${-s} ${s / 2}`} transform={t} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />;
+      return <path className="canvas-edge-end" d={`M ${-s} ${-s / 2} L 0 0 L ${-s} ${s / 2}`} transform={t} fill="none" stroke={color} strokeWidth={EDGE_WIDTH} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />;
     case "arrowFilled":
-      return <path className="canvas-edge-end" d={`M 0 0 L ${-s} ${-s / 2} L ${-s + 3} 0 L ${-s} ${s / 2} Z`} transform={t} fill={color} stroke={color} strokeWidth={1.5} strokeLinejoin="round" pointerEvents="none" />;
+      return <path className="canvas-edge-end filled" d={`M 0 0 L ${-s} ${-s / 2} L ${-s + 2} 0 L ${-s} ${s / 2} Z`} transform={t} fill={color} stroke={color} strokeWidth={1} strokeLinejoin="round" pointerEvents="none" />;
     case "dot":
-      return <circle className="canvas-edge-end" cx={x} cy={y} r={DOT_R} fill={colors.surfaceApp} stroke={color} strokeWidth={2} pointerEvents="none" data-edge={edgeId} />;
+      return <circle className="canvas-edge-end" cx={x} cy={y} r={DOT_R} fill={colors.surfaceCard} stroke={color} strokeWidth={EDGE_WIDTH} pointerEvents="none" data-edge={edgeId} />;
     case "dotFilled":
-      return <circle className="canvas-edge-end" cx={x} cy={y} r={DOT_R} fill={color} stroke={color} strokeWidth={1} pointerEvents="none" />;
+      return <circle className="canvas-edge-end filled" cx={x} cy={y} r={DOT_R} fill={color} stroke={color} strokeWidth={1} pointerEvents="none" />;
   }
 }
 
@@ -817,7 +879,7 @@ function edgePath(style: CanvasEdgeStyle, p: { sourceX: number; sourceY: number;
       return [d, lx, ly];
     }
     case "step": {
-      const [d, lx, ly] = getSmoothStepPath({ ...p, borderRadius: 10, offset: 24 });
+      const [d, lx, ly] = getSmoothStepPath({ ...p, borderRadius: radius.lg, offset: 24 });
       return [d, lx, ly];
     }
     default: {
@@ -874,7 +936,7 @@ function CanvasEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition
   const showLabel = editing || (edge?.label ?? "") !== "";
   return (
     <>
-      <BaseEdge id={id} path={path} style={{ stroke: color, strokeWidth: 2, strokeLinecap: "round" }} interactionWidth={18} />
+      <BaseEdge id={id} path={path} style={{ stroke: color, strokeWidth: EDGE_WIDTH, strokeLinecap: "round" }} interactionWidth={18} />
       {/* Endings: the source tip points back into the source node, the target tip into the target. */}
       <EdgeEnding end={fromEnd} x={sourceX} y={sourceY} dir={{ x: -leave.x, y: -leave.y }} color={color} edgeId={id} />
       <EdgeEnding end={toEnd} x={targetX} y={targetY} dir={arrive} color={color} edgeId={id} />
@@ -886,7 +948,8 @@ function CanvasEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition
             transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
             pointerEvents: "all",
             fontFamily: cardFont,
-            fontSize: 12,
+            fontSize: font.size.xs,
+            lineHeight: "14px",
           }}
           onDoubleClick={(e) => {
             e.stopPropagation();
@@ -898,7 +961,8 @@ function CanvasEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition
               autoFocus
               value={draft}
               placeholder="Label"
-              style={{ font: "inherit", padding: "2px 8px", borderRadius: 6, border: `1px solid ${colors.borderDefault}`, background: colors.surfaceCard, outline: 0, width: 140 }}
+              className="canvas-input"
+              style={{ width: 140 }}
               onChange={(e) => setDraft(e.target.value)}
               onBlur={commit}
               onKeyDown={(e) => {
@@ -907,9 +971,9 @@ function CanvasEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition
               }}
             />
           ) : showLabel ? (
-            <span style={{ padding: "2px 8px", borderRadius: 6, background: colors.surfaceCard, border: `1px solid ${selected ? colors.accent : colors.borderSubtle}`, color: colors.textSecondary }}>{edge?.label}</span>
+            <span style={{ display: "inline-block", padding: "0 5px", borderRadius: radius.sm, background: colors.surfaceCard, border: `1px solid ${selected ? colors.accent : colors.borderSubtle}`, color: colors.textSecondary }}>{edge?.label}</span>
           ) : selected ? (
-            <span style={{ padding: "2px 8px", borderRadius: 6, background: colors.surfaceCard, border: `1px dashed ${colors.borderDefault}`, color: colors.textTertiary, cursor: "text" }}>Add label</span>
+            <span style={{ display: "inline-block", padding: "0 5px", borderRadius: radius.sm, background: colors.surfaceCard, border: `1px dashed ${colors.borderDefault}`, color: colors.textQuaternary, cursor: "text" }}>Add label</span>
           ) : null}
         </div>
       </EdgeLabelRenderer>
@@ -961,6 +1025,9 @@ const edgeTypes = { canvas: CanvasEdgeView };
 export interface CanvasViewProps {
   host: CanvasHost;
   canvasId: string;
+  /** Force the touch chrome (bottom tool bar + embed sheet) on or off. Defaults to the
+   *  pointer: coarse → touch, which is what the native WebView and phone browsers report. */
+  touch?: boolean;
 }
 
 /** Imperative entry points for the surrounding editor (drops from the app's drag layer). */
@@ -969,6 +1036,29 @@ export interface CanvasViewHandle {
   addRefAt: (ref: { type: CanvasRefKind; id: string }, clientX: number, clientY: number) => void;
   /** Add image cards for dropped files at a screen position. */
   addFiles: (files: File[], clientX: number, clientY: number) => void;
+  /** Frame the whole board — for a host nav bar's Fit button. */
+  fitView: () => void;
+}
+
+/** Whether the primary pointer is coarse (a finger). Desktop density never applies to touch,
+ *  so this swaps the board's chrome, not just its sizes. Live, for convertibles. */
+function useCoarsePointer(): boolean {
+  const query = "(pointer: coarse)";
+  const [coarse, setCoarse] = useState(() => typeof window !== "undefined" && !!window.matchMedia?.(query).matches);
+  useEffect(() => {
+    const mq = typeof window !== "undefined" ? window.matchMedia?.(query) : undefined;
+    if (!mq) return;
+    const on = () => setCoarse(mq.matches);
+    on();
+    // Safari < 14 only has the deprecated addListener.
+    if (mq.addEventListener) mq.addEventListener("change", on);
+    else mq.addListener(on);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", on);
+      else mq.removeListener(on);
+    };
+  }, []);
+  return coarse;
 }
 
 export const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(function CanvasView(props, ref) {
@@ -979,8 +1069,10 @@ export const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(function
   );
 });
 
-function CanvasSurface({ host, canvasId, handleRef }: CanvasViewProps & { handleRef: Ref<CanvasViewHandle> }) {
+function CanvasSurface({ host, canvasId, touch: touchProp, handleRef }: CanvasViewProps & { handleRef: Ref<CanvasViewHandle> }) {
   const rf = useReactFlow<FlowNode, FlowEdge>();
+  const coarse = useCoarsePointer();
+  const touch = touchProp ?? coarse;
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEdge>([]);
   const [doc, setDoc] = useState<CanvasDocument | null>(null);
@@ -1196,7 +1288,7 @@ function CanvasSurface({ host, canvasId, handleRef }: CanvasViewProps & { handle
 
   // ---- adding nodes ----
   const centerOfView = useCallback((): { x: number; y: number } => {
-    const el = wrapperRef.current;
+    const el = boardRef.current;
     const w = el?.clientWidth ?? 800;
     const h = el?.clientHeight ?? 600;
     return rf.screenToFlowPosition({ x: (el?.getBoundingClientRect().left ?? 0) + w / 2, y: (el?.getBoundingClientRect().top ?? 0) + h / 2 });
@@ -1302,8 +1394,9 @@ function CanvasSurface({ host, canvasId, handleRef }: CanvasViewProps & { handle
     () => ({
       addRefAt: (ref, clientX, clientY) => void addRefNode(ref, flowPoint(clientX, clientY)),
       addFiles: (files, clientX, clientY) => void addFilesAt(files, flowPoint(clientX, clientY)),
+      fitView: () => void rf.fitView({ padding: 0.2, maxZoom: 1 }),
     }),
-    [addRefNode, addFilesAt, flowPoint],
+    [addRefNode, addFilesAt, flowPoint, rf],
   );
 
   // ---- drag: groups carry their contents ----
@@ -1538,8 +1631,13 @@ function CanvasSurface({ host, canvasId, handleRef }: CanvasViewProps & { handle
 
   // ---- keyboard ----
   const wrapperRef = useRef<HTMLDivElement>(null);
+  // The board area beneath the tool strip — what "the center of the view" is measured in.
+  const boardRef = useRef<HTMLDivElement>(null);
+  const zoom = useStore((st) => st.transform[2]);
   const [editRequest, setEditRequest] = useState<EditRequest | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  // Touch chrome: the embed sheet behind the bottom bar's More.
+  const [showMore, setShowMore] = useState(false);
   const [search, setSearch] = useState<string | null>(null); // null = closed
   const [snap, setSnap] = useState(true);
   const [showMinimap, setShowMinimap] = useState(false);
@@ -1732,6 +1830,7 @@ function CanvasSurface({ host, canvasId, handleRef }: CanvasViewProps & { handle
       // Overlays.
       if (e.key === "Escape") {
         stop();
+        if (showMore) return setShowMore(false);
         if (showHelp) return setShowHelp(false);
         if (search !== null) return setSearch(null);
         return selectOnly([]);
@@ -1820,7 +1919,7 @@ function CanvasSurface({ host, canvasId, handleRef }: CanvasViewProps & { handle
         case "f": return void (stop(), setShowMinimap((v) => !v));
       }
     },
-    [undo, redo, rf, selectedNodes, selectedEdges, pushHistory, upsertNodes, setNodes, showHelp, search, selectOnly, cycleSelection, activateSelection, copySelection, deleteNodes, selectedIds, groupSelection, ungroupSelection, alignSelection, distributeSelection, cycleEdgeEnds, cycleEdgeStyle, host, setZ, setColor, addSticky, placeAt, addRef, pickImage, pickLink, connectSelected, reverseEdges],
+    [undo, redo, rf, selectedNodes, selectedEdges, pushHistory, upsertNodes, setNodes, showHelp, showMore, search, selectOnly, cycleSelection, activateSelection, copySelection, deleteNodes, selectedIds, groupSelection, ungroupSelection, alignSelection, distributeSelection, cycleEdgeEnds, cycleEdgeStyle, host, setZ, setColor, addSticky, placeAt, addRef, pickImage, pickLink, connectSelected, reverseEdges],
   );
 
   // Paste onto the board: an image becomes an image card, a URL a link card, other text a
@@ -1896,6 +1995,22 @@ function CanvasSurface({ host, canvasId, handleRef }: CanvasViewProps & { handle
     [host, canvasId],
   );
 
+  // What the tool strip, the selection bar and the status strip say about the selection.
+  const hasSelection = selectedNodes.length > 0 || selectedEdges.length > 0;
+  const selectionColor: string | null | undefined = hasSelection ? (selectedNodes[0]?.data.node.color ?? selectedEdges[0]?.data?.edge.color ?? null) : undefined;
+  const selectionSummary = (() => {
+    if (!hasSelection) return nodes.length ? "double-click the board for a sticky · drag from a card’s edge to connect" : "empty board · double-click anywhere to start";
+    if (selectedNodes.length === 1 && !selectedEdges.length) {
+      const n = selectedNodes[0].data.node;
+      const label = n.kind === "text" ? String(n.data?.text ?? "") : n.kind === "group" ? String(n.data?.label ?? "") : "";
+      return label ? `${n.kind === "text" ? "sticky" : n.kind} · ${label.replace(/\s+/g, " ").slice(0, 60)}` : n.kind === "text" ? "sticky" : n.kind;
+    }
+    const parts: string[] = [];
+    if (selectedNodes.length) parts.push(`${selectedNodes.length} ${selectedNodes.length === 1 ? "card" : "cards"}`);
+    if (selectedEdges.length) parts.push(`${selectedEdges.length} ${selectedEdges.length === 1 ? "edge" : "edges"}`);
+    return `${parts.join(" · ")} selected`;
+  })();
+
   const canUndo = past.current.length > 0;
   const canRedo = future.current.length > 0;
   void historyVersion;
@@ -1922,139 +2037,217 @@ function CanvasSurface({ host, canvasId, handleRef }: CanvasViewProps & { handle
         }}
       >
         <style>{CANVAS_CSS}</style>
-        <ReactFlow<FlowNode, FlowEdge>
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onReconnect={onReconnect}
-          edgesReconnectable
-          reconnectRadius={10}
-          onNodesDelete={onNodesDelete}
-          onEdgesDelete={onEdgesDelete}
-          onNodeDragStart={onNodeDragStart}
-          onNodeDrag={onNodeDrag}
-          onNodeDragStop={onNodeDragStop}
-          onMoveEnd={onMoveEnd}
-          onSelectionChange={onSelectionChange}
-          connectionMode={ConnectionMode.Loose}
-          deleteKeyCode={["Backspace", "Delete"]}
-          selectionKeyCode="Shift"
-          multiSelectionKeyCode={["Meta", "Control"]}
-          zoomOnDoubleClick={false}
-          // Keep the persisted stacking: a selected group must stay behind its contents,
-          // or clicking a card inside it would grab the group instead.
-          elevateNodesOnSelect={false}
-          snapToGrid={snap}
-          snapGrid={[GRID, GRID]}
-          minZoom={0.1}
-          maxZoom={2.5}
-          nodeDragThreshold={2}
-          proOptions={{ hideAttribution: true }}
-          style={{ background: colors.surfaceApp }}
-        >
-          <Background color={colors.borderDefault} gap={24} size={1.5} />
-          <Controls showInteractive={false} position="bottom-right" />
-          {showMinimap ? <MiniMap pannable zoomable position="bottom-left" nodeColor={(n) => (n as FlowNode).data?.node.color ?? colors.borderStrong} /> : null}
-          <Panel position="top-left">
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <ToolButton icon="sticky" label="Sticky note" onClick={() => addSticky()} />
-              <ToolButton icon="group" label="Group" onClick={addGroup} />
-              <ToolButton icon="file" label="Note" onClick={() => void addRef("note")} />
-              <ToolButton icon="tasks" label="Task" onClick={() => void addRef("task")} />
-              <ToolButton icon="calendar" label="Event" onClick={() => void addRef("event")} />
-              <ToolButton icon="image" label="Image" onClick={() => void pickImage()} />
-              <ToolButton icon="link" label="Link" onClick={() => void pickLink()} />
-              <span style={{ width: 8 }} />
-              <ToolButton icon="undo" title="Undo (⌘Z)" disabled={!canUndo} onClick={() => void undo()} />
-              <ToolButton icon="redo" title="Redo (⇧⌘Z)" disabled={!canRedo} onClick={() => void redo()} />
-              <ToolButton icon="fit" title="Fit view (⌘0)" onClick={() => void rf.fitView({ padding: 0.2, maxZoom: 1 })} />
-              <ToolButton icon="search" title="Find a card (⌘K)" onClick={() => setSearch("")} />
-              <ToolButton icon="dot" title="Keyboard shortcuts (?)" label="?" onClick={() => setShowHelp((v) => !v)} />
-            </div>
-          </Panel>
-          {search !== null ? (
-            <Panel position="top-center">
-              <CardSearch
-                query={search}
-                onQuery={setSearch}
-                nodes={nodes}
-                onPick={(id) => {
-                  setSearch(null);
-                  selectOnly([id]);
-                  void rf.fitView({ nodes: [{ id }], padding: 0.6, maxZoom: 1.2, duration: 200 });
-                  wrapperRef.current?.focus();
-                }}
-                onClose={() => {
-                  setSearch(null);
-                  wrapperRef.current?.focus();
-                }}
-              />
-            </Panel>
-          ) : null}
-          {/* Selection tools sit at the bottom so they never overlap the add toolbar on a
-              narrow pane. */}
-          {selectedNodes.length || selectedEdges.length ? (
-            <Panel position="bottom-center">
-              <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "6px 8px", borderRadius: 10, background: colors.surfaceCard, border: `1px solid ${colors.borderSubtle}`, boxShadow: "0 6px 20px rgba(0,0,0,0.10)" }}>
-                {swatches.map((c) => (
-                  <button key={c} type="button" className="canvas-swatch" title={c} style={{ background: c }} onClick={() => setColor(c)} />
-                ))}
-                <button type="button" className="canvas-swatch" title="Default color" style={{ background: colors.surfaceCard, border: `2px solid ${colors.borderDefault}` }} onClick={() => setColor(null)} />
-                <span style={{ width: 1, height: 18, background: colors.borderSubtle, margin: "0 4px" }} />
-                {selectedNodes.length ? (
-                  <>
-                    <ToolButton icon="chevronRight" title="Bring to front" onClick={() => setZ(1)} rotate={-90} />
-                    <ToolButton icon="chevronRight" title="Send to back" onClick={() => setZ(-1)} rotate={90} />
-                  </>
-                ) : null}
-                {selectedEdges.length ? (
-                  <>
-                    <span style={{ display: "inline-flex", gap: 2 }} title="Line style">
-                      {STYLES.map((st) => (
-                        <button key={st} type="button" className={`canvas-btn icon${firstEdge?.style === st ? " on" : ""}`} title={STYLE_LABEL[st]} aria-label={`Line: ${STYLE_LABEL[st]}`} onClick={() => patchEdges({ style: st })}>
-                          <StyleGlyph style={st} />
-                        </button>
+        {/* The board's tool strip: a 28px sub-toolbar with a bottom hairline. */}
+        {/* Under touch the add tools move to the bottom bar (sticky / group / connect / undo)
+            and its More sheet; this strip keeps history, colour and the view controls. */}
+        <div style={toolbarStyle}>
+          {touch ? null : (
+            <>
+          <ToolButton icon="sticky" title="Sticky note (T)" onClick={() => addSticky()} />
+          <ToolButton icon="group" title="Group" onClick={addGroup} />
+          <ToolButton icon="file" title="Note (N)" onClick={() => void addRef("note")} />
+          <ToolButton icon="tasks" title="Task (K)" onClick={() => void addRef("task")} />
+          <ToolButton icon="calendar" title="Event (E)" onClick={() => void addRef("event")} />
+          <ToolButton icon="image" title="Image (I)" onClick={() => void pickImage()} />
+          <ToolButton icon="link" title="Link (L)" onClick={() => void pickLink()} />
+          <ToolButton icon="arrow" title="Connect the two selected cards (C)" disabled={selectedNodes.length !== 2} onClick={connectSelected} />
+          <span style={toolDivider} />
+            </>
+          )}
+          <ToolButton icon="undo" title={`Undo (${MOD} Z)`} disabled={!canUndo} onClick={() => void undo()} />
+          <ToolButton icon="redo" title={`Redo (${MOD} Shift Z)`} disabled={!canRedo} onClick={() => void redo()} />
+          <span style={toolDivider} />
+          <span style={{ display: "inline-flex", alignItems: "center", gap: space.xs, padding: `0 ${space.xxs}px` }}>
+            {QUICK_SWATCHES.map((c) => (
+              <button key={c} type="button" className={`canvas-swatch${selectionColor === c ? " on" : ""}`} title="Color the selection" aria-label={`Color ${c}`} style={{ background: c }} disabled={!hasSelection} onClick={() => setColor(c)} />
+            ))}
+          </span>
+          <span style={{ flex: 1 }} />
+          <button type="button" className="canvas-btn icon mono" title={`Zoom out (${MOD} −)`} aria-label="Zoom out" onClick={() => void rf.zoomOut({ duration: 150 })}>
+            −
+          </button>
+          <span style={{ ...monoMeta, width: 34, textAlign: "center", flexShrink: 0 }}>{Math.round(zoom * 100)}%</span>
+          <button type="button" className="canvas-btn icon mono" title={`Zoom in (${MOD} +)`} aria-label="Zoom in" onClick={() => void rf.zoomIn({ duration: 150 })}>
+            +
+          </button>
+          <ToolButton icon="fit" title={`Fit board (${MOD} 0)`} onClick={() => void rf.fitView({ padding: 0.2, maxZoom: 1 })} />
+          <span style={toolDivider} />
+          <ToolButton icon="search" title={`Find a card (${MOD} K)`} active={search !== null} onClick={() => setSearch((v) => (v === null ? "" : null))} />
+          <button type="button" className={`canvas-btn icon mono${showHelp ? " on" : ""}`} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" onClick={() => setShowHelp((v) => !v)}>
+            ?
+          </button>
+        </div>
+        <div ref={boardRef} style={{ position: "relative", flex: 1, minHeight: 0 }}>
+          {/* An absolutely-sized box, so React Flow measures a real height inside the flex
+              column (a plain 100% collapses). */}
+          <div style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}>
+            <ReactFlow<FlowNode, FlowEdge>
+              className="canvas-flow"
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              onReconnect={onReconnect}
+              edgesReconnectable
+              reconnectRadius={10}
+              onNodesDelete={onNodesDelete}
+              onEdgesDelete={onEdgesDelete}
+              onNodeDragStart={onNodeDragStart}
+              onNodeDrag={onNodeDrag}
+              onNodeDragStop={onNodeDragStop}
+              onMoveEnd={onMoveEnd}
+              onSelectionChange={onSelectionChange}
+              connectionMode={ConnectionMode.Loose}
+              deleteKeyCode={["Backspace", "Delete"]}
+              selectionKeyCode="Shift"
+              multiSelectionKeyCode={["Meta", "Control"]}
+              zoomOnDoubleClick={false}
+              // Keep the persisted stacking: a selected group must stay behind its contents,
+              // or clicking a card inside it would grab the group instead.
+              elevateNodesOnSelect={false}
+              snapToGrid={snap}
+              snapGrid={[GRID, GRID]}
+              minZoom={0.1}
+              maxZoom={2.5}
+              nodeDragThreshold={2}
+              proOptions={{ hideAttribution: true }}
+            >
+              {/* The 16px dotted grid, on the card surface. Zoom and fit live in the tool
+                  strip, so React Flow's own controls are not mounted. */}
+              <Background color={colors.borderDefault} gap={16} size={1} />
+              {showMinimap ? <MiniMap pannable zoomable position="bottom-left" nodeColor={(n) => (n as FlowNode).data?.node.color ?? colors.borderStrong} /> : null}
+              {search !== null ? (
+                <Panel position="top-center">
+                  <CardSearch
+                    query={search}
+                    onQuery={setSearch}
+                    nodes={nodes}
+                    onPick={(id) => {
+                      setSearch(null);
+                      selectOnly([id]);
+                      void rf.fitView({ nodes: [{ id }], padding: 0.6, maxZoom: 1.2, duration: 200 });
+                      wrapperRef.current?.focus();
+                    }}
+                    onClose={() => {
+                      setSearch(null);
+                      wrapperRef.current?.focus();
+                    }}
+                  />
+                </Panel>
+              ) : null}
+              {/* Selection tools float at the bottom of the board, clear of the tool strip. */}
+              {hasSelection ? (
+                <Panel position="bottom-center">
+                  <div style={floatingBarStyle}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: space.xs, padding: `0 ${space.xs}px` }}>
+                      {swatches.map((c) => (
+                        <button key={c} type="button" className={`canvas-swatch${selectionColor === c ? " on" : ""}`} title={c} aria-label={`Color ${c}`} style={{ background: c }} onClick={() => setColor(c)} />
                       ))}
+                      <button type="button" className={`canvas-swatch${selectionColor === null ? " on" : ""}`} title="Default color (0)" aria-label="Default color" style={{ background: colors.surfaceCard, border: `1px solid ${colors.borderStrong}` }} onClick={() => setColor(null)} />
                     </span>
-                    <span style={{ width: 1, height: 18, background: colors.borderSubtle, margin: "0 4px" }} />
-                    <span style={{ display: "inline-flex", gap: 2 }} title="Start">
-                      {ENDINGS.map((en) => (
-                        <button key={en} type="button" className={`canvas-btn icon${firstEdge?.fromEnd === en ? " on" : ""}`} title={`Start: ${END_LABEL[en]}`} aria-label={`Start: ${END_LABEL[en]}`} onClick={() => patchEdges({ fromEnd: en })}>
-                          <EndGlyph end={en} atStart />
-                        </button>
-                      ))}
-                    </span>
-                    <span style={{ width: 1, height: 18, background: colors.borderSubtle, margin: "0 4px" }} />
-                    <span style={{ display: "inline-flex", gap: 2 }} title="End">
-                      {ENDINGS.map((en) => (
-                        <button key={en} type="button" className={`canvas-btn icon${firstEdge?.toEnd === en ? " on" : ""}`} title={`End: ${END_LABEL[en]}`} aria-label={`End: ${END_LABEL[en]}`} onClick={() => patchEdges({ toEnd: en })}>
-                          <EndGlyph end={en} />
-                        </button>
-                      ))}
-                    </span>
-                  </>
-                ) : null}
-                <ToolButton icon="trash" title="Delete (⌫)" onClick={deleteSelection} />
+                    <span style={toolDivider} />
+                    {selectedNodes.length ? (
+                      <>
+                        <ToolButton icon="chevronRight" title={`Bring to front (${MOD} ])`} onClick={() => setZ(1)} rotate={-90} />
+                        <ToolButton icon="chevronRight" title={`Send to back (${MOD} [)`} onClick={() => setZ(-1)} rotate={90} />
+                      </>
+                    ) : null}
+                    {selectedEdges.length ? (
+                      <>
+                        <span style={{ display: "inline-flex", gap: 1 }} title="Line style">
+                          {STYLES.map((st) => (
+                            <button key={st} type="button" className={`canvas-btn glyph${firstEdge?.style === st ? " on" : ""}`} title={STYLE_LABEL[st]} aria-label={`Line: ${STYLE_LABEL[st]}`} onClick={() => patchEdges({ style: st })}>
+                              <StyleGlyph style={st} />
+                            </button>
+                          ))}
+                        </span>
+                        <span style={toolDivider} />
+                        <span style={{ display: "inline-flex", gap: 1 }} title="Start">
+                          {ENDINGS.map((en) => (
+                            <button key={en} type="button" className={`canvas-btn glyph${firstEdge?.fromEnd === en ? " on" : ""}`} title={`Start: ${END_LABEL[en]}`} aria-label={`Start: ${END_LABEL[en]}`} onClick={() => patchEdges({ fromEnd: en })}>
+                              <EndGlyph end={en} atStart />
+                            </button>
+                          ))}
+                        </span>
+                        <span style={toolDivider} />
+                        <span style={{ display: "inline-flex", gap: 1 }} title="End">
+                          {ENDINGS.map((en) => (
+                            <button key={en} type="button" className={`canvas-btn glyph${firstEdge?.toEnd === en ? " on" : ""}`} title={`End: ${END_LABEL[en]}`} aria-label={`End: ${END_LABEL[en]}`} onClick={() => patchEdges({ toEnd: en })}>
+                              <EndGlyph end={en} />
+                            </button>
+                          ))}
+                        </span>
+                      </>
+                    ) : null}
+                    <ToolButton icon="trash" title="Delete (⌫)" onClick={deleteSelection} />
+                  </div>
+                </Panel>
+              ) : null}
+              {error ? (
+                <Panel position="bottom-left">
+                  <div style={{ padding: `${space.xs}px ${space.md}px`, borderRadius: radius.md, background: colors.dangerSoft, color: colors.danger, fontFamily: cardFont, fontSize: font.size.sm }}>{error}</div>
+                </Panel>
+              ) : null}
+            </ReactFlow>
+            {/* A board with nothing on it: the dotted grid stays, so it reads as a surface
+                waiting for something. Click-through, so the double-click it describes lands
+                on the pane beneath. */}
+            {doc && doc.nodes.length === 0 && nodes.length === 0 ? (
+              <div style={emptyWrapStyle}>
+                <div style={emptyCardStyle}>
+                  <Icon name="sticky" size={18} color={colors.textQuaternary} />
+                  <div style={{ fontSize: font.size.md, fontWeight: font.weight.semibold, color: colors.textPrimary }}>Nothing on this canvas yet.</div>
+                  <div style={{ fontSize: font.size.sm, lineHeight: "18px", color: colors.textTertiary, textAlign: "center" }}>
+                    Double-click anywhere for a sticky, or add notes, tasks, events, images and links from the strip above. Paste a URL or an image to embed it; drag from a card’s edge to connect it.
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", justifyContent: "center" }}>
+                    <KeyHint keys="T" what="sticky" />
+                    <KeyHint keys="G" what="group" />
+                    <KeyHint keys="C" what="connect" />
+                    <KeyHint keys="?" what="all shortcuts" />
+                  </div>
+                </div>
               </div>
-            </Panel>
-          ) : null}
-          {doc && doc.nodes.length === 0 && nodes.length === 0 ? (
-            <Panel position="bottom-center">
-              <div style={{ padding: "8px 14px", borderRadius: 10, background: colors.surfaceCard, border: `1px solid ${colors.borderSubtle}`, color: colors.textTertiary, fontFamily: cardFont, fontSize: 12 }}>
-                Empty board. Double-click anywhere for a sticky note, add notes, tasks, events, images, or links from the toolbar, or paste a URL or image. Drag from a card's edge to connect it.
-              </div>
-            </Panel>
-          ) : null}
-          {error ? (
-            <Panel position="bottom-left">
-              <div style={{ padding: "8px 12px", borderRadius: 10, background: colors.dangerSoft, color: colors.danger, fontFamily: cardFont, fontSize: 12 }}>{error}</div>
-            </Panel>
-          ) : null}
-        </ReactFlow>
+            ) : null}
+          </div>
+        </div>
+        {/* The board's status strip: what is selected (or what to do next), then the counts. */}
+        {touch ? (
+          // Native chrome: a 48px bottom tool bar instead of the status strip. The frequent
+          // tools sit here; everything you can embed lives behind More.
+          <div style={bottomBarStyle}>
+            <BarButton icon="sticky" label="Sticky" onClick={() => addSticky()} />
+            <BarButton icon="group" label="Group" onClick={() => void groupSelection()} />
+            <BarButton icon="arrow" label="Connect" disabled={selectedNodes.length !== 2} onClick={connectSelected} />
+            <BarButton icon="undo" label="Undo" disabled={!canUndo} onClick={() => void undo()} />
+            <BarButton icon="moreH" label="More" active={showMore} onClick={() => setShowMore(true)} />
+          </div>
+        ) : (
+          <div style={statusStyle}>
+            <span style={{ ...monoMeta, color: hasSelection ? colors.textSecondary : colors.textQuaternary, minWidth: 0 }}>{selectionSummary}</span>
+            <span style={{ flex: 1 }} />
+            <span style={{ ...monoMeta, flexShrink: 0 }}>
+              {nodes.length} {nodes.length === 1 ? "node" : "nodes"} · {edges.length} {edges.length === 1 ? "edge" : "edges"}
+              {snap ? "" : " · snap off"}
+            </span>
+          </div>
+        )}
+        {touch && showMore ? (
+          <EmbedSheet
+            onClose={() => setShowMore(false)}
+            items={[
+              { icon: "file", title: "Embed a note", subtitle: "Search your notes", run: () => void addRef("note") },
+              { icon: "tasks", title: "Embed a task", subtitle: "Search your tasks", run: () => void addRef("task") },
+              { icon: "calendar", title: "Embed an event", subtitle: "From a connected calendar", run: () => void addRef("event") },
+              { icon: "image", title: "Add an image", subtitle: "From your files", run: () => void pickImage() },
+              { icon: "link", title: "Add a link", subtitle: "Paste a URL for a preview", run: () => void pickLink() },
+              { icon: "group", title: "Add a group", subtitle: "A labelled frame that carries its contents", run: addGroup },
+            ]}
+          />
+        ) : null}
         {showHelp ? <ShortcutHelp onClose={() => setShowHelp(false)} /> : null}
       </div>
     </EditRequestCtx.Provider>
@@ -2062,41 +2255,198 @@ function CanvasSurface({ host, canvasId, handleRef }: CanvasViewProps & { handle
   );
 }
 
-function ToolButton({ icon, label, title, onClick, disabled, rotate }: { icon: IconName; label?: ReactNode; title?: string; onClick: () => void; disabled?: boolean; rotate?: number }) {
+// The five quick swatches in the tool strip (amber, teal, violet, indigo, slate); the
+// selection bar and the 1–9 keys reach the full set.
+const QUICK_SWATCHES = ["#f59e0b", "#14b8a6", "#8b5cf6", "#6366f1", "#64748b"] as const;
+
+const toolbarStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: space.xxs,
+  // A minimum, so the coarse-pointer control size (CANVAS_CSS) can grow the strip.
+  minHeight: layout.subToolbarH,
+  flexShrink: 0,
+  boxSizing: "border-box",
+  padding: `0 ${space.sm}px`,
+  borderBottom: `1px solid ${colors.borderSubtle}`,
+  overflowX: "auto",
+  scrollbarWidth: "none",
+};
+const toolDivider: CSSProperties = { width: 1, height: 14, flexShrink: 0, margin: `0 ${space.xs}px`, background: colors.borderSubtle };
+const statusStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: space.md,
+  height: layout.statusbarH,
+  flexShrink: 0,
+  boxSizing: "border-box",
+  padding: `0 ${space.ml}px`,
+  borderTop: `1px solid ${colors.borderSubtle}`,
+  background: colors.surfaceApp,
+  overflow: "hidden",
+};
+// Floats over the board, so it gets the overlay treatment: hairline, 6px radius, menu shadow.
+const floatingBarStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: space.xxs,
+  padding: space.xxs + 1,
+  borderRadius: radius.lg,
+  background: colors.surfaceOverlay,
+  border: `1px solid ${colors.borderSubtle}`,
+  boxShadow: SHADOW_MD,
+};
+const emptyWrapStyle: CSSProperties = { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: space.xl, pointerEvents: "none" };
+const emptyCardStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  gap: space.md,
+  maxWidth: 320,
+  padding: space.xl2,
+  background: colors.surfaceCard,
+  border: `1px dashed ${colors.borderDefault}`,
+  borderRadius: radius.lg,
+  fontFamily: cardFont,
+};
+const kbdStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  boxSizing: "border-box",
+  minWidth: 16,
+  height: 16,
+  padding: "0 4px",
+  borderRadius: radius.xs,
+  border: `1px solid ${colors.borderSubtle}`,
+  background: colors.surfaceSunken,
+  color: colors.textSecondary,
+  fontFamily: font.mono,
+  fontSize: font.size.xs,
+  whiteSpace: "nowrap",
+};
+
+// ---- touch chrome ----------------------------------------------------------------------
+
+const bottomBarStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-around",
+  gap: space.xxs,
+  minHeight: 48,
+  flexShrink: 0,
+  boxSizing: "border-box",
+  padding: `0 ${space.sm}px`,
+  // Clear of the home indicator where the host hasn't already inset the WebView.
+  paddingBottom: "env(safe-area-inset-bottom, 0px)",
+  borderTop: `1px solid ${colors.borderSubtle}`,
+  background: colors.surfaceApp,
+};
+
+/** One bottom-bar tool: an 18px glyph over a 9px mono caption, in a 44px hit area. */
+function BarButton({ icon, label, onClick, disabled, active }: { icon: IconName; label: string; onClick: () => void; disabled?: boolean; active?: boolean }) {
   return (
-    <button type="button" className={`canvas-btn${label ? "" : " icon"}`} title={title ?? (typeof label === "string" ? label : undefined)} aria-label={title ?? (typeof label === "string" ? label : undefined)} onClick={onClick} disabled={disabled}>
-      {icon === "dot" && label ? null : (
-        <span style={{ display: "inline-flex", transform: rotate ? `rotate(${rotate}deg)` : undefined }}>
-          <Icon name={icon} size={15} color="currentColor" />
-        </span>
-      )}
-      {label ? <span>{label}</span> : null}
+    <button type="button" className={`canvas-bar-btn${active ? " on" : ""}`} aria-label={label} onClick={onClick} disabled={disabled}>
+      <Icon name={icon} size={18} color="currentColor" />
+      <span style={{ fontFamily: font.mono, fontSize: 9, lineHeight: "11px", color: active ? colors.textAccent : colors.textQuaternary }}>{label}</span>
     </button>
   );
 }
 
+interface EmbedItem {
+  icon: IconName;
+  title: string;
+  subtitle: string;
+  run: () => void;
+}
+
+/** The More sheet: everything the board can embed beyond a sticky. A bottom sheet over a
+ *  scrim — overlay surface, 8px top radius, a grab handle, then 60px card rows with 38px
+ *  icon tiles. Picking a row closes the sheet first, so the host's picker opens over the
+ *  board rather than under it. */
+function EmbedSheet({ items, onClose }: { items: EmbedItem[]; onClose: () => void }) {
+  return (
+    <div onClick={onClose} style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0, zIndex: 30, display: "flex", flexDirection: "column", justifyContent: "flex-end", background: colors.scrim, fontFamily: cardFont }}>
+      <div
+        role="dialog"
+        aria-label="Add to the board"
+        onClick={(e) => e.stopPropagation()}
+        style={{ padding: `${space.md}px ${space.ml}px calc(${space.lg + 2}px + env(safe-area-inset-bottom, 0px))`, background: colors.surfaceOverlay, borderTop: `1px solid ${colors.borderSubtle}`, borderRadius: `${radius.xl}px ${radius.xl}px 0 0`, boxShadow: SHADOW_LG }}
+      >
+        <div style={{ width: 32, height: 3, borderRadius: 3, background: colors.borderDefault, margin: `0 auto ${space.ml}px` }} />
+        <div style={{ background: colors.surfaceCard, border: `1px solid ${colors.borderSubtle}`, borderRadius: radius.lg, overflow: "hidden" }}>
+          {items.map((it, i) => (
+            <button
+              key={it.title}
+              type="button"
+              className="canvas-sheet-row"
+              style={i === items.length - 1 ? undefined : { borderBottom: `1px solid ${colors.borderSubtle}` }}
+              onClick={() => {
+                onClose();
+                it.run();
+              }}
+            >
+              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, flexShrink: 0, borderRadius: radius.lg, background: colors.surfaceSunken, border: `1px solid ${colors.borderSubtle}` }}>
+                <Icon name={it.icon} size={18} color={colors.textSecondary} />
+              </span>
+              <span style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0, flex: 1 }}>
+                <span style={{ fontSize: font.size.lg, fontWeight: font.weight.medium, color: colors.textPrimary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.title}</span>
+                <span style={{ fontSize: font.size.sm, color: colors.textTertiary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.subtitle}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** A shortcut chip and what it does, in mono — the DOM twin of the design system's `Kbd`. */
+function KeyHint({ keys, what }: { keys: string; what: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: space.xs }}>
+      <kbd style={kbdStyle}>{keys}</kbd>
+      <span style={monoMeta}>{what}</span>
+    </span>
+  );
+}
+
+/** The DOM twin of the design system's `size="sm"` IconButton: 22px square, 13px glyph,
+ *  transparent at rest, fill steps on hover/press, soft accent when `active`. */
+function ToolButton({ icon, title, onClick, disabled, active, rotate }: { icon: IconName; title: string; onClick: () => void; disabled?: boolean; active?: boolean; rotate?: number }) {
+  return (
+    <button type="button" className={`canvas-btn icon${active ? " on" : ""}`} title={title} aria-label={title} onClick={onClick} disabled={disabled}>
+      <span style={{ display: "inline-flex", transform: rotate ? `rotate(${rotate}deg)` : undefined }}>
+        <Icon name={icon} size={13} color="currentColor" />
+      </span>
+    </button>
+  );
+}
 
 /** The `?` overlay: every shortcut, grouped. Click anywhere or press Escape to close. */
 function ShortcutHelp({ onClose }: { onClose: () => void }) {
   return (
     <div
       onClick={onClose}
-      style={{ position: "absolute", inset: 0, zIndex: 20, background: "rgba(17,17,16,0.25)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: cardFont }}
+      style={{ position: "absolute", inset: 0, zIndex: 20, background: colors.scrim, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: cardFont }}
     >
-      <div onClick={(e) => e.stopPropagation()} style={{ width: 720, maxWidth: "94%", maxHeight: "86%", overflow: "auto", background: colors.surfaceCard, border: `1px solid ${colors.borderSubtle}`, borderRadius: 14, boxShadow: "0 18px 50px rgba(0,0,0,0.18)", padding: "18px 22px" }}>
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 12 }}>
-          <div style={{ fontSize: 15, fontWeight: 600 }}>Keyboard shortcuts</div>
+      {/* A dialog, so it takes the overlay surface, the 8px radius and the large shadow. */}
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 720, maxWidth: "94%", maxHeight: "86%", display: "flex", flexDirection: "column", background: colors.surfaceOverlay, border: `1px solid ${colors.borderSubtle}`, borderRadius: radius.xl, boxShadow: SHADOW_LG, overflow: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", minHeight: layout.subToolbarH, flexShrink: 0, padding: `0 ${space.xs}px 0 ${space.lg}px`, borderBottom: `1px solid ${colors.borderSubtle}` }}>
+          <div style={{ fontSize: font.size.base, fontWeight: font.weight.semibold, color: colors.textPrimary }}>Keyboard shortcuts</div>
           <button type="button" className="canvas-btn icon" aria-label="Close" onClick={onClose} style={{ marginLeft: "auto" }}>
-            <Icon name="close" size={14} color="currentColor" />
+            <Icon name="close" size={12} color="currentColor" />
           </button>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "10px 28px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: `${space.md}px ${space.xxl}px`, padding: `${space.md}px ${space.lg}px ${space.lg}px`, overflow: "auto" }}>
           {SHORTCUTS.map((g) => (
             <div key={g.group}>
-              <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase", color: colors.textTertiary, margin: "6px 0" }}>{g.group}</div>
+              <div style={{ fontFamily: font.mono, fontSize: font.size["2xs"], fontWeight: font.weight.semibold, letterSpacing: "0.12em", textTransform: "uppercase", color: colors.textQuaternary, margin: `${space.xs}px 0` }}>{g.group}</div>
               {g.items.map(([keys, what]) => (
-                <div key={keys + what} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, padding: "3px 0" }}>
-                  <kbd style={{ font: `500 11px ${cardFont}`, padding: "1px 6px", borderRadius: 5, border: `1px solid ${colors.borderDefault}`, background: colors.surfaceSunken, color: colors.textSecondary, whiteSpace: "nowrap", minWidth: 60, textAlign: "center" }}>{keys}</kbd>
+                <div key={keys + what} style={{ display: "flex", alignItems: "center", gap: space.md, minHeight: 22, fontSize: font.size.sm }}>
+                  <span style={{ minWidth: 96, flexShrink: 0 }}>
+                    <kbd style={kbdStyle}>{keys}</kbd>
+                  </span>
                   <span style={{ color: colors.textPrimary }}>{what}</span>
                 </div>
               ))}
@@ -2126,29 +2476,30 @@ function CardSearch({ query, onQuery, nodes, onPick, onClose }: { query: string;
   };
   const matches = nodes.map((n) => ({ id: n.id, kind: n.data.node.kind, label: labelOf(n) })).filter((m) => !q || m.label.toLowerCase().includes(q)).slice(0, 8);
   return (
-    <div style={{ width: 360, background: colors.surfaceCard, border: `1px solid ${colors.borderSubtle}`, borderRadius: 10, boxShadow: "0 6px 20px rgba(0,0,0,0.12)", padding: 8, fontFamily: cardFont }}>
+    <div style={{ width: 340, padding: space.xs, background: colors.surfaceOverlay, border: `1px solid ${colors.borderSubtle}`, borderRadius: radius.lg, boxShadow: SHADOW_MD, fontFamily: cardFont }}>
       <input
         autoFocus
+        className="canvas-input"
         value={query}
-        placeholder="Find a card…"
+        placeholder="Find a card"
         onChange={(e) => onQuery(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Escape") onClose();
           else if (e.key === "Enter" && matches[0]) onPick(matches[0].id);
           e.stopPropagation();
         }}
-        style={{ width: "100%", boxSizing: "border-box", font: `13px ${cardFont}`, padding: "6px 8px", borderRadius: 6, border: `1px solid ${colors.borderDefault}`, outline: 0 }}
+        style={{ width: "100%" }}
       />
-      <div style={{ marginTop: 6 }}>
+      <div style={{ marginTop: space.xs, display: "flex", flexDirection: "column", gap: 1 }}>
         {matches.length ? (
           matches.map((m) => (
-            <button key={m.id} type="button" onClick={() => onPick(m.id)} style={{ display: "flex", width: "100%", alignItems: "center", gap: 8, padding: "6px 8px", border: 0, background: "transparent", borderRadius: 6, cursor: "pointer", font: `12px ${cardFont}`, color: colors.textPrimary, textAlign: "left" }}>
-              <span style={{ color: colors.textTertiary, fontSize: 11, minWidth: 40 }}>{m.kind}</span>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.label || "(empty)"}</span>
+            <button key={m.id} type="button" className="canvas-row" onClick={() => onPick(m.id)}>
+              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.label || "(empty)"}</span>
+              <span style={{ ...monoMeta, flexShrink: 0 }}>{m.kind === "text" ? "sticky" : m.kind}</span>
             </button>
           ))
         ) : (
-          <div style={{ padding: "6px 8px", color: colors.textTertiary, fontSize: 12 }}>No cards match.</div>
+          <div style={{ padding: `${space.xs}px ${space.sm}px`, color: colors.textTertiary, fontSize: font.size.sm }}>No cards match.</div>
         )}
       </div>
     </div>

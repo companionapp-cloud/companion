@@ -1,5 +1,6 @@
 import { useLayoutEffect } from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import { CalendarItemInfo } from '@companion/app';
 import { colors, space } from '@companion/design-system';
@@ -13,13 +14,14 @@ export function CalendarEventScreen() {
   const nav = useNavigation();
   const route = useRoute<RouteProp<RootStackParamList, 'CalendarEvent'>>();
   const { item } = route.params;
+  const insets = useSafeAreaInsets();
 
   useLayoutEffect(() => {
     nav.setOptions({ title: item.title || 'Event' });
   }, [nav, item.title]);
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + space.xxl }]}>
       <CalendarItemInfo item={item} />
     </ScrollView>
   );

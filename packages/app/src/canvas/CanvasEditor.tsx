@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { StyleSheet, View } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
+import { colors } from "@companion/design-system";
 import { CANVAS_CSS, CANVAS_JS } from "../canvasBundle.generated";
 import { useCanvasHost } from "./useCanvasHost";
 import type { CanvasHost, CanvasRefKind } from "./host";
@@ -28,7 +29,7 @@ function buildHtml(canvasId: string): string {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<style>html,body{margin:0;padding:0;height:100%;width:100%;background:#f5f5f3;overflow:hidden;-webkit-text-size-adjust:100%;}#canvas{position:absolute;inset:0;}${CANVAS_CSS}</style>
+<style>html,body{margin:0;padding:0;height:100%;width:100%;background:${colors.surfaceCard};overflow:hidden;-webkit-text-size-adjust:100%;}#canvas{position:absolute;inset:0;}${CANVAS_CSS}</style>
 </head>
 <body>
 <div id="canvas"></div>
@@ -109,6 +110,7 @@ export function CanvasEditor({ canvasId, onOpenRef, onNewCanvas }: CanvasEditorP
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  // The board sits on the card surface (the dotted grid is drawn inside the WebView).
+  root: { flex: 1, backgroundColor: colors.surfaceCard },
   web: { flex: 1, backgroundColor: "transparent" },
 });

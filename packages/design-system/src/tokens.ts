@@ -1,148 +1,147 @@
-// Design tokens — the single source of truth for Companion's visual language.
-// Ported from the Companion design system (warm-gray ramp + a single orange accent,
-// Geist typography, generous rounding, low diffuse shadows). CSS variable aliases
-// are resolved to concrete values here because react-native styles take literals.
+// Design tokens — the single source of truth for Companion's visual language: a warm-gray
+// ramp with a single orange accent, Geist typography, and the dense-redesign metrics
+// (13px UI base, 24px rows, 22/26/30 controls, 2–8px radii, hairlines instead of shadows).
+// Colours live in colors.ts (literals on native, CSS custom properties on web so
+// `data-theme="dark"` works); everything else is a literal because react-native styles
+// take numbers.
 
-/** Warm-neutral ramp + orange accent + muted semantic hues, plus semantic aliases. */
-export const colors = {
-  // Neutral ramp (very slightly warm gray)
-  gray0: "#ffffff",
-  gray25: "#fafaf9",
-  gray50: "#f5f5f3",
-  gray100: "#ededea",
-  gray200: "#e0e0dc",
-  gray300: "#cececa",
-  gray400: "#a7a7a1",
-  gray500: "#7b7b75",
-  gray600: "#595954",
-  gray700: "#3e3e3a",
-  gray800: "#2a2a27",
-  gray900: "#1a1a18",
-  gray950: "#111110",
+export { colors, type Colors } from "./colors";
+export { ramp, lightColors, darkColors, type SemanticColors, type ThemeName } from "./palette";
 
-  // Orange accent
-  orange50: "#fff4ed",
-  orange100: "#ffe5d4",
-  orange200: "#feccab",
-  orange500: "#f76808",
-  orange600: "#e04e02",
-  orange700: "#b83a05",
-
-  // Text
-  textPrimary: "#1a1a18",
-  textSecondary: "#595954",
-  textTertiary: "#7b7b75",
-  textDisabled: "#a7a7a1",
-  textInverse: "#ffffff",
-  textAccent: "#e04e02",
-
-  // Surfaces
-  surfaceApp: "#f5f5f3",
-  surfaceCard: "#ffffff",
-  surfaceSunken: "#ededea",
-  surfaceHover: "#ededea",
-  surfaceActive: "#e0e0dc",
-
-  // Borders
-  borderSubtle: "#e0e0dc",
-  borderDefault: "#cececa",
-  borderStrong: "#a7a7a1",
-  borderFocus: "#f76808",
-
-  // Accent / primary action
-  accent: "#f76808",
-  accentHover: "#e04e02",
-  accentActive: "#b83a05",
-  accentSoft: "#fff4ed",
-  accentSoftBorder: "#feccab",
-  onAccent: "#ffffff",
-
-  // Semantic feedback (muted, used sparingly)
-  success: "#2e9e5b",
-  warning: "#d68a0c",
-  danger: "#d64545",
-  dangerSoft: "#fbecec",
-  info: "#3b74d6",
-  infoSoft: "#eaf1fb",
-  infoActive: "#2b579e",
-} as const;
-
-/** 4px base grid. */
+/** 2px base grid. Chrome lives in 4–12px; 16px and up is for page gutters and prose. */
 export const space = {
+  xxs: 2,
   xs: 4,
   sm: 6,
   md: 8,
+  ml: 10,
   lg: 12,
   xl: 16,
+  xl2: 20,
   xxl: 24,
   xxxl: 32,
+  huge: 40,
 } as const;
 
-/** Corner radii — rounded is core to the brand. */
+/** Corner radii — chrome reads as panels, not pills. Only avatars and numeric count
+ * badges stay fully round. */
 export const radius = {
-  xs: 4,
-  sm: 6,
-  md: 8,
-  lg: 12,
-  xl: 16,
-  xxl: 20,
+  /** Inline chips, tab affordances. */
+  xs: 2,
+  /** Rows, tabs, badges, small buttons. */
+  sm: 3,
+  /** Inputs, buttons. */
+  md: 4,
+  /** Panels, code blocks, cards. */
+  lg: 6,
+  /** Overlays, the app tile. */
+  xl: 8,
+  /** @deprecated Same as `xl`; the redesign tops out at 8px. */
+  xxl: 8,
   full: 999,
 } as const;
 
-/** Typography. Geist for UI, Geist Mono for ids/metadata/code. */
+/** Typography. Geist for UI, Geist Mono for everything the machine owns: timestamps,
+ * versions, counts, ids, paths, shortcut hints and section eyebrows. */
 export const font = {
   sans: 'Geist, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
   mono: '"Geist Mono", ui-monospace, "SF Mono", Menlo, monospace',
   size: {
-    "2xs": 11,
-    xs: 12,
-    sm: 13,
-    base: 14,
-    md: 15,
-    lg: 17,
-    xl: 20,
-    "2xl": 24,
-    "3xl": 30,
+    "2xs": 10,
+    xs: 11,
+    sm: 12,
+    /** The UI base. */
+    base: 13,
+    /** Document prose — the one surface that goes up a step, because it is for reading. */
+    md: 14,
+    lg: 15,
+    xl: 17,
+    "2xl": 20,
+    "3xl": 24,
+    display: 30,
   },
   weight: {
     regular: "400",
     medium: "500",
     semibold: "600",
+    /** Marketing only. */
     bold: "700",
   },
-  // react-native letterSpacing is absolute px (no em); approximations of the
-  // design system's tight tracking on display sizes.
+  // react-native letterSpacing is absolute px (no em); these approximate the system's
+  // em tracking at the size each is used with (tight @30, snug @15–17, wide/eyebrow @10–11).
   tracking: {
-    tight: -0.5,
-    snug: -0.2,
+    tight: -0.75,
+    snug: -0.18,
     normal: 0,
-    wide: 0.5,
+    wide: 0.66,
+    eyebrow: 1.2,
+  },
+  /** Line-height multipliers; react-native lineHeight is px, so multiply by the size. */
+  leading: {
+    tight: 1.15,
+    ui: 1.35,
+    prose: 1.6,
   },
 } as const;
 
-/** Low, diffuse, neutral shadows expressed as react-native shadow props (RNW maps
+/** Shadows are only for things that float above the document: `md` for menus and
+ * popovers, `lg` for dialogs and quick capture. Flat chrome — toolbars, panels, cards,
+ * rows — gets a hairline and no shadow. Expressed as react-native shadow props (RNW maps
  * these to box-shadow; native uses them directly). */
 export const shadow = {
-  sm: { shadowColor: "#111110", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 3, elevation: 1 },
+  sm: { shadowColor: "#111110", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 2, elevation: 1 },
   md: { shadowColor: "#111110", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 12, elevation: 4 },
-  lg: { shadowColor: "#111110", shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.14, shadowRadius: 28, elevation: 12 },
+  lg: { shadowColor: "#111110", shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.16, shadowRadius: 28, elevation: 12 },
 } as const;
 
-/** Control heights. */
+/** Control heights. `md` is the pointer default; touch surfaces use `lg`. */
 export const control = {
-  sm: 28,
-  md: 34,
-  lg: 40,
+  xs: 20,
+  sm: 22,
+  md: 26,
+  lg: 30,
+} as const;
+
+/** Row heights. Pointer lists are 24px (38px only when a subtitle earns it); touch rows
+ * never drop below 44px. */
+export const row = {
+  h: 24,
+  twoLine: 38,
+  touch: 44,
+} as const;
+
+/** Icon sizes: 12 beside mono metadata and in tabs, 14 in toolbars and rows, 16 in the
+ * rail, 20 in mobile tiles. Stroke is always 1.5; icons are never filled. */
+export const icon = {
+  sm: 12,
+  md: 14,
+  lg: 16,
+  tile: 20,
+  stroke: 1.5,
 } as const;
 
 /** App layout dimensions. */
 export const layout = {
-  railW: 56,
-  railOpenW: 232,
-  listW: 300,
-  titlebarH: 44,
-  toolbarH: 52,
-  contentMax: 760,
+  railW: 44,
+  railOpenW: 208,
+  listW: 260,
+  panelW: 280,
+  titlebarH: 32,
+  toolbarH: 36,
+  subToolbarH: 28,
+  statusbarH: 22,
+  contentMax: 720,
+} as const;
+
+/** Motion is functional only: one ease, three durations. Content never animates in. */
+export const motion = {
+  ease: "cubic-bezier(0.2, 0, 0.2, 1)",
+  /** Press/hover fills. */
+  instant: 80,
+  /** Colour and border changes. */
+  fast: 120,
+  /** Layout reveals: rail expand, panel toggle. */
+  medium: 200,
 } as const;
 
 /** A small categorical palette for user-picked colors (archetypes, feeds, canvas
@@ -159,5 +158,3 @@ export const swatches = [
   "#3b82f6",
   "#64748b",
 ] as const;
-
-export type Colors = typeof colors;

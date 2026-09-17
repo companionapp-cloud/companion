@@ -1,9 +1,10 @@
 import { useLayoutEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useProjects, DeleteProjectDialog } from '@companion/app';
-import { Button, Center, Text, TextField, colors, radius, space } from '@companion/design-system';
+import { Button, Center, Icon, Input, Text, colors, radius, space, type PressState } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
 import { SectionLabel } from '../ui/native';
 
@@ -15,6 +16,7 @@ export function ProjectSettingsScreen() {
   const { params } = useRoute<RouteProp<RootStackParamList, 'ProjectSettings'>>();
   const { projects, areas, updateProject, deleteProject } = useProjects();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const insets = useSafeAreaInsets();
   const project = projects.find((p) => p.id === params.projectId);
 
   useLayoutEffect(() => {
@@ -31,17 +33,14 @@ export function ProjectSettingsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surfaceApp }}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + space.xxl }]} keyboardShouldPersistTaps="handled">
         <SectionLabel>Name</SectionLabel>
-        <View style={styles.titleRow}>
-          <View style={[styles.dot, { backgroundColor: project.color ?? colors.borderStrong }]} />
-          <TextField
-            variant="title"
-            value={project.name}
-            placeholder="Project name"
-            onChangeText={(t) => t.trim() && void updateProject(project.id, { name: t.trim() })}
-          />
-        </View>
+        <Input
+          value={project.name}
+          placeholder="Name the project"
+          leadingIcon={<Icon name="folder" size={16} color={project.color ?? colors.textTertiary} />}
+          onChangeText={(t) => t.trim() && void updateProject(project.id, { name: t.trim() })}
+        />
 
         <SectionLabel>Area</SectionLabel>
         <View style={styles.chips}>
@@ -51,7 +50,7 @@ export function ProjectSettingsScreen() {
               <Pressable
                 key={a.id}
                 onPress={() => void updateProject(project.id, { areaId: a.id })}
-                style={[styles.chip, on ? styles.chipOn : null]}
+                style={({ pressed }: PressState) => [styles.chip, on ? styles.chipOn : pressed ? styles.chipPressed : null]}
               >
                 <Text variant="caption" tone={on ? 'accent' : 'secondary'}>
                   {a.name}
@@ -88,11 +87,18 @@ export function ProjectSettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: space.xl, gap: space.md },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  dot: { width: 12, height: 12, borderRadius: radius.full, flexShrink: 0 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
-  chip: { paddingHorizontal: space.md, paddingVertical: space.xs, borderRadius: radius.full, borderWidth: 1, borderColor: colors.borderDefault },
-  chipOn: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
+  content: { paddingHorizontal: space.lg },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, paddingHorizontal: space.xxs },
+  // Chips are 3px-cornered; `lg` control height keeps them a comfortable touch target.
+  chip: {
+    minHeight: 30,
+    justifyContent: 'center',
+    paddingHorizontal: space.ml,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.borderDefault,
+  },
+  chipPressed: { backgroundColor: colors.surfaceActive },
+  chipOn: { borderColor: colors.accentSoftBorder, backgroundColor: colors.accentSoft },
   footer: { marginTop: space.xxl, alignItems: 'flex-start' },
 });

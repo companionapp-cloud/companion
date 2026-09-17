@@ -8,14 +8,19 @@ import {
   IconButton,
   Input,
   ListRow,
+  ProgressRing,
   SplitView,
   Text,
   TextField,
   colors,
+  control,
+  icon,
   layout,
+  motion,
   radius,
   space,
-  type IconName,
+  transition,
+  type PressState,
 } from "@companion/design-system";
 import { useNav, type ProjectSection } from "./nav-context";
 import { useToolVisibility, type ToolId } from "./ToolVisibilityProvider";
@@ -31,34 +36,42 @@ import { repeatSubtitle } from "./repeat";
 import { useMultiSelect, pressMods } from "./MultiSelectProvider";
 import { SelectionStack } from "./SelectionStack";
 import { MultiSelectBar } from "./MultiSelectBar";
-import { ListsColumn, ListHome } from "./ProjectLists";
+import { ListsColumn, ListHome, listStyles } from "./ProjectLists";
+import { EmptyDetail } from "./WorkspaceScreen";
+import { timeAgo } from "./NotificationRow";
 import { useProjectLists } from "./ListsProvider";
 import { useCanvases } from "./canvas/CanvasesProvider";
 import { CanvasesList } from "./canvas/CanvasesList";
 import { CanvasPane } from "./canvas/CanvasPane";
 
-const SECTIONS: { id: ProjectSection; label: string; icon: IconName; tool: ToolId }[] = [
-  { id: "notes", label: "Notes", icon: "notes", tool: "notes" },
-  { id: "tasks", label: "Tasks", icon: "tasks", tool: "tasks" },
+const SECTIONS: { id: ProjectSection; label: string; tool: ToolId }[] = [
+  { id: "notes", label: "Notes", tool: "notes" },
+  { id: "tasks", label: "Tasks", tool: "tasks" },
   // Lists order a project's tasks, so they follow the Tasks tool's visibility.
-  { id: "lists", label: "Lists", icon: "listOrdered", tool: "tasks" },
-  { id: "canvases", label: "Canvases", icon: "canvas", tool: "canvases" },
-  { id: "calendars", label: "Calendars", icon: "calendar", tool: "calendar" },
-  { id: "habits", label: "Habits", icon: "habits", tool: "habits" },
+  { id: "lists", label: "Lists", tool: "tasks" },
+  { id: "canvases", label: "Canvases", tool: "canvases" },
+  { id: "calendars", label: "Calendars", tool: "calendar" },
+  { id: "habits", label: "Habits", tool: "habits" },
 ];
 const SECTION_LABEL: Record<ProjectSection, string> = { notes: "Notes", tasks: "Tasks", lists: "Lists", canvases: "Canvases", calendars: "Calendars", habits: "Habits" };
 
-/** The project content-details view (PLAN §6.6) — a master-detail rendered in the main
- * content area (not a modal). The list column carries a push sub-nav (Notes / Tasks /
- * Calendars / Habits → that section's item list); the detail pane shows the selected
- * item. Every level is a deep-linkable URL: /project/<id>[/<section>[/<itemId>]]. */
+/** The project content-details view (PLAN §6.6), rendered in the main content area (not a
+ * modal): a 32px header (name, task progress, settings), a row of section chips, then a
+ * split of that section's dense list beside the selected item's editor. Nothing is selected
+ * on the user's behalf — a section opens on the empty state, and switching section drops
+ * the selection. Every level is a deep-linkable URL: /project/<id>[/<section>[/<itemId>]];
+ * the bare project URL shows its first section. */
 export function ProjectView() {
   const nav = useNav();
   const { core } = useCore();
   const { projects, membershipsForProject } = useProjects();
   const notesStore = useNotes();
   const tasksStore = useTasks();
+  // Hiding a tool in Settings › Tools also drops its project section from the chips.
+  const { hidden } = useToolVisibility();
   const loc = nav.current;
+  // The project's settings page (name, area, delete) takes over the body while open.
+  const [showSettings, setShowSettings] = useState(false);
 
   // A project's live memberships, kept fresh as they change locally or via sync.
   const projectId = loc.kind === "project" ? loc.projectId : "";
@@ -101,6 +114,13 @@ export function ProjectView() {
     [canvasMembers, canvasesStore],
   );
 
+  const projectLists = useProjectLists(projectId);
+
+  // Navigating anywhere inside the project (a chip, a row, another project) leaves settings.
+  const locSection = loc.kind === "project" ? loc.section : undefined;
+  const locItem = loc.kind === "project" ? loc.itemId : undefined;
+  useEffect(() => setShowSettings(false), [projectId, locSection, locItem]);
+
   if (loc.kind !== "project") return null;
   const project = projects.find((p) => p.id === loc.projectId);
   if (!project) {
@@ -111,24 +131,106 @@ export function ProjectView() {
     );
   }
 
+  const sections = SECTIONS.filter((s) => !hidden.has(s.tool));
+  // The bare project URL lands on the first section's list (with nothing selected).
+  const section: ProjectSection | undefined = loc.section ?? sections[0]?.id;
+  const counts: Partial<Record<ProjectSection, number>> = {
+    notes: notes.length,
+    tasks: tasks.length + seeds.length,
+    lists: projectLists.length,
+    canvases: canvases.length,
+  };
+  const doneCount = tasks.filter((t) => t.status === "done").length;
+
   return (
-    <SplitView storageKey="companion.project.listWidth" defaultWidth={layout.listW} minWidth={240} maxWidth={460} aside={<ListColumn notes={notes} tasks={tasks} seeds={seeds} canvases={canvases} noteCount={notes.length} taskCount={tasks.length + seeds.length} />}>
-      <DetailPane notes={notes} />
-    </SplitView>
+    <View style={styles.root}>
+      <View style={styles.header}>
+        <Icon name="folder" size={icon.md} color={project.color ?? colors.textSecondary} />
+        <Text variant="title" numberOfLines={1} style={{ flexShrink: 1 }}>
+          {project.name}
+        </Text>
+        {tasks.length ? (
+          <>
+            <ProgressRing value={doneCount / tasks.length} />
+            <Text variant="mono" tone="quaternary">
+              {doneCount}/{tasks.length} done
+            </Text>
+          </>
+        ) : null}
+        <View style={{ flex: 1 }} />
+        <IconButton label="Project settings" size="sm" active={showSettings || !section} onPress={() => setShowSettings((v) => !v)}>
+          <Icon name="settings" size={13} color={showSettings ? colors.textAccent : colors.textSecondary} />
+        </IconButton>
+      </View>
+
+      {sections.length ? (
+        <View style={styles.chipRow}>
+          {sections.map((s) => (
+            <SectionChip
+              key={s.id}
+              label={s.label}
+              count={counts[s.id]}
+              selected={!showSettings && s.id === section}
+              onPress={() => {
+                setShowSettings(false);
+                // Re-picking the open section keeps its selection; a different one clears it.
+                if (s.id !== section || !loc.section) nav.openProjectSection(project.id, s.id);
+              }}
+            />
+          ))}
+        </View>
+      ) : null}
+
+      {showSettings || !section ? (
+        <ProjectHome notes={notes} />
+      ) : (
+        <SplitView
+          storageKey="companion.project.listWidth"
+          defaultWidth={layout.listW}
+          minWidth={200}
+          maxWidth={440}
+          aside={<ListColumn section={section} notes={notes} tasks={tasks} seeds={seeds} canvases={canvases} />}
+        >
+          <DetailPane section={section} />
+        </SplitView>
+      )}
+    </View>
   );
 }
 
-/** The list column: a two-level push sub-nav. Level 0 shows the section menu; pressing
- * a section pushes to that section's item list (with a back to the menu). */
-function ListColumn({ notes, tasks, seeds, canvases, noteCount, taskCount }: { notes: Note[]; tasks: Task[]; seeds: RepeatingTask[]; canvases: Canvas[]; noteCount: number; taskCount: number }) {
+/** One section chip: 22px, radius 3, caption label + mono count. Selected reads like a
+ *  selected row (soft fill, accent text); hover steps the fill, nothing moves. */
+function SectionChip({ label, count, selected, onPress }: { label: string; count?: number; selected: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      aria-label={label}
+      style={({ hovered, pressed }: PressState) => [
+        styles.chip,
+        transition("background-color", motion.instant),
+        { backgroundColor: selected ? colors.surfaceSelected : pressed ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent" },
+      ]}
+    >
+      <Text variant="caption" tone={selected ? "accent" : "secondary"}>
+        {label}
+      </Text>
+      {count != null ? (
+        <Text variant="mono" tone={selected ? "accent" : "quaternary"}>
+          {count}
+        </Text>
+      ) : null}
+    </Pressable>
+  );
+}
+
+/** The list column: the open section's dense browse list (the chips above pick which). */
+function ListColumn({ section, notes, tasks, seeds, canvases }: { section: ProjectSection; notes: Note[]; tasks: Task[]; seeds: RepeatingTask[]; canvases: Canvas[] }) {
   const nav = useNav();
   const notesStore = useNotes();
   const tasksStore = useTasks();
   const canvasesStore = useCanvases();
   const { addMember } = useProjects();
   const ms = useMultiSelect();
-  // Hiding a tool in Settings › Tools also drops its project section from this menu.
-  const { hidden } = useToolVisibility();
   const loc = nav.current;
 
   // Per-section list controls: a search box narrows the notes list, a due-date filter
@@ -153,16 +255,18 @@ function ListColumn({ notes, tasks, seeds, canvases, noteCount, taskCount }: { n
 
   // Register the on-screen section list for multiselect (notes / actionable tasks; seeds
   // stay single-select). Scoped per project+section so switching lists drops the selection.
-  // Registers the filtered order so range-select matches what's shown.
+  // Registers the filtered order so range-select matches what's shown. Only while this tab
+  // is the one on screen — background tabs stay mounted and would fight for the scope.
   const secProjectId = loc.kind === "project" ? loc.projectId : "";
-  const secSection = loc.kind === "project" ? loc.section : undefined;
+  const secSection = section;
   useEffect(() => {
+    if (!nav.visible) return;
     if (secSection === "notes") ms.register(`project:${secProjectId}:notes`, "note", filteredNotes.map((n) => n.id));
     else if (secSection === "tasks") ms.register(`project:${secProjectId}:tasks`, "task", [...openTasks, ...doneTasks].map((t) => t.id));
-  }, [ms.register, secProjectId, secSection, filteredNotes, openTasks, doneTasks]);
+  }, [ms.register, secProjectId, secSection, filteredNotes, openTasks, doneTasks, nav.visible]);
 
   if (loc.kind !== "project") return null;
-  const { projectId, section, itemId, subItemId } = loc;
+  const { projectId, itemId, subItemId } = loc;
 
   // The lists section has its own column (index of lists → one list's rows).
   if (section === "lists") {
@@ -175,7 +279,6 @@ function ListColumn({ notes, tasks, seeds, canvases, noteCount, taskCount }: { n
         canvases={canvases}
         selectedId={itemId ?? null}
         onSelect={(id) => nav.openProjectItem(projectId, "canvases", id)}
-        onBack={() => nav.openProject(projectId)}
         onCreate={() => {
           void (async () => {
             const c = await canvasesStore.create();
@@ -203,203 +306,181 @@ function ListColumn({ notes, tasks, seeds, canvases, noteCount, taskCount }: { n
     await createTaskInProject(title);
   };
 
-  // Section list (level 1).
-  if (section) {
-    return (
-      <View style={styles.list}>
-        <View style={styles.listHeader}>
-          <IconButton label="Back to sections" size="sm" onPress={() => nav.openProject(projectId)}>
-            <Icon name="chevronLeft" size={18} color={colors.textSecondary} />
-          </IconButton>
-          {/* The tasks section swaps the static title for its due-date filter, matching the
-              root task list; other sections keep the plain label. */}
-          {section === "tasks" ? (
-            <View style={{ flex: 1 }}>
-              <ListFilterMenu<"all" | "upcoming" | "overdue" | `list:${string}`>
-                value={taskFilter}
-                onChange={(v) => {
-                  // List entries jump into that list's ordered view; the rest filter in place.
-                  if (v.startsWith("list:")) nav.openProjectItem(projectId, "lists", v.slice(5));
-                  else setTaskFilter(v as "all" | "upcoming" | "overdue");
-                }}
-                options={[
-                  { value: "all", label: "All tasks" },
-                  { value: "upcoming", label: "Upcoming tasks" },
-                  { value: "overdue", label: "Overdue tasks" },
-                  ...projectLists.map((l) => ({ value: `list:${l.id}` as const, label: `List: ${l.name}` })),
-                ]}
-              />
-            </View>
-          ) : (
-            <Text variant="caption" tone="secondary" style={{ flex: 1, fontWeight: "600" }}>
-              {SECTION_LABEL[section]}
-            </Text>
-          )}
-          {section === "notes" ? (
-            <IconButton label="New note" size="sm" onPress={createNoteInProject}>
-              <Icon name="plus" size={16} color={colors.textSecondary} />
-            </IconButton>
-          ) : section === "tasks" ? (
-            <IconButton label="New task" size="sm" onPress={() => void createTaskInProject()}>
-              <Icon name="plus" size={16} color={colors.textSecondary} />
-            </IconButton>
-          ) : null}
-        </View>
-        {section === "notes" ? (
-          <View style={styles.search}>
-            <Input
-              size="sm"
-              placeholder="Search notes"
-              value={noteQuery}
-              onChangeText={setNoteQuery}
-              leadingIcon={<Icon name="search" size={15} color={colors.textTertiary} />}
-            />
-          </View>
-        ) : section === "tasks" ? (
-          <View style={styles.search}>
-            <Input
-              size="sm"
-              placeholder="Add a task, press Enter"
-              value={taskDraft}
-              onChangeText={setTaskDraft}
-              onSubmitEditing={() => void addTaskFromDraft()}
-              leadingIcon={<Icon name="plus" size={15} color={colors.textTertiary} />}
-            />
-          </View>
-        ) : null}
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.md, gap: 2 }}>
-          {section === "notes" ? (
-            filteredNotes.length ? (
-              filteredNotes.map((n) => {
-                const selected = ms.active ? ms.isSelected(n.id) : n.id === itemId;
-                return (
-                  <ListRow
-                    key={n.id}
-                    icon={<Icon name="file" size={17} color={selected ? colors.accentHover : colors.textTertiary} />}
-                    title={n.title || "Untitled"}
-                    subtitle={preview(n.contentMd)}
-                    selected={selected}
-                    onPress={(e) => {
-                      if (!ms.press(n.id, pressMods(e))) nav.openProjectItem(projectId, "notes", n.id);
-                    }}
-                  />
-                );
-              })
-            ) : (
-              <Text tone="tertiary" variant="caption" style={styles.empty}>
-                {noteQuery
-                  ? "No notes match that."
-                  : "No notes yet. Add one with ＋, or add existing notes from a note’s “Projects” menu."}
-              </Text>
-            )
-          ) : section === "tasks" ? (
-            filteredTasks.length || (taskFilter === "all" && seeds.length) ? (
-              <>
-                {openTasks.map((t) => (
-                  <TaskRow
-                    key={t.id}
-                    task={t}
-                    selected={ms.active ? ms.isSelected(t.id) : t.id === itemId}
-                    onPress={(e) => {
-                      if (!ms.press(t.id, pressMods(e))) nav.openProjectItem(projectId, "tasks", t.id);
-                    }}
-                    onToggle={() => void tasksStore.setStatus(t.id, "done")}
-                  />
-                ))}
-                {/* Repeating definitions have no concrete due date, so hide them under a due filter. */}
-                {taskFilter === "all" && seeds.length ? (
-                  <>
-                    <Text variant="caption" tone="tertiary" style={styles.sectionLabel}>
-                      REPEATING · {seeds.length}
-                    </Text>
-                    {seeds.map((s) => (
-                      <ListRow
-                        key={s.id}
-                        icon={<Icon name="repeat" size={16} color={s.id === itemId ? colors.accentHover : colors.textTertiary} />}
-                        title={s.title || "Untitled task"}
-                        subtitle={repeatSubtitle(s.repeatRule, s.nextOccurrence)}
-                        selected={s.id === itemId}
-                        onPress={() => nav.openProjectItem(projectId, "tasks", s.id)}
-                      />
-                    ))}
-                  </>
-                ) : null}
-                {doneTasks.length ? (
-                  <>
-                    <Text variant="caption" tone="tertiary" style={styles.sectionLabel}>
-                      COMPLETED · {doneTasks.length}
-                    </Text>
-                    {doneTasks.map((t) => (
-                      <TaskRow
-                        key={t.id}
-                        task={t}
-                        selected={ms.active ? ms.isSelected(t.id) : t.id === itemId}
-                        onPress={(e) => {
-                          if (!ms.press(t.id, pressMods(e))) nav.openProjectItem(projectId, "tasks", t.id);
-                        }}
-                        onToggle={() => void tasksStore.setStatus(t.id, "open")}
-                      />
-                    ))}
-                  </>
-                ) : null}
-              </>
-            ) : (
-              <Text tone="tertiary" variant="caption" style={styles.empty}>
-                {taskFilter === "upcoming"
-                  ? "No upcoming tasks in this project."
-                  : taskFilter === "overdue"
-                    ? "No overdue tasks in this project."
-                    : "No tasks yet. Add one with ＋, or add existing tasks from a task’s “Projects” menu."}
-              </Text>
-            )
-          ) : (
-            <Text tone="tertiary" variant="caption" style={styles.empty}>
-              {SECTION_LABEL[section]} for this project arrive in a later milestone.
-            </Text>
-          )}
-        </ScrollView>
-      </View>
-    );
-  }
+  const count = section === "notes" ? notes.length : section === "tasks" ? openTasks.length : null;
 
-  // Section menu (level 0).
   return (
     <View style={styles.list}>
       <View style={styles.listHeader}>
-        <Text variant="caption" tone="secondary" style={{ flex: 1, fontWeight: "600" }}>
-          Sections
-        </Text>
+        {/* The tasks section swaps the static title for its due-date filter, matching the
+            root task list; other sections keep the plain label. */}
+        {section === "tasks" ? (
+          <View style={{ flex: 1 }}>
+            <ListFilterMenu<"all" | "upcoming" | "overdue" | `list:${string}`>
+              value={taskFilter}
+              onChange={(v) => {
+                // List entries jump into that list's ordered view; the rest filter in place.
+                if (v.startsWith("list:")) nav.openProjectItem(projectId, "lists", v.slice(5));
+                else setTaskFilter(v as "all" | "upcoming" | "overdue");
+              }}
+              options={[
+                { value: "all", label: "All tasks" },
+                { value: "upcoming", label: "Upcoming tasks" },
+                { value: "overdue", label: "Overdue tasks" },
+                ...projectLists.map((l) => ({ value: `list:${l.id}` as const, label: `List: ${l.name}` })),
+              ]}
+            />
+          </View>
+        ) : (
+          <Text variant="label" numberOfLines={1} style={{ flex: 1 }}>
+            {SECTION_LABEL[section]}
+          </Text>
+        )}
+        {count != null ? (
+          <Text variant="mono" tone="quaternary">
+            {count}
+          </Text>
+        ) : null}
+        {section === "notes" ? (
+          <IconButton label="New note" size="sm" onPress={createNoteInProject}>
+            <Icon name="plus" size={icon.sm} color={colors.textSecondary} />
+          </IconButton>
+        ) : section === "tasks" ? (
+          <IconButton label="New task" size="sm" onPress={() => void createTaskInProject()}>
+            <Icon name="plus" size={icon.sm} color={colors.textSecondary} />
+          </IconButton>
+        ) : null}
       </View>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.md, gap: 2 }}>
-        {SECTIONS.filter((s) => !hidden.has(s.tool)).map((s) => (
-          <ListRow
-            key={s.id}
-            icon={<Icon name={s.icon} size={18} color={colors.textSecondary} />}
-            title={s.label}
-            trailing={s.id === "notes" ? String(noteCount) : s.id === "tasks" ? String(taskCount) : s.id === "lists" ? String(projectLists.length) : s.id === "canvases" ? String(canvases.length) : undefined}
-            hasChildren
-            onPress={() => nav.openProjectSection(projectId, s.id)}
+      {section === "notes" ? (
+        <View style={styles.search}>
+          <Input
+            size="sm"
+            placeholder="Search notes"
+            value={noteQuery}
+            onChangeText={setNoteQuery}
+            leadingIcon={<Icon name="search" size={icon.sm} color={colors.textQuaternary} />}
           />
-        ))}
+        </View>
+      ) : section === "tasks" ? (
+        <View style={styles.search}>
+          <Input
+            size="sm"
+            placeholder="Add a task, press Enter"
+            value={taskDraft}
+            onChangeText={setTaskDraft}
+            onSubmitEditing={() => void addTaskFromDraft()}
+            leadingIcon={<Icon name="plus" size={icon.sm} color={colors.textQuaternary} />}
+          />
+        </View>
+      ) : null}
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll}>
+        {section === "notes" ? (
+          filteredNotes.length ? (
+            filteredNotes.map((n) => {
+              const selected = ms.active ? ms.isSelected(n.id) : n.id === itemId;
+              return (
+                <ListRow
+                  key={n.id}
+                  icon={<Icon name={n.date ? "today" : "file"} size={icon.sm} color={selected ? colors.textAccent : colors.textQuaternary} />}
+                  title={n.title || "Untitled"}
+                  trailing={timeAgo(n.updatedAt)}
+                  selected={selected}
+                  onPress={(e) => {
+                    if (!ms.press(n.id, pressMods(e))) nav.openProjectItem(projectId, "notes", n.id);
+                  }}
+                />
+              );
+            })
+          ) : (
+            <Text tone="tertiary" variant="caption" style={styles.empty}>
+              {noteQuery
+                ? "No notes match that."
+                : "No notes yet. Add one with ＋, or add existing notes from a note’s “Projects” menu."}
+            </Text>
+          )
+        ) : section === "tasks" ? (
+          filteredTasks.length || (taskFilter === "all" && seeds.length) ? (
+            <>
+              {openTasks.map((t) => (
+                <TaskRow
+                  key={t.id}
+                  task={t}
+                  selected={ms.active ? ms.isSelected(t.id) : t.id === itemId}
+                  onPress={(e) => {
+                    if (!ms.press(t.id, pressMods(e))) nav.openProjectItem(projectId, "tasks", t.id);
+                  }}
+                  onToggle={() => void tasksStore.setStatus(t.id, "done")}
+                />
+              ))}
+              {/* Repeating definitions have no concrete due date, so hide them under a due filter. */}
+              {taskFilter === "all" && seeds.length ? (
+                <>
+                  <Text variant="eyebrow" tone="quaternary" style={styles.sectionLabel}>
+                    Repeating · {seeds.length}
+                  </Text>
+                  {seeds.map((s) => (
+                    <ListRow
+                      key={s.id}
+                      icon={<Icon name="repeat" size={icon.sm} color={s.id === itemId ? colors.textAccent : colors.textQuaternary} />}
+                      title={s.title || "Untitled task"}
+                      subtitle={repeatSubtitle(s.repeatRule, s.nextOccurrence)}
+                      selected={s.id === itemId}
+                      onPress={() => nav.openProjectItem(projectId, "tasks", s.id)}
+                    />
+                  ))}
+                </>
+              ) : null}
+              {doneTasks.length ? (
+                <>
+                  <Text variant="eyebrow" tone="quaternary" style={styles.sectionLabel}>
+                    Completed · {doneTasks.length}
+                  </Text>
+                  {doneTasks.map((t) => (
+                    <TaskRow
+                      key={t.id}
+                      task={t}
+                      selected={ms.active ? ms.isSelected(t.id) : t.id === itemId}
+                      onPress={(e) => {
+                        if (!ms.press(t.id, pressMods(e))) nav.openProjectItem(projectId, "tasks", t.id);
+                      }}
+                      onToggle={() => void tasksStore.setStatus(t.id, "open")}
+                    />
+                  ))}
+                </>
+              ) : null}
+            </>
+          ) : (
+            <Text tone="tertiary" variant="caption" style={styles.empty}>
+              {taskFilter === "upcoming"
+                ? "No upcoming tasks in this project."
+                : taskFilter === "overdue"
+                  ? "No overdue tasks in this project."
+                  : "No tasks yet. Add one with ＋, or add existing tasks from a task’s “Projects” menu."}
+            </Text>
+          )
+        ) : (
+          <Text tone="tertiary" variant="caption" style={styles.empty}>
+            {SECTION_LABEL[section]} for this project arrive in a later milestone.
+          </Text>
+        )}
       </ScrollView>
     </View>
   );
 }
 
-/** The detail pane: the project's home (settings) at the root, a selected note or task, or
- * a prompt to pick one. */
-function DetailPane({ notes }: { notes: Note[] }) {
+/** The detail pane: the selected note, task, list or canvas — or the empty state. Nothing
+ * is picked on the user's behalf. */
+function DetailPane({ section }: { section: ProjectSection }) {
   const nav = useNav();
   const notesStore = useNotes();
   const tasksStore = useTasks();
   const ms = useMultiSelect();
   const loc = nav.current;
   if (loc.kind !== "project") return null;
-  const { section, itemId, subItemId } = loc;
+  const { itemId, subItemId } = loc;
 
   // A multiselection takes over the detail pane: the bulk sub-toolbar + the selection stack
   // showing the first selected item, instead of the single-item editor.
-  if (ms.active) {
+  if (ms.active && nav.visible) {
     const id = ms.primaryId;
     let body: ReactNode = <Center><Text tone="tertiary">Nothing to preview.</Text></Center>;
     if (id && ms.kind === "note") {
@@ -410,7 +491,7 @@ function DetailPane({ notes }: { notes: Note[] }) {
       if (task) body = <TaskEditor key={task.id} task={task} save={tasksStore.update} />;
     }
     return (
-      <View style={{ flex: 1, minHeight: 0 }}>
+      <View style={styles.detail}>
         <MultiSelectBar />
         <SelectionStack count={ms.count}>{body}</SelectionStack>
       </View>
@@ -494,29 +575,20 @@ function DetailPane({ notes }: { notes: Note[] }) {
     return <CanvasPane key={itemId} canvasId={itemId} onDeleted={() => nav.openProjectSection(loc.projectId, "canvases")} />;
   }
 
-  if (section) {
-    const prompt =
-      section === "notes"
-        ? "Select a note, or start a new one."
-        : section === "tasks"
-          ? "Select a task, or add a new one."
-          : section === "lists"
-            ? "Select a list, or create one to order this project’s tasks."
-            : section === "canvases"
-              ? "Select a canvas, or start a new board for this project."
-              : `${SECTION_LABEL[section]} land in a later milestone.`;
+  if (section === "calendars" || section === "habits") {
     return (
       <Center>
-        <Text tone="tertiary">{prompt}</Text>
+        <Text variant="caption" tone="tertiary">
+          {SECTION_LABEL[section]} land in a later milestone.
+        </Text>
       </Center>
     );
   }
-
-  // Project home (root): settings + a peek at the content.
-  return <ProjectHome notes={notes} />;
+  return <EmptyDetail kind={section === "notes" ? "note" : section === "canvases" ? "canvas" : "task"} />;
 }
 
-/** The project root detail: editable name, area reassignment, and delete. */
+/** The project's settings page (behind the header's settings button): editable name, area
+ * reassignment, a peek at recent notes, and delete. */
 function ProjectHome({ notes }: { notes: Note[] }) {
   const nav = useNav();
   const { projects, areas, updateProject, deleteProject } = useProjects();
@@ -526,21 +598,30 @@ function ProjectHome({ notes }: { notes: Note[] }) {
   if (!project || loc.kind !== "project") return null;
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={styles.detail}>
     <ScrollView contentContainerStyle={styles.home}>
       <View style={styles.titleRow}>
         <View style={[styles.dot, { backgroundColor: project.color ?? colors.borderStrong }]} />
         <TextField variant="title" value={project.name} placeholder="Project name" onChangeText={(t) => t.trim() && void updateProject(project.id, { name: t.trim() })} />
       </View>
 
-      <Text variant="caption" tone="tertiary" style={styles.groupLabel}>
-        AREA
+      <Text variant="eyebrow" tone="quaternary" style={styles.groupLabel}>
+        Area
       </Text>
       <View style={styles.chips}>
         {areas.map((a) => {
           const on = a.id === project.areaId;
           return (
-            <Pressable key={a.id} onPress={() => void updateProject(project.id, { areaId: a.id })} style={[styles.chip, on ? styles.chipOn : null]}>
+            <Pressable
+              key={a.id}
+              onPress={() => void updateProject(project.id, { areaId: a.id })}
+              aria-label={a.name}
+              style={({ hovered, pressed }: PressState) => [
+                styles.chip,
+                styles.areaChip,
+                on ? styles.areaChipOn : { backgroundColor: pressed ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent" },
+              ]}
+            >
               <Text variant="caption" tone={on ? "accent" : "secondary"}>
                 {a.name}
               </Text>
@@ -554,17 +635,17 @@ function ProjectHome({ notes }: { notes: Note[] }) {
         ) : null}
       </View>
 
-      <Text variant="caption" tone="tertiary" style={styles.groupLabel}>
-        RECENT NOTES
+      <Text variant="eyebrow" tone="quaternary" style={styles.groupLabel}>
+        Recent notes
       </Text>
       {notes.length ? (
         <View style={styles.card}>
           {notes.slice(0, 5).map((n) => (
             <ListRow
               key={n.id}
-              icon={<Icon name="file" size={17} color={colors.textTertiary} />}
+              icon={<Icon name={n.date ? "today" : "file"} size={icon.sm} color={colors.textQuaternary} />}
               title={n.title || "Untitled"}
-              subtitle={preview(n.contentMd)}
+              trailing={timeAgo(n.updatedAt)}
               onPress={() => nav.openProjectItem(project.id, "notes", n.id)}
             />
           ))}
@@ -576,7 +657,7 @@ function ProjectHome({ notes }: { notes: Note[] }) {
       )}
 
       <View style={styles.footer}>
-        <Button label="Delete project" variant="secondary" onPress={() => setConfirmDelete(true)} />
+        <Button label="Delete project" variant="danger" size="sm" onPress={() => setConfirmDelete(true)} />
       </View>
     </ScrollView>
 
@@ -594,39 +675,44 @@ function ProjectHome({ notes }: { notes: Note[] }) {
   );
 }
 
-function preview(md: string): string {
-  const body = md.replace(/\s+/g, " ").trim();
-  return body || "No additional text";
-}
-
 const styles = {
-  list: { flex: 1, minHeight: 0, backgroundColor: colors.surfaceCard },
-  listHeader: {
+  ...listStyles,
+  root: { flex: 1, minHeight: 0, backgroundColor: colors.surfaceCard },
+  header: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    gap: space.xs,
-    // Match the height of the section headers (which carry 28px IconButtons) so the
-    // "Sections" menu, which is text-only, doesn't render a shorter bar. The +1 covers
-    // the bottom border, which border-box folds into minHeight but not the taller rows.
-    minHeight: 28 + space.md * 2 + 1,
-    paddingHorizontal: space.md,
-    paddingVertical: space.md,
+    gap: space.md,
+    height: layout.titlebarH,
+    paddingLeft: space.ml,
+    paddingRight: space.sm,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
-    // Sit above the search row so the filter dropdown, which overflows the header,
-    // paints over the sibling input instead of behind it.
-    zIndex: 2,
+    flexShrink: 0,
   },
-  search: { paddingHorizontal: space.md, paddingTop: space.md, paddingBottom: space.md, zIndex: 1 },
-  empty: { padding: space.xl, lineHeight: 20, textAlign: "center" as const },
-  sectionLabel: { fontWeight: "600" as const, letterSpacing: 0.5, paddingHorizontal: space.md, paddingTop: space.lg, paddingBottom: space.xs },
-  home: { maxWidth: layout.contentMax, width: "100%" as const, marginHorizontal: "auto" as const, padding: space.xxl, gap: space.lg },
-  titleRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.md },
-  dot: { width: 12, height: 12, borderRadius: radius.full, flexShrink: 0 },
-  groupLabel: { fontWeight: "600" as const, letterSpacing: 0.5, marginTop: space.md },
-  chips: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: space.sm },
-  chip: { paddingHorizontal: space.md, paddingVertical: space.xs, borderRadius: radius.full, borderWidth: 1, borderColor: colors.borderDefault },
-  chipOn: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
-  card: { backgroundColor: colors.surfaceCard, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.borderSubtle, overflow: "hidden" as const, padding: space.xs },
-  footer: { marginTop: space.xl, alignItems: "flex-start" as const },
+  chipRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: space.xxs,
+    paddingHorizontal: space.md,
+    paddingVertical: space.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+    flexShrink: 0,
+  },
+  chip: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 5,
+    height: control.sm,
+    paddingHorizontal: 7,
+    borderRadius: radius.sm,
+  },
+  detail: { flex: 1, minWidth: 0, minHeight: 0, backgroundColor: colors.surfaceCard },
+  dot: { width: 8, height: 8, borderRadius: radius.full, flexShrink: 0 },
+  groupLabel: { marginTop: space.md },
+  chips: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: space.xs },
+  // Area choices are bordered chips (a pick-one set), unlike the borderless section chips.
+  areaChip: { borderWidth: 1, borderColor: colors.borderSubtle, paddingHorizontal: 6 },
+  areaChipOn: { borderColor: colors.accentSoftBorder, backgroundColor: colors.accentSoft },
+  card: { borderRadius: radius.lg, borderWidth: 1, borderColor: colors.borderSubtle, overflow: "hidden" as const, padding: space.xs, gap: 1 },
 };

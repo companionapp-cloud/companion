@@ -1,4 +1,4 @@
-import { Icon, type IconName } from "@companion/design-system";
+import { Icon, type IconName } from "../ds";
 import { useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { usePostHog } from "posthog-js/react";
 

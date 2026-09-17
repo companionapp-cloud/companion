@@ -1,13 +1,13 @@
-import { useState } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { SidebarArea, SidebarProject } from '@companion/core-bridge';
-import { useNotes, useProjects, useTasks, useNotifications, useToolVisibility, SortableList, CaptureForm, ConfirmDialog, type ToolId } from '@companion/app';
-import { Icon, IconButton, Input, ProgressRing, Text, colors, font, radius, space, type IconName } from '@companion/design-system';
+import { useCore, useNotes, useProjects, useTasks, useNotifications, useToolVisibility, SortableList, CaptureForm, ConfirmDialog, type ToolId } from '@companion/app';
+import { Badge, Button, Icon, IconButton, Input, ProgressRing, Text, colors, font, radius, space, type IconName } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
-import { Card, CardRow, CountPill, IconTile, SectionLabel } from '../ui/native';
+import { BottomSheet, Card, CardRow, CountPill, FAB_CLEARANCE, Fab, IconTile, SectionLabel } from '../ui/native';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -24,13 +24,22 @@ const SECTIONS: { route: SectionRoute; label: string; subtitle: string; icon: Ic
   { route: 'Trash', label: 'Trash', subtitle: 'Recently deleted, kept 30 days', icon: 'trash' },
 ];
 
-/** The mobile root: a greeting header, a grouped card of global sections, then the
- * areas → projects tree as inset cards (PLAN §6.6). A quick-add FAB opens a capture
- * sheet. Opening a project pushes its scoped tab bar. */
+/** What a project row reports beside its name: member counts and task completion. */
+interface ProjectCounts {
+  notes: number;
+  tasks: number;
+  done: number;
+}
+
+/** The mobile root. It owns its title, so there is no nav bar: a large title across from
+ * the notifications bell, a mono date line, one grouped card of the tool sections, then
+ * the areas → projects tree as labelled cards (PLAN §6.6). A quick-add FAB opens the
+ * capture sheet. Opening a project pushes its scoped tab bar. */
 export function HomeScreen() {
   const nav = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const store = useNotes();
+  const tasks = useTasks();
   const { sidebar, createArea, createProject, deleteArea, reorderAreas, reorderProjects } = useProjects();
 
   const [addingArea, setAddingArea] = useState(false);
@@ -71,28 +80,28 @@ export function HomeScreen() {
     (a, b) => (orderIndex.get(toolId(a.route)) ?? 0) - (orderIndex.get(toolId(b.route)) ?? 0),
   );
 
+  const openTasks = useMemo(() => tasks.tasks.filter((t) => t.status !== 'done').length, [tasks.tasks]);
+  const counts = useProjectCounts(sidebar);
+
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + space.sm }]}>
-        <View style={{ flex: 1 }}>
-          <Text variant="mono" style={styles.date}>
-            {dateLabel()}
-          </Text>
-          <Text style={styles.greeting}>What's new today?</Text>
-        </View>
+        <Text style={styles.greeting} numberOfLines={1}>
+          What’s new today?
+        </Text>
+        <Button label={editing ? 'Done' : 'Edit'} variant="ghost" onPress={() => setEditing((v) => !v)} />
         <BellButton onPress={() => nav.navigate('Notifications')} />
-        <Pressable onPress={() => setEditing((v) => !v)} style={styles.editBtn} aria-label={editing ? 'Done reordering' : 'Edit'}>
-          <Text variant="label" style={{ color: colors.accent, fontWeight: font.weight.semibold }}>
-            {editing ? 'Done' : 'Edit'}
-          </Text>
-        </Pressable>
       </View>
 
       <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 96 }]}
+        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + space.xl + FAB_CLEARANCE }]}
         showsVerticalScrollIndicator={false}
         scrollEnabled={!dragging}
       >
+        <Text variant="mono" tone="tertiary" style={styles.date}>
+          {dateLabel()}
+        </Text>
+
         <Card>
           <SortableList
             items={sections}
@@ -119,6 +128,8 @@ export function HomeScreen() {
                     </View>
                   ) : s.route === 'Notes' ? (
                     <CountPill>{store.notes.length}</CountPill>
+                  ) : s.route === 'Tasks' ? (
+                    <CountPill>{openTasks}</CountPill>
                   ) : undefined
                 }
                 showChevron={!editing}
@@ -129,15 +140,6 @@ export function HomeScreen() {
           />
         </Card>
 
-        <View style={styles.areasHeader}>
-          <SectionLabel>Areas</SectionLabel>
-          {editing ? null : (
-            <IconButton label="New area" size="sm" onPress={() => setAddingArea((v) => !v)}>
-              <Icon name="plus" size={16} color={colors.textTertiary} />
-            </IconButton>
-          )}
-        </View>
-
         <SortableList
           items={sidebar.areas}
           keyExtractor={(a) => a.id}
@@ -146,37 +148,37 @@ export function HomeScreen() {
           onDragActiveChange={setDragging}
           onReorder={(ids) => void reorderAreas(ids)}
           renderItem={({ item: area, drag }) => (
-            <View style={styles.area}>
-              <View style={styles.areaTitleRow}>
-                {area.color ? <View style={[styles.areaDot, { backgroundColor: area.color }]} /> : null}
-                <Text variant="label" tone="secondary" numberOfLines={1} style={styles.areaTitle}>
-                  {area.name}
-                </Text>
-                {editing ? (
-                  <>
-                    {/* Areas are only deletable once empty (PLAN §6.6). */}
-                    {area.projects.length === 0 ? (
-                      <IconButton label={`Delete area ${area.name}`} size="sm" onPress={() => setDeletingArea(area)}>
-                        <Icon name="trash" size={16} color={colors.textTertiary} />
-                      </IconButton>
-                    ) : null}
-                    <View {...drag} style={styles.dragHandle} aria-label={`Reorder ${area.name}`}>
-                      <Icon name="moreH" size={18} color={colors.textTertiary} />
-                    </View>
-                  </>
-                ) : (
-                  <IconButton
-                    label={`New project in ${area.name}`}
-                    size="sm"
-                    onPress={() => {
-                      setAddingProjectFor(area.id);
-                      setProjectName('');
-                    }}
-                  >
-                    <Icon name="plus" size={14} color={colors.textTertiary} />
-                  </IconButton>
-                )}
-              </View>
+            <View>
+              <SectionLabel
+                leading={area.color ? <View style={[styles.areaDot, { backgroundColor: area.color }]} /> : undefined}
+                trailing={
+                  editing ? (
+                    <>
+                      {/* Areas are only deletable once empty (PLAN §6.6). */}
+                      {area.projects.length === 0 ? (
+                        <IconButton label={`Delete area ${area.name}`} onPress={() => setDeletingArea(area)}>
+                          <Icon name="trash" size={16} color={colors.textTertiary} />
+                        </IconButton>
+                      ) : null}
+                      <View {...drag} style={styles.dragHandle} aria-label={`Reorder ${area.name}`}>
+                        <Icon name="moreH" size={18} color={colors.textTertiary} />
+                      </View>
+                    </>
+                  ) : (
+                    <IconButton
+                      label={`New project in ${area.name}`}
+                      onPress={() => {
+                        setAddingProjectFor(area.id);
+                        setProjectName('');
+                      }}
+                    >
+                      <Icon name="plus" size={16} color={colors.textTertiary} />
+                    </IconButton>
+                  )
+                }
+              >
+                {area.name}
+              </SectionLabel>
               {area.projects.length > 0 || (addingProjectFor === area.id && !editing) ? (
                 <Card>
                   <SortableList
@@ -189,6 +191,7 @@ export function HomeScreen() {
                     renderItem={({ item: p, index, drag: pdrag }) => (
                       <ProjectRow
                         project={p}
+                        counts={counts[p.id]}
                         isLast={index === area.projects.length - 1 && !(addingProjectFor === area.id && !editing)}
                         editing={editing}
                         drag={pdrag}
@@ -197,7 +200,7 @@ export function HomeScreen() {
                     )}
                   />
                   {addingProjectFor === area.id && !editing ? (
-                    <CreateInput placeholder="Project name" value={projectName} onChangeText={setProjectName} onSubmit={() => void submitProject(area.id)} />
+                    <CreateInput placeholder="Name the project" value={projectName} onChangeText={setProjectName} onSubmit={() => void submitProject(area.id)} />
                   ) : null}
                 </Card>
               ) : (
@@ -210,55 +213,56 @@ export function HomeScreen() {
         />
 
         {sidebar.unsorted.length > 0 ? (
-          <View style={styles.area}>
-            <View style={styles.areaTitleRow}>
-              <Text variant="label" tone="tertiary" style={styles.areaTitle}>
-                Unsorted
-              </Text>
-            </View>
+          <View>
+            <SectionLabel>Unsorted</SectionLabel>
             <Card>
               {sidebar.unsorted.map((p, i) => (
-                <ProjectRow key={p.id} project={p} isLast={i === sidebar.unsorted.length - 1} onPress={() => openProject(p.id)} />
+                <ProjectRow key={p.id} project={p} counts={counts[p.id]} isLast={i === sidebar.unsorted.length - 1} onPress={() => openProject(p.id)} />
               ))}
             </Card>
           </View>
         ) : null}
 
-        {addingArea && !editing ? (
-          <Card>
-            <CreateInput placeholder="Area name" value={areaName} onChangeText={setAreaName} onSubmit={() => void submitArea()} />
-          </Card>
-        ) : null}
-
         {sidebar.areas.length === 0 && sidebar.unsorted.length === 0 && !addingArea ? (
           <Text tone="tertiary" variant="caption" style={styles.empty}>
-            Group your work into areas and projects. Add one with ＋.
+            Group your work into areas and projects. Start with a new area below.
           </Text>
         ) : null}
 
         {/* Settings and other secondary destinations live under the areas as a "More"
-            entry (moved off the header). */}
-        <View style={styles.moreSection}>
-          <SectionLabel>More</SectionLabel>
-          <Card>
+            card (moved off the header), along with the new-area affordance. */}
+        <SectionLabel>More</SectionLabel>
+        <Card>
+          {editing ? null : addingArea ? (
+            <CreateInput placeholder="Name the area" value={areaName} onChangeText={setAreaName} onSubmit={() => void submitArea()} divided />
+          ) : (
             <CardRow
               leading={
                 <IconTile variant="neutral">
-                  <Icon name="settings" size={20} color={colors.textSecondary} />
+                  <Icon name="plus" size={20} color={colors.textSecondary} />
                 </IconTile>
               }
-              title="Settings"
-              subtitle="Account, sync, appearance"
-              isLast
-              onPress={() => nav.navigate('Settings')}
+              title="New area"
+              subtitle="A heading to group projects under"
+              showChevron={false}
+              onPress={() => setAddingArea(true)}
             />
-          </Card>
-        </View>
+          )}
+          <CardRow
+            leading={
+              <IconTile variant="neutral">
+                <Icon name="settings" size={20} color={colors.textSecondary} />
+              </IconTile>
+            }
+            title="Settings"
+            subtitle="Account, sync, appearance"
+            isLast
+            onPress={() => nav.navigate('Settings')}
+          />
+        </Card>
       </ScrollView>
 
-      <Pressable style={[styles.fab, { bottom: insets.bottom + space.xl }]} onPress={() => setCapture(true)} aria-label="Quick capture">
-        <Icon name="plus" size={26} color={colors.textInverse} />
-      </Pressable>
+      <Fab label="Quick capture" onPress={() => setCapture(true)} bottomInset={insets.bottom} />
 
       <CaptureSheet visible={capture} onClose={() => setCapture(false)} />
 
@@ -278,23 +282,86 @@ export function HomeScreen() {
   );
 }
 
+/** Member counts per project, for the row subtitle and the done/total readout. The sidebar
+ * tree only carries a completion ratio, so this reads each project's memberships (kept
+ * fresh on the same `nav.changed` signal the scoped lists use) and resolves them against
+ * the live note/task stores, which drops anything trashed. */
+function useProjectCounts(sidebar: { areas: SidebarArea[]; unsorted: SidebarProject[] }): Record<string, ProjectCounts | undefined> {
+  const { core } = useCore();
+  const { membershipsForProject } = useProjects();
+  const notes = useNotes().notes;
+  const tasks = useTasks().tasks;
+  const idsKey = [...sidebar.areas.flatMap((a) => a.projects), ...sidebar.unsorted].map((p) => p.id).join(',');
+  const [members, setMembers] = useState<Record<string, { notes: string[]; tasks: string[] }>>({});
+
+  useEffect(() => {
+    const ids = idsKey ? idsKey.split(',') : [];
+    let cancelled = false;
+    const load = async () => {
+      const entries = await Promise.all(
+        ids.map(async (id) => {
+          const rows = await membershipsForProject(id);
+          return [
+            id,
+            {
+              notes: rows.filter((m) => m.entityType === 'note').map((m) => m.entityId),
+              tasks: rows.filter((m) => m.entityType === 'task').map((m) => m.entityId),
+            },
+          ] as const;
+        }),
+      );
+      if (!cancelled) setMembers(Object.fromEntries(entries));
+    };
+    void load().catch(() => {});
+    const off = core.on('nav.changed', () => void load().catch(() => {}));
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, [idsKey, membershipsForProject, core]);
+
+  return useMemo(() => {
+    const noteIds = new Set(notes.map((n) => n.id));
+    const taskStatus = new Map(tasks.map((t) => [t.id, t.status]));
+    const out: Record<string, ProjectCounts | undefined> = {};
+    for (const [id, m] of Object.entries(members)) {
+      const live = m.tasks.filter((t) => taskStatus.has(t));
+      out[id] = {
+        notes: m.notes.filter((n) => noteIds.has(n)).length,
+        tasks: live.length,
+        done: live.filter((t) => taskStatus.get(t) === 'done').length,
+      };
+    }
+    return out;
+  }, [members, notes, tasks]);
+}
+
 function ProjectRow({
   project,
+  counts,
   isLast,
   editing,
   drag,
   onPress,
 }: {
   project: SidebarProject;
+  counts?: ProjectCounts;
   isLast?: boolean;
   editing?: boolean;
   drag?: object;
   onPress: () => void;
 }) {
+  const progress = counts && counts.tasks > 0 ? counts.done / counts.tasks : project.taskProgress;
   return (
     <CardRow
-      leading={<View style={[styles.projectDot, { backgroundColor: project.color ?? colors.borderStrong }]} />}
+      leading={
+        <IconTile>
+          {/* The project's own swatch tints the folder; without one it reads as any tile. */}
+          <Icon name="folder" size={19} color={project.color ?? colors.textSecondary} />
+        </IconTile>
+      }
       title={project.name}
+      subtitle={counts ? `${plural(counts.notes, 'note')} · ${plural(counts.tasks, 'task')}` : undefined}
       trailing={
         editing ? (
           // The handle is the drag surface (claims the gesture on touch-down so the
@@ -302,32 +369,35 @@ function ProjectRow({
           <View {...(drag ?? {})} style={styles.dragHandle} aria-label={`Reorder ${project.name}`}>
             <Icon name="moreH" size={18} color={colors.textTertiary} />
           </View>
-        ) : project.taskProgress != null ? (
-          <ProgressRing value={project.taskProgress} size={16} />
+        ) : progress != null ? (
+          <View style={styles.progress}>
+            <ProgressRing value={progress} size={16} />
+            {counts && counts.tasks > 0 ? (
+              <Text variant="mono" tone="quaternary">
+                {counts.done}/{counts.tasks}
+              </Text>
+            ) : null}
+          </View>
         ) : undefined
       }
       showChevron={!editing}
       isLast={isLast}
-      separatorInset={space.xl + 10 + 14}
       onPress={editing ? undefined : onPress}
     />
   );
 }
 
-/** Quick-capture bottom sheet: the shared CaptureForm (note or task) in a bottom sheet,
- *  mounted fresh each time it opens. Create-and-close. */
+function plural(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`;
+}
+
+/** Quick-capture bottom sheet: the shared CaptureForm (note or task), mounted fresh each
+ *  time it opens. Create-and-close. */
 function CaptureSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
-  const insets = useSafeAreaInsets();
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <Pressable style={styles.scrim} onPress={onClose} />
-        <View style={[styles.sheet, { paddingBottom: insets.bottom + space.xl }]}>
-          <View style={styles.grabber} />
-          {visible ? <CaptureForm onClose={onClose} /> : null}
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
+    <BottomSheet visible={visible} onClose={onClose}>
+      {visible ? <CaptureForm onClose={onClose} /> : null}
+    </BottomSheet>
   );
 }
 
@@ -336,109 +406,77 @@ function CreateInput({
   value,
   onChangeText,
   onSubmit,
+  divided,
 }: {
   placeholder: string;
   value: string;
   onChangeText: (t: string) => void;
   onSubmit: () => void;
+  /** Close the field with the card's inset hairline (when more rows follow it). */
+  divided?: boolean;
 }) {
   return (
-    <View style={styles.createInput}>
-      <Input size="sm" autoFocus placeholder={placeholder} value={value} onChangeText={onChangeText} onBlur={onSubmit} />
+    <View style={[styles.createInput, divided ? styles.createInputDivided : null]}>
+      <Input autoFocus placeholder={placeholder} value={value} onChangeText={onChangeText} onBlur={onSubmit} />
     </View>
   );
 }
 
+// "Thursday 17 September" — mono metadata, so it stays in normal case.
 function dateLabel(): string {
   const d = new Date();
   const weekday = d.toLocaleDateString(undefined, { weekday: 'long' });
   const month = d.toLocaleDateString(undefined, { month: 'long' });
-  return `${weekday} · ${month} ${d.getDate()}`.toUpperCase();
+  return `${weekday} ${d.getDate()} ${month}`;
 }
 
-/** Header bell: opens the notifications feed, with an unread-count badge (PLAN §6.4). */
+/** Header bell: opens the notifications feed, with a round danger count when there is
+ *  anything unread (PLAN §6.4). */
 function BellButton({ onPress }: { onPress: () => void }) {
   const { unreadCount } = useNotifications();
   return (
-    <Pressable onPress={onPress} style={styles.bellBtn} aria-label="Notifications">
-      <Icon name="bell" size={20} color={colors.textSecondary} />
+    <View>
+      <IconButton label="Notifications" size="lg" onPress={onPress}>
+        <Icon name="bell" size={18} color={colors.textSecondary} />
+      </IconButton>
       {unreadCount > 0 ? (
         <View style={styles.bellBadge} pointerEvents="none">
-          <Text style={styles.bellBadgeLabel}>{unreadCount > 9 ? '9+' : String(unreadCount)}</Text>
+          <Badge label={unreadCount > 9 ? '9+' : String(unreadCount)} tone="danger" round />
         </View>
       ) : null}
-    </Pressable>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.surfaceApp },
+  // The large title stands in for a nav bar: no branding, no divider.
   header: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    paddingHorizontal: space.xl,
-    paddingBottom: space.lg,
-  },
-  date: { fontSize: 11, letterSpacing: 0.9, color: colors.textTertiary, marginBottom: space.xs },
-  greeting: { fontSize: 26, fontWeight: font.weight.semibold, letterSpacing: -0.5, color: colors.textPrimary },
-  editBtn: {
-    minHeight: 40,
-    paddingHorizontal: space.md,
-    justifyContent: 'center',
-  },
-  bellBtn: {
-    minHeight: 40,
-    paddingHorizontal: space.sm,
-    justifyContent: 'center',
-  },
-  bellBadge: {
-    position: 'absolute',
-    top: 6,
-    right: 0,
-    minWidth: 15,
-    height: 15,
-    paddingHorizontal: 3,
-    borderRadius: radius.full,
-    backgroundColor: colors.accent,
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: space.xs,
+    paddingLeft: space.lg + space.sm,
+    paddingRight: space.lg,
+    paddingBottom: space.ml,
   },
-  bellBadgeLabel: { color: colors.onAccent, fontSize: 9, lineHeight: 11, fontWeight: font.weight.bold },
-  scroll: { paddingHorizontal: space.xl, paddingTop: space.xs },
-  areasHeader: { flexDirection: 'row', alignItems: 'center', marginTop: space.xl },
-  moreSection: { marginTop: space.lg },
-  area: { marginBottom: space.sm },
-  areaTitleRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.sm, height: 34 },
-  areaDot: { width: 8, height: 8, borderRadius: radius.full },
-  areaTitle: { flex: 1, fontWeight: font.weight.semibold },
+  greeting: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: font.weight.semibold,
+    letterSpacing: -0.55, // tracking-tight (-0.025em) at 22px
+    color: colors.textPrimary,
+  },
+  date: { paddingHorizontal: space.sm, paddingBottom: space.ml },
+  bellBadge: { position: 'absolute', top: -4, right: -4 },
+  scroll: { paddingHorizontal: space.lg },
+  areaDot: { width: 8, height: 8, borderRadius: radius.full, marginRight: space.xxs },
   // Generous hit area so the drag handle is easy to grab on touch.
   dragHandle: { paddingHorizontal: space.md, paddingVertical: space.sm },
-  areaEmpty: { paddingHorizontal: space.md, paddingBottom: space.sm },
-  projectDot: { width: 10, height: 10, borderRadius: radius.full, flexShrink: 0 },
-  createInput: { padding: space.md },
-  empty: { paddingHorizontal: space.md, paddingVertical: space.lg, lineHeight: 20 },
-  fab: {
-    position: 'absolute',
-    right: space.xl,
-    width: 58,
-    height: 58,
-    borderRadius: 19,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: colors.accent,
-    shadowOpacity: 0.4,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 6,
-  },
-  scrim: { flex: 1, backgroundColor: 'rgba(17,17,16,0.35)' },
-  sheet: {
-    backgroundColor: colors.surfaceCard,
-    borderTopLeftRadius: radius.xxl,
-    borderTopRightRadius: radius.xxl,
-    padding: space.xl,
-  },
-  grabber: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.borderDefault, alignSelf: 'center', marginBottom: space.lg },
+  areaEmpty: { paddingHorizontal: space.sm, paddingBottom: space.xs },
+  progress: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  createInput: { padding: space.lg },
+  createInputDivided: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderSubtle },
+  empty: { paddingHorizontal: space.sm, paddingTop: space.lg, lineHeight: 20 },
 });

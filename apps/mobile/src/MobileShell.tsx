@@ -1,12 +1,13 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as Notifications from 'expo-notifications';
 import { colors } from '@companion/design-system';
 import { taskIdFromResponse } from './notifications';
-import { TrashScreen, SyncHealthBanner } from '@companion/app';
+import { SyncHealthBanner, useSync } from '@companion/app';
+import { stackHeader } from './ui/native';
 import { HomeScreen } from './screens/HomeScreen';
 import { TodayScreen } from './screens/TodayScreen';
 import { CalendarScreen } from './screens/CalendarScreen';
@@ -17,6 +18,7 @@ import { TasksListScreen } from './screens/TasksListScreen';
 import { CanvasesListScreen } from './screens/CanvasesListScreen';
 import { CanvasScreen } from './screens/CanvasScreen';
 import { NotificationsScreen } from './screens/NotificationsScreen';
+import { TrashRouteScreen } from './screens/TrashRouteScreen';
 import { TaskEditorScreen } from './screens/TaskEditorScreen';
 import { TaskGraphScreen } from './screens/TaskGraphScreen';
 import { NoteGraphScreen } from './screens/NoteGraphScreen';
@@ -34,8 +36,12 @@ import type { CalendarItem } from '@companion/core-bridge';
 // (Chat/Notes/Tasks/Calendar) plus the areas → projects tree. Global sections open as
 // full stack screens; opening a project pushes ProjectScreen, which hosts a bottom tab
 // bar scoped to that project (PLAN §6.6). The desktop AppShell is intentionally not
-// reused; the shared data layer (Core/Sync/Notes/Projects providers) is mounted above
-// this in App.tsx.
+// reused — no rail, no tab strip; the shared data layer (Core/Sync/Notes/Projects
+// providers) is mounted above this in App.tsx.
+//
+// Chrome: Home owns its large title and drops the bar; every other route wears the same
+// 44px nav bar (ui/native's NavBar, handed to the stack as its `header`), so screens keep
+// configuring it through the usual `title` / `headerRight` options.
 
 export type RootStackParamList = {
   Home: undefined;
@@ -80,6 +86,12 @@ const RootStack = createNativeStackNavigator<RootStackParamList>();
 export function MobileShell() {
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
   const insets = useSafeAreaInsets();
+  // The sync-health banner sits above the navigator and takes the top inset when it
+  // shows; the nav bars beneath it must then not pad for the status bar a second time.
+  // (Mirrors SyncHealthBanner's own visibility rule.)
+  const sync = useSync();
+  const bannerShown = sync.connected && (sync.status === 'locked' || sync.needsReauth);
+  const navInsets = useMemo(() => (bannerShown ? { ...insets, top: 0 } : insets), [bannerShown, insets]);
 
   // Deep-link a tapped reminder to its task (PLAN §6.4). navigate() is safe to call once the
   // container is ready; guard because a cold-start tap can resolve before that.
@@ -111,43 +123,45 @@ export function MobileShell() {
   }, [openTask]);
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: colors.surfaceApp }}>
       {/* Global sync-health banner: prompts unlock / re-auth in Settings when sync is blocked. It
           carries the top safe-area inset so it clears the status bar when visible (§7). */}
       <SyncHealthBanner onOpenSettings={() => navigationRef.navigate('Settings')} topInset={insets.top} />
-      <NavigationContainer ref={navigationRef} onReady={handleReady}>
-        <RootStack.Navigator
-        screenOptions={{
-          headerStyle: { backgroundColor: colors.surfaceApp },
-          headerTitleStyle: { color: colors.textPrimary },
-          headerTintColor: colors.accent,
-          contentStyle: { backgroundColor: colors.surfaceApp },
-        }}
-      >
-        <RootStack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
-        <RootStack.Screen name="Today" component={TodayScreen} options={{ title: 'Today' }} />
-        <RootStack.Screen name="Chat" component={ChatListScreen} options={{ title: 'Chat' }} />
-        <RootStack.Screen name="ChatConversation" component={ChatScreen} options={{ title: '' }} />
-        <RootStack.Screen name="Notes" component={NotesListScreen} options={{ title: 'All notes' }} />
-        <RootStack.Screen name="Tasks" component={TasksListScreen} options={{ title: 'All tasks' }} />
-        <RootStack.Screen name="Canvases" component={CanvasesListScreen} options={{ title: 'All canvases' }} />
-        <RootStack.Screen name="Canvas" component={CanvasScreen} options={{ title: 'Canvas' }} />
-        <RootStack.Screen name="Habits" component={PlaceholderScreen} options={{ title: 'Habits' }} />
-        <RootStack.Screen name="Calendar" component={CalendarScreen} options={{ title: 'Calendar' }} />
-        <RootStack.Screen name="CalendarEvent" component={CalendarEventScreen} options={{ title: 'Event' }} />
-        <RootStack.Screen name="Graph" component={GraphScreen} options={{ title: 'Graph' }} />
-        <RootStack.Screen name="Trash" component={TrashScreen} options={{ title: 'Trash' }} />
-        <RootStack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifications' }} />
-        <RootStack.Screen name="Project" component={ProjectScreen} />
-        <RootStack.Screen name="ProjectSettings" component={ProjectSettingsScreen} options={{ title: 'Project settings' }} />
-        <RootStack.Screen name="NoteEditor" component={NoteEditorScreen} options={{ title: '' }} />
-        <RootStack.Screen name="TaskEditor" component={TaskEditorScreen} options={{ title: 'Task' }} />
-        <RootStack.Screen name="NoteGraph" component={NoteGraphScreen} options={{ title: 'Graph' }} />
-        <RootStack.Screen name="TaskGraph" component={TaskGraphScreen} options={{ title: 'Graph' }} />
-        <RootStack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
-        <RootStack.Screen name="SettingsSection" component={SettingsSectionScreen} options={{ title: 'Settings' }} />
-        </RootStack.Navigator>
-      </NavigationContainer>
+      <SafeAreaInsetsContext.Provider value={navInsets}>
+        <NavigationContainer ref={navigationRef} onReady={handleReady}>
+          <RootStack.Navigator
+            screenOptions={{
+              header: stackHeader,
+              contentStyle: { backgroundColor: colors.surfaceApp },
+            }}
+          >
+            <RootStack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
+            <RootStack.Screen name="Today" component={TodayScreen} options={{ title: 'Today' }} />
+            <RootStack.Screen name="Chat" component={ChatListScreen} options={{ title: 'Chat' }} />
+            <RootStack.Screen name="ChatConversation" component={ChatScreen} options={{ title: 'Chat' }} />
+            {/* Notes and Tasks hang their segmented filter under the bar, so the bar's hairline
+                moves beneath the segments (NavBarSegments draws it). */}
+            <RootStack.Screen name="Notes" component={NotesListScreen} options={{ title: 'Notes', headerShadowVisible: false }} />
+            <RootStack.Screen name="Tasks" component={TasksListScreen} options={{ title: 'Tasks', headerShadowVisible: false }} />
+            <RootStack.Screen name="Canvases" component={CanvasesListScreen} options={{ title: 'Canvases' }} />
+            <RootStack.Screen name="Canvas" component={CanvasScreen} options={{ title: 'Canvas' }} />
+            <RootStack.Screen name="Habits" component={PlaceholderScreen} options={{ title: 'Habits' }} />
+            <RootStack.Screen name="Calendar" component={CalendarScreen} options={{ title: 'Calendar' }} />
+            <RootStack.Screen name="CalendarEvent" component={CalendarEventScreen} options={{ title: 'Event' }} />
+            <RootStack.Screen name="Graph" component={GraphScreen} options={{ title: 'Graph' }} />
+            <RootStack.Screen name="Trash" component={TrashRouteScreen} options={{ title: 'Trash' }} />
+            <RootStack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifications' }} />
+            <RootStack.Screen name="Project" component={ProjectScreen} options={{ title: 'Project' }} />
+            <RootStack.Screen name="ProjectSettings" component={ProjectSettingsScreen} options={{ title: 'Project settings' }} />
+            <RootStack.Screen name="NoteEditor" component={NoteEditorScreen} options={{ title: '' }} />
+            <RootStack.Screen name="TaskEditor" component={TaskEditorScreen} options={{ title: 'Task' }} />
+            <RootStack.Screen name="NoteGraph" component={NoteGraphScreen} options={{ title: 'Graph' }} />
+            <RootStack.Screen name="TaskGraph" component={TaskGraphScreen} options={{ title: 'Graph' }} />
+            <RootStack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
+            <RootStack.Screen name="SettingsSection" component={SettingsSectionScreen} options={{ title: 'Settings' }} />
+          </RootStack.Navigator>
+        </NavigationContainer>
+      </SafeAreaInsetsContext.Provider>
     </View>
   );
 }

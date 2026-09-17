@@ -1,29 +1,40 @@
 import { Pressable, View } from "react-native";
 import type { NotificationFeedItem } from "@companion/core-bridge";
-import { Icon, Text, colors, space, type PressState } from "@companion/design-system";
+import { Icon, Text, colors, font, icon, motion, radius, row, space, transition, useDensity, type PressState } from "@companion/design-system";
 
 /** One feed entry, shared by the bell popover and the notifications page (PLAN §6.4):
- *  kind icon, title + body, relative time, and an unread dot. Settled tasks render muted —
- *  the notification already served its purpose. */
+ *  kind icon, title + body, mono relative time, and an unread dot. A two-line 38px row with
+ *  a pointer, 60px on touch. Settled tasks render muted — the notification already served
+ *  its purpose. */
 export function NotificationRow({ item, onPress }: { item: NotificationFeedItem; onPress: () => void }) {
   const muted = item.settled;
+  const touch = useDensity() === "touch";
   return (
     <Pressable
       onPress={onPress}
       aria-label={`Open ${item.title}`}
-      style={({ hovered }: PressState) => [styles.row, hovered ? styles.rowHover : null]}
+      style={({ hovered, pressed }: PressState) => [
+        styles.row,
+        transition("background-color", motion.fast),
+        { minHeight: touch ? 60 : row.twoLine, paddingHorizontal: touch ? space.lg : space.sm, gap: touch ? space.lg : space.sm },
+        pressed ? styles.rowPressed : hovered ? styles.rowHover : null,
+      ]}
     >
-      <Icon name={item.kind === "reminder" ? "bell" : "calendar"} size={16} color={colors.textTertiary} />
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text numberOfLines={1} tone={muted ? "tertiary" : "default"} style={item.read ? null : styles.unreadTitle}>
+      <Icon name={item.kind === "reminder" ? "bell" : "calendar"} size={touch ? icon.tile : icon.sm} color={touch ? colors.textTertiary : colors.textQuaternary} />
+      <View style={styles.body}>
+        <Text variant="label" numberOfLines={1} tone={muted ? "tertiary" : "default"} style={item.read ? null : styles.unreadTitle}>
           {item.title}
         </Text>
         <Text variant="caption" tone="tertiary" numberOfLines={1}>
-          {item.body} · {timeAgo(item.fireAt)}
-          {muted ? " · completed" : ""}
+          {item.body}
         </Text>
       </View>
-      {item.read ? null : <View style={styles.dot} aria-label="Unread" />}
+      <Text variant="mono" tone="quaternary" numberOfLines={1}>
+        {timeAgo(item.fireAt)}
+        {muted ? " · completed" : ""}
+      </Text>
+      {/* The dot keeps its slot when read so the timestamps stay in one column. */}
+      <View style={[styles.dot, item.read ? styles.dotRead : null]} aria-label={item.read ? undefined : "Unread"} />
     </Pressable>
   );
 }
@@ -42,14 +53,11 @@ export function timeAgo(fireAt: string): string {
 }
 
 const styles = {
-  row: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: space.md,
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
-  },
+  row: { flexDirection: "row" as const, alignItems: "center" as const, borderRadius: radius.sm },
   rowHover: { backgroundColor: colors.surfaceHover },
-  unreadTitle: { fontWeight: "600" as const },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.accent, flexShrink: 0 },
+  rowPressed: { backgroundColor: colors.surfaceActive },
+  body: { flex: 1, minWidth: 0 },
+  unreadTitle: { fontWeight: font.weight.semibold },
+  dot: { width: 5, height: 5, borderRadius: radius.full, backgroundColor: colors.accent, flexShrink: 0 },
+  dotRead: { backgroundColor: "transparent" as const },
 };

@@ -1,4 +1,4 @@
-import { Button } from "@companion/design-system";
+import { Button } from "../ds";
 import { useState } from "react";
 import { usePostHog } from "posthog-js/react";
 

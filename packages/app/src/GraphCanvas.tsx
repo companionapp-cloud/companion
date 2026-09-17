@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { StyleSheet, View } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import type { Graph } from "@companion/core-bridge";
+import { colors } from "@companion/design-system";
 import { GRAPH_CSS, GRAPH_JS } from "./graphBundle.generated";
 import { useStyledGraph } from "./useStyledGraph";
 
@@ -25,7 +26,7 @@ function buildHtml(focusKey: string | null): string {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<style>html,body{margin:0;padding:0;height:100%;width:100%;background:#f5f5f3;}#graph{position:absolute;inset:0;}${GRAPH_CSS}</style>
+<style>html,body{margin:0;padding:0;height:100%;width:100%;background:${colors.surfaceCard};}#graph{position:absolute;inset:0;}${GRAPH_CSS}</style>
 </head>
 <body>
 <div id="graph"></div>
@@ -94,6 +95,7 @@ export function GraphCanvas({ graph, focusKey = null, onOpenNode }: GraphCanvasP
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  // The graph sits on the card surface (the dotted grid is drawn inside the WebView).
+  root: { flex: 1, backgroundColor: colors.surfaceCard },
   web: { flex: 1, backgroundColor: "transparent" },
 });

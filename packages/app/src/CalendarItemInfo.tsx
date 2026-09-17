@@ -1,12 +1,13 @@
 import { ScrollView, View, type StyleProp, type ViewStyle } from "react-native";
 import type { CalendarItem, CalendarItemKind } from "@companion/core-bridge";
-import { Icon, Text, colors, radius, space } from "@companion/design-system";
+import { Icon, Text, colors, font, icon, radius, shadow, space, useDensity } from "@companion/design-system";
 
-// Per-kind accent + label, shared with the agenda dot palette (PLAN §6.7).
+// Per-kind accent + label, shared with the agenda palette (PLAN §6.7). The label is mono
+// metadata, so it stays lowercase.
 const KIND_META: Record<CalendarItemKind, { color: string; label: string }> = {
-  event: { color: colors.gray500, label: "Event" },
-  task: { color: colors.info, label: "Task" },
-  note: { color: colors.success, label: "Note" },
+  event: { color: colors.textTertiary, label: "event" },
+  task: { color: colors.info, label: "task" },
+  note: { color: colors.success, label: "note" },
 };
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -47,41 +48,44 @@ export function CalendarItemInfo({
 }: {
   item: CalendarItem;
   style?: StyleProp<ViewStyle>;
-  /** When set (the desktop hover popover), the body caps at this height and scrolls instead
-   *  of truncating. Omitted when embedded in a screen that scrolls on its own (mobile). */
+  /** When set (the desktop hover popover), the card floats: it caps at this height and scrolls
+   *  instead of truncating, and takes the popover shadow. Omitted when embedded in a screen
+   *  that scrolls on its own (mobile) — there it is a flat, hairlined panel. */
   maxHeight?: number;
 }) {
+  const touch = useDensity() === "touch";
   const meta = KIND_META[item.kind];
+  const floating = maxHeight != null;
   const body = (
     <>
       <View style={styles.kindRow}>
         <View style={[styles.dot, { backgroundColor: item.color ?? meta.color }]} />
-        <Text variant="mono" tone="tertiary" style={styles.kindLabel}>
+        <Text variant="mono" tone="tertiary">
           {meta.label}
         </Text>
       </View>
-      <Text style={styles.title}>{item.title || "Untitled"}</Text>
-      <Text variant="mono" tone="secondary" style={styles.when}>
+      <Text variant={touch ? "title" : "label"}>{item.title || "Untitled"}</Text>
+      <Text variant="mono" tone="secondary">
         {formatWhen(item)}
       </Text>
       {item.location ? (
         <View style={styles.metaRow}>
-          <Icon name="calendar" size={13} color={colors.textTertiary} />
-          <Text tone="secondary" style={styles.metaText}>
+          <Icon name="calendar" size={icon.sm} color={colors.textQuaternary} />
+          <Text variant="caption" tone="secondary" style={styles.metaText}>
             {item.location}
           </Text>
         </View>
       ) : null}
       {item.description ? (
-        <Text tone="secondary" style={styles.description}>
+        <Text variant="caption" tone="secondary" style={styles.description}>
           {item.description.trim()}
         </Text>
       ) : null}
     </>
   );
   return (
-    <View style={[styles.card, style]}>
-      {maxHeight != null ? (
+    <View style={[styles.card, touch ? styles.cardTouch : null, floating ? styles.cardFloating : null, style]}>
+      {floating ? (
         <ScrollView style={{ maxHeight }} contentContainerStyle={styles.body} showsVerticalScrollIndicator>
           {body}
         </ScrollView>
@@ -94,21 +98,20 @@ export function CalendarItemInfo({
 
 const styles = {
   card: {
-    backgroundColor: colors.surfaceCard,
-    borderRadius: radius.md,
+    backgroundColor: colors.surfaceOverlay,
+    borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
-    padding: space.lg,
-    // A subtle lift for the floating popover; harmless when embedded in a screen.
-    boxShadow: "0 6px 24px rgba(0,0,0,0.14)",
+    padding: space.md,
   },
-  body: { gap: space.xs },
-  kindRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.xs, marginBottom: 2 },
-  dot: { width: 8, height: 8, borderRadius: radius.full },
-  kindLabel: { fontSize: 10, textTransform: "uppercase" as const, letterSpacing: 0.6 },
-  title: { fontSize: 14, fontWeight: "600" as const, color: colors.textPrimary },
-  when: { fontSize: 12 },
-  metaRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.xs, marginTop: 2 },
-  metaText: { flex: 1, fontSize: 12 },
-  description: { fontSize: 12, marginTop: space.xs, lineHeight: 17 },
+  // Touch surfaces embed the card in a screen or sheet: prose-scale padding, same hairline.
+  cardTouch: { padding: space.lg },
+  // Only the hover popover floats above the document, so only it earns a shadow.
+  cardFloating: shadow.md,
+  body: { gap: 3 },
+  kindRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 5 },
+  dot: { width: 7, height: 7, borderRadius: radius.sm },
+  metaRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 5, marginTop: 2 },
+  metaText: { flex: 1 },
+  description: { marginTop: 2, fontSize: font.size.sm, lineHeight: 17 },
 };

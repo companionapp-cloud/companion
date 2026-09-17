@@ -1,4 +1,4 @@
-import { Badge, Icon, ListRow, Text, colors, radius, space } from "@companion/design-system";
+import { Badge, Icon, ListRow, Text, colors, radius, space } from "../ds";
 import { usePostHog } from "posthog-js/react";
 import { getGroups, type Doc, type DocGroup } from "../content/docs";
 

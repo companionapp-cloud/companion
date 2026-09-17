@@ -1,4 +1,4 @@
-import type { IconName } from "@companion/design-system";
+import type { IconName } from "../ds";
 
 // Docs content, sourced from content/docs/*.md. Each markdown file is compiled by
 // metro.transformer.js into { slug, frontmatter, html, toc } and enumerated here

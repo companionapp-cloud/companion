@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
-import { Button, Text, colors, radius, space, type PressState } from "@companion/design-system";
+import { Button, Kbd, Text, colors, control, motion, radius, space, transition, type PressState } from "@companion/design-system";
+import { SettingsNote } from "./settingsUi";
 import {
   SHORTCUTS,
   acceleratorFromKeyEvent,
@@ -70,87 +71,97 @@ export function ShortcutSettings() {
   if (!store) return null;
 
   return (
-    <View style={{ gap: space.md }}>
-      <Text variant="caption" tone="tertiary" style={{ lineHeight: 18 }}>
-        Shortcuts work system-wide, so they win over whatever app you’re in — pick a chord no
-        other app needs. This only applies to this device.
-      </Text>
-      <View style={styles.card}>
+    <View style={styles.section}>
+      <SettingsNote>
+        Shortcuts work system-wide, so they win over whatever app you’re in — pick a chord no other app needs. This only
+        applies to this device.
+      </SettingsNote>
+      <View style={styles.list}>
         {SHORTCUTS.map((s, i) => {
           const binding = bindings?.find((b) => b.id === s.id);
           const isRecording = recording === s.id;
           const isDefault = !!binding && binding.accelerator === binding.defaultAccelerator;
           return (
             <View key={s.id} style={[styles.row, i === SHORTCUTS.length - 1 ? null : styles.rowDivider]}>
-              <View style={{ flex: 1, gap: 2 }}>
-                <Text>{s.label}</Text>
-                <Text variant="caption" tone="tertiary" style={{ lineHeight: 18 }}>
+              <View style={styles.rowBody}>
+                <Text variant="label">{s.label}</Text>
+                <Text variant="caption" tone="tertiary">
                   {s.description}
                 </Text>
               </View>
               {binding && !isDefault ? (
-                <Button
-                  label="Reset"
-                  variant="secondary"
-                  onPress={() => void rebind(s.id, binding.defaultAccelerator)}
-                />
+                <Button label="Reset" variant="ghost" size="sm" onPress={() => void rebind(s.id, binding.defaultAccelerator)} />
               ) : null}
               <Pressable
                 onPress={() => setRecording(isRecording ? null : s.id)}
                 aria-label={isRecording ? `Press the new shortcut for ${s.label}` : `Change the ${s.label} shortcut`}
-                style={({ hovered }: PressState) => [
+                style={({ hovered, pressed }: PressState) => [
                   styles.chord,
-                  isRecording ? styles.chordRecording : hovered ? styles.chordHover : null,
+                  transition("background-color, border-color", motion.fast),
+                  isRecording ? styles.chordRecording : pressed ? styles.chordPressed : hovered ? styles.chordHover : null,
                 ]}
               >
-                <Text variant="mono" tone={isRecording ? "accent" : undefined}>
-                  {isRecording ? "Press keys…" : binding ? formatAccelerator(binding.accelerator) : "—"}
-                </Text>
+                {isRecording ? (
+                  <Text variant="mono" tone="accent">
+                    press keys…
+                  </Text>
+                ) : binding ? (
+                  <Kbd>{formatAccelerator(binding.accelerator)}</Kbd>
+                ) : (
+                  <Text variant="mono" tone="quaternary">
+                    —
+                  </Text>
+                )}
               </Pressable>
             </View>
           );
         })}
       </View>
       {recording ? (
-        <Text variant="caption" tone="tertiary">
-          Hold a modifier (⌥, ⌃, ⇧, ⌘) and press a key. Esc cancels.
-        </Text>
+        <View style={styles.hint}>
+          <SettingsNote>Hold a modifier</SettingsNote>
+          <Kbd>⌥</Kbd>
+          <Kbd>⌃</Kbd>
+          <Kbd>⇧</Kbd>
+          <Kbd>⌘</Kbd>
+          <SettingsNote>and press a key.</SettingsNote>
+          <Kbd>esc</Kbd>
+          <SettingsNote>cancels.</SettingsNote>
+        </View>
       ) : null}
-      {error ? (
-        <Text variant="caption" tone="danger">
-          {error}
-        </Text>
-      ) : null}
+      {error ? <SettingsNote tone="danger">{error}</SettingsNote> : null}
     </View>
   );
 }
 
 const styles = {
-  card: {
-    backgroundColor: colors.surfaceCard,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    overflow: "hidden" as const,
-  },
+  section: { gap: space.lg },
+  list: { borderWidth: 1, borderColor: colors.borderSubtle, borderRadius: radius.lg, overflow: "hidden" as const },
   row: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
     gap: space.md,
-    paddingHorizontal: space.lg,
+    paddingHorizontal: space.ml,
     paddingVertical: space.md,
-    backgroundColor: colors.surfaceCard,
   },
+  rowBody: { flex: 1, minWidth: 0, gap: 1 },
   rowDivider: { borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
+  // The chord is a button (press to record), so it takes the secondary-button shell and
+  // holds the binding as a Kbd.
   chord: {
-    minWidth: 104,
+    minWidth: 96,
+    height: control.md,
+    flexDirection: "row" as const,
     alignItems: "center" as const,
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
+    justifyContent: "center" as const,
+    paddingHorizontal: space.sm,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.borderDefault,
+    backgroundColor: colors.surfaceCard,
   },
   chordHover: { backgroundColor: colors.surfaceHover },
-  chordRecording: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
+  chordPressed: { backgroundColor: colors.surfaceActive },
+  chordRecording: { borderColor: colors.borderFocus, backgroundColor: colors.accentSoft },
+  hint: { flexDirection: "row" as const, flexWrap: "wrap" as const, alignItems: "center" as const, gap: space.xs },
 };

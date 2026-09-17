@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ScrollView, View, type GestureResponderEvent } from "react-native";
-import type { Note } from "@companion/core-bridge";
-import { Center, Icon, Input, ListRow, SplitView, Spinner, Text, colors, layout, space } from "@companion/design-system";
-import { useNav } from "./nav-context";
+import { Center, Icon, IconButton, Input, Kbd, ListRow, Row, SplitView, Spinner, Text, colors, icon, layout, space } from "@companion/design-system";
+import { docOfRef, useNav } from "./nav-context";
 import { useNotes } from "./NotesProvider";
 import { useTasks } from "./TasksProvider";
 import { NoteEditor } from "./NoteEditor";
@@ -16,68 +15,79 @@ import { MultiSelectBar } from "./MultiSelectBar";
 import { CanvasesList } from "./canvas/CanvasesList";
 import { CanvasPane } from "./canvas/CanvasPane";
 import { useCanvases } from "./canvas/CanvasesProvider";
+import { timeAgo } from "./NotificationRow";
 
-/** The web/desktop workspace: a persistent split of a browse list (notes or tasks, chosen
- * by the rail) and a shared tab strip. Notes and tasks share one set of tabs (in the
- * toolbar); this renders the active tab's document — or an empty "Nothing selected" state.
- * Mounted once by the shell and shown/hidden, so every open tab's editor stays alive. */
+/** One tab's workspace: a split of a browse list (notes, tasks or canvases — whichever
+ * section this tab is in) beside the tab's document, or an empty "Nothing selected" state.
+ * Each tab renders its own and stays mounted while in the background, so a list's scroll
+ * and search and an editor's in-progress state survive a tab switch. */
 export function WorkspaceScreen() {
   const nav = useNav();
-  // Keep the last browsed list so the aside doesn't flip while the workspace is hidden
-  // (e.g. when the user is on the graph). Only a notes/tasks route changes it.
-  const browseRef = useRef<"notes" | "tasks" | "canvases">("notes");
-  if (nav.current.kind === "notes") browseRef.current = "notes";
-  else if (nav.current.kind === "tasks") browseRef.current = "tasks";
-  else if (nav.current.kind === "canvases") browseRef.current = "canvases";
+  const section = nav.current.kind === "tasks" ? "tasks" : nav.current.kind === "canvases" ? "canvases" : "notes";
 
   return (
     <SplitView
-      storageKey="companion.workspace.listWidth"
-      defaultWidth={layout.listW}
-      minWidth={240}
-      maxWidth={480}
-      aside={browseRef.current === "tasks" ? <TasksList /> : browseRef.current === "canvases" ? <CanvasesBrowseList /> : <NotesList />}
+      storageKey={section === "canvases" ? "companion.canvases.listWidth" : "companion.workspace.listWidth"}
+      defaultWidth={section === "canvases" ? 220 : layout.listW}
+      minWidth={200}
+      maxWidth={440}
+      aside={section === "tasks" ? <TasksList /> : section === "canvases" ? <CanvasesBrowseList /> : <NotesList />}
     >
       <TabContent />
     </SplitView>
   );
 }
 
-/** The content pane: one editor per open tab (all mounted so their in-progress state
- * survives tab switches), only the active one visible; an empty active tab shows the
- * "Nothing selected" placeholder. */
+/** The detail pane: this tab's document. Nothing is selected on the user's behalf — a tab
+ * that is only browsing shows the empty state until something is picked. */
 function TabContent() {
   const nav = useNav();
   const ms = useMultiSelect();
 
   // While ≥2 items are multiselected, the detail pane shows the selection stack (the first
-  // selected item on top) instead of the active tab's editor.
-  if (ms.active) return <SelectionStackBody />;
+  // selected item on top) instead of the tab's editor.
+  if (ms.active && nav.visible) return <SelectionStackBody />;
 
+  const doc = docOfRef(nav.activeTab.ref);
+  const close = () => nav.closeTab(nav.tabs.indexOf(nav.activeTab));
   return (
     <View style={styles.detail}>
-      {nav.tabs.map((tab, i) => {
-        if (!tab.ref) return null;
-        const visible = i === nav.activeIndex;
-        const ref = tab.ref;
-        return (
-          <View key={tab.uid} style={[styles.fill, visible ? null : styles.hidden]}>
-            {ref.kind === "note" ? (
-              <NoteTabBody id={ref.id} onDelete={() => nav.closeTab(i)} />
-            ) : ref.kind === "task" ? (
-              <TaskTabBody id={ref.id} onDelete={() => nav.closeTab(i)} />
-            ) : (
-              <CanvasPane key={ref.id} canvasId={ref.id} onDeleted={() => nav.closeTab(i)} />
-            )}
-          </View>
-        );
-      })}
-      {!nav.activeTab.ref ? (
-        <Center>
-          <Text tone="tertiary">Nothing selected. Pick something from the list, or open a new tab.</Text>
-        </Center>
-      ) : null}
+      {!doc ? (
+        <EmptyDetail kind={nav.current.kind === "tasks" ? "task" : nav.current.kind === "canvases" ? "canvas" : "note"} />
+      ) : doc.kind === "note" ? (
+        <NoteTabBody id={doc.id} onDelete={close} />
+      ) : doc.kind === "task" ? (
+        <TaskTabBody id={doc.id} onDelete={close} />
+      ) : (
+        <CanvasPane key={doc.id} canvasId={doc.id} onDeleted={close} />
+      )}
     </View>
+  );
+}
+
+const EMPTY_COPY = {
+  note: { icon: "file", body: "Pick a note from the list, or start a new one. A blank page is just potential, etc." },
+  task: { icon: "tasks", body: "Pick a task from the list, or add one above. Nothing is selected until you say so." },
+  canvas: { icon: "canvas", body: "Pick a canvas from the list, or start a new one." },
+} as const;
+
+/** The detail pane's empty state. */
+export function EmptyDetail({ kind }: { kind: keyof typeof EMPTY_COPY }) {
+  const copy = EMPTY_COPY[kind];
+  return (
+    <Center>
+      <Icon name={copy.icon} size={18} color={colors.textQuaternary} />
+      <Text variant="title">Nothing selected</Text>
+      <Text variant="caption" tone="tertiary" style={styles.emptyBody}>
+        {copy.body}
+      </Text>
+      <Row gap={5} align="center">
+        <Kbd>⌘T</Kbd>
+        <Text variant="mono" tone="quaternary">
+          new tab
+        </Text>
+      </Row>
+    </Center>
   );
 }
 
@@ -170,8 +180,8 @@ function NotesList() {
   const nav = useNav();
   const ms = useMultiSelect();
   const [query, setQuery] = useState("");
-  const activeRef = nav.activeTab.ref;
-  const activeId = activeRef?.kind === "note" ? activeRef.id : null;
+  const activeDoc = docOfRef(nav.activeTab.ref);
+  const activeId = activeDoc?.kind === "note" ? activeDoc.id : null;
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -180,12 +190,12 @@ function NotesList() {
   }, [store.visible, query]);
 
   // Announce this list (and its visible order) so multiselect gestures + range work here.
-  // Only while the notes route is active — the workspace stays mounted (hidden) on other
-  // routes, and registering there would fight the on-screen list for the shared scope.
+  // Only while this tab is the one on screen — background tabs stay mounted, and
+  // registering from there would fight the visible list for the shared scope.
   useEffect(() => {
-    if (nav.current.kind !== "notes") return;
+    if (!nav.visible) return;
     ms.register("notes", "note", filtered.map((n) => n.id));
-  }, [ms.register, filtered, nav.current.kind]);
+  }, [ms.register, filtered, nav.visible]);
 
   if (store.loading) return <Spinner label="Loading your notes…" />;
 
@@ -202,9 +212,18 @@ function NotesList() {
             ]}
           />
         </View>
-        <Text variant="mono" tone="tertiary">
+        <Text variant="mono" tone="quaternary">
           {store.visible.length}
         </Text>
+        <IconButton
+          label="New note"
+          size="sm"
+          onPress={() => {
+            void store.create().then((n) => nav.openNote(n.id));
+          }}
+        >
+          <Icon name="plus" size={icon.sm} color={colors.textSecondary} />
+        </IconButton>
       </View>
       <View style={styles.search}>
         <Input
@@ -212,19 +231,19 @@ function NotesList() {
           placeholder="Search notes"
           value={query}
           onChangeText={setQuery}
-          leadingIcon={<Icon name="search" size={15} color={colors.textTertiary} />}
+          leadingIcon={<Icon name="search" size={icon.sm} color={colors.textQuaternary} />}
         />
       </View>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.md, gap: 2 }}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll}>
         {filtered.length ? (
           filtered.map((n) => {
             const selected = ms.active ? ms.isSelected(n.id) : n.id === activeId;
             return (
               <Draggable key={n.id} payload={{ kind: "note", id: n.id, label: n.title || "Untitled" }}>
                 <ListRow
-                  icon={<Icon name="file" size={17} color={selected ? colors.accentHover : colors.textTertiary} />}
+                  icon={<Icon name={n.date ? "today" : "file"} size={icon.sm} color={selected ? colors.textAccent : colors.textQuaternary} />}
                   title={n.title || "Untitled"}
-                  subtitle={notePreview(n)}
+                  trailing={timeAgo(n.updatedAt)}
                   selected={selected}
                   onPress={(e) => {
                     if (!ms.press(n.id, pressMods(e))) nav.openNote(n.id);
@@ -235,7 +254,7 @@ function NotesList() {
           })
         ) : (
           <Text tone="tertiary" variant="caption" style={styles.empty}>
-            {query ? "No notes match that." : "Nothing here yet. A blank page is just potential, etc."}
+            {query ? "No notes match that." : "Nothing here yet. Tap ＋ to start a note."}
           </Text>
         )}
       </ScrollView>
@@ -249,8 +268,8 @@ function TasksList() {
   const nav = useNav();
   const ms = useMultiSelect();
   const [draft, setDraft] = useState("");
-  const activeRef = nav.activeTab.ref;
-  const activeId = activeRef?.kind === "task" ? activeRef.id : null;
+  const activeDoc = docOfRef(nav.activeTab.ref);
+  const activeId = activeDoc?.kind === "task" ? activeDoc.id : null;
 
   const { open, done } = useMemo(() => {
     const open = store.visible.filter((t) => t.status !== "done");
@@ -259,11 +278,11 @@ function TasksList() {
   }, [store.visible]);
 
   // Multiselect covers the actionable tasks (open + done); repeating seeds stay single-select.
-  // Gated on the active route (see NotesList) so the hidden workspace doesn't clobber the scope.
+  // Gated on visibility (see NotesList) so a background tab doesn't clobber the scope.
   useEffect(() => {
-    if (nav.current.kind !== "tasks") return;
+    if (!nav.visible) return;
     ms.register("tasks", "task", [...open, ...done].map((t) => t.id));
-  }, [ms.register, open, done, nav.current.kind]);
+  }, [ms.register, open, done, nav.visible]);
 
   const selectFor = (id: string) => (ms.active ? ms.isSelected(id) : id === activeId);
   const pressTask = (id: string, e: GestureResponderEvent) => {
@@ -294,7 +313,7 @@ function TasksList() {
             ]}
           />
         </View>
-        <Text variant="mono" tone="tertiary">
+        <Text variant="mono" tone="quaternary">
           {open.length}
         </Text>
       </View>
@@ -305,10 +324,10 @@ function TasksList() {
           value={draft}
           onChangeText={setDraft}
           onSubmitEditing={() => void add()}
-          leadingIcon={<Icon name="plus" size={15} color={colors.textTertiary} />}
+          leadingIcon={<Icon name="plus" size={icon.sm} color={colors.textQuaternary} />}
         />
       </View>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.md, gap: 2 }}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll}>
         {open.length ? (
           open.map((t) => (
             <Draggable key={t.id} payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }}>
@@ -322,13 +341,13 @@ function TasksList() {
         )}
         {store.seeds.length ? (
           <>
-            <Text variant="caption" tone="tertiary" style={styles.doneLabel}>
-              REPEATING · {store.seeds.length}
+            <Text variant="eyebrow" tone="quaternary" style={styles.sectionLabel}>
+              Repeating · {store.seeds.length}
             </Text>
             {store.seeds.map((s) => (
               <ListRow
                 key={s.id}
-                icon={<Icon name="repeat" size={16} color={s.id === activeId ? colors.accentHover : colors.textTertiary} />}
+                icon={<Icon name="repeat" size={icon.sm} color={s.id === activeId ? colors.textAccent : colors.textQuaternary} />}
                 title={s.title || "Untitled task"}
                 subtitle={repeatSubtitle(s.repeatRule, s.nextOccurrence)}
                 selected={s.id === activeId}
@@ -339,8 +358,8 @@ function TasksList() {
         ) : null}
         {done.length ? (
           <>
-            <Text variant="caption" tone="tertiary" style={styles.doneLabel}>
-              COMPLETED · {done.length}
+            <Text variant="eyebrow" tone="quaternary" style={styles.sectionLabel}>
+              Completed · {done.length}
             </Text>
             {done.map((t) => (
               <Draggable key={t.id} payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }}>
@@ -354,30 +373,27 @@ function TasksList() {
   );
 }
 
-function notePreview(n: Note): string {
-  const body = n.contentMd.replace(/\s+/g, " ").trim();
-  return body || "No additional text";
-}
-
 const styles = {
   list: { flex: 1, minHeight: 0, backgroundColor: colors.surfaceCard },
   listHeader: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    gap: space.md,
-    paddingHorizontal: space.lg,
-    paddingTop: space.lg,
-    paddingBottom: space.md,
+    gap: space.sm,
+    minHeight: 32,
+    paddingLeft: space.sm,
+    paddingRight: space.sm,
+    paddingTop: space.sm,
+    paddingBottom: space.xs,
     // Sit above the search row so the filter dropdown, which overflows the
     // header, paints over the sibling input instead of behind it.
     zIndex: 2,
   },
-  search: { paddingHorizontal: space.md, paddingBottom: space.md, zIndex: 1 },
-  empty: { padding: space.xxl, textAlign: "center" as const, lineHeight: 20 },
-  doneLabel: { fontWeight: "600" as const, letterSpacing: 0.5, paddingHorizontal: space.md, paddingTop: space.lg, paddingBottom: space.xs },
+  search: { paddingHorizontal: space.sm, paddingBottom: space.sm, zIndex: 1 },
+  scroll: { padding: space.xs, gap: 1 },
+  empty: { padding: space.xl, textAlign: "center" as const, lineHeight: 18 },
+  emptyBody: { maxWidth: 300, textAlign: "center" as const, lineHeight: 18 },
+  sectionLabel: { paddingHorizontal: space.sm, paddingTop: space.md, paddingBottom: 3 },
   detail: { flex: 1, minWidth: 0, backgroundColor: colors.surfaceCard },
-  fill: { position: "absolute" as const, top: 0, left: 0, right: 0, bottom: 0 },
-  hidden: { display: "none" as const },
 };
 
 /** The canvases browse list (left column): every board, with the All/Unsorted filter.
@@ -385,8 +401,8 @@ const styles = {
 function CanvasesBrowseList() {
   const nav = useNav();
   const store = useCanvases();
-  const activeRef = nav.activeTab.ref;
-  const activeId = activeRef?.kind === "canvas" ? activeRef.id : null;
+  const activeDoc = docOfRef(nav.activeTab.ref);
+  const activeId = activeDoc?.kind === "canvas" ? activeDoc.id : null;
   return (
     <CanvasesList
       selectedId={activeId}

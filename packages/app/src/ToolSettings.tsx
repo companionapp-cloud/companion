@@ -1,7 +1,7 @@
-import { View } from "react-native";
-import { Icon, Text, colors, radius, space } from "@companion/design-system";
-import { Checkbox } from "./TaskEditor";
+import { View, type ViewStyle } from "react-native";
+import { Icon, Text, colors, icon, radius, row, space, useDensity } from "@companion/design-system";
 import { SortableList } from "./SortableList";
+import { CheckBox, SettingsNote } from "./settingsUi";
 import { useToolVisibility, type ToolId } from "./ToolVisibilityProvider";
 
 /** Settings › Tools: choose which tools show in the sidebar on this device, and in what
@@ -10,13 +10,14 @@ import { useToolVisibility, type ToolId } from "./ToolVisibilityProvider";
  *  its handle to reorder. */
 export function ToolSettings() {
   const { tools, hidden, setHidden, reorder } = useToolVisibility();
+  const touch = useDensity() === "touch";
   return (
-    <View style={{ gap: space.md }}>
-      <Text variant="caption" tone="tertiary" style={{ lineHeight: 18 }}>
-        Choose which tools appear in the sidebar and drag to reorder them. This only applies to
-        this device, and a hidden tool is just tucked away — links to it still work.
-      </Text>
-      <View style={styles.card}>
+    <View style={styles.section}>
+      <SettingsNote>
+        Choose which tools appear in the sidebar and drag to reorder them. This only applies to this device, and a hidden
+        tool is just tucked away — links to it still work.
+      </SettingsNote>
+      <View style={styles.list}>
         <SortableList
           items={tools}
           keyExtractor={(t) => t.id}
@@ -27,24 +28,24 @@ export function ToolSettings() {
               <View
                 style={[
                   styles.row,
+                  { minHeight: touch ? row.touch : 28 },
                   index === tools.length - 1 ? null : styles.rowDivider,
                   isActive ? styles.rowActive : null,
                 ]}
               >
                 {/* Drag handle: claims the gesture on vertical movement so a tap still hits the
                     checkbox. Cursor hints it's grabbable on web. */}
-                <View {...drag} style={styles.handle} aria-label={`Reorder ${t.label}`}>
-                  <Icon name="moreH" size={16} color={colors.textTertiary} />
+                <View {...drag} style={[styles.handle, grabCursor, touch ? styles.handleTouch : null]} aria-label={`Reorder ${t.label}`}>
+                  <Icon name="moreH" size={touch ? icon.lg : icon.sm} color={colors.borderStrong} />
                 </View>
-                <Icon name={t.icon} size={18} color={visible ? colors.textSecondary : colors.textTertiary} />
-                <Text style={{ flex: 1 }} tone={visible ? "default" : "tertiary"}>
+                <Icon name={t.icon} size={touch ? icon.lg : icon.sm} color={visible ? colors.textSecondary : colors.textQuaternary} />
+                <Text variant="label" style={{ flex: 1 }} tone={visible ? "default" : "tertiary"} numberOfLines={1}>
                   {t.label}
                 </Text>
-                <Checkbox
+                <CheckBox
                   checked={visible}
                   onPress={() => setHidden(t.id, visible)}
-                  size={20}
-                  label={visible ? `Hide ${t.label} from the sidebar` : `Show ${t.label} in the sidebar`}
+                  ariaLabel={visible ? `Hide ${t.label} from the sidebar` : `Show ${t.label} in the sidebar`}
                 />
               </View>
             );
@@ -55,25 +56,23 @@ export function ToolSettings() {
   );
 }
 
+// A grab cursor on web. Not a value native's ViewStyle knows, hence the cast (it no-ops there).
+const grabCursor = { cursor: "grab" } as unknown as ViewStyle;
+
 const styles = {
-  card: {
-    backgroundColor: colors.surfaceCard,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    overflow: "hidden" as const,
-  },
+  section: { gap: space.lg },
+  list: { borderWidth: 1, borderColor: colors.borderSubtle, borderRadius: radius.lg, overflow: "hidden" as const },
   row: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
     gap: space.md,
-    paddingLeft: space.md,
-    paddingRight: space.lg,
-    paddingVertical: space.md,
+    paddingLeft: space.xs,
+    paddingRight: space.ml,
     backgroundColor: colors.surfaceCard,
   },
   rowActive: { backgroundColor: colors.surfaceActive },
   rowDivider: { borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
-  // Generous hit area so the handle is easy to grab; a grab cursor on web.
-  handle: { paddingVertical: space.xs, paddingHorizontal: space.xs, cursor: "grab" as const },
+  // Generous hit area so the handle is easy to grab.
+  handle: { alignSelf: "stretch" as const, justifyContent: "center" as const, paddingHorizontal: space.xs },
+  handleTouch: { paddingHorizontal: space.md },
 };
