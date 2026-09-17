@@ -1,36 +1,61 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ScrollView, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import {
   NavigationContainer,
   StackActions,
   StackRouter,
   createNavigatorFactory,
   useNavigationBuilder,
-  useRoute,
   type LinkingOptions,
   type ParamListBase,
 } from "@react-navigation/native";
 import {
-  Avatar,
   BrandMark,
+  Center,
+  Divider,
   Frame,
   Icon,
   IconButton,
+  Kbd,
   RailItem,
+  Row,
+  StatusBar,
+  StatusText,
   Text,
+  Wordmark,
   colors,
   dragRegion,
+  icon,
   layout,
+  motion,
+  radius,
+  shadow,
   space,
   transition,
+  type IconName,
 } from "@companion/design-system";
 import type { SidebarArea } from "@companion/core-bridge";
-import { NavContext, useNav, type NavLocation, type Navigator, type ProjectSection, type Tab, type TabRef, type ViewId } from "./nav-context";
+import {
+  NavContext,
+  SECTION_OF,
+  docOfRef,
+  keyOfRef,
+  locationOfRef,
+  useNav,
+  viewOfRef,
+  type DocRef,
+  type Navigator,
+  type ProjectSection,
+  type SurfaceViewId,
+  type Tab,
+  type TabRef,
+  type WorkspaceSection,
+} from "./nav-context";
 import { useCore } from "./CoreContext";
 import { setReminderActivationHandler } from "./reminderNav";
 import { openFocusWindow } from "./focus";
-import { NotesProvider } from "./NotesProvider";
-import { TasksProvider } from "./TasksProvider";
+import { NotesProvider, useNotes } from "./NotesProvider";
+import { TasksProvider, useTasks } from "./TasksProvider";
 import { ListsProvider } from "./ListsProvider";
 import { CanvasesProvider } from "./canvas/CanvasesProvider";
 import { RemindersProvider, type NotificationScheduler } from "./RemindersProvider";
@@ -55,17 +80,16 @@ import { MultiSelectProvider } from "./MultiSelectProvider";
 import { SettingsScreen } from "./SettingsScreen";
 import { useSync } from "./SyncProvider";
 import { SyncHealthBanner } from "./SyncHealthBanner";
+import { CaptureForm } from "./CaptureForm";
 
 // Monotonic tab uid so React keys are stable across reorders/overwrites even when two
-// tabs hold the same document.
+// tabs hold the same surface.
 let tabSeq = 0;
-const freshTab = (): Tab => ({ uid: `tab${++tabSeq}`, ref: null, back: [], fwd: [] });
+const freshTab = (ref: TabRef | null = null): Tab => ({ uid: `tab${++tabSeq}`, ref, back: [], fwd: [] });
 
-type PlaceholderView = "calendar" | "tasks" | "habits";
+type PlaceholderView = "habits";
 
 const PLACEHOLDER: Record<PlaceholderView, string> = {
-  calendar: "A calendar is coming. Time keeps happening in the meantime.",
-  tasks: "Tasks are on the way. Until then, a note that says “do the thing” works.",
   habits: "Habits, streaks, and gentle nudges are on the way.",
 };
 
@@ -114,65 +138,11 @@ function webLinking(): LinkingOptions<ParamListBase> | undefined {
   };
 }
 
-// The workspace (notes/tasks list + tab strip) is mounted persistently by Shell so per-tab
-// editor state survives route changes; it doesn't live on the router. These screens only
-// anchor the "notes"/"tasks" routes for linking + rail highlighting.
-function NotesRouteScreen() {
+// Tabs own what's on screen (see Shell); the router only carries the *active* tab's
+// location for URL linking + browser history. Every route renders nothing.
+function RouteAnchor() {
   return null;
 }
-function TasksRouteScreen() {
-  return null;
-}
-function CanvasesRouteScreen() {
-  return null;
-}
-
-/** The workspace section each tab kind browses in. */
-type WorkspaceSection = "notes" | "tasks" | "canvases";
-const SECTION_OF: Record<TabRef["kind"], WorkspaceSection> = { note: "notes", task: "tasks", canvas: "canvases" };
-
-// Adapts the navigator-free NotificationsScreen to this shell: opening an entry's task
-// selects it in the workspace tab strip.
-function NotificationsRouteScreen() {
-  const nav = useNav();
-  return <NotificationsScreen onOpenTask={nav.openTask} />;
-}
-
-function ViewScreen() {
-  const route = useRoute();
-  return <ComingSoon view={route.name as PlaceholderView} />;
-}
-
-function CompanionNavigator({
-  initialRouteName,
-  children,
-  screenOptions,
-  topInset,
-}: {
-  initialRouteName?: string;
-  children: ReactNode;
-  screenOptions?: unknown;
-  topInset: number;
-}) {
-  const { state, descriptors, navigation, NavigationContent } = useNavigationBuilder(StackRouter, {
-    initialRouteName,
-    children,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    screenOptions: screenOptions as any,
-  });
-  const route = state.routes[state.index];
-  return (
-    <NavigationContent>
-      <NavBridge state={state} navigation={navigation} topInset={topInset}>
-        {descriptors[route.key].render()}
-      </NavBridge>
-    </NavigationContent>
-  );
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const createCompanionNavigator = createNavigatorFactory(CompanionNavigator as any);
-const Nav = createCompanionNavigator();
 
 interface RouteParams {
   id?: string;
@@ -193,128 +163,139 @@ interface StateLike {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type NavLike = any;
 
-/** Builds the useNav() API from the router state plus tab/forward state, and renders
- * the shell around the current screen. */
-function NavBridge({
-  state,
-  navigation,
-  topInset,
+const DOC_KIND_OF: Record<WorkspaceSection, DocRef["kind"]> = { notes: "note", tasks: "task", canvases: "canvas" };
+const isSection = (name: string): name is WorkspaceSection => name === "notes" || name === "tasks" || name === "canvases";
+
+/** The tab contents a route describes (a bookmarked /notes/:id, /graph, /project/…). */
+function refOfRoute(route: RouteLike): TabRef {
+  const p = route.params ?? {};
+  if (isSection(route.name)) return p.id ? { kind: DOC_KIND_OF[route.name], id: p.id } : { kind: "browse", section: route.name };
+  if (route.name === "project") {
+    return {
+      kind: "project",
+      projectId: p.projectId ?? "",
+      section: p.section as ProjectSection | undefined,
+      itemId: p.itemId,
+      subItemId: p.subItemId,
+    };
+  }
+  return { kind: "view", view: route.name as SurfaceViewId };
+}
+
+/** The route that mirrors a tab's contents into the URL. */
+function routeOfRef(ref: TabRef): { name: string; params?: RouteParams } {
+  switch (ref.kind) {
+    case "browse":
+      return { name: ref.section };
+    case "view":
+      return { name: ref.view };
+    case "project":
+      return { name: "project", params: { projectId: ref.projectId, section: ref.section, itemId: ref.itemId, subItemId: ref.subItemId } };
+    default:
+      return { name: SECTION_OF[ref.kind], params: { id: ref.id } };
+  }
+}
+
+function CompanionNavigator({
+  initialRouteName,
   children,
+  screenOptions,
+  topInset,
 }: {
-  state: StateLike;
-  navigation: NavLike;
-  topInset: number;
+  initialRouteName?: string;
   children: ReactNode;
+  screenOptions?: unknown;
+  topInset: number;
 }) {
-  const route = state.routes[state.index];
-  const routeName = route.name;
-  const inWorkspace = routeName === "notes" || routeName === "tasks" || routeName === "canvases";
-
-  // The workspace tab strip: notes, tasks, and canvases share one set of slots (always ≥ 1).
-  // Tabs are session state; only the *active* tab's document is mirrored to the URL. Seed
-  // the first tab from a bookmarked /notes/:id, /tasks/:id, or /canvases/:id.
-  const [tabs, setTabs] = useState<Tab[]>(() => {
-    const first = freshTab();
-    const id = route.params?.id;
-    const kind = routeName === "notes" ? "note" : routeName === "tasks" ? "task" : routeName === "canvases" ? "canvas" : null;
-    if (id && kind) first.ref = { kind, id };
-    return [first];
+  const { state, navigation, NavigationContent } = useNavigationBuilder(StackRouter, {
+    initialRouteName,
+    children,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    screenOptions: screenOptions as any,
   });
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [forwardStack, setForwardStack] = useState<{ name: string; params?: RouteParams }[]>([]);
+  return (
+    <NavigationContent>
+      <NavBridge state={state} navigation={navigation} topInset={topInset} />
+    </NavigationContent>
+  );
+}
 
-  const current: NavLocation =
-    routeName === "project"
-      ? {
-          kind: "project",
-          projectId: route.params?.projectId ?? "",
-          section: route.params?.section as ProjectSection | undefined,
-          itemId: route.params?.itemId,
-          subItemId: route.params?.subItemId,
-        }
-      : routeName === "tasks"
-        ? { kind: "tasks" }
-        : routeName === "notes"
-          ? { kind: "notes" }
-          : routeName === "canvases"
-            ? { kind: "canvases", canvasId: route.params?.id }
-            : { kind: "view", view: routeName as Exclude<ViewId, "notes" | "tasks" | "canvases"> };
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const createCompanionNavigator = createNavigatorFactory(CompanionNavigator as any);
+const Nav = createCompanionNavigator();
+
+/** Builds the useNav() API. Tabs are the source of truth: each holds a surface and its own
+ * Back/Forward history. The router mirrors the active tab (URL + browser history) and
+ * feeds deep links / browser Back into it. */
+function NavBridge({ state, navigation, topInset }: { state: StateLike; navigation: NavLike; topInset: number }) {
+  const route = state.routes[state.index];
+
+  // Always ≥ 1 tab. Tabs are session state; the first is seeded from the landing route (a
+  // bookmarked URL, or the user's first visible tool).
+  const [tabs, setTabs] = useState<Tab[]>(() => [freshTab(refOfRoute(route))]);
+  const [activeIndex, setActiveIndex] = useState(0);
 
   const active = Math.min(activeIndex, tabs.length - 1);
   const activeTab = tabs[active];
   const activeRef = activeTab.ref;
 
-  // Mirror the active tab's document into the URL as /notes/:id or /tasks/:id (bookmarkable),
-  // but only while its kind matches the browsed section. `replace` keeps this out of the
-  // route history — per-tab selection history (below) owns document navigation.
-  useEffect(() => {
-    if (!inWorkspace) return;
-    const matches = activeRef && SECTION_OF[activeRef.kind] === routeName;
-    const wantId = matches ? activeRef!.id : undefined;
-    if ((route.params?.id ?? undefined) !== wantId) {
-      navigation.dispatch(StackActions.replace(routeName, wantId ? { id: wantId } : {}));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inWorkspace, routeName, activeRef?.kind, activeRef?.id]);
-
-  const nav = useMemo<Navigator>(() => {
-    const goto = (name: string, params?: RouteParams) => {
-      setForwardStack([]);
-      navigation.dispatch(StackActions.push(name, params));
-    };
-    // Put the workspace section for `name` on screen. Entering from another view (graph,
-    // project) pushes — so route Back returns there; switching sections *within* the
-    // workspace replaces, so document selections never grow route history (the per-tab
-    // history handles those). The :id param is filled by the effect above.
-    const ensureSection = (name: WorkspaceSection) => {
-      if (routeName === name) return;
-      if (inWorkspace) navigation.dispatch(StackActions.replace(name));
-      else goto(name);
-    };
-    // Point the active tab at a document, remembering the one it replaces for per-tab Back.
-    const selectRef = (ref: TabRef) => {
+  // Point the active tab at a surface, remembering the one it replaces for per-tab Back.
+  const selectRef = useCallback(
+    (ref: TabRef) => {
       setTabs((ts) =>
         ts.map((tab, i) => {
-          if (i !== active) return tab;
-          if (tab.ref && tab.ref.kind === ref.kind && tab.ref.id === ref.id) {
-            // Re-select of the same document: keep history, but refresh its origin (a project
-            // detail-pane select vs a plain workspace select) so the tab returns to the right
-            // place when clicked.
-            return tab.ref.projectId === ref.projectId ? tab : { ...tab, ref };
-          }
+          if (i !== active || keyOfRef(tab.ref) === keyOfRef(ref)) return tab;
           return { ...tab, ref, back: tab.ref ? [...tab.back, tab.ref] : tab.back, fwd: [] };
         }),
       );
-    };
-    // Put a tab's document on screen: a project-origin doc returns to its project route, a
-    // plain doc to the shared workspace section. Skips a redundant push when already there.
-    const showRef = (ref: TabRef) => {
-      if (ref.projectId) {
-        const here =
-          current.kind === "project" && current.projectId === ref.projectId && current.itemId === ref.id;
-        if (!here) goto("project", { projectId: ref.projectId, section: SECTION_OF[ref.kind], itemId: ref.id });
-        return;
-      }
-      ensureSection(SECTION_OF[ref.kind]);
-    };
-    // Restore a document from the active tab's Back (dir -1) or Forward (dir +1) stack.
-    const stepTab = (dir: -1 | 1): boolean => {
-      const tab = tabs[active];
-      const from = dir === -1 ? tab.back : tab.fwd;
-      if (!from.length) return false;
-      const target = from[from.length - 1];
+    },
+    [active],
+  );
+
+  // Restore a surface from the active tab's Back (dir -1) or Forward (dir +1) stack.
+  const stepTab = useCallback(
+    (dir: -1 | 1) => {
       setTabs((ts) =>
         ts.map((t, i) => {
           if (i !== active) return t;
-          if (dir === -1) {
-            return { ...t, ref: target, back: t.back.slice(0, -1), fwd: t.ref ? [...t.fwd, t.ref] : t.fwd };
-          }
-          return { ...t, ref: target, fwd: t.fwd.slice(0, -1), back: t.ref ? [...t.back, t.ref] : t.back };
+          const from = dir === -1 ? t.back : t.fwd;
+          if (!from.length) return t;
+          const target = from[from.length - 1];
+          return dir === -1
+            ? { ...t, ref: target, back: t.back.slice(0, -1), fwd: t.ref ? [...t.fwd, t.ref] : t.fwd }
+            : { ...t, ref: target, fwd: t.fwd.slice(0, -1), back: t.ref ? [...t.back, t.ref] : t.back };
         }),
       );
-      showRef(target);
-      return true;
-    };
+    },
+    [active],
+  );
+
+  // Keep the router and the active tab in step. Whichever moved last wins:
+  //  - the tab moved (a selection, a rail click, a tab switch) → mirror it into the URL.
+  //    Navigating within a tab pushes, so browser Back works; switching tabs replaces.
+  //  - the route moved (browser Back/Forward, a deep link) → feed it to the active tab,
+  //    walking its own history when the target is simply the previous/next surface.
+  const routeKey = keyOfRef(refOfRoute(route));
+  const refKey = keyOfRef(activeRef);
+  const prev = useRef({ routeKey, refKey, uid: activeTab.uid });
+  useEffect(() => {
+    const p = prev.current;
+    prev.current = { routeKey, refKey, uid: activeTab.uid };
+    if (routeKey === refKey) return;
+    if (refKey !== p.refKey || activeTab.uid !== p.uid) {
+      if (!activeRef) return; // an empty tab has no URL of its own
+      const r = routeOfRef(activeRef);
+      navigation.dispatch(activeTab.uid !== p.uid ? StackActions.replace(r.name, r.params) : StackActions.push(r.name, r.params));
+    } else if (routeKey !== p.routeKey) {
+      const top = (stack: TabRef[]) => (stack.length ? keyOfRef(stack[stack.length - 1]) : null);
+      if (top(activeTab.back) === routeKey) stepTab(-1);
+      else if (top(activeTab.fwd) === routeKey) stepTab(1);
+      else selectRef(refOfRoute(route));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeKey, refKey, activeTab.uid]);
+
+  const nav = useMemo<Navigator>(() => {
     // Close a tab, keeping at least one (empty) slot and a valid active index.
     const removeTab = (index: number) => {
       if (tabs.length <= 1) {
@@ -326,107 +307,64 @@ function NavBridge({
       setActiveIndex((cur) => (index < cur ? cur - 1 : index === cur ? Math.min(cur, tabs.length - 2) : cur));
     };
     return {
-      current,
-      activeView: routeName === "project" ? "project" : (routeName as ViewId),
-      // In the workspace, Back/Forward walk the active tab's selection history first, then
-      // fall back to the route history (to leave the workspace to where you came from).
-      canBack: inWorkspace ? activeTab.back.length > 0 || state.index > 0 : state.index > 0,
-      canForward: inWorkspace ? activeTab.fwd.length > 0 || forwardStack.length > 0 : forwardStack.length > 0,
-      back: () => {
-        if (inWorkspace && stepTab(-1)) return;
-        const top = state.routes[state.index];
-        setForwardStack((f) => [...f, { name: top.name, params: top.params }]);
-        navigation.goBack();
-      },
-      forward: () => {
-        if (inWorkspace && stepTab(1)) return;
-        setForwardStack((f) => {
-          if (!f.length) return f;
-          const r = f[f.length - 1];
-          navigation.dispatch(StackActions.push(r.name, r.params));
-          return f.slice(0, -1);
-        });
-      },
+      current: locationOfRef(activeRef),
+      activeView: viewOfRef(activeRef),
+      visible: true,
+      // Back/Forward walk the active tab's own history, like a browser tab.
+      canBack: activeTab.back.length > 0,
+      canForward: activeTab.fwd.length > 0,
+      back: () => stepTab(-1),
+      forward: () => stepTab(1),
+      // A rail click points the *active* tab at that surface. A workspace section opens its
+      // browse list with nothing selected — unless the tab is already in that section.
       goView: (view) => {
-        if (routeName === view) return;
-        goto(view);
+        if (isSection(view)) {
+          if (viewOfRef(activeRef) !== view) selectRef({ kind: "browse", section: view });
+        } else selectRef({ kind: "view", view });
       },
 
       tabs,
       activeIndex: active,
       activeTab,
-      openNote: (id) => {
-        selectRef({ kind: "note", id });
-        ensureSection("notes");
-      },
-      openTask: (id) => {
-        selectRef({ kind: "task", id });
-        ensureSection("tasks");
-      },
+      openNote: (id) => selectRef({ kind: "note", id }),
+      openTask: (id) => selectRef({ kind: "task", id }),
+      openCanvas: (id) => selectRef({ kind: "canvas", id }),
       openInNewTab: (ref) => {
-        // Append a tab already holding the document and focus it. Done in one shot (not
-        // addTab + openTask) so it doesn't depend on the active index updating first.
-        setTabs((t) => [...t, { ...freshTab(), ref }]);
+        // Append a tab already holding the surface and focus it, in one shot.
+        setTabs((t) => [...t, freshTab(ref)]);
         setActiveIndex(tabs.length);
-        ensureSection(SECTION_OF[ref.kind]);
       },
       addTab: () => {
         setActiveIndex(tabs.length);
         setTabs((t) => [...t, freshTab()]);
       },
-      // A board is a workspace tab like a note: it fills the active tab and the canvases
-      // section comes on screen (the URL mirrors it as /canvases/:id).
-      openCanvas: (id) => {
-        selectRef({ kind: "canvas", id });
-        ensureSection("canvases");
-      },
-      selectTab: (index) => {
-        setActiveIndex(index);
-        const ref = tabs[index]?.ref;
-        if (ref) showRef(ref);
-      },
+      selectTab: (index) => setActiveIndex(index),
       closeTab: (index) => removeTab(index),
       expandTab: (index) => {
-        const ref = tabs[index]?.ref;
-        // Boards have no focus window yet; the tab just closes.
-        if (ref && ref.kind !== "canvas") openFocusWindow(ref.kind, ref.id);
+        // Only notes and tasks have a focus window; anything else just stays put.
+        const doc = docOfRef(tabs[index]?.ref ?? null);
+        if (!doc || doc.kind === "canvas") return;
+        openFocusWindow(doc.kind, doc.id);
         removeTab(index);
       },
 
-      // Each level of the project drill-down is a push, so Back pops overview ← section
-      // ← item and the URL stays deep-linkable.
-      openProject: (projectId) => goto("project", { projectId }),
-      openProjectSection: (projectId, section) => goto("project", { projectId, section }),
-      openProjectItem: (projectId, section, itemId) => {
-        // Selecting a note/task in a project also points the shared tab strip's active tab at
-        // it, so the tab tracks the project detail pane (and stays put when you leave to the
-        // workspace). Other sections (calendars/habits) carry no document, so leave tabs alone.
-        if (section === "notes") selectRef({ kind: "note", id: itemId, projectId });
-        else if (section === "tasks") selectRef({ kind: "task", id: itemId, projectId });
-        else if (section === "canvases") selectRef({ kind: "canvas", id: itemId, projectId });
-        // Re-selecting within the same section (e.g. another canvas) replaces so the board
-        // list doesn't pile up route history.
-        if (current.kind === "project" && current.projectId === projectId && current.section === section && current.itemId) {
-          navigation.dispatch(StackActions.replace("project", { projectId, section, itemId }));
-          return;
-        }
-        goto("project", { projectId, section, itemId });
-      },
-      // A task selected inside a list: the list stays the column's item, the task is the
-      // detail. Points the tab strip at the task like openProjectItem does for tasks.
-      openProjectSubItem: (projectId, section, itemId, subItemId) => {
-        if (section === "lists") selectRef({ kind: "task", id: subItemId, projectId });
-        goto("project", { projectId, section, itemId, subItemId });
-      },
+      // Each level of the project drill-down is a step in the tab's history, so Back pops
+      // item ← section ← overview and the URL stays deep-linkable.
+      openProject: (projectId) => selectRef({ kind: "project", projectId }),
+      openProjectSection: (projectId, section) => selectRef({ kind: "project", projectId, section }),
+      openProjectItem: (projectId, section, itemId) => selectRef({ kind: "project", projectId, section, itemId }),
+      // A task selected inside a list: the list stays the column's item, the task is the detail.
+      openProjectSubItem: (projectId, section, itemId, subItemId) =>
+        selectRef({ kind: "project", projectId, section, itemId, subItemId }),
     };
-  }, [current, tabs, active, activeTab, routeName, inWorkspace, state, forwardStack, navigation]);
+  }, [tabs, active, activeTab, activeRef, selectRef, stepTab]);
 
   return (
     <NavContext.Provider value={nav}>
       <ReminderNavigationBridge />
       <MultiSelectProvider>
         <DndProvider>
-          <Shell topInset={topInset}>{children}</Shell>
+          <Shell topInset={topInset} />
         </DndProvider>
       </MultiSelectProvider>
     </NavContext.Provider>
@@ -443,7 +381,6 @@ function ReminderNavigationBridge() {
   useEffect(() => {
     const open = (taskId: string) => {
       if (!taskId) return;
-      nav.goView("tasks");
       nav.openTask(taskId);
     };
     setReminderActivationHandler(({ taskId }) => open(taskId));
@@ -495,39 +432,42 @@ function ShellRoutes({ topInset }: { topInset: number }) {
   return (
     <NavigationContainer linking={linking} documentTitle={{ enabled: false }}>
       <Nav.Navigator initialRouteName={initialRoute} topInset={topInset}>
-        <Nav.Screen name="today" component={TodayScreen} />
-        <Nav.Screen name="chat" component={ChatsScreen} />
-        <Nav.Screen name="calendar" component={CalendarScreen} />
-        <Nav.Screen name="notes" component={NotesRouteScreen} />
-        <Nav.Screen name="tasks" component={TasksRouteScreen} />
-        <Nav.Screen name="canvases" component={CanvasesRouteScreen} />
-        <Nav.Screen name="habits" component={ViewScreen} />
-        <Nav.Screen name="graph" component={GraphScreen} />
-        <Nav.Screen name="trash" component={TrashScreen} />
-        <Nav.Screen name="settings" component={SettingsScreen} />
-        <Nav.Screen name="notifications" component={NotificationsRouteScreen} />
-        <Nav.Screen name="project" component={ProjectView} />
+        <Nav.Screen name="today" component={RouteAnchor} />
+        <Nav.Screen name="chat" component={RouteAnchor} />
+        <Nav.Screen name="calendar" component={RouteAnchor} />
+        <Nav.Screen name="notes" component={RouteAnchor} />
+        <Nav.Screen name="tasks" component={RouteAnchor} />
+        <Nav.Screen name="canvases" component={RouteAnchor} />
+        <Nav.Screen name="habits" component={RouteAnchor} />
+        <Nav.Screen name="graph" component={RouteAnchor} />
+        <Nav.Screen name="trash" component={RouteAnchor} />
+        <Nav.Screen name="settings" component={RouteAnchor} />
+        <Nav.Screen name="notifications" component={RouteAnchor} />
+        <Nav.Screen name="project" component={RouteAnchor} />
       </Nav.Navigator>
     </NavigationContainer>
   );
 }
 
-/** The persistent chrome: hover-reveal rail + inset Frame(toolbar) around the current
- * screen (children). */
-function Shell({ topInset, children }: { topInset: number; children: ReactNode }) {
+/** The persistent chrome: a hover-reveal rail beside an inset Frame (toolbar with the tab
+ * strip over the content panel), and a mono status bar spanning the window beneath both. */
+function Shell({ topInset }: { topInset: number }) {
   const nav = useNav();
-  // The notes/tasks workspace is shown for both those sections (it's one shared thing).
-  const inWorkspace = nav.current.kind === "notes" || nav.current.kind === "tasks" || nav.current.kind === "canvases";
   const sync = useSync();
   const dnd = useDnd();
+  const notes = useNotes();
+  const tasks = useTasks();
   const { deleteArea } = useProjects();
   // The area pending deletion — its confirm dialog is rendered at the shell root, outside
   // the clipped (overflow:hidden) rail so the scrim can cover the whole window.
   const [deletingArea, setDeletingArea] = useState<SidebarArea | null>(null);
+  const [captureOpen, setCaptureOpen] = useState(false);
   // Per-device tool hiding (Settings › Tools): only the rail entry disappears — the view
-  // itself stays routable.
+  // itself stays reachable. Trash sits with Settings at the foot of the rail.
   const { tools, hidden } = useToolVisibility();
-  const rail = tools.filter((t) => !hidden.has(t.id));
+  const visibleTools = tools.filter((t) => !hidden.has(t.id));
+  const rail = visibleTools.filter((t) => t.id !== "trash");
+  const showTrash = visibleTools.some((t) => t.id === "trash");
   const [open, setOpen] = useState(false);
   const [pinned, setPinned] = usePersistentBoolean("companion.sidebar.pinned", false);
   // Reveal the rail while a dragged document approaches it, so projects become drop
@@ -550,107 +490,136 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
   // The rail's width transition takes ~200ms; re-measure the project targets once it lands.
   useEffect(() => {
     if (!dragNearRail) return;
-    const t = setTimeout(() => void dnd.remeasure(), 260);
+    const t = setTimeout(() => void dnd.remeasure(), motion.medium + 60);
     return () => clearTimeout(t);
   }, [dragNearRail, dnd.remeasure]);
   const expanded = open || pinned || dragNearRail;
   const activeProjectId = nav.current.kind === "project" ? nav.current.projectId : null;
 
-  // Sync on navigation (§5.4). Key on the location + active tab so param-only changes fire.
-  const loc = nav.current;
-  const locKey =
-    loc.kind +
-    (nav.activeTab.ref ? `${nav.activeTab.ref.kind}:${nav.activeTab.ref.id}` : "") +
-    (loc.kind === "project" ? `${loc.projectId}:${loc.section ?? ""}:${loc.itemId ?? ""}` : "");
+  // Sync on navigation (§5.4). Key on the active tab's contents so every move fires.
   // Depend on the stable `trigger`, not the whole `sync` object: `sync` is a memo that
   // changes identity on every status/lastSyncedAt update, so listing it here would
   // re-fire this effect after each sync and loop (a sync every ~second).
+  const locKey = keyOfRef(nav.activeTab.ref);
   const syncTrigger = sync.trigger;
   useEffect(() => {
     syncTrigger();
   }, [locKey, syncTrigger]);
 
+  // Window-level shortcuts: ⌘T new tab, ⌥⇧Space quick capture. (A browser keeps ⌘T for
+  // itself; the desktop shell delivers it.)
+  const addTab = nav.addTab;
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.addEventListener) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === "Space" && e.altKey && e.shiftKey) {
+        e.preventDefault();
+        setCaptureOpen((c) => !c);
+      } else if ((e.key === "t" || e.key === "T") && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        addTab();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [addTab]);
+
+  const openTaskCount = useMemo(() => tasks.tasks.filter((t) => t.status !== "done").length, [tasks.tasks]);
+  const badgeFor = (id: string) =>
+    id === "notes" ? countLabel(notes.notes.length) : id === "tasks" ? countLabel(openTaskCount) : undefined;
+  const railIcon = (name: IconName, id: string) => (
+    <Icon name={name} size={icon.lg} color={nav.activeView === id ? colors.textAccent : colors.textSecondary} />
+  );
+
   return (
-    <View style={{ flex: 1, flexDirection: "row", backgroundColor: colors.surfaceApp }}>
-      <View
-        onPointerEnter={() => setOpen(true)}
-        onPointerLeave={() => setOpen(false)}
-        style={[
-          dragRegion,
-          {
-            width: expanded ? layout.railOpenW : layout.railW,
-            flexShrink: 0,
-            paddingHorizontal: space.md,
-            paddingTop: space.md + topInset,
-            paddingBottom: space.md,
-            overflow: "hidden",
-          },
-          transition("width", 200),
-        ]}
-      >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: space.lg, height: 40, paddingHorizontal: space.sm, marginBottom: space.md }}>
-          <Mark />
-          {expanded ? (
-            <>
-              <Text variant="title" style={{ flex: 1 }} numberOfLines={1}>
-                companion
-              </Text>
-              <IconButton label={pinned ? "Unpin sidebar" : "Pin sidebar"} size="sm" active={pinned} onPress={() => setPinned((p) => !p)}>
-                <Icon name="panelLeft" size={16} color={pinned ? colors.accentHover : colors.textSecondary} />
-              </IconButton>
-            </>
-          ) : null}
-        </View>
+    <View style={styles.window}>
+      <View style={styles.body}>
+        <View
+          onPointerEnter={() => setOpen(true)}
+          onPointerLeave={() => setOpen(false)}
+          style={[
+            dragRegion,
+            styles.rail,
+            { width: expanded ? layout.railOpenW : layout.railW, paddingTop: space.md + topInset },
+            transition("width", motion.medium),
+          ]}
+        >
+          <View style={styles.railHeader}>
+            {expanded ? (
+              <>
+                <Wordmark size={18} />
+                <View style={{ flex: 1 }} />
+                <IconButton label={pinned ? "Unpin sidebar" : "Pin sidebar"} size="sm" active={pinned} onPress={() => setPinned((p) => !p)}>
+                  <Icon name="panelLeft" size={13} color={pinned ? colors.textAccent : colors.textSecondary} />
+                </IconButton>
+              </>
+            ) : (
+              <BrandMark size={18} />
+            )}
+          </View>
 
-        <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1 }}>
-          <View style={{ gap: 3 }}>
-            {rail.map((n) => (
-              <RailItem
-                key={n.id}
-                icon={<Icon name={n.icon} size={19} color={nav.activeView === n.id ? colors.accentHover : colors.textSecondary} />}
-                label={n.label}
-                active={nav.activeView === n.id}
-                expanded={expanded}
-                onPress={() => nav.goView(n.id)}
+          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1 }}>
+            <View style={{ gap: 1 }}>
+              {rail.map((n) => (
+                <RailItem
+                  key={n.id}
+                  icon={railIcon(n.icon, n.id)}
+                  label={n.label}
+                  badge={badgeFor(n.id)}
+                  active={nav.activeView === n.id}
+                  expanded={expanded}
+                  onPress={() => nav.goView(n.id)}
+                />
+              ))}
+            </View>
+            {/* Areas → projects tree, only when there's room to render labels. */}
+            {expanded ? (
+              <ProjectsSidebar
+                onSelectProject={nav.openProject}
+                activeProjectId={activeProjectId}
+                onDeleteArea={setDeletingArea}
               />
-            ))}
-          </View>
-          {/* Areas → projects tree, only when there's room to render labels. */}
-          {expanded ? (
-            <ProjectsSidebar
-              onSelectProject={nav.openProject}
-              activeProjectId={activeProjectId}
-              onDeleteArea={setDeletingArea}
-            />
-          ) : null}
-          {/* Empty rail space fills the column (a window drag handle on desktop). */}
-          <View style={{ flexGrow: 1, minHeight: space.xl }} />
-        </ScrollView>
+            ) : null}
+            {/* Empty rail space fills the column (a window drag handle on desktop). */}
+            <View style={{ flexGrow: 1, minHeight: space.lg }} />
+          </ScrollView>
 
-        <View style={{ gap: space.sm, paddingTop: space.md }}>
-          <RailItem
-            icon={<Icon name="settings" size={18} color={nav.activeView === "settings" ? colors.accentHover : colors.textSecondary} />}
-            label="Settings"
-            active={nav.activeView === "settings"}
-            expanded={expanded}
-            onPress={() => nav.goView("settings")}
-          />
+          <View style={{ gap: 1, paddingTop: space.sm }}>
+            {showTrash ? (
+              <RailItem
+                icon={railIcon("trash", "trash")}
+                label="Trash"
+                active={nav.activeView === "trash"}
+                expanded={expanded}
+                onPress={() => nav.goView("trash")}
+              />
+            ) : null}
+            <RailItem
+              icon={railIcon("settings", "settings")}
+              label="Settings"
+              active={nav.activeView === "settings"}
+              expanded={expanded}
+              onPress={() => nav.goView("settings")}
+            />
+          </View>
+        </View>
+
+        <View style={{ flex: 1, minWidth: 0 }}>
+          {/* Sync health: prompts re-auth / unlock in Settings when sync is blocked (§7). */}
+          <SyncHealthBanner onOpenSettings={() => nav.goView("settings")} />
+          <Frame toolbar={<AppToolbar onCapture={() => setCaptureOpen(true)} />}>
+            {/* Every tab's surface stays mounted and only the active one is shown, so an
+                editor's draft, a chat's scroll or a graph's layout survives a tab switch. */}
+            {nav.tabs.map((tab, i) => (
+              <TabSurface key={tab.uid} tab={tab} visible={i === nav.activeIndex} />
+            ))}
+          </Frame>
         </View>
       </View>
 
-      <View style={{ flex: 1, minWidth: 0 }}>
-        {/* Sync health: prompts re-auth / unlock in Settings when sync is blocked (§7). */}
-        <SyncHealthBanner onOpenSettings={() => nav.goView("settings")} />
-        <Frame toolbar={<AppToolbar />}>
-          {/* The workspace (notes/tasks list + shared tab strip) is mounted once and only
-              shown on those sections; keeping it alive across route changes is what makes
-              every open tab's editor stateful. Other views render through the router. */}
-          <View style={[{ flex: 1 }, inWorkspace ? null : { display: "none" }]}>
-            <WorkspaceScreen />
-          </View>
-          {inWorkspace ? null : children}
-        </Frame>
-      </View>
+      <ShellStatusBar tabCount={nav.tabs.length} />
+
+      {captureOpen ? <QuickCapture onClose={() => setCaptureOpen(false)} /> : null}
 
       {deletingArea ? (
         <ConfirmDialog
@@ -668,23 +637,178 @@ function Shell({ topInset, children }: { topInset: number; children: ReactNode }
   );
 }
 
-function ComingSoon({ view }: { view: PlaceholderView }) {
+/** One tab's surface. Re-provides the nav context scoped to this tab — `current` and
+ * `activeTab` describe *this* tab, and `visible` says whether it is the one on screen — so
+ * a screen renders the same whether it is the active tab or parked in the background. */
+function TabSurface({ tab, visible }: { tab: Tab; visible: boolean }) {
+  const nav = useNav();
+  const scoped = useMemo<Navigator>(
+    () => ({ ...nav, current: locationOfRef(tab.ref), activeTab: tab, visible }),
+    [nav, tab, visible],
+  );
   return (
-    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: space.xxxl }}>
-      <Text tone="tertiary" style={{ textAlign: "center", maxWidth: 360, lineHeight: 22 }}>
-        {PLACEHOLDER[view]}
-      </Text>
+    <View style={[styles.surface, visible ? null : styles.hidden]}>
+      <NavContext.Provider value={scoped}>
+        <SurfaceBody tabRef={tab.ref} />
+      </NavContext.Provider>
     </View>
   );
 }
 
-function Mark({ size = 26 }: { size?: number }) {
+const VIEW_SCREENS: Partial<Record<SurfaceViewId, ComponentType>> = {
+  today: TodayScreen,
+  chat: ChatsScreen,
+  calendar: CalendarScreen,
+  graph: GraphScreen,
+  trash: TrashScreen,
+  settings: SettingsScreen,
+  notifications: NotificationsRouteScreen,
+};
+
+function SurfaceBody({ tabRef }: { tabRef: TabRef | null }) {
+  if (!tabRef) return <EmptyTab />;
+  if (tabRef.kind === "project") return <ProjectView key={tabRef.projectId} />;
+  if (tabRef.kind === "view") {
+    const Screen = VIEW_SCREENS[tabRef.view];
+    return Screen ? <Screen /> : <ComingSoon view={tabRef.view as PlaceholderView} />;
+  }
+  // A document or a browse list: the workspace split. Unkeyed, so moving between notes in
+  // one tab keeps the list (its scroll, its search) and only swaps the editor.
+  return <WorkspaceScreen />;
+}
+
+/** A fresh tab: nothing is opened on the user's behalf. */
+function EmptyTab() {
   return (
-    <View style={{ flexShrink: 0 }}>
-      <BrandMark size={size} />
+    <Center>
+      <Text variant="title">Nothing selected</Text>
+      <Text variant="caption" tone="tertiary">
+        Pick a tool from the rail, or something from a list.
+      </Text>
+      <Row gap={5} align="center">
+        <Kbd>⌘T</Kbd>
+        <Text variant="mono" tone="quaternary">
+          new tab
+        </Text>
+      </Row>
+    </Center>
+  );
+}
+
+// Adapts the navigator-free NotificationsScreen to this shell: opening an entry's task
+// points the active tab at it.
+function NotificationsRouteScreen() {
+  const nav = useNav();
+  return <NotificationsScreen onOpenTask={nav.openTask} />;
+}
+
+/** The persistent mono status strip: sync state, server, open tabs, and what the machine
+ * knows about itself. All 11px mono — none of it is the user's writing. */
+function ShellStatusBar({ tabCount }: { tabCount: number }) {
+  const sync = useSync();
+  // Re-render on a slow tick so "synced 12s ago" stays honest without a sync event.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 15_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const state = !sync.connected
+    ? { color: colors.textQuaternary, label: "local only" }
+    : sync.status === "syncing"
+      ? { color: colors.accent, label: "syncing…" }
+      : sync.status === "locked"
+        ? { color: colors.danger, label: "locked" }
+        : sync.status === "error" || sync.needsReauth
+          ? { color: colors.danger, label: sync.needsReauth ? "signed out" : "sync error" }
+          : { color: colors.success, label: sync.lastSyncedAt ? `synced ${agoLabel(sync.lastSyncedAt)} ago` : "connected" };
+
+  return (
+    <StatusBar>
+      <View style={[styles.statusDot, { backgroundColor: state.color }]} />
+      <StatusText>{state.label}</StatusText>
+      {sync.connected && sync.baseUrl ? (
+        <>
+          <Divider vertical style={styles.statusDivider} />
+          <StatusText>{hostOf(sync.baseUrl)}</StatusText>
+        </>
+      ) : null}
+      <Divider vertical style={styles.statusDivider} />
+      <StatusText>{tabCount === 1 ? "1 tab open" : `${tabCount} tabs open`}</StatusText>
+      <View style={{ flex: 1 }} />
+      <StatusText>{sync.connected && sync.encrypted ? "e2e encrypted" : "stored on this device"}</StatusText>
+    </StatusBar>
+  );
+}
+
+/** Quick capture (⌥⇧Space): a 460px overlay on the scrim, 14vh from the top. Esc closes. */
+function QuickCapture({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.addEventListener) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <View style={styles.captureLayer}>
+      <Pressable style={styles.captureScrim} onPress={onClose} aria-label="Close quick capture" />
+      <View style={styles.capturePanel}>
+        <CaptureForm onClose={onClose} />
+      </View>
     </View>
   );
 }
+
+function ComingSoon({ view }: { view: PlaceholderView }) {
+  return (
+    <Center>
+      <Text tone="tertiary" variant="caption" style={{ textAlign: "center", maxWidth: 360, lineHeight: 18 }}>
+        {PLACEHOLDER[view] ?? "Nothing here yet."}
+      </Text>
+    </Center>
+  );
+}
+
+const countLabel = (n: number) => (n > 0 ? String(n) : undefined);
+
+function agoLabel(at: number): string {
+  const s = Math.max(0, Math.round((Date.now() - at) / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.round(m / 60);
+  return h < 24 ? `${h}h` : `${Math.round(h / 24)}d`;
+}
+
+function hostOf(url: string): string {
+  return url.replace(/^[a-z]+:\/\//i, "").replace(/\/.*$/, "");
+}
+
+const styles = StyleSheet.create({
+  window: { flex: 1, backgroundColor: colors.surfaceApp, overflow: "hidden" },
+  body: { flex: 1, minHeight: 0, flexDirection: "row" },
+  rail: { flexShrink: 0, paddingHorizontal: space.md, paddingBottom: space.md, overflow: "hidden" },
+  railHeader: { flexDirection: "row", alignItems: "center", gap: space.sm, height: 24, marginBottom: space.md, paddingLeft: 5 },
+  surface: { flex: 1, minHeight: 0 },
+  hidden: { display: "none" },
+  statusDot: { width: 5, height: 5, borderRadius: radius.full },
+  statusDivider: { height: 10, alignSelf: "center" },
+  captureLayer: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, alignItems: "center", zIndex: 100 },
+  captureScrim: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: colors.scrim },
+  capturePanel: {
+    width: 460,
+    maxWidth: "92%",
+    marginTop: "14vh" as unknown as number,
+    padding: space.lg,
+    backgroundColor: colors.surfaceOverlay,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.xl,
+    ...shadow.lg,
+  },
+});
 
 function usePersistentBoolean(key: string, initial: boolean) {
   const [value, setValue] = useState<boolean>(() => {

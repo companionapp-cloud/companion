@@ -21,9 +21,10 @@ export interface SplitViewProps {
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 
 /**
- * A two-pane split with a draggable divider. One pane (`aside`) has a resizable,
- * optionally persisted width; the other (`children`) flexes to fill the rest, so
- * dragging the divider resizes the content view. Web/desktop drags via pointer
+ * A two-pane split with a draggable hairline divider. The `aside` is the fixed pane —
+ * its width is drag-controlled and optionally persisted — and `children` flex to fill the
+ * rest. (Getting that backwards starves the flexible pane to zero.) Use
+ * `asideSide="right"` for a detail panel beside a document. Web/desktop drags via pointer
  * events; on native it renders as a static split.
  */
 export function SplitView({
@@ -31,8 +32,8 @@ export function SplitView({
   children,
   asideSide = "left",
   defaultWidth = layout.listW,
-  minWidth = 220,
-  maxWidth = 520,
+  minWidth = 200,
+  maxWidth = 440,
   storageKey,
   style,
 }: SplitViewProps) {
@@ -149,8 +150,8 @@ const styles = StyleSheet.create({
   root: { flexDirection: "row", height: "100%" },
   aside: { flexShrink: 0, height: "100%" },
   content: { flex: 1, minWidth: 0, height: "100%" },
-  // 7px hit area with negative margins so it overlaps the seam without consuming
-  // layout width — the 1px line stays visually centered on the pane boundary.
+  // A 1px hairline with a 7px invisible grab area: negative margins let the hit area
+  // overlap the seam without consuming layout width. The line goes accent while dragging.
   handle: {
     width: 7,
     marginHorizontal: -3,

@@ -4,8 +4,9 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTasks, TaskEditor, MembershipPicker, ConfirmDialog } from '@companion/app';
 import type { LinkRef } from '@companion/editor';
-import { Center, Icon, IconButton, Text, colors, space } from '@companion/design-system';
+import { Center, Text, colors } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
+import { NavAction, NavActions } from '../ui/native';
 
 // Full-screen editor for one task (PLAN §6.4). Task-scoped actions (add to projects,
 // delete) live in the nav header; the shared TaskEditor renders headerless here.
@@ -34,22 +35,17 @@ export function TaskEditorScreen() {
 
   useLayoutEffect(() => {
     nav.setOptions({
-      title: task?.title || 'Task',
+      // The editor beneath shows the task's own title, so the bar just names the screen.
+      title: 'Task',
       headerRight: () => (
-        <View style={styles.headerActions}>
-          <IconButton label="Add to projects" size="sm" onPress={() => setShowProjects(true)}>
-            <Icon name="folder" size={18} color={colors.textSecondary} />
-          </IconButton>
-          <IconButton label="Task graph" size="sm" onPress={() => nav.navigate('TaskGraph', { id: taskId })}>
-            <Icon name="graph" size={18} color={colors.textSecondary} />
-          </IconButton>
-          <IconButton label="Delete task" size="sm" onPress={() => setConfirmDelete(true)}>
-            <Icon name="trash" size={18} color={colors.textSecondary} />
-          </IconButton>
-        </View>
+        <NavActions>
+          <NavAction icon="folder" label="Add to projects" onPress={() => setShowProjects(true)} />
+          <NavAction icon="graph" label="Show task graph" onPress={() => nav.navigate('TaskGraph', { id: taskId })} />
+          <NavAction icon="trash" label="Delete task" onPress={() => setConfirmDelete(true)} />
+        </NavActions>
       ),
     });
-  }, [nav, task?.title]);
+  }, [nav, taskId]);
 
   if (!task) {
     return (
@@ -86,7 +82,3 @@ export function TaskEditorScreen() {
     </View>
   );
 }
-
-const styles = {
-  headerActions: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: space.xs },
-};

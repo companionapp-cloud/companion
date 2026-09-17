@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useContext, useEffect, useState } from "react";
 import type { Graph } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
-import { useNav } from "./nav-context";
+import { NavContext } from "./nav-context";
 import { useStyledGraph } from "./useStyledGraph";
 // Explicit .web specifier — see the note in GraphScreen.web.tsx.
 import { GraphEmpty, GraphView, nodeKey } from "./GraphView.web";
@@ -11,7 +11,9 @@ import { GraphEmpty, GraphView, nodeKey } from "./GraphView.web";
 // variant; native gets a placeholder (NoteGraph.tsx).
 export function NoteGraph({ noteId, depth = 2 }: { noteId: string; depth?: number }) {
   const { core, graph: graphApi } = useCore();
-  const nav = useNav();
+  // Optional: the focus window (FocusView) renders the editors outside the app navigator,
+  // where a node can be inspected but not opened.
+  const nav = useContext(NavContext);
   const [graph, setGraph] = useState<Graph>({ nodes: [], edges: [] });
   const styledGraph = useStyledGraph(graph);
   const [loaded, setLoaded] = useState(false);
@@ -45,6 +47,7 @@ export function NoteGraph({ noteId, depth = 2 }: { noteId: string; depth?: numbe
       graph={styledGraph}
       focusKey={nodeKey("note", noteId)}
       onOpenNode={(type, id) => {
+        if (!nav) return;
         if (type === "note") nav.openNote(id);
         else if (type === "task") nav.openTask(id);
         else if (type === "project") nav.openProject(id);

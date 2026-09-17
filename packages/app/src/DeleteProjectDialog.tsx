@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Pressable, View } from "react-native";
-import { Text, colors, radius, space } from "@companion/design-system";
+import { Text, colors, radius, space, useDensity, type PressState } from "@companion/design-system";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 export interface DeleteProjectDialogProps {
@@ -23,11 +23,11 @@ export function DeleteProjectDialog({ projectName, onConfirm, onClose }: DeleteP
   const deleteContent = mode === "content";
   return (
     <ConfirmDialog
-      title="Delete project?"
+      title={`Delete “${projectName}”?`}
       message={
         <View style={{ gap: space.sm }}>
           <Text tone="secondary" style={{ lineHeight: 20 }}>
-            Deleting “{projectName}” removes the project. Choose what happens to its notes and tasks:
+            The project is removed from its area. Choose what happens to its notes and tasks.
           </Text>
           <Choice
             selected={mode === "keep"}
@@ -39,11 +39,11 @@ export function DeleteProjectDialog({ projectName, onConfirm, onClose }: DeleteP
             selected={mode === "content"}
             onPress={() => setMode("content")}
             title="Delete content"
-            subtitle="Notes and tasks are moved to the Trash too."
+            subtitle="Notes and tasks move to the Trash, and are gone after 30 days."
           />
         </View>
       }
-      confirmLabel={deleteContent ? "Delete project & content" : "Delete project"}
+      confirmLabel={deleteContent ? "Delete project and content" : "Delete project"}
       confirmText={deleteContent ? projectName : undefined}
       confirmTextPrompt={deleteContent ? "Type the project name to confirm:" : undefined}
       onConfirm={() => onConfirm(deleteContent)}
@@ -63,16 +63,23 @@ function Choice({
   title: string;
   subtitle: string;
 }) {
+  const touch = useDensity() === "touch";
   return (
-    <Pressable onPress={onPress} style={[styles.choice, selected ? styles.choiceOn : null]}>
-      <View style={[styles.radio, selected ? styles.radioOn : null]}>
-        {selected ? <View style={styles.radioDot} /> : null}
-      </View>
-      <View style={{ flex: 1 }}>
+    <Pressable
+      onPress={onPress}
+      aria-label={title}
+      style={({ hovered, pressed }: PressState) => [
+        styles.choice,
+        touch ? styles.choiceTouch : null,
+        selected ? styles.choiceOn : pressed ? { backgroundColor: colors.surfaceActive } : hovered ? { backgroundColor: colors.surfaceHover } : null,
+      ]}
+    >
+      <View style={[styles.radio, selected ? styles.radioOn : null]}>{selected ? <View style={styles.radioDot} /> : null}</View>
+      <View style={{ flex: 1, gap: 1 }}>
         <Text variant="label" tone={selected ? "accent" : "default"}>
           {title}
         </Text>
-        <Text variant="caption" tone="tertiary" style={{ marginTop: 1 }}>
+        <Text variant="caption" tone="tertiary">
           {subtitle}
         </Text>
       </View>
@@ -81,26 +88,30 @@ function Choice({
 }
 
 const styles = {
+  // A hairline option card: selection is the soft-accent fill, nothing lifts.
   choice: {
     flexDirection: "row" as const,
     alignItems: "flex-start" as const,
     gap: space.md,
-    padding: space.md,
-    borderRadius: radius.lg,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: colors.borderDefault,
+    borderColor: colors.borderSubtle,
   },
-  choiceOn: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
+  choiceTouch: { minHeight: 44, paddingVertical: space.md },
+  choiceOn: { borderColor: colors.accentSoftBorder, backgroundColor: colors.accentSoft },
   radio: {
-    width: 18,
-    height: 18,
+    width: 12,
+    height: 12,
     borderRadius: radius.full,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: colors.borderStrong,
     alignItems: "center" as const,
     justifyContent: "center" as const,
-    marginTop: 1,
+    marginTop: 3,
+    flexShrink: 0,
   },
   radioOn: { borderColor: colors.accent },
-  radioDot: { width: 8, height: 8, borderRadius: radius.full, backgroundColor: colors.accent },
+  radioDot: { width: 6, height: 6, borderRadius: radius.full, backgroundColor: colors.accent },
 };

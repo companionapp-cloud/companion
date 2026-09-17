@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, AppState, StyleSheet, Text, View } from 'react-native';
+import { AppState, StyleSheet, View } from 'react-native';
 import { useURL } from 'expo-linking';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import EventSource from 'react-native-sse';
 import { CoreProvider, NotesProvider, TasksProvider, RemindersProvider, NotificationsProvider, ProjectsProvider, ObjectTypesProvider, CalendarProvider, CanvasesProvider, SyncProvider, ToolVisibilityProvider, RecoveryResetScreen, type NotificationScheduler } from '@companion/app';
 import { createNativeSyncNotifier, type CoreBridge, type SyncNotifier } from '@companion/core-bridge';
+import { DensityProvider, Spinner, Text, colors, space } from '@companion/design-system';
 import { MobileShell } from './src/MobileShell';
 import { openCore } from './src/core';
 import { createMobileNotificationScheduler, REMINDER_HORIZON_DAYS } from './src/notifications';
@@ -69,14 +70,17 @@ function Root() {
   if (error) {
     return (
       <View style={styles.center}>
-        <Text style={styles.error}>Failed to start core:{'\n'}{error}</Text>
+        <Text tone="danger" style={styles.error}>
+          Failed to start core:{'\n'}
+          {error}
+        </Text>
       </View>
     );
   }
   if (!bridge) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator />
+        <Spinner inline />
       </View>
     );
   }
@@ -135,13 +139,18 @@ function parseResetUrl(url: string | null): { token: string; baseUrl: string } |
 export default function App() {
   return (
     <SafeAreaProvider>
+      {/* Dark glyphs over surfaceApp — native ships the light theme only. */}
       <StatusBar style="dark" />
-      <Root />
+      {/* Touch density for every shared primitive and screen beneath: 44px rows, `lg`
+          controls. Mounted above the recovery flow too, so it reads the same. */}
+      <DensityProvider density="touch">
+        <Root />
+      </DensityProvider>
     </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
-  error: { color: '#b00020', textAlign: 'center', paddingHorizontal: 24 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceApp },
+  error: { textAlign: 'center', paddingHorizontal: space.xxl },
 });

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Platform, Pressable, ScrollView, View } from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
 import type { ObjectProps } from "@companion/core-bridge";
-import { Icon, IconButton, Text, colors, radius, space, type IconName, type PressState } from "@companion/design-system";
+import { Icon, IconButton, Text, colors, control, layout, radius, row, shadow, space, useDensity, type IconName, type PressState } from "@companion/design-system";
 import { useObjectTypes } from "./ObjectTypesProvider";
 import { ObjectForm } from "./ObjectForm";
 
 /** The inline archetype chip for a note/task editor (PLAN §6.3): shows/sets the object
- *  type. A ghost "Add type" chip opens a picker; once typed, it shows the type with a
+ *  type. A neutral, badge-style "+ add type" chip opens a picker; once typed, it shows the type with a
  *  clear (✕). Viewing/editing the type's structured props happens in the metadata side
  *  panel ({@link MetadataSidePanel}), not here — the chip is only the type selector. */
 export function ArchetypeChip({
@@ -22,6 +22,7 @@ export function ArchetypeChip({
 }) {
   const objectTypes = useObjectTypes();
   const [picking, setPicking] = useState(false);
+  const touch = useDensity() === "touch";
   const active = objectTypes.byId(objectTypeId);
   const candidates = objectTypes.forKind(kind);
 
@@ -30,17 +31,25 @@ export function ArchetypeChip({
   if (!objectTypeId) {
     return (
       <View style={styles.wrap}>
-        <Pressable onPress={() => setPicking((v) => !v)} style={styles.ghostChip}>
-          <Icon name="file" size={13} color={colors.textTertiary} />
-          <Text variant="caption" tone="tertiary">
-            Add type
+        <Pressable
+          onPress={() => setPicking((v) => !v)}
+          aria-label="Add type"
+          style={({ hovered, pressed }: PressState) => [
+            styles.chip,
+            touch ? styles.chipTouch : null,
+            hovered ? { backgroundColor: colors.surfaceHover } : null,
+            pressed || picking ? { backgroundColor: colors.surfaceActive } : null,
+          ]}
+        >
+          <Text variant="mono" tone="tertiary">
+            + add type
           </Text>
         </Pressable>
         {picking ? (
           <View style={styles.dropdown}>
             {candidates.length === 0 ? (
-              <View style={styles.dropdownRow}>
-                <Text variant="caption" tone="tertiary">
+              <View style={[styles.dropdownRow, { paddingVertical: space.xs }]}>
+                <Text variant="caption" tone="tertiary" style={{ flex: 1 }}>
                   No object types yet — create one in Settings → Objects.
                 </Text>
               </View>
@@ -52,10 +61,17 @@ export function ArchetypeChip({
                     onSetType(t.id);
                     setPicking(false);
                   }}
-                  style={({ hovered }: PressState) => [styles.dropdownRow, hovered ? { backgroundColor: colors.surfaceHover } : null]}
+                  style={({ hovered, pressed }: PressState) => [
+                    styles.dropdownRow,
+                    touch ? styles.dropdownRowTouch : null,
+                    hovered ? { backgroundColor: colors.surfaceHover } : null,
+                    pressed ? { backgroundColor: colors.surfaceActive } : null,
+                  ]}
                 >
-                  <Text variant="caption">{t.name}</Text>
-                  <Text variant="caption" tone="tertiary">
+                  <Text variant="label" numberOfLines={1}>
+                    {t.name}
+                  </Text>
+                  <Text variant="mono" tone="quaternary">
                     {t.appliesTo}
                   </Text>
                 </Pressable>
@@ -70,17 +86,17 @@ export function ArchetypeChip({
   // Archetyped: a filled chip with the type's icon + name and a clear (✕). A dangling type
   // (deleted/not synced) still lets the user clear it, tolerating the dangle (PLAN §5.1).
   return (
-    <View style={[styles.typeChip, active ? styles.typeChipActive : null]}>
+    <View style={[styles.chip, touch ? styles.chipTouch : null]}>
       <Icon
         name={(active?.schemaJson.icon as IconName) || "file"}
-        size={13}
-        color={active?.schemaJson.color || colors.accentHover}
+        size={11}
+        color={active?.schemaJson.color || colors.textAccent}
       />
-      <Text variant="caption" tone="secondary" style={{ fontWeight: "600" }}>
-        {active?.name ?? "Unknown type"}
+      <Text variant="mono" tone="secondary" numberOfLines={1}>
+        {active?.name ?? "unknown type"}
       </Text>
-      <Pressable onPress={onClearType} aria-label="Remove type" style={styles.clear}>
-        <Icon name="close" size={12} color={colors.textTertiary} />
+      <Pressable onPress={onClearType} aria-label="Remove type" hitSlop={touch ? 10 : 3} style={styles.clear}>
+        <Icon name="close" size={10} color={colors.textQuaternary} />
       </Pressable>
     </View>
   );
@@ -118,8 +134,8 @@ export function ObjectMetadataPanel({
   return (
     <View style={{ gap: space.md }}>
       <View style={styles.metaHeader}>
-        <Icon name={(active.schemaJson.icon as IconName) || "file"} size={14} color={active.schemaJson.color || colors.accentHover} />
-        <Text variant="caption" tone="secondary" style={{ fontWeight: "600" }}>
+        <Icon name={(active.schemaJson.icon as IconName) || "file"} size={12} color={active.schemaJson.color || colors.textAccent} />
+        <Text variant="label" tone="secondary">
           {active.name}
         </Text>
       </View>
@@ -128,7 +144,7 @@ export function ObjectMetadataPanel({
   );
 }
 
-const PANEL_MIN = 240;
+const PANEL_MIN = 220;
 const PANEL_MAX = 560;
 
 /** The metadata side panel to the right of a note/task's content, toggled from the editor
@@ -145,17 +161,17 @@ export function MetadataSidePanel({
   onChangeProps: (next: ObjectProps) => void;
   onClose: () => void;
 }) {
-  const [width, setWidth] = usePersistentWidth("companion.metadataPanel.width", 320);
+  const [width, setWidth] = usePersistentWidth("companion.metadataPanel.width", layout.panelW);
 
   return (
     <View style={[styles.sidePanel, { width }]}>
       <ResizeHandle width={width} setWidth={setWidth} />
       <View style={styles.sidePanelHeader}>
-        <Text variant="caption" tone="tertiary" style={{ fontWeight: "600", letterSpacing: 0.5, flex: 1 }}>
-          METADATA
+        <Text variant="eyebrow" tone="quaternary" style={{ flex: 1 }}>
+          Metadata
         </Text>
         <IconButton label="Hide metadata" size="sm" onPress={onClose}>
-          <Icon name="close" size={15} color={colors.textTertiary} />
+          <Icon name="close" size={12} color={colors.textTertiary} />
         </IconButton>
       </View>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.sidePanelBody}>
@@ -258,38 +274,29 @@ function usePersistentWidth(key: string, initial: number) {
 const styles = {
   // The chip anchors the picker; keep it above sibling chips so the floating dropdown
   // (absolutely positioned below) paints over them instead of pushing them around.
-  wrap: { alignSelf: "flex-start" as const, position: "relative" as const, zIndex: 1 },
-  ghostChip: {
+  wrap: { alignSelf: "center" as const, position: "relative" as const, zIndex: 1 },
+  // Badge-style: 16px tall mono on the sunken fill, radius 3. Touch grows it to a 30px control.
+  chip: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
     gap: space.xs,
-    alignSelf: "flex-start" as const,
-    paddingHorizontal: space.md,
-    paddingVertical: 5,
-    borderRadius: radius.full,
+    alignSelf: "center" as const,
+    height: 16,
+    paddingHorizontal: 5,
+    borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
+    backgroundColor: colors.surfaceSunken,
+    flexShrink: 0,
   },
-  typeChip: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: space.xs,
-    alignSelf: "flex-start" as const,
-    paddingHorizontal: space.md,
-    paddingVertical: 5,
-    borderRadius: radius.full,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    backgroundColor: colors.gray50,
-  },
-  typeChipActive: { backgroundColor: colors.accentSoft, borderColor: colors.accentSoftBorder },
+  chipTouch: { height: control.lg, paddingHorizontal: space.ml },
   clear: { padding: 3, marginVertical: -3, marginRight: -3 },
   metaHeader: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.xs },
+  // A right pane on the panel surface, split from the document by a left hairline.
   sidePanel: {
     flexShrink: 0,
     borderLeftWidth: 1,
     borderLeftColor: colors.borderSubtle,
-    backgroundColor: colors.surfaceApp,
     position: "relative" as const,
   },
   // A 7px hit area straddling the panel's left seam; the 1px line stays centered on it.
@@ -306,39 +313,42 @@ const styles = {
   },
   handleLine: { width: 1, height: "100%" as const, backgroundColor: "transparent" as const },
   handleLineActive: { backgroundColor: colors.accent },
+  // The eyebrow label and the close affordance share a row at the top of the panel's padding.
   sidePanelHeader: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
     gap: space.xs,
-    height: 44,
-    paddingLeft: space.lg,
+    minHeight: control.sm,
+    paddingTop: space.ml,
+    paddingLeft: space.ml,
     paddingRight: space.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderSubtle,
   },
-  sidePanelBody: { padding: space.lg },
+  sidePanelBody: { padding: space.ml, paddingTop: space.sm },
   // Floats below the chip so opening it never changes the chip's footprint (which would
-  // otherwise shove the "Edited" timestamp / resize neighboring task chips).
+  // otherwise shove the meta line / resize neighboring task chips). A popover, so it takes
+  // the overlay surface and shadow.md.
   dropdown: {
     position: "absolute" as const,
     top: "100%" as const,
     left: 0,
     marginTop: space.xs,
     zIndex: 10,
-    minWidth: 180,
+    minWidth: 200,
+    padding: space.xs,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
-    borderRadius: radius.md,
-    backgroundColor: colors.surfaceCard,
-    overflow: "hidden" as const,
-    ...(Platform.OS === "web" ? { boxShadow: "0 8px 24px rgba(0,0,0,0.14)" } : null),
+    borderRadius: radius.lg,
+    backgroundColor: colors.surfaceOverlay,
+    ...shadow.md,
   },
   dropdownRow: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
     justifyContent: "space-between" as const,
-    gap: space.sm,
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
+    gap: space.md,
+    minHeight: row.h,
+    paddingHorizontal: space.sm,
+    borderRadius: radius.sm,
   },
+  dropdownRowTouch: { minHeight: row.touch },
 };

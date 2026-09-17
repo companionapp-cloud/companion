@@ -13,7 +13,7 @@ export interface ProgressRingProps {
  * project task-completion indicator (PLAN §6.6). The native variant uses
  * react-native-svg so it never enters the react-native-web bundle. When fully
  * complete (value >= 1) the ring becomes a filled check to signal "all tasks done". */
-export function ProgressRing({ value, size = 16, stroke = 2.5, color = colors.accent, track = colors.borderDefault }: ProgressRingProps) {
+export function ProgressRing({ value, size = 14, stroke = 2, color = colors.accent, track = colors.borderSubtle }: ProgressRingProps) {
   const v = Math.max(0, Math.min(1, value));
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;

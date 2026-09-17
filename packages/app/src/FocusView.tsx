@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 import { View } from "react-native";
-import { Center, Spinner, Text, colors, dragRegion, radius, shadow, space } from "@companion/design-system";
+import { Center, Spinner, Text, colors, dragRegion, radius, space } from "@companion/design-system";
 import { useNotes } from "./NotesProvider";
 import { useTasks } from "./TasksProvider";
 import { NoteEditor } from "./NoteEditor";
@@ -65,12 +65,15 @@ function Gone({ loading, label }: { loading: boolean; label: string }): ReactNod
   if (loading) return <Spinner label="Opening…" />;
   return (
     <Center>
-      <Text tone="tertiary">{label}</Text>
+      <Text variant="caption" tone="tertiary">
+        {label}
+      </Text>
     </Center>
   );
 }
 
 const styles = {
+  // The same inset panel as the app frame: card surface, hairline, radius 6, no shadow.
   root: { flex: 1, backgroundColor: colors.surfaceApp, padding: space.lg },
   card: {
     flex: 1,
@@ -78,8 +81,7 @@ const styles = {
     backgroundColor: colors.surfaceCard,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
-    borderRadius: radius.xl,
+    borderRadius: radius.lg,
     overflow: "hidden" as const,
-    ...shadow.sm,
   },
 };

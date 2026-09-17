@@ -75,8 +75,11 @@ declare module "react-native" {
     onHoverIn?: () => void;
     onHoverOut?: () => void;
     disabled?: boolean;
+    hitSlop?: number;
     children?: ReactNode | ((state: PressableState) => ReactNode);
     "aria-label"?: string;
+    "aria-selected"?: boolean;
+    role?: string;
   }
   interface ModalProps extends ViewProps {
     visible?: boolean;
@@ -91,6 +94,8 @@ declare module "react-native" {
     style?: StyleProp;
     contentContainerStyle?: StyleProp;
     ListEmptyComponent?: ReactNode;
+    ListHeaderComponent?: ReactNode;
+    ListFooterComponent?: ReactNode;
   }
 
   // Layout + gesture types for drag-and-drop (SortableList). Loose stand-ins.

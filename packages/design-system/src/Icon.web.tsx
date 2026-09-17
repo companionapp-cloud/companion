@@ -1,9 +1,9 @@
-import { ICON_DEFAULT_COLOR, ICON_PATHS, type IconProps } from "./iconPaths";
+import { ICON_DEFAULT_COLOR, ICON_PATHS, ICON_STROKE, type IconProps } from "./iconPaths";
 
 // Web/desktop icon: a plain DOM <svg>. This variant is resolved by Vite (.web.tsx
 // first), so react-native-web builds never pull react-native-svg (whose Fabric native
 // components import React Native internals absent from react-native-web).
-export function Icon({ name, size = 18, color = ICON_DEFAULT_COLOR, strokeWidth = 1.75 }: IconProps) {
+export function Icon({ name, size = 14, color = ICON_DEFAULT_COLOR, strokeWidth = ICON_STROKE }: IconProps) {
   return (
     <svg
       width={size}
@@ -14,6 +14,8 @@ export function Icon({ name, size = 18, color = ICON_DEFAULT_COLOR, strokeWidth 
       strokeWidth={strokeWidth}
       strokeLinecap="round"
       strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ display: "block", flexShrink: 0 }}
     >
       <path d={ICON_PATHS[name] ?? ICON_PATHS.dot} />
     </svg>

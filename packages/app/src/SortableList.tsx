@@ -10,11 +10,14 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
-import { noDragRegion } from "@companion/design-system";
+import { colors, noDragRegion, radius, shadow } from "@companion/design-system";
 
 // On web a mouse-drag would otherwise start a native text selection that fights the
 // PanResponder; disabling user-select on the rows keeps drags clean. No-op on native.
 const NO_SELECT = Platform.OS === "web" ? ({ userSelect: "none" } as const) : null;
+
+// An opaque fill so the shadow reads as one floating row rather than bleeding through it.
+const FLOATING = { backgroundColor: colors.surfaceCard, borderRadius: radius.sm, ...shadow.md } as const;
 
 export interface SortableRenderInfo<T> {
   item: T;
@@ -128,7 +131,8 @@ export function SortableList<T>({
         let shift = 0;
         if (s.startIndex < target && j > s.startIndex && j <= target) shift = -h;
         else if (target < s.startIndex && j >= target && j < s.startIndex) shift = h;
-        Animated.spring(getTranslate(k), { toValue: shift, useNativeDriver: false, bounciness: 0, speed: 20 }).start();
+        // Critically damped: rows slide to open the gap and settle without overshoot.
+        Animated.spring(getTranslate(k), { toValue: shift, useNativeDriver: false, bounciness: 0, speed: 24 }).start();
       }
     },
     [getTranslate],
@@ -224,7 +228,9 @@ function SortableRow({
       onLayout={(e: LayoutChangeEvent) => onLayoutHeight(e.nativeEvent.layout.height)}
       // noDragRegion: on the Wails desktop the rail is a window drag handle, so rows must
       // opt out or a drag would move the window instead of reordering.
-      style={{ transform: [{ translateY: translate }], zIndex: active ? 2 : 0, opacity: active ? 0.95 : 1, ...NO_SELECT, ...noDragRegion }}
+      // The dragged row floats above the document, so it alone earns `shadow.md`; it follows
+      // the pointer 1:1 — no scale, no lift, no spring.
+      style={{ transform: [{ translateY: translate }], zIndex: active ? 2 : 0, ...(active ? FLOATING : null), ...NO_SELECT, ...noDragRegion }}
     >
       {children(responder.panHandlers)}
     </Animated.View>

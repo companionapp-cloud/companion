@@ -8,9 +8,13 @@ import {
   SplitView,
   Text,
   colors,
+  font,
   layout,
+  motion,
   radius,
   space,
+  transition,
+  useDensity,
   type PressState,
 } from "@companion/design-system";
 import type { CalendarItem } from "@companion/core-bridge";
@@ -20,6 +24,7 @@ import { FormattingBar } from "./FormattingBar";
 import { tableMenuPresenter } from "./tableMenu";
 import { useNav } from "./nav-context";
 import { useNotes } from "./NotesProvider";
+import { useSync } from "./SyncProvider";
 import { useTasks } from "./TasksProvider";
 import { useLinkSource } from "./useLinkSource";
 import { useQuickCreateLink } from "./useQuickCreateLink";
@@ -56,10 +61,13 @@ export function TodayScreen() {
   // The wall clock can roll past midnight while the screen is mounted; recompute "today" so
   // future-day gating and the "today" markers stay honest without a manual refresh.
   const [today, setToday] = useState(todayISO);
+  // Only the visible tab keeps the clock; a background tab catches up the moment it's shown.
   useEffect(() => {
+    if (!nav.visible) return;
+    setToday(todayISO());
     const id = setInterval(() => setToday(todayISO()), 60_000);
     return () => clearInterval(id);
-  }, []);
+  }, [nav.visible]);
 
   const isToday = selected === today;
 
@@ -74,6 +82,7 @@ export function TodayScreen() {
         <CalendarPane
           selected={selected}
           today={today}
+          visible={nav.visible}
           onSelect={setSelected}
           onOpenItem={(item) => {
             if (item.kind === "task" || item.kind === "note") nav.openInNewTab({ kind: item.kind, id: item.sourceId });
@@ -83,7 +92,7 @@ export function TodayScreen() {
     >
       <View style={styles.content}>
         <View style={styles.subToolbar}>
-          <Text variant="mono" tone="tertiary" style={{ flex: 1 }} numberOfLines={1}>
+          <Text variant="mono" tone="tertiary" style={styles.crumb} numberOfLines={1}>
             Daily notes / {formatFullDate(selected)}
           </Text>
           {isToday ? <Badge tone="accent" label="today" /> : null}
@@ -92,8 +101,8 @@ export function TodayScreen() {
           ) : null}
         </View>
         {/* Keyed by date so switching days remounts with that day's content seeded in.
-            DailyNote owns its own scroll region on web so the floating formatting bar can
-            anchor to the fixed viewport rather than scroll away with the document. */}
+            DailyNote owns its own scroll region on web so the pinned formatting bar stays
+            under the fixed viewport rather than scrolling away with the document. */}
         <DailyNote
           key={selected}
           date={selected}
@@ -139,6 +148,7 @@ function DailyNoteBody({
 }) {
   const notes = useNotes();
   const tasks = useTasks();
+  const touch = useDensity() === "touch";
   const linkSource = useLinkSource();
   // File embedding (PLAN §6.9): present on web (OPFS blob store), undefined elsewhere.
   const documentSource = useDocumentSource();
@@ -150,7 +160,7 @@ function DailyNoteBody({
   const noteIdRef = useRef<string | null>(initial?.id ?? null);
   const [hasNote, setHasNote] = useState(!!initial);
 
-  // Web/desktop: the formatting bar floats over the editor while it's focused. The editor
+  // Web/desktop: the formatting bar sits pinned under the document. The editor
   // reports which toggles are active/available; the ref drives them. (Native renders its own
   // keyboard-anchored toolbar inside the editor, so this stays dormant there.) Mirrors the
   // note editor's formatting-bar plumbing.
@@ -158,8 +168,8 @@ function DailyNoteBody({
   // Empty `[[label]]` links double-click to a quick-create dialog (make a note/task chip).
   const quickCreate = useQuickCreateLink(editorRef);
   const [formatState, setFormatState] = useState<FormatState | null>(null);
-  // Show the bar whenever the editor is focused. Clicking a bar button briefly blurs the
-  // editor (the action then refocuses it), so hiding is delayed a beat to avoid a flicker.
+  // Touch web shows the bar only while the editor is focused. Clicking a bar button briefly
+  // blurs the editor (the action then refocuses it), so hiding is delayed a beat to avoid a flicker.
   const [editorFocused, setEditorFocused] = useState(false);
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleFocusChange = useCallback((focused: boolean) => {
@@ -208,7 +218,7 @@ function DailyNoteBody({
   const body = (
     <>
       <View style={{ paddingHorizontal: headingPadding }}>
-        <Text variant="title" style={styles.heading}>
+        <Text variant="title" style={touch ? styles.headingTouch : null}>
           {formatFullDate(date)}
         </Text>
         <Text variant="mono" tone="tertiary" style={styles.meta}>
@@ -235,8 +245,8 @@ function DailyNoteBody({
   );
 
   // Native: the editor manages its own keyboard-anchored toolbar and scrolls internally, so
-  // the host View is enough. Web/desktop: own the scroll region here so the floating
-  // formatting bar can anchor to this fixed container instead of scrolling with the document.
+  // the host View is enough. Web/desktop: own the scroll region here so the pinned formatting
+  // bar stays under this fixed container instead of scrolling away with the document.
   if (Platform.OS !== "web") {
     return (
       <View style={styles.page}>
@@ -248,10 +258,12 @@ function DailyNoteBody({
 
   return (
     <View style={styles.page}>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.doc}>
-        {body}
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.docScroll}>
+        <View style={styles.doc}>{body}</View>
       </ScrollView>
-      {editorFocused ? (
+      {/* The bar is pinned under the document as the column's last row. A pointer keeps it
+          up permanently; touch web only shows it while the editor has focus. */}
+      {!touch || editorFocused ? (
         <FormattingBar state={formatState} editorRef={editorRef} canAttach={!!documentSource} />
       ) : null}
       {quickCreate.dialog}
@@ -259,28 +271,76 @@ function DailyNoteBody({
   );
 }
 
-/** Desktop aside wrapper: the mini calendar plus the selected day's agenda in a scrollable,
- *  bordered side panel. */
+/** Desktop aside wrapper: the mini calendar, the selected day's agenda and the sync state in
+ *  a scrollable side panel. The SplitView draws the hairline; this pane is flat. */
 function CalendarPane(props: {
   selected: string;
   today: string;
+  /** False while this tab sits in the background — pauses the sync section's clock. */
+  visible: boolean;
   onSelect: (date: string) => void;
   onOpenItem?: (item: CalendarItem) => void;
 }) {
   return (
-    <ScrollView style={styles.aside} contentContainerStyle={{ padding: space.xl }}>
+    <ScrollView style={styles.aside} contentContainerStyle={styles.asideContent}>
       <TodayCalendar selected={props.selected} today={props.today} onSelect={props.onSelect} />
-      <View style={styles.agendaBlock}>
-        <Agenda date={props.selected} onOpenItem={props.onOpenItem} />
-      </View>
+      <Agenda date={props.selected} onOpenItem={props.onOpenItem} />
+      <SyncSection visible={props.visible} />
     </ScrollView>
   );
 }
 
-/** A mini month calendar. Days with a note show a dot; today is outlined; the selected day
- *  is filled. Past days and today are always clickable; future days are disabled in the
- *  daily-note picker (you don't write tomorrow's note) but selectable when `allowFuture` is
- *  set — the Calendar tool browses upcoming events. Layout-neutral so either shell can place it. */
+/** '12s' / '4m' / '3h' / '2d' since `at` — mono metadata, so terse and lowercase. */
+function agoLabel(at: number): string {
+  const s = Math.max(0, Math.round((Date.now() - at) / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86_400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86_400)}d`;
+}
+
+/** The aside's sync line: a 5px state dot and what the machine knows, in mono. Mirrors the
+ *  shell status bar's states so the two never disagree. */
+function SyncSection({ visible }: { visible: boolean }) {
+  const sync = useSync();
+  // Re-render on a slow tick so "12s ago" stays honest without a sync event.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!visible) return;
+    const t = setInterval(() => setTick((n) => n + 1), 15_000);
+    return () => clearInterval(t);
+  }, [visible]);
+
+  const state = !sync.connected
+    ? { color: colors.textQuaternary, label: "local only" }
+    : sync.status === "syncing"
+      ? { color: colors.accent, label: "syncing…" }
+      : sync.status === "locked"
+        ? { color: colors.danger, label: "locked" }
+        : sync.status === "error" || sync.needsReauth
+          ? { color: colors.danger, label: sync.needsReauth ? "signed out" : "sync error" }
+          : { color: colors.success, label: sync.lastSyncedAt ? `synced · ${agoLabel(sync.lastSyncedAt)} ago` : "connected" };
+
+  return (
+    <View>
+      <Text variant="eyebrow" tone="quaternary" style={styles.sectionLabel}>
+        Sync
+      </Text>
+      <View style={styles.syncRow}>
+        <View style={[styles.syncDot, { backgroundColor: state.color }]} />
+        <Text variant="mono" tone="tertiary" numberOfLines={1}>
+          {state.label}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+/** A mini month calendar. Days with a note show a 3px dot; today is the filled accent cell;
+ *  the selected day takes the selected fill. Past days and today are always clickable; future
+ *  days are disabled in the daily-note picker (you don't write tomorrow's note) but selectable
+ *  when `allowFuture` is set — the Calendar tool browses upcoming events. Layout-neutral so
+ *  either shell can place it; cells are 22px under a pointer and 30px under touch. */
 export function TodayCalendar({
   selected,
   today,
@@ -293,6 +353,7 @@ export function TodayCalendar({
   allowFuture?: boolean;
 }) {
   const notes = useNotes();
+  const touch = useDensity() === "touch";
   const daysWithNotes = useMemo(() => {
     const set = new Set<string>();
     for (const n of notes.notes) if (n.date) set.add(n.date);
@@ -323,25 +384,27 @@ export function TodayCalendar({
     const m = view.month + delta;
     setView({ year: view.year + Math.floor(m / 12), month: ((m % 12) + 12) % 12 });
   };
+  const cellHeight = touch ? CELL_H_TOUCH : CELL_H;
 
   return (
     <View>
       <View style={styles.calHeader}>
-        <Text style={{ flex: 1, fontWeight: "600" }}>
+        <Text variant="label" style={{ flex: 1 }} numberOfLines={1}>
           {MONTHS[view.month]} {view.year}
         </Text>
-        <IconButton label="Previous month" size="sm" onPress={() => step(-1)}>
-          <Icon name="chevronLeft" size={16} color={colors.textSecondary} />
+        {/* Touch leaves the size to the density default (lg); the pointer aside is sm. */}
+        <IconButton label="Previous month" size={touch ? undefined : "sm"} onPress={() => step(-1)}>
+          <Icon name="chevronLeft" size={touch ? 14 : 12} color={colors.textSecondary} />
         </IconButton>
-        <IconButton label="Next month" size="sm" onPress={() => step(1)}>
-          <Icon name="chevronRight" size={16} color={colors.textSecondary} />
+        <IconButton label="Next month" size={touch ? undefined : "sm"} onPress={() => step(1)}>
+          <Icon name="chevronRight" size={touch ? 14 : 12} color={colors.textSecondary} />
         </IconButton>
       </View>
 
       <View style={styles.grid}>
         {DOW.map((d, i) => (
           <View key={`dow-${i}`} style={styles.dowCell}>
-            <Text variant="mono" tone="tertiary" style={{ fontSize: 11 }}>
+            <Text variant="mono" tone="quaternary">
               {d}
             </Text>
           </View>
@@ -350,7 +413,7 @@ export function TodayCalendar({
 
       <View style={styles.grid}>
         {cells.map((d, i) => {
-          if (d === null) return <View key={`x-${i}`} style={styles.cell} />;
+          if (d === null) return <View key={`x-${i}`} style={[styles.cell, { height: cellHeight + 2 }]} />;
           const date = iso(d);
           const isSel = date === selected;
           const isToday = date === today;
@@ -361,6 +424,8 @@ export function TodayCalendar({
               key={date}
               day={d}
               label={formatFullDate(date)}
+              height={cellHeight}
+              touch={touch}
               selected={isSel}
               today={isToday}
               disabled={isFuture && !allowFuture}
@@ -377,6 +442,8 @@ export function TodayCalendar({
 function DayCell({
   day,
   label,
+  height,
+  touch,
   selected,
   today,
   disabled,
@@ -385,15 +452,25 @@ function DayCell({
 }: {
   day: number;
   label: string;
+  height: number;
+  touch: boolean;
   selected: boolean;
   today: boolean;
   disabled: boolean;
   hasNote: boolean;
   onPress: () => void;
 }) {
-  // Future days read muted only when they're also disabled (the daily-note picker); when the
-  // Calendar tool lets you browse ahead, upcoming days render as normal selectable days.
-  const fg = selected ? colors.onAccent : disabled ? colors.textTertiary : colors.textPrimary;
+  // Today is the one filled cell; a selected day that isn't today reads like any other
+  // selection (selected fill + accent ink). Future days read muted only when they're also
+  // disabled (the daily-note picker); when the Calendar tool lets you browse ahead, upcoming
+  // days render as normal selectable days.
+  const fg = today
+    ? colors.onAccent
+    : selected
+      ? colors.textAccent
+      : disabled
+        ? colors.textDisabled
+        : colors.textSecondary;
   return (
     <View style={styles.cell}>
       <Pressable
@@ -402,22 +479,43 @@ function DayCell({
         aria-label={label}
         // react-native-web supplies `hovered`; it's always false on native (no hover), which
         // is the correct fallback.
-        style={({ hovered }: PressState) => [
+        style={({ hovered, pressed }: PressState) => [
           styles.day,
+          transition("background-color", motion.instant),
           {
-            backgroundColor: selected ? colors.accent : hovered && !disabled ? colors.surfaceHover : "transparent",
+            height,
+            backgroundColor: today
+              ? pressed
+                ? colors.accentActive
+                : hovered
+                  ? colors.accentHover
+                  : colors.accent
+              : selected
+                ? colors.surfaceSelected
+                : pressed && !disabled
+                  ? colors.surfaceActive
+                  : hovered && !disabled
+                    ? colors.surfaceHover
+                    : "transparent",
           },
-          !selected && today ? styles.dayToday : null,
+          selected && !today ? styles.daySelected : null,
         ]}
       >
-        <Text style={{ color: fg, fontWeight: today ? "600" : "400" }}>{day}</Text>
-        {hasNote ? (
-          <View style={[styles.noteDot, { backgroundColor: selected ? colors.onAccent : colors.accent }]} />
-        ) : null}
+        <Text
+          variant="mono"
+          style={{ color: fg, fontSize: touch ? font.size.sm : font.size.xs, fontWeight: today || selected ? font.weight.semibold : font.weight.regular }}
+        >
+          {day}
+        </Text>
+        {hasNote ? <View style={[styles.noteDot, { backgroundColor: today ? colors.onAccent : colors.accent }]} /> : null}
       </Pressable>
     </View>
   );
 }
+
+// Mini-calendar day cells: 22px under a pointer, 30px under touch.
+const CELL_H = 22;
+const CELL_H_TOUCH = 30;
 
 const styles = {
   content: { flex: 1, minWidth: 0, backgroundColor: colors.surfaceCard },
@@ -425,46 +523,53 @@ const styles = {
     flexDirection: "row" as const,
     alignItems: "center" as const,
     gap: space.sm,
-    height: 44,
-    paddingHorizontal: space.lg,
+    height: layout.subToolbarH,
+    paddingLeft: space.ml,
+    paddingRight: space.sm,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
     flexShrink: 0,
   },
-  doc: {
-    maxWidth: layout.contentMax,
-    width: "100%" as const,
-    marginHorizontal: "auto" as const,
-    paddingHorizontal: 44,
-    paddingTop: 40,
-    paddingBottom: 60,
-  },
+  crumb: { flex: 1, minWidth: 0 },
+  // The document column: 20/28 page padding around a 720px measure, left-aligned like the
+  // note editor so the two read as the same page.
+  docScroll: { paddingHorizontal: 28, paddingTop: space.xl2, paddingBottom: space.huge },
+  doc: { maxWidth: layout.contentMax, width: "100%" as const },
   page: { flex: 1 },
-  heading: { fontSize: 30, lineHeight: 36, fontWeight: "600" as const, letterSpacing: -0.5 },
-  meta: { marginTop: space.sm, marginBottom: space.xxl },
+  // Touch drops the desktop title for the phone's 20px semibold heading.
+  headingTouch: { fontSize: font.size["2xl"], lineHeight: 24, letterSpacing: -0.5 },
+  meta: { marginTop: space.xs, marginBottom: space.xl },
 
-  aside: { flex: 1, backgroundColor: colors.surfaceCard, borderLeftWidth: 1, borderLeftColor: colors.borderSubtle },
-  agendaBlock: { marginTop: space.xxl, paddingTop: space.xl, borderTopWidth: 1, borderTopColor: colors.borderSubtle },
-  calHeader: { flexDirection: "row" as const, alignItems: "center" as const, marginBottom: space.lg },
-  grid: { flexDirection: "row" as const, flexWrap: "wrap" as const },
-  cell: { width: `${100 / 7}%` as const, aspectRatio: 1, padding: 2 },
-  // The weekday header row is a slim label strip, not square day cells — squares left a big
-  // gap under the S/M/T… labels.
-  dowCell: { width: `${100 / 7}%` as const, alignItems: "center" as const, paddingBottom: space.xs },
+  aside: { flex: 1, backgroundColor: colors.surfaceCard },
+  asideContent: { padding: space.ml },
+  sectionLabel: { paddingHorizontal: space.sm, paddingTop: space.md, paddingBottom: 3 },
+  syncRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: space.sm,
+    paddingHorizontal: space.sm,
+    minHeight: 18,
+  },
+  syncDot: { width: 5, height: 5, flexShrink: 0, borderRadius: radius.full },
+
+  calHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: space.xs,
+    paddingTop: space.xxs,
+    paddingBottom: space.sm,
+    paddingHorizontal: space.sm,
+  },
+  // A 7-column grid with a 2px gutter: each cell carries 1px of padding, the grid 3px, so
+  // the numerals sit 4px in from the pane's own padding.
+  grid: { flexDirection: "row" as const, flexWrap: "wrap" as const, paddingHorizontal: 3 },
+  cell: { width: `${100 / 7}%` as const, padding: 1 },
+  dowCell: { width: `${100 / 7}%` as const, alignItems: "center" as const, paddingBottom: space.xxs },
   day: {
-    flex: 1,
-    borderRadius: radius.md,
+    borderRadius: radius.sm,
     alignItems: "center" as const,
     justifyContent: "center" as const,
-    position: "relative" as const,
   },
-  dayToday: { borderWidth: 1, borderColor: colors.accentSoftBorder },
-  noteDot: {
-    position: "absolute" as const,
-    bottom: 5,
-    width: 4,
-    height: 4,
-    marginTop: 2,
-    borderRadius: radius.full,
-  },
+  daySelected: { borderWidth: 1, borderColor: colors.accentSoftBorder },
+  noteDot: { width: 3, height: 3, marginTop: 1, borderRadius: radius.full },
 };

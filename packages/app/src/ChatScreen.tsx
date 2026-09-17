@@ -1,26 +1,47 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Pressable, ScrollView, StyleSheet, Text as RNText, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Text as RNText, View } from "react-native";
 import {
+  Avatar,
+  BrandMark,
   Button,
   colors,
+  control,
   font,
   Icon,
+  icon as iconSize,
   IconButton,
   Input,
+  Kbd,
+  layout,
+  motion,
   radius,
+  row,
   shadow,
   space,
   Spinner,
+  SplitView,
+  Text,
+  transition,
+  useDensity,
+  type PressState,
 } from "@companion/design-system";
 import { Editor, type LinkRef, type LinkSource } from "@companion/editor";
 import type { Chat, LLMConfig, StoredChatMessage } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
 import { useLinkSource } from "./useLinkSource";
 import { useNav } from "./nav-context";
+import { timeAgo } from "./NotificationRow";
+import { useSync } from "./SyncProvider";
 
 /** OpenEntityContext lets wikilink chips navigate without threading the shell's navigator
  *  through every component; each shell supplies its own handler. */
 const OpenEntityContext = createContext<((type: string, id: string) => void) | undefined>(undefined);
+
+/** How messages are drawn. "transcript" is the desktop thread — a 640px column of avatar +
+ *  mono speaker label + prose, no bubbles. "bubbles" is the touch layout the floating
+ *  composer pairs with. */
+type ThreadLayout = "transcript" | "bubbles";
+const ThreadLayoutContext = createContext<ThreadLayout>("transcript");
 
 // ===========================================================================
 // ChatView — the shell-agnostic conversation pane, bound to one persisted chat.
@@ -63,6 +84,8 @@ export function ChatView({
   const draftRef = useRef("");
   const [sendTick, setSendTick] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const floating = composer === "floating";
 
   const scrollRef = useRef<{ scrollToEnd: (o?: { animated?: boolean }) => void } | null>(null);
 
@@ -72,6 +95,7 @@ export function ChatView({
       .get(chatId)
       .then((d) => {
         setMessages(d.messages);
+        setTitle(d.chat.title);
         setConfigId((cur) => cur ?? d.chat.configId ?? null);
         setModel((cur) => cur ?? d.chat.model ?? null);
         setWorking(d.working);
@@ -196,59 +220,99 @@ export function ChatView({
   if (live || working) {
     (live?.actions ?? []).forEach((a, i) => threadRows.push(<ActionLine key={`la${i}`} action={a} />));
     threadRows.push(
-      <Bubble key="live" role="assistant">
+      <Message key="live" role="assistant" working>
         {live?.text ? <WikiText value={live.text} /> : <RNText style={styles.thinking}>Thinking…</RNText>}
-      </Bubble>,
+      </Message>,
     );
   }
 
+  const sendDisabled = working || !draft.trim() || !canSend;
+  const selector = (placement: "header" | "below") => (
+    <SelectorBar
+      placement={placement}
+      configs={configs ?? []}
+      configId={configId}
+      onPickConfig={pickConfig}
+      models={models}
+      model={model}
+      onPickModel={setModel}
+    />
+  );
+
   return (
     <OpenEntityContext.Provider value={onOpenEntity}>
-      <View style={styles.root}>
-        <ScrollView ref={scrollRef as never} style={styles.scroll} contentContainerStyle={isThread ? styles.threadAnchored : styles.scrollInner}>
-          {!hasProvider && configs !== null ? (
-            <EmptyState onConfigure={onConfigure} />
-          ) : !isThread ? (
-            <View style={styles.center}>
-              <RNText style={styles.hint}>Ask about your notes and tasks, or tell me to create one. I can search, then act.</RNText>
+      <ThreadLayoutContext.Provider value={floating ? "bubbles" : "transcript"}>
+        <View style={styles.root}>
+          {/* Desktop thread header: the chat title and the mono model line, which is also
+              the provider / model picker. The mobile shells title the screen themselves. */}
+          {!floating ? (
+            <View style={styles.header}>
+              <Text variant="label" numberOfLines={1} style={styles.headerTitle}>
+                {title || "New chat"}
+              </Text>
+              {hasProvider ? selector("header") : null}
+              {onConfigure ? (
+                <IconButton label="Model settings" size="sm" onPress={onConfigure}>
+                  <Icon name="settings" size={13} color={colors.textSecondary} />
+                </IconButton>
+              ) : null}
             </View>
-          ) : (
-            threadRows
-          )}
-        </ScrollView>
-        {error && <RNText style={styles.error}>{error}</RNText>}
+          ) : null}
 
-        {hasProvider &&
-          (composer === "floating" ? (
-            <View style={[styles.floatingWrap, { paddingBottom: space.lg + bottomInset }]}>
-              <View style={styles.floatingBar}>
-                <View style={styles.floatingInput}>
-                  <Composer
-                    placeholder="Message…"
-                    onChangeMarkdown={onDraftChange}
-                    onSubmit={(md) => void send(md)}
-                    clearSignal={sendTick}
-                    linkSource={linkSource}
-                    onOpenRef={(ref) => onOpenEntity?.(ref.type, ref.id)}
-                  />
-                </View>
-                <Pressable onPress={() => void send()} disabled={working || !draft.trim() || !canSend} aria-label="Send" style={[styles.sendCircle, (working || !draft.trim() || !canSend) && styles.sendCircleOff]}>
-                  <Icon name="chevronRight" size={18} color={colors.onAccent} />
-                </Pressable>
+          <ScrollView
+            ref={scrollRef as never}
+            style={styles.scroll}
+            contentContainerStyle={isThread ? (floating ? styles.threadBubbles : styles.threadTranscript) : styles.scrollInner}
+          >
+            {!hasProvider && configs !== null ? (
+              <EmptyState onConfigure={onConfigure} />
+            ) : !isThread ? (
+              <View style={styles.center}>
+                <Text variant="caption" tone="tertiary" style={styles.hint}>
+                  Ask about your notes and tasks, or tell me to create one. I can search, then act.
+                </Text>
               </View>
-              <SelectorBar
-                configs={configs ?? []}
-                configId={configId}
-                onPickConfig={pickConfig}
-                models={models}
-                model={model}
-                onPickModel={setModel}
-              />
-            </View>
-          ) : (
-            <View style={styles.composerCol}>
+            ) : (
+              threadRows
+            )}
+          </ScrollView>
+          {error ? (
+            <Text variant="caption" tone="danger" style={styles.error}>
+              {error}
+            </Text>
+          ) : null}
+
+          {hasProvider &&
+            (floating ? (
+              <View style={[styles.floatingWrap, { paddingBottom: space.lg + bottomInset }]}>
+                <View style={styles.floatingBar}>
+                  <View style={styles.floatingInput}>
+                    <Composer
+                      placeholder="Message…"
+                      onChangeMarkdown={onDraftChange}
+                      onSubmit={(md) => void send(md)}
+                      clearSignal={sendTick}
+                      linkSource={linkSource}
+                      onOpenRef={(ref) => onOpenEntity?.(ref.type, ref.id)}
+                    />
+                  </View>
+                  <Pressable
+                    onPress={() => void send()}
+                    disabled={sendDisabled}
+                    aria-label="Send"
+                    style={({ pressed }: PressState) => [
+                      styles.sendCircle,
+                      sendDisabled ? styles.sendCircleOff : pressed ? styles.sendCirclePressed : null,
+                    ]}
+                  >
+                    <Icon name="chevronRight" size={18} color={colors.onAccent} />
+                  </Pressable>
+                </View>
+                {selector("below")}
+              </View>
+            ) : (
               <View style={styles.composer}>
-                <View style={styles.input}>
+                <ComposerField>
                   <Composer
                     placeholder="Message your assistant…"
                     onChangeMarkdown={onDraftChange}
@@ -257,23 +321,42 @@ export function ChatView({
                     linkSource={linkSource}
                     onOpenRef={(ref) => onOpenEntity?.(ref.type, ref.id)}
                   />
-                </View>
-                <Button label={working ? "…" : "Send"} onPress={() => void send()} disabled={working || !draft.trim() || !canSend} />
+                </ComposerField>
+                <Button label={working ? "…" : "Send"} onPress={() => void send()} disabled={sendDisabled} />
               </View>
-              <SelectorBar
-                configs={configs ?? []}
-                configId={configId}
-                onPickConfig={pickConfig}
-                models={models}
-                model={model}
-                onPickModel={setModel}
-              />
-            </View>
-          ))}
-      </View>
+            ))}
+        </View>
+      </ThreadLayoutContext.Provider>
     </OpenEntityContext.Provider>
   );
 }
+
+/** The desktop composer shell: the same box as `Input` (hairline, 4px radius, focus edge +
+ *  ring) around the growing editor, with the ⏎ hint in the trailing slot. */
+function ComposerField({ children }: { children: ReactNode }) {
+  const [focused, setFocused] = useState(false);
+  // Focus events bubble from the editor's contenteditable on web; they aren't View props
+  // in the native typings, hence the cast. Native never renders this (it uses "floating").
+  const focusProps = { onFocus: () => setFocused(true), onBlur: () => setFocused(false) } as Record<string, unknown>;
+  return (
+    <View
+      {...focusProps}
+      style={[
+        styles.field,
+        transition("border-color, box-shadow", motion.fast),
+        focused ? styles.fieldFocused : null,
+        focused ? focusRing : null,
+      ]}
+    >
+      <View style={styles.fieldInput}>{children}</View>
+      <View style={styles.fieldTrailing}>
+        <Kbd>⏎</Kbd>
+      </View>
+    </View>
+  );
+}
+
+const focusRing = Platform.OS === "web" ? ({ boxShadow: `0 0 0 2px ${colors.focusRing}` } as Record<string, unknown>) : null;
 
 // ===========================================================================
 // ChatList — reusable chat list column (desktop detail pane + mobile screen).
@@ -292,42 +375,125 @@ export function ChatList({
   onSelect: (id: string) => void;
   onNew: () => void;
   onDelete?: (id: string) => void;
-  /** "sidebar" is the fixed desktop detail column; "full" fills a mobile screen and drops
-   *  the internal header (the stack header already titles it). */
+  /** "sidebar" is the desktop list column (dense 24px rows, mono time, hover-revealed
+   *  delete); "full" fills a mobile screen as one grouped card of 60px rows and drops the
+   *  internal header (the stack header already titles it). */
   variant?: "sidebar" | "full";
 }) {
-  return (
-    <View style={variant === "full" ? styles.listColFull : styles.listCol}>
-      {variant === "sidebar" && (
-        <View style={styles.listHeader}>
-          <RNText style={styles.listTitle}>Chats</RNText>
-          <View style={{ flex: 1 }} />
-          <IconButton label="New chat" size="sm" onPress={onNew}>
-            <Icon name="plus" size={16} color={colors.textSecondary} />
-          </IconButton>
-        </View>
-      )}
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.sm }}>
+  if (variant === "full") {
+    return (
+      <ScrollView style={styles.listColFull} contentContainerStyle={styles.listFullContent}>
         {chats.length === 0 ? (
-          <RNText style={styles.listEmpty}>No chats yet. Start one.</RNText>
+          <Text variant="caption" tone="tertiary" style={styles.listEmpty}>
+            No chats yet. Start one.
+          </Text>
         ) : (
-          chats.map((c) => (
-            <Pressable key={c.id} style={[styles.listRow, c.id === selectedId && styles.listRowActive]} onPress={() => onSelect(c.id)} aria-label={c.title || "New chat"}>
-              <RNText numberOfLines={1} style={styles.listRowTitle}>
-                {c.title || "New chat"}
-              </RNText>
-              {c.working ? (
-                <Spinner />
-              ) : onDelete ? (
-                <IconButton label="Delete chat" size="sm" onPress={() => onDelete(c.id)}>
-                  <Icon name="trash" size={14} color={colors.textTertiary} />
-                </IconButton>
-              ) : null}
-            </Pressable>
-          ))
+          <View style={styles.card}>
+            {chats.map((c, i) => (
+              <Pressable
+                key={c.id}
+                onPress={() => onSelect(c.id)}
+                aria-label={c.title || "New chat"}
+                style={({ pressed }: PressState) => [styles.cardRow, pressed ? styles.rowPressed : null]}
+              >
+                <Icon name="chat" size={19} color={colors.textTertiary} />
+                <View style={[styles.cardRowBody, i === chats.length - 1 ? null : styles.cardRowDivider]}>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text variant="label" numberOfLines={1}>
+                      {c.title || "New chat"}
+                    </Text>
+                    {/* A sentence subtitle, as the mobile card rows write it — not mono metadata. */}
+                    <Text variant="caption" tone="tertiary" numberOfLines={1}>
+                      Last message {timeAgo(c.updatedAt)}
+                    </Text>
+                  </View>
+                  {c.working ? (
+                    <Spinner inline size={13} />
+                  ) : onDelete ? (
+                    <IconButton label="Delete chat" size="md" onPress={() => onDelete(c.id)}>
+                      <Icon name="trash" size={iconSize.md} color={colors.textTertiary} />
+                    </IconButton>
+                  ) : null}
+                </View>
+              </Pressable>
+            ))}
+          </View>
+        )}
+      </ScrollView>
+    );
+  }
+
+  return (
+    <View style={styles.listCol}>
+      <View style={styles.listHeader}>
+        <Text variant="label" numberOfLines={1} style={{ flex: 1 }}>
+          Chats
+        </Text>
+        <Text variant="mono" tone="quaternary">
+          {chats.length}
+        </Text>
+        <IconButton label="New chat" size="sm" onPress={onNew}>
+          <Icon name="plus" size={iconSize.sm} color={colors.textSecondary} />
+        </IconButton>
+      </View>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.listScroll}>
+        {chats.length === 0 ? (
+          <Text variant="caption" tone="tertiary" style={styles.listEmpty}>
+            No chats yet. Start one with ＋.
+          </Text>
+        ) : (
+          chats.map((c) => <ChatRow key={c.id} chat={c} selected={c.id === selectedId} onSelect={onSelect} onDelete={onDelete} />)
         )}
       </ScrollView>
     </View>
+  );
+}
+
+/** One dense list row. ListRow's trailing slot is text-only, and this row swaps its mono
+ *  time for a spinner while a reply generates and for a delete button on hover. */
+function ChatRow({
+  chat,
+  selected,
+  onSelect,
+  onDelete,
+}: {
+  chat: Chat;
+  selected: boolean;
+  onSelect: (id: string) => void;
+  onDelete?: (id: string) => void;
+}) {
+  const touch = useDensity() === "touch";
+  return (
+    <Pressable
+      onPress={() => onSelect(chat.id)}
+      aria-label={chat.title || "New chat"}
+      style={({ hovered, pressed }: PressState) => [
+        styles.listRow,
+        transition("background-color", motion.fast),
+        { minHeight: touch ? row.touch : row.h },
+        selected ? styles.rowSelected : pressed ? styles.rowPressed : hovered ? styles.rowHover : null,
+      ]}
+    >
+      {({ hovered }: PressState) => (
+        <>
+          <Icon name="chat" size={iconSize.sm} color={selected ? colors.textAccent : colors.textQuaternary} />
+          <Text variant="label" tone={selected ? "accent" : "default"} numberOfLines={1} style={styles.listRowTitle}>
+            {chat.title || "New chat"}
+          </Text>
+          {chat.working ? (
+            <Spinner inline size={iconSize.sm} />
+          ) : onDelete && (hovered || touch) ? (
+            <IconButton label="Delete chat" size={touch ? undefined : "sm"} onPress={() => onDelete(chat.id)}>
+              <Icon name="trash" size={touch ? iconSize.md : iconSize.sm} color={colors.textTertiary} />
+            </IconButton>
+          ) : (
+            <Text variant="mono" tone="quaternary" numberOfLines={1}>
+              {timeAgo(chat.updatedAt)}
+            </Text>
+          )}
+        </>
+      )}
+    </Pressable>
   );
 }
 
@@ -388,18 +554,25 @@ export function ChatsScreen() {
   return noProvider ? (
     <EmptyState onConfigure={openSettings} />
   ) : (
-    <View style={styles.split}>
-      <ChatList chats={chats} selectedId={selectedId} onSelect={setSelectedId} onNew={newChat} onDelete={removeChat} />
+    <SplitView
+      aside={<ChatList chats={chats} selectedId={selectedId} onSelect={setSelectedId} onNew={newChat} onDelete={removeChat} />}
+      storageKey="companion.chat.listWidth"
+      defaultWidth={220}
+      minWidth={180}
+      maxWidth={320}
+    >
       <View style={styles.detail}>
         {selectedId ? (
           <ChatView chatId={selectedId} onOpenEntity={onOpen} onConfigure={openSettings} />
         ) : (
           <View style={styles.center}>
-            <RNText style={styles.hint}>Pick a chat on the left, or start a new one.</RNText>
+            <Text variant="caption" tone="tertiary" style={styles.hint}>
+              Pick a chat from the list, or start a new one.
+            </Text>
           </View>
         )}
       </View>
-    </View>
+    </SplitView>
   );
 }
 
@@ -446,9 +619,9 @@ function ChatItem({ item }: { item: DisplayItem }) {
   if (item.type === "action") return <ActionLine action={item} />;
   if (item.type === "note") return <NotePreview id={item.noteId} />;
   return (
-    <Bubble role={item.type}>
+    <Message role={item.type}>
       <WikiText value={item.text} />
-    </Bubble>
+    </Message>
   );
 }
 
@@ -458,6 +631,7 @@ function ChatItem({ item }: { item: DisplayItem }) {
 function NotePreview({ id }: { id: string }) {
   const { notes } = useCore();
   const openEntity = useContext(OpenEntityContext);
+  const threadLayout = useContext(ThreadLayoutContext);
   const [note, setNote] = useState<{ title: string; contentMd: string } | null>(null);
   const [missing, setMissing] = useState(false);
   useEffect(() => {
@@ -476,15 +650,14 @@ function NotePreview({ id }: { id: string }) {
   }, [notes, id]);
   if (missing) return null;
   return (
-    <View style={styles.notePreviewWrap}>
+    <View style={[styles.notePreviewWrap, threadLayout === "transcript" ? styles.actionRowTranscript : null]}>
       <Pressable style={styles.notePreview} onPress={() => openEntity?.("note", id)} aria-label={note?.title ?? "Note"}>
         <View style={styles.notePreviewHead}>
-          <Icon name="file" size={14} color={colors.textTertiary} />
-          <RNText style={styles.notePreviewTitle} numberOfLines={1}>
+          <Icon name="file" size={iconSize.sm} color={colors.textQuaternary} />
+          <Text variant="label" numberOfLines={1} style={{ flex: 1 }}>
             {note?.title || "Untitled"}
-          </RNText>
-          <View style={{ flex: 1 }} />
-          <Icon name="external" size={12} color={colors.textTertiary} />
+          </Text>
+          <Icon name="external" size={11} color={colors.textQuaternary} />
         </View>
         {note && <View style={styles.notePreviewBody}>{renderNotePreview(note.contentMd)}</View>}
       </Pressable>
@@ -529,20 +702,50 @@ function renderNotePreview(md: string): ReactNode {
   return out;
 }
 
-function Bubble({ role, children }: { role: "user" | "assistant"; children: ReactNode }) {
+/** One turn. Desktop: an 18px avatar (you) or brand mark (companion), a mono speaker label,
+ *  then prose — no bubble. Touch: a bubble, soft accent for you and sunken for the assistant. */
+function Message({ role, working = false, children }: { role: "user" | "assistant"; working?: boolean; children: ReactNode }) {
+  const threadLayout = useContext(ThreadLayoutContext);
   const isUser = role === "user";
+  if (threadLayout === "bubbles") {
+    return (
+      <View style={[styles.bubbleRow, isUser ? styles.rowEnd : styles.rowStart]}>
+        <View style={[styles.bubble, isUser ? styles.userBubble : styles.assistantBubble]}>{children}</View>
+      </View>
+    );
+  }
   return (
-    <View style={[styles.bubbleRow, isUser ? styles.rowEnd : styles.rowStart]}>
-      <View style={[styles.bubble, isUser ? styles.userBubble : styles.assistantBubble]}>{children}</View>
+    <View style={styles.message}>
+      {isUser ? <UserAvatar /> : <BrandMark size={18} />}
+      <View style={styles.messageBody}>
+        <View style={styles.messageLabel}>
+          <Text variant="mono" tone="quaternary">
+            {isUser ? "you" : "companion"}
+          </Text>
+          {working ? <Spinner inline size={10} /> : null}
+        </View>
+        {children}
+      </View>
     </View>
   );
 }
 
+/** Initials for the signed-in account; a local-only workspace is just "You". */
+function UserAvatar() {
+  const sync = useSync();
+  return <Avatar name={sync.email ?? "You"} size="sm" />;
+}
+
+/** A tool the assistant ran, printed above its reply: mono, quiet, lowercase. */
 function ActionLine({ action }: { action: ToolAction }) {
+  const threadLayout = useContext(ThreadLayoutContext);
   return (
-    <View style={styles.actionRow}>
-      <Icon name={action.isError ? "close" : "check"} size={13} color={action.isError ? colors.danger : colors.success} />
-      <RNText style={styles.actionText}>{humanizeTool(action.name)}</RNText>
+    <View style={[styles.actionRow, threadLayout === "transcript" ? styles.actionRowTranscript : null]}>
+      <Icon name={action.isError ? "close" : "check"} size={iconSize.sm} color={action.isError ? colors.danger : colors.textQuaternary} />
+      <Text variant="mono" tone="quaternary">
+        {humanizeTool(action.name)}
+        {action.isError ? " · failed" : ""}
+      </Text>
     </View>
   );
 }
@@ -574,6 +777,7 @@ function humanizeTool(name: string): string {
 const WIKILINK = /!?\[\[(note|task|habit|project):([^\]|]+)(?:\|[^\]]+)?\]\]/g;
 
 function WikiText({ value }: { value: string }) {
+  const threadLayout = useContext(ThreadLayoutContext);
   const parts: ReactNode[] = [];
   let last = 0;
   let m: RegExpExecArray | null;
@@ -585,7 +789,7 @@ function WikiText({ value }: { value: string }) {
     last = m.index + m[0].length;
   }
   if (last < value.length) parts.push(<RNText key={key++}>{value.slice(last)}</RNText>);
-  return <RNText style={styles.body}>{parts}</RNText>;
+  return <RNText style={[styles.body, threadLayout === "bubbles" ? styles.bodyBubble : null]}>{parts}</RNText>;
 }
 
 function LinkChip({ type, id }: { type: string; id: string }) {
@@ -654,9 +858,12 @@ function configLabel(c: LLMConfig): string {
   return c.provider === "anthropic" ? "Anthropic" : c.scope === "device" ? "Local" : "OpenAI";
 }
 
-/** SelectorBar sits under the composer: the provider picker (hidden when there's only one)
- *  plus the model picker, which lists the models the chosen provider offers live. */
+/** SelectorBar is the provider + model picker. "header" is the desktop thread header's mono
+ *  model line (`model · provider`, menus open downward); "below" sits under the floating
+ *  composer (`provider › model`, menus open upward). The provider is a picker only when
+ *  there is more than one; the model lists what the chosen provider offers live. */
 function SelectorBar({
+  placement,
   configs,
   configId,
   onPickConfig,
@@ -664,6 +871,7 @@ function SelectorBar({
   model,
   onPickModel,
 }: {
+  placement: "header" | "below";
   configs: LLMConfig[];
   configId: string | null;
   onPickConfig: (id: string) => void;
@@ -673,35 +881,72 @@ function SelectorBar({
 }) {
   if (configs.length === 0) return null;
   const current = configs.find((c) => c.id === configId) ?? configs[0];
-  return (
-    <View style={styles.selectorRow}>
-      {configs.length >= 2 && (
-        <Dropdown
-          label={current.name}
-          options={configs.map((c) => ({ value: c.id, label: `${c.name} — ${configLabel(c)}` }))}
-          value={current.id}
-          onSelect={onPickConfig}
-        />
-      )}
-      <ModelSelector models={models} model={model} onPickModel={onPickModel} />
+  const opens = placement === "header" ? "down" : "up";
+  const provider =
+    configs.length >= 2 ? (
+      <Dropdown
+        label={current.name}
+        ariaLabel="Choose a provider"
+        opens={opens}
+        options={configs.map((c) => ({ value: c.id, label: `${c.name} — ${configLabel(c)}` }))}
+        value={current.id}
+        onSelect={onPickConfig}
+      />
+    ) : (
+      <Text variant="mono" tone="quaternary" numberOfLines={1}>
+        {current.name}
+      </Text>
+    );
+  const modelPicker = <ModelSelector models={models} model={model} onPickModel={onPickModel} opens={opens} />;
+  return placement === "header" ? (
+    <View style={styles.selectorHeader}>
+      {modelPicker}
+      <Text variant="mono" tone="quaternary">
+        ·
+      </Text>
+      {provider}
+    </View>
+  ) : (
+    <View style={styles.selectorBelow}>
+      {provider}
+      <Icon name="chevronRight" size={10} color={colors.textQuaternary} />
+      {modelPicker}
     </View>
   );
 }
 
-function ModelSelector({ models, model, onPickModel }: { models: string[] | null; model: string | null; onPickModel: (m: string) => void }) {
+function ModelSelector({
+  models,
+  model,
+  onPickModel,
+  opens,
+}: {
+  models: string[] | null;
+  model: string | null;
+  onPickModel: (m: string) => void;
+  opens: "up" | "down";
+}) {
   // Loading (models === null) or the endpoint returned none / failed (empty): let the user
   // type a model name so a running-but-unlisted server (or a fresh Ollama pull) still works.
-  if (models === null) return <RNText style={styles.selectorLabel}>Loading models…</RNText>;
+  if (models === null) {
+    return (
+      <Text variant="mono" tone="quaternary">
+        loading models…
+      </Text>
+    );
+  }
   if (models.length === 0) {
     return (
       <View style={styles.modelInputWrap}>
-        <Input value={model ?? ""} onChangeText={onPickModel} placeholder="Model name" autoCapitalize="none" />
+        <Input mono size={opens === "down" ? "sm" : undefined} value={model ?? ""} onChangeText={onPickModel} placeholder="Model name" autoCapitalize="none" />
       </View>
     );
   }
   return (
     <Dropdown
-      label={model ?? "Choose a model"}
+      label={model ?? "choose a model"}
+      ariaLabel="Choose a model"
+      opens={opens}
       options={models.map((m) => ({ value: m, label: m }))}
       value={model}
       onSelect={onPickModel}
@@ -709,40 +954,69 @@ function ModelSelector({ models, model, onPickModel }: { models: string[] | null
   );
 }
 
-/** Dropdown is the shared upward-opening menu used by both selectors under the composer. */
+/** Dropdown is the menu both selectors share: a mono trigger and an overlay list that opens
+ *  up (under the floating composer) or down (from the thread header). */
 function Dropdown({
   label,
+  ariaLabel,
+  opens,
   options,
   value,
   onSelect,
 }: {
   label: string;
+  ariaLabel: string;
+  opens: "up" | "down";
   options: { value: string; label: string }[];
   value: string | null;
   onSelect: (v: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const touch = useDensity() === "touch";
   return (
-    <View>
-      {open && (
-        <View style={styles.selectorMenu}>
-          {options.map((o) => (
-            <Pressable key={o.value} style={styles.selectorOption} aria-label={o.label} onPress={() => { onSelect(o.value); setOpen(false); }}>
-              <RNText style={styles.selectorOptionText} numberOfLines={1}>
-                {o.label}
-              </RNText>
-              {o.value === value && <Icon name="check" size={14} color={colors.accent} />}
-            </Pressable>
-          ))}
-        </View>
-      )}
-      <Pressable style={styles.selectorTrigger} onPress={() => setOpen((o) => !o)} aria-label="Choose">
-        <RNText style={styles.selectorLabel} numberOfLines={1}>
+    <View style={open ? styles.selectorOpen : null}>
+      {open ? (
+        <>
+          {/* Full-bleed scrim closes the menu on an outside tap. */}
+          <Pressable style={styles.selectorScrim} onPress={() => setOpen(false)} aria-label="Close menu" />
+          <ScrollView style={[styles.selectorMenu, opens === "down" ? styles.selectorMenuDown : styles.selectorMenuUp]}>
+            {options.map((o) => (
+              <Pressable
+                key={o.value}
+                aria-label={o.label}
+                onPress={() => {
+                  onSelect(o.value);
+                  setOpen(false);
+                }}
+                style={({ hovered, pressed }: PressState) => [
+                  styles.selectorOption,
+                  { minHeight: touch ? row.touch : row.h },
+                  pressed ? styles.rowPressed : hovered ? styles.rowHover : null,
+                ]}
+              >
+                <Text variant="mono" tone={o.value === value ? "accent" : "secondary"} numberOfLines={1} style={{ flex: 1 }}>
+                  {o.label}
+                </Text>
+                {o.value === value ? <Icon name="check" size={iconSize.sm} color={colors.textAccent} /> : null}
+              </Pressable>
+            ))}
+          </ScrollView>
+        </>
+      ) : null}
+      <Pressable
+        onPress={() => setOpen((o) => !o)}
+        aria-label={ariaLabel}
+        hitSlop={touch ? 12 : undefined}
+        style={({ hovered, pressed }: PressState) => [
+          styles.selectorTrigger,
+          transition("background-color", motion.instant),
+          pressed || open ? styles.rowPressed : hovered ? styles.rowHover : null,
+        ]}
+      >
+        <Text variant="mono" tone="quaternary" numberOfLines={1} style={styles.selectorLabel}>
           {label}
-        </RNText>
-        <View style={{ transform: [{ rotate: open ? "-90deg" : "90deg" }] }}>
-          <Icon name="chevronRight" size={13} color={colors.textTertiary} />
-        </View>
+        </Text>
+        <Icon name="chevronDown" size={10} color={colors.textQuaternary} />
       </Pressable>
     </View>
   );
@@ -751,73 +1025,168 @@ function Dropdown({
 function EmptyState({ onConfigure }: { onConfigure?: () => void }) {
   return (
     <View style={styles.empty}>
-      <Icon name="chat" size={28} color={colors.textTertiary} />
-      <RNText style={styles.emptyTitle}>No AI provider yet</RNText>
-      <RNText style={styles.emptyBody}>Connect a model to chat with your notes and tasks. Set up a local Ollama server or an OpenAI / Anthropic key in Settings, then pick a model here.</RNText>
-      {onConfigure && <Button label="Set up in Settings" onPress={onConfigure} icon={<Icon name="settings" size={15} />} />}
+      <Icon name="chat" size={iconSize.tile} color={colors.textQuaternary} />
+      <Text variant="title">No AI provider yet</Text>
+      <Text variant="caption" tone="tertiary" style={styles.emptyBody}>
+        Connect a model to chat with your notes and tasks. Set up a local Ollama server or an OpenAI / Anthropic key in
+        Settings, then pick a model here.
+      </Text>
+      {onConfigure ? (
+        <Button label="Set up in Settings" onPress={onConfigure} icon={<Icon name="settings" size={iconSize.sm} color={colors.onAccent} />} />
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, minHeight: 0 },
-  split: { flex: 1, flexDirection: "row", minHeight: 0 },
-  listCol: { width: 260, flexShrink: 0, borderRightWidth: 1, borderRightColor: colors.borderSubtle, backgroundColor: colors.surfaceCard },
+  // --- desktop list column
+  listCol: { flex: 1, minHeight: 0, backgroundColor: colors.surfaceCard },
+  listHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+    height: layout.subToolbarH,
+    paddingLeft: space.ml,
+    paddingRight: space.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+  },
+  listScroll: { padding: space.xs, gap: 1 },
+  listEmpty: { padding: space.xl, lineHeight: 18, textAlign: "center" },
+  listRow: { flexDirection: "row", alignItems: "center", gap: space.sm, paddingLeft: space.sm, paddingRight: space.xxs, borderRadius: radius.sm },
+  listRowTitle: { flex: 1, minWidth: 0 },
+  rowHover: { backgroundColor: colors.surfaceHover },
+  rowPressed: { backgroundColor: colors.surfaceActive },
+  rowSelected: { backgroundColor: colors.surfaceSelected },
+  // --- mobile list: one grouped card, hairlines inset past the leading icon
   listColFull: { flex: 1, backgroundColor: colors.surfaceApp },
-  listHeader: { flexDirection: "row", alignItems: "center", gap: space.sm, paddingHorizontal: space.lg, paddingVertical: space.md, borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
-  listTitle: { fontSize: font.size.sm, fontWeight: font.weight.semibold, color: colors.textSecondary },
-  listEmpty: { padding: space.lg, fontSize: font.size.sm, color: colors.textTertiary, textAlign: "center" },
-  listRow: { flexDirection: "row", alignItems: "center", gap: space.sm, paddingHorizontal: space.lg, paddingVertical: space.md, borderRadius: radius.md },
-  listRowActive: { backgroundColor: colors.surfaceSunken },
-  listRowTitle: { flex: 1, fontSize: font.size.sm, color: colors.textPrimary },
-  detail: { flex: 1, minWidth: 0, backgroundColor: colors.surfaceCard },
+  listFullContent: { padding: space.xl, paddingBottom: 92 },
+  card: { backgroundColor: colors.surfaceCard, borderWidth: 1, borderColor: colors.borderSubtle, borderRadius: radius.lg, overflow: "hidden" },
+  cardRow: { flexDirection: "row", alignItems: "center", gap: 14, paddingLeft: 14 },
+  cardRowBody: { flex: 1, minWidth: 0, minHeight: 60, flexDirection: "row", alignItems: "center", gap: space.md, paddingRight: space.lg },
+  cardRowDivider: { borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
+  // --- thread
+  detail: { flex: 1, minWidth: 0, minHeight: 0, backgroundColor: colors.surfaceCard },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+    height: layout.subToolbarH,
+    paddingLeft: space.ml,
+    paddingRight: space.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+    flexShrink: 0,
+    // Above the transcript (a later sibling) so the model menu opens over it.
+    zIndex: 10,
+  },
+  headerTitle: { flex: 1, minWidth: 0 },
   scroll: { flex: 1 },
-  scrollInner: { padding: space.xxl, paddingBottom: space.xxxl, flexGrow: 1 },
+  scrollInner: { padding: space.xxl, flexGrow: 1 },
   // Bottom-anchored transcript: content packs to the bottom (newest just above the composer)
   // when short, and scrolls normally when it overflows.
-  threadAnchored: { flexGrow: 1, justifyContent: "flex-end", gap: space.xl, padding: space.xxl },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: space.xxxl },
-  hint: { color: colors.textTertiary, fontSize: font.size.md, textAlign: "center", maxWidth: 420 },
-  bubbleRow: { flexDirection: "row", maxWidth: 720, width: "100%", alignSelf: "center" },
+  threadTranscript: { flexGrow: 1, justifyContent: "flex-end", gap: 14, paddingVertical: space.xl, paddingHorizontal: space.xl2 },
+  threadBubbles: { flexGrow: 1, justifyContent: "flex-end", gap: space.ml, padding: space.lg, paddingBottom: space.md },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: space.xxl },
+  hint: { textAlign: "center", maxWidth: 360, lineHeight: 18 },
+  message: { flexDirection: "row", alignItems: "flex-start", gap: space.md, maxWidth: 640, width: "100%", alignSelf: "center" },
+  messageBody: { flex: 1, minWidth: 0, gap: space.xxs },
+  messageLabel: { flexDirection: "row", alignItems: "center", gap: space.sm, height: 18 },
+  bubbleRow: { flexDirection: "row", width: "100%" },
   rowStart: { justifyContent: "flex-start" },
   rowEnd: { justifyContent: "flex-end" },
-  bubble: { maxWidth: "84%", paddingVertical: space.md, paddingHorizontal: space.lg, borderRadius: radius.lg },
-  userBubble: { backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentSoftBorder },
-  assistantBubble: { backgroundColor: colors.surfaceSunken, borderWidth: 1, borderColor: colors.borderSubtle },
-  body: { fontSize: font.size.md, lineHeight: 22, color: colors.textPrimary },
-  thinking: { fontSize: font.size.md, color: colors.textTertiary, fontStyle: "italic" },
+  bubble: { maxWidth: "84%", paddingVertical: space.md, paddingHorizontal: space.lg, borderRadius: radius.xl, borderWidth: 1 },
+  userBubble: { backgroundColor: colors.accentSoft, borderColor: colors.accentSoftBorder },
+  assistantBubble: { backgroundColor: colors.surfaceSunken, borderColor: colors.borderSubtle },
+  body: { fontFamily: font.sans, fontSize: font.size.md, lineHeight: 21, color: colors.textPrimary },
+  bodyBubble: { lineHeight: 20 },
+  thinking: { fontFamily: font.sans, fontSize: font.size.md, lineHeight: 21, color: colors.textTertiary, fontStyle: "italic" },
   chip: { color: colors.textAccent, fontWeight: font.weight.medium, textDecorationLine: "underline", textDecorationColor: colors.accentSoftBorder },
-  actionRow: { flexDirection: "row", alignItems: "center", gap: space.sm, paddingLeft: space.xs, maxWidth: 720, width: "100%", alignSelf: "center" },
-  actionText: { fontSize: font.size.sm, color: colors.textTertiary, fontFamily: font.mono },
-  notePreviewWrap: { maxWidth: 720, width: "100%", alignSelf: "center" },
-  notePreview: { alignSelf: "flex-start", maxWidth: "92%", backgroundColor: colors.surfaceCard, borderWidth: 1, borderColor: colors.borderDefault, borderRadius: radius.lg, overflow: "hidden" },
-  notePreviewHead: { flexDirection: "row", alignItems: "center", gap: space.sm, paddingHorizontal: space.lg, paddingVertical: space.md, backgroundColor: colors.surfaceSunken, borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
-  notePreviewTitle: { fontSize: font.size.sm, fontWeight: font.weight.semibold, color: colors.textPrimary },
-  notePreviewBody: { padding: space.lg, gap: 3, maxHeight: 280, overflow: "hidden" },
-  mdH1: { fontSize: font.size.md, fontWeight: font.weight.semibold, color: colors.textPrimary, marginBottom: 2 },
-  mdH2: { fontSize: font.size.base, fontWeight: font.weight.semibold, color: colors.textPrimary, marginTop: space.xs },
+  actionRow: { flexDirection: "row", alignItems: "center", gap: space.sm, paddingLeft: space.xxs },
+  // In the transcript, tool lines and note cards sit in the prose column (past the 18px mark).
+  actionRowTranscript: { maxWidth: 640, width: "100%", alignSelf: "center", paddingLeft: 18 + space.md },
+  notePreviewWrap: { width: "100%" },
+  notePreview: { alignSelf: "flex-start", maxWidth: "92%", backgroundColor: colors.surfaceCard, borderWidth: 1, borderColor: colors.borderSubtle, borderRadius: radius.lg, overflow: "hidden" },
+  notePreviewHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+    height: layout.subToolbarH,
+    paddingHorizontal: space.ml,
+    backgroundColor: colors.surfaceSunken,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+  },
+  notePreviewBody: { padding: space.ml, gap: 3, maxHeight: 280, overflow: "hidden" },
+  mdH1: { fontFamily: font.sans, fontSize: font.size.md, fontWeight: font.weight.semibold, color: colors.textPrimary, marginBottom: 2 },
+  mdH2: { fontFamily: font.sans, fontSize: font.size.base, fontWeight: font.weight.semibold, color: colors.textPrimary, marginTop: space.xs },
   mdLi: { flexDirection: "row", gap: space.sm, alignItems: "flex-start" },
-  mdBullet: { color: colors.textTertiary, fontSize: font.size.md, lineHeight: 22 },
-  mdQuote: { borderLeftWidth: 2, borderLeftColor: colors.accentSoftBorder, paddingLeft: space.md },
-  mdMore: { color: colors.textTertiary, fontSize: font.size.md },
-  error: { marginTop: space.lg, color: colors.danger, fontSize: font.size.sm, textAlign: "center" },
-  composer: { flexDirection: "row", alignItems: "flex-end", gap: space.md, padding: space.lg, borderTopWidth: 1, borderTopColor: colors.borderSubtle, backgroundColor: colors.surfaceCard },
-  input: { flex: 1, justifyContent: "center", minHeight: 40, paddingVertical: space.sm, paddingHorizontal: space.lg, backgroundColor: colors.surfaceApp, borderWidth: 1, borderColor: colors.borderSubtle, borderRadius: radius.lg },
-  floatingWrap: { paddingHorizontal: space.lg, paddingTop: space.sm, paddingBottom: space.lg },
-  floatingBar: { flexDirection: "row", alignItems: "flex-end", gap: space.sm, paddingLeft: space.xl, paddingRight: space.xs, paddingVertical: space.xs, backgroundColor: colors.surfaceCard, borderWidth: 1, borderColor: colors.borderDefault, borderRadius: radius.full, ...shadow.md },
-  floatingInput: { flex: 1, justifyContent: "center", minHeight: 30, paddingVertical: space.xs },
-  sendCircle: { width: 34, height: 34, borderRadius: radius.full, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
+  mdBullet: { color: colors.textQuaternary, fontSize: font.size.md, lineHeight: 21 },
+  mdQuote: { borderLeftWidth: 2, borderLeftColor: colors.borderDefault, paddingLeft: space.md },
+  mdMore: { color: colors.textQuaternary, fontSize: font.size.md },
+  error: { paddingHorizontal: space.xl, paddingVertical: space.sm, textAlign: "center" },
+  // --- desktop composer
+  composer: { flexDirection: "row", alignItems: "flex-end", gap: space.sm, padding: space.md, borderTopWidth: 1, borderTopColor: colors.borderSubtle, flexShrink: 0 },
+  field: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: space.sm,
+    minHeight: control.md,
+    paddingHorizontal: space.sm,
+    backgroundColor: colors.surfaceCard,
+    borderWidth: 1,
+    borderColor: colors.borderDefault,
+    borderRadius: radius.md,
+  },
+  fieldFocused: { borderColor: colors.borderFocus },
+  fieldInput: { flex: 1, minWidth: 0, justifyContent: "center", paddingVertical: 1 },
+  fieldTrailing: { height: control.md - 2, justifyContent: "center" },
+  // --- floating (touch) composer: floats over the thread, so it is the one shadowed thing here
+  floatingWrap: { paddingHorizontal: space.lg, paddingTop: space.xs, paddingBottom: space.lg, flexShrink: 0 },
+  floatingBar: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: space.md,
+    paddingLeft: 14,
+    paddingRight: space.xs,
+    paddingVertical: space.xs,
+    backgroundColor: colors.surfaceCard,
+    borderWidth: 1,
+    borderColor: colors.borderDefault,
+    borderRadius: radius.xl,
+    ...shadow.md,
+  },
+  floatingInput: { flex: 1, justifyContent: "center", minHeight: 34, paddingVertical: space.xs },
+  sendCircle: { width: 34, height: 34, borderRadius: radius.full, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  sendCirclePressed: { backgroundColor: colors.accentActive },
   sendCircleOff: { backgroundColor: colors.borderStrong },
-  composerCol: { gap: space.xs },
-  selectorRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: space.md, paddingBottom: space.xs },
-  modelInputWrap: { minWidth: 160, maxWidth: 240 },
-  selectorTrigger: { flexDirection: "row", alignItems: "center", gap: space.xs, paddingVertical: space.xs, paddingHorizontal: space.sm, maxWidth: "90%" },
-  selectorLabel: { fontSize: font.size.xs, color: colors.textTertiary, fontFamily: font.mono },
-  selectorMenu: { position: "absolute", bottom: 32, alignSelf: "center", minWidth: 220, maxWidth: "96%", backgroundColor: colors.surfaceCard, borderWidth: 1, borderColor: colors.borderSubtle, borderRadius: radius.md, paddingVertical: space.xs, marginBottom: space.xs, zIndex: 20, ...shadow.md },
-  selectorOption: { flexDirection: "row", alignItems: "center", gap: space.sm, paddingVertical: space.sm, paddingHorizontal: space.lg },
-  selectorOptionText: { flex: 1, fontSize: font.size.sm, color: colors.textPrimary },
-  empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: space.lg, padding: space.xxxl },
-  emptyTitle: { fontSize: font.size.lg, fontWeight: font.weight.semibold, color: colors.textPrimary },
-  emptyBody: { fontSize: font.size.base, color: colors.textSecondary, textAlign: "center", maxWidth: 380, lineHeight: 20 },
-  emptyNote: { fontSize: font.size.xs, color: colors.textTertiary, textAlign: "center", maxWidth: 380 },
+  // --- provider · model selectors
+  selectorHeader: { flexDirection: "row", alignItems: "center", gap: space.xxs, flexShrink: 1, minWidth: 0 },
+  selectorBelow: { flexDirection: "row", alignItems: "center", gap: space.xs, paddingTop: space.md, paddingLeft: space.xs },
+  selectorOpen: { zIndex: 20 },
+  selectorScrim: { position: "absolute", top: 0, left: 0, width: 4000, height: 4000, marginLeft: -2000, marginTop: -2000 },
+  modelInputWrap: { width: 180 },
+  selectorTrigger: { flexDirection: "row", alignItems: "center", gap: space.xs, height: control.xs, paddingHorizontal: space.xs, borderRadius: radius.sm, maxWidth: 260 },
+  selectorLabel: { flexShrink: 1 },
+  selectorMenu: {
+    position: "absolute",
+    minWidth: 220,
+    maxWidth: 320,
+    maxHeight: 280,
+    backgroundColor: colors.surfaceOverlay,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.lg,
+    padding: space.xs,
+    zIndex: 20,
+    ...shadow.md,
+  },
+  selectorMenuDown: { top: control.xs + space.xs, right: 0 },
+  selectorMenuUp: { bottom: control.xs + space.xs, left: 0 },
+  selectorOption: { flexDirection: "row", alignItems: "center", gap: space.sm, paddingHorizontal: space.sm, borderRadius: radius.sm },
+  empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: space.md, padding: space.xxl },
+  emptyBody: { textAlign: "center", maxWidth: 360, lineHeight: 18 },
 });

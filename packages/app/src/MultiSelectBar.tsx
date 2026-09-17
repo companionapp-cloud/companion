@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { View } from "react-native";
-import { Button, Icon, IconButton, Text, colors, space } from "@companion/design-system";
+import { Button, Icon, IconButton, Text, colors, layout, row, space, useDensity } from "@companion/design-system";
 import { useMultiSelect } from "./MultiSelectProvider";
 import { useNotes } from "./NotesProvider";
 import { useTasks } from "./TasksProvider";
@@ -17,6 +17,8 @@ export function MultiSelectBar() {
   const tasks = useTasks();
   const [showAssign, setShowAssign] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const touch = useDensity() === "touch";
+  const size = touch ? "lg" : "sm";
 
   const noun = ms.kind === "task" ? "task" : "note";
   const nounPlural = `${noun}s`;
@@ -31,16 +33,16 @@ export function MultiSelectBar() {
 
   return (
     <>
-      <View style={styles.bar}>
-        <IconButton label="Cancel selection" size="sm" onPress={ms.clear}>
-          <Icon name="close" size={16} color={colors.textSecondary} />
+      <View style={[styles.bar, touch ? styles.barTouch : null]}>
+        <IconButton label="Cancel selection" size={size} onPress={ms.clear}>
+          <Icon name="close" size={13} color={colors.textSecondary} />
         </IconButton>
-        <Text variant="label" tone="secondary">
-          {ms.count} {many ? nounPlural : noun} selected
+        <Text variant="mono" tone="tertiary">
+          {ms.count} selected
         </Text>
         <View style={{ flex: 1 }} />
-        <Button label="Assign to project" variant="secondary" size="sm" onPress={() => setShowAssign(true)} />
-        <Button label="Delete" variant="danger" size="sm" onPress={() => setConfirmDelete(true)} />
+        <Button label="Assign to project" variant="ghost" size={size} onPress={() => setShowAssign(true)} />
+        <Button label="Delete" variant="danger" size={size} onPress={() => setConfirmDelete(true)} />
       </View>
 
       {showAssign ? (
@@ -74,11 +76,12 @@ const styles = {
   bar: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    gap: space.md,
-    height: 44,
-    paddingHorizontal: space.md,
+    gap: space.sm,
+    height: layout.subToolbarH,
+    paddingHorizontal: space.sm,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
     flexShrink: 0,
   },
+  barTouch: { height: row.touch, paddingHorizontal: space.md },
 };

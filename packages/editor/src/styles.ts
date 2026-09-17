@@ -1,53 +1,95 @@
+import { font, lightColors, type SemanticColors } from "@companion/design-system";
+
 // Editor CSS, shared by the web component (injected into <head>) and the native
-// WebView (embedded in its HTML). Colors mirror the design tokens. `.pm-wrap` is the
+// WebView (embedded in its HTML). Every colour is a design-system role: on web/desktop the
+// `--c-*` custom properties the design system defines resolve it (so `data-theme="dark"`
+// re-points the editor with the rest of the app); the native WebView has no such
+// properties, so each `var()` carries the light literal as its fallback. `.pm-wrap` is the
 // centered document column used by the native WebView (full-screen); on web the note
 // view supplies its own column, so only the `.ProseMirror` rules apply there.
+
+/** `var(--c-text-primary, #1a1a18)` for a semantic role — themed on web, light in a WebView. */
+const c = (role: keyof SemanticColors) =>
+  `var(--c-${role.replace(/[A-Z]/g, (ch) => `-${ch.toLowerCase()}`)}, ${lightColors[role]})`;
+
+// Glyphs are drawn as CSS masks so they take a role colour and need no DOM from the node
+// views. Path strings are copied verbatim from design-system's iconPaths.ts (24×24, 1.5 stroke).
+const ICON_LINK = "M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5";
+const ICON_FILE = "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6";
+const ICON_BELL = "M10.3 21a1.9 1.9 0 0 0 3.4 0M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9Z";
+const mask = (d: string) => {
+  const svg =
+    `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' ` +
+    `stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='${d}'/></svg>`;
+  const url = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+  return `-webkit-mask: ${url} center / contain no-repeat; mask: ${url} center / contain no-repeat;`;
+};
+
+const MONO = font.mono;
+const SANS = font.sans;
+// Menus and popovers float above the document: the design system's shadow.md.
+const SHADOW_MD = "0 4px 12px rgba(17, 17, 16, 0.1)";
+
 export const EDITOR_CSS = `
 .ProseMirror {
   outline: none;
   min-height: 40vh;
-  font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  color: #1a1a18;
-  caret-color: #f76808;
+  font: 400 14px/22px ${SANS};
+  color: ${c("textPrimary")};
+  caret-color: ${c("accent")};
   white-space: pre-wrap;
   word-wrap: break-word;
 }
-.ProseMirror p { margin: 0 0 0.8em; }
-.ProseMirror h1 { font-size: 1.6em; font-weight: 700; margin: 0.4em 0 0.3em; }
-.ProseMirror h2 { font-size: 1.3em; font-weight: 700; margin: 0.4em 0 0.3em; }
-.ProseMirror h3 { font-size: 1.1em; font-weight: 600; margin: 0.4em 0 0.3em; }
-.ProseMirror ul, .ProseMirror ol { padding-left: 1.4em; margin: 0 0 0.8em; }
+.ProseMirror ::selection { background: ${c("focusRing")}; }
+.ProseMirror p { margin: 0 0 10px; }
+.ProseMirror h1, .ProseMirror h2, .ProseMirror h3,
+.ProseMirror h4, .ProseMirror h5, .ProseMirror h6 { font-weight: 600; color: ${c("textPrimary")}; }
+.ProseMirror h1 { font-size: 24px; line-height: 28px; letter-spacing: -0.025em; margin: 20px 0 8px; }
+.ProseMirror h2 { font-size: 20px; line-height: 24px; letter-spacing: -0.025em; margin: 18px 0 6px; }
+.ProseMirror h3 { font-size: 17px; line-height: 22px; letter-spacing: -0.011em; margin: 16px 0 6px; }
+.ProseMirror h4 { font-size: 15px; line-height: 20px; letter-spacing: -0.011em; margin: 14px 0 4px; }
+.ProseMirror h5, .ProseMirror h6 { font-size: 14px; line-height: 20px; margin: 12px 0 4px; }
+.ProseMirror > :first-child { margin-top: 0; }
+.ProseMirror ul, .ProseMirror ol { padding-left: 20px; margin: 0 0 10px; }
+.ProseMirror li > p { margin-bottom: 2px; }
+.ProseMirror a { color: ${c("textAccent")}; text-decoration: underline; text-underline-offset: 2px; }
+.ProseMirror hr { border: none; border-top: 1px solid ${c("borderSubtle")}; margin: 16px 0; }
 .ProseMirror blockquote {
-  border-left: 3px solid #e0e0dc; margin: 0 0 0.8em; padding-left: 12px; color: #595954;
+  border-left: 1px solid ${c("borderDefault")}; margin: 0 0 10px; padding-left: 12px; color: ${c("textSecondary")};
 }
 .ProseMirror code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  background: #f5f5f3; border-radius: 4px; padding: 1px 4px; font-size: 0.9em;
+  font-family: ${MONO}; font-size: 12px;
+  background: ${c("surfaceCode")}; border: 1px solid ${c("borderSubtle")}; border-radius: 3px; padding: 0 3px;
+  color: ${c("textSecondary")};
 }
 .ProseMirror pre {
-  background: #f5f5f3; border-radius: 8px; padding: 12px; overflow-x: auto;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em;
+  margin: 0 0 12px; padding: 8px 10px; overflow-x: auto;
+  background: ${c("surfaceCode")}; border: 1px solid ${c("borderSubtle")}; border-radius: 4px;
+  font: 400 12px/18px ${MONO}; color: ${c("textSecondary")};
 }
-.pm-wrap { max-width: 760px; margin: 0 auto; width: 100%; padding: 40px 44px 120px; box-sizing: border-box; }
+.ProseMirror pre code { background: none; border: none; border-radius: 0; padding: 0; font: inherit; color: inherit; }
+.pm-wrap { max-width: 720px; margin: 0 auto; width: 100%; padding: 20px 28px 120px; box-sizing: border-box; }
 @media (max-width: 640px) { .pm-wrap { padding: 16px 20px 96px; } }
 
 /* Simple variant (task notes, chat composer): an inline field, not a full page. Drop the
    tall min-height and the roomy document column; the field hugs its content. .pm-simple
    is the web wrapper; .pm-compact is the native WebView mount. */
-.pm-simple .ProseMirror, .pm-compact .ProseMirror { min-height: 1.65em; }
+.pm-simple .ProseMirror, .pm-compact .ProseMirror { min-height: 22px; }
+.pm-simple .ProseMirror > :last-child, .pm-compact .ProseMirror > :last-child { margin-bottom: 0; }
 .pm-compact { padding: 4px 0; }
 
 /* Placeholder over an empty document: the placeholder plugin tags the empty paragraph with
    .pm-empty + data-placeholder; render it via ::before so it doesn't enter the doc. */
 .ProseMirror p.pm-empty:first-child::before {
   content: attr(data-placeholder);
-  color: #9a9a92;
+  color: ${c("textQuaternary")};
   float: left;
   height: 0;
   pointer-events: none;
 }
 
-/* Task list items: a round checkbox todo ([ ] / [x]) the reader can click. */
+/* Task list items: a square checkbox todo ([ ] / [x]) the reader can click — the same
+   1px border-strong / accent-fill box as the app's task rows. */
 .ProseMirror li.pm-task-item {
   list-style: none;
   display: flex;
@@ -56,62 +98,66 @@ export const EDITOR_CSS = `
 }
 .ProseMirror .pm-task-checkbox {
   flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  margin-top: 0.2em;
-  border: 2px solid #a7a7a1;
-  border-radius: 999px;
+  width: 14px;
+  height: 14px;
+  margin-top: 4px;
+  border: 1px solid ${c("borderStrong")};
+  border-radius: 2px;
   box-sizing: border-box;
   cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition: background 0.08s cubic-bezier(0.2, 0, 0.2, 1), border-color 0.08s cubic-bezier(0.2, 0, 0.2, 1);
 }
 .ProseMirror li.pm-task-item[data-checked="true"] .pm-task-checkbox {
-  background: #2e9e5b;
-  border-color: #2e9e5b;
+  background: ${c("accent")};
+  border-color: ${c("accent")};
 }
 .ProseMirror li.pm-task-item[data-checked="true"] .pm-task-checkbox::after {
   content: "";
   display: block;
-  width: 4px;
-  height: 8px;
-  margin: 2px auto 0;
-  border: solid #ffffff;
-  border-width: 0 2px 2px 0;
+  width: 3px;
+  height: 7px;
+  margin: 1px auto 0;
+  border: solid ${c("onAccent")};
+  border-width: 0 1.5px 1.5px 0;
   transform: rotate(45deg);
 }
 .ProseMirror .pm-task-body { flex: 1 1 auto; min-width: 0; }
 .ProseMirror .pm-task-body p { margin: 0; }
 .ProseMirror li.pm-task-item[data-checked="true"] .pm-task-body {
-  color: #7b7b75;
+  color: ${c("textQuaternary")};
   text-decoration: line-through;
 }
 
-/* Wikilink chip: an inline pill rendered for [[type:id]] / ![[type:id|alias]]. */
+/* Wikilink chip: a 20px mono chip rendered for [[type:id]] / ![[type:id|alias]], led by a
+   quiet link glyph. Machine-owned, so it reads as metadata rather than prose. */
 .pm-wikilink {
   display: inline-flex;
-  align-items: baseline;
-  gap: 3px;
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: #fdece0;
-  color: #b7500a;
-  font-size: 0.92em;
-  font-weight: 500;
-  line-height: 1.35;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  box-sizing: border-box;
+  padding: 0 6px;
+  vertical-align: middle;
+  border-radius: 3px;
+  background: ${c("surfaceSunken")};
+  color: ${c("textSecondary")};
+  font: 400 11px/18px ${MONO};
+  letter-spacing: 0;
   white-space: nowrap;
   cursor: default;
-  border: 1px solid #f7d9c4;
+  border: 1px solid ${c("borderSubtle")};
 }
 .pm-wikilink::before {
-  content: attr(data-type);
-  font-size: 0.72em;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  opacity: 0.6;
+  content: "";
+  flex: 0 0 auto;
+  width: 11px;
+  height: 11px;
+  background-color: ${c("textQuaternary")};
+  ${mask(ICON_LINK)}
 }
-.pm-wikilink-embed { background: #e7f0fb; color: #1f5fb0; border-color: #cfe0f5; }
-.pm-wikilink.ProseMirror-selectednode { outline: 2px solid #f76808; outline-offset: 1px; }
+/* An embed (![[…]]) is the same chip; only its glyph changes tone. */
+.pm-wikilink-embed::before { background-color: ${c("info")}; }
+.pm-wikilink.ProseMirror-selectednode { outline: 2px solid ${c("focusRing")}; border-color: ${c("borderFocus")}; }
 
 /* Document embed (![[doc:…]]): an inline-block that renders the file's contents — an image
    preview, an audio player, or a file chip with a download link (PLAN §6.9). */
@@ -121,103 +167,113 @@ export const EDITOR_CSS = `
   max-width: 100%;
   cursor: default;
 }
-.pm-doc-embed.ProseMirror-selectednode { outline: 2px solid #f76808; outline-offset: 2px; border-radius: 8px; }
+.pm-doc-embed.ProseMirror-selectednode { outline: 2px solid ${c("focusRing")}; outline-offset: 1px; border-radius: 6px; }
 .pm-doc-image {
   display: block;
   max-width: 100%;
   max-height: 420px;
-  border-radius: 8px;
-  border: 1px solid #e0e0dc;
+  border-radius: 6px;
+  border: 1px solid ${c("borderSubtle")};
 }
 .pm-doc-audio { display: block; max-width: 360px; }
 /* File / loading / broken states share a compact chip. */
 .pm-doc-chip {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 6px 11px;
-  border-radius: 9px;
-  background: #f5f5f3;
-  border: 1px solid #e0e0dc;
-  color: #3e3e3a;
-  font-size: 0.92em;
-  line-height: 1.3;
+  gap: 6px;
+  height: 22px;
+  box-sizing: border-box;
+  padding: 0 6px;
+  border-radius: 3px;
+  background: ${c("surfaceSunken")};
+  border: 1px solid ${c("borderSubtle")};
+  color: ${c("textSecondary")};
+  font: 400 12px/16px ${SANS};
   max-width: 100%;
 }
-.pm-doc-fileicon { flex: 0 0 auto; font-size: 1.05em; }
+/* The file glyph is a mask, so any text the node view put here stays invisible. */
+.pm-doc-fileicon {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  font-size: 0;
+  background-color: ${c("textQuaternary")};
+  ${mask(ICON_FILE)}
+}
 .pm-doc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pm-doc-hint { color: #9a9a92; font-size: 0.85em; flex: 0 0 auto; }
+.pm-doc-hint { color: ${c("textQuaternary")}; font: 400 11px/16px ${MONO}; flex: 0 0 auto; }
 .pm-doc-download {
   flex: 0 0 auto;
   margin-left: 2px;
-  color: #b7500a;
-  font-weight: 600;
+  color: ${c("textAccent")};
+  font-weight: 500;
   text-decoration: none;
   cursor: pointer;
 }
 .pm-doc-download:hover { text-decoration: underline; }
-.pm-doc-broken { border-style: dashed; color: #9a9a92; }
+.pm-doc-broken { border-style: dashed; color: ${c("textQuaternary")}; }
 
 /* Drop target highlight while a file is dragged over the editor (PLAN §6.9). */
 .companion-editor.pm-drop-active {
-  outline: 2px dashed #f76808;
+  outline: 1px dashed ${c("borderFocus")};
   outline-offset: 4px;
-  border-radius: 8px;
-  background: rgba(247, 104, 8, 0.04);
+  border-radius: 6px;
+  background: ${c("accentSoft")};
 }
 
-/* Task chip: a referenced task rendered like a todo — a round status box, the title, and
-   its due / reminder dates. Neutral (not accent) so it reads as a task, not a link. */
-.pm-wikilink-task {
-  gap: 5px;
-  background: #f5f5f3;
-  color: #3e3e3a;
-  border-color: #e0e0dc;
-  cursor: pointer;
-}
-.pm-wikilink-task::before { content: none; } /* no TYPE badge; the status box leads instead */
+/* Task chip: a referenced task rendered like a todo — a square status box, the title, and
+   its due / reminder dates. The status box leads, so the link glyph is dropped. */
+.pm-wikilink-task { gap: 5px; cursor: pointer; }
+.pm-wikilink-task::before { content: none; }
 .pm-wikilink-task .pm-wikilink-status {
-  align-self: center;
   flex: 0 0 auto;
-  width: 13px;
-  height: 13px;
-  border: 1.5px solid #a7a7a1;
-  border-radius: 999px;
+  width: 11px;
+  height: 11px;
+  border: 1px solid ${c("borderStrong")};
+  border-radius: 2px;
   box-sizing: border-box;
 }
 .pm-wikilink-task[data-status="done"] .pm-wikilink-status {
-  background: #2e9e5b;
-  border-color: #2e9e5b;
+  background: ${c("accent")};
+  border-color: ${c("accent")};
   position: relative;
 }
 .pm-wikilink-task[data-status="done"] .pm-wikilink-status::after {
   content: "";
   position: absolute;
-  left: 4px;
-  top: 1px;
-  width: 3px;
-  height: 6px;
-  border: solid #ffffff;
+  left: 3px;
+  top: 0.5px;
+  width: 2.5px;
+  height: 5.5px;
+  border: solid ${c("onAccent")};
   border-width: 0 1.5px 1.5px 0;
   transform: rotate(45deg);
 }
-.pm-wikilink-task[data-status="done"] .pm-wikilink-label { text-decoration: line-through; color: #7b7b75; }
+.pm-wikilink-task[data-status="done"] .pm-wikilink-label { text-decoration: line-through; color: ${c("textQuaternary")}; }
 .pm-wikilink-task .pm-wikilink-meta { display: inline-flex; align-items: center; gap: 5px; }
 .pm-wikilink-task .pm-wikilink-due,
 .pm-wikilink-task .pm-wikilink-remind {
-  font-size: 0.82em;
-  font-weight: 500;
-  color: #7b7b75;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: ${c("textQuaternary")};
   white-space: nowrap;
+}
+.pm-wikilink-task .pm-wikilink-remind::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  background-color: ${c("textQuaternary")};
+  ${mask(ICON_BELL)}
 }
 .pm-wikilink-task .pm-wikilink-meta:empty { display: none; }
 
-/* Broken reference: the target no longer exists. A leading unlink icon plus a muted, struck
-   label; the TYPE badge and any task status / meta are suppressed. */
+/* Broken reference: the target no longer exists. A leading unlink icon plus a struck
+   label in the danger tone; the link glyph and any task status / meta are suppressed. */
 .pm-wikilink-broken {
-  background: #f4ecea;
-  color: #9a5a4a;
-  border-color: #e6d2cc;
+  background: ${c("dangerSoft")};
+  color: ${c("danger")};
+  border-color: transparent;
   cursor: default;
 }
 .pm-wikilink-broken::before { content: none; }
@@ -232,16 +288,16 @@ export const EDITOR_CSS = `
   align-items: center;
   flex: 0 0 auto;
 }
-.pm-wikilink-brokenicon svg { width: 0.9em; height: 0.9em; }
+.pm-wikilink-brokenicon svg { width: 11px; height: 11px; stroke-width: 1.5; }
 
-/* Unresolved "empty" link: raw [[label]] text the author never resolved to a target. Styled
-   as a dashed, muted pill-ish run; double-clicking it opens the quick-create UI. */
+/* Unresolved "empty" link: raw [[label]] text the author never resolved to a target. A
+   dashed, quiet run; double-clicking it opens the quick-create UI. */
 .pm-wikilink-empty {
-  border-radius: 4px;
+  border-radius: 2px;
   padding: 0 2px;
-  color: #9a5a4a;
-  background: #faf1ee;
-  text-decoration: underline dashed #d9b7ac;
+  color: ${c("textTertiary")};
+  background: ${c("surfaceSunken")};
+  text-decoration: underline dashed ${c("borderStrong")};
   text-underline-offset: 2px;
   cursor: pointer;
 }
@@ -253,40 +309,45 @@ export const EDITOR_CSS = `
   z-index: 9999;
   width: 320px;
   max-width: 90vw;
-  background: #ffffff;
-  border: 1px solid #e6e6e2;
-  border-radius: 10px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
-  font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: ${c("surfaceOverlay")};
+  border: 1px solid ${c("borderSubtle")};
+  border-radius: 6px;
+  box-shadow: ${SHADOW_MD};
+  font: 400 13px/18px ${SANS};
+  color: ${c("textPrimary")};
   overflow: hidden;
 }
 .pm-wikilink-menu-list { max-height: 240px; overflow-y: auto; padding: 4px; }
-.pm-wikilink-menu-empty { padding: 10px 9px; color: #9a9a92; }
+.pm-wikilink-menu-empty { padding: 6px; color: ${c("textTertiary")}; font-size: 12px; }
 .pm-wikilink-menu-item {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 6px 9px;
-  border-radius: 6px;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 6px;
+  border-radius: 3px;
   cursor: pointer;
 }
-.pm-wikilink-menu-item.is-active { background: #fdece0; }
+.pm-wikilink-menu-item:hover { background: ${c("surfaceHover")}; }
+.pm-wikilink-menu-item.is-active { background: ${c("surfaceSelected")}; }
 .pm-wikilink-menu-type {
   flex-shrink: 0;
-  font-size: 0.68em;
-  font-weight: 600;
+  min-width: 44px;
+  font: 600 10px/1 ${MONO};
   text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: #b7500a;
+  letter-spacing: 0.12em;
+  color: ${c("textQuaternary")};
 }
 .pm-wikilink-menu-title {
   flex: 1;
   min-width: 0;
-  color: #1a1a18;
+  font-weight: 500;
+  color: ${c("textPrimary")};
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.pm-wikilink-menu-item.is-active .pm-wikilink-menu-title { color: ${c("textAccent")}; }
 
 /* GFM tables: real rows/cells with a header row. Columns/rows auto-size (no columnResizing
    plugin is installed, so cells are not resizable); the table caps at the editor width and
@@ -298,17 +359,18 @@ export const EDITOR_CSS = `
   table-layout: auto;
   width: auto;
   max-width: 100%;
-  margin: 0 0 0.8em;
-  font-size: 0.95em;
-  border: 1px solid #e0e0dc;
-  border-radius: 8px;
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 18px;
+  border: 1px solid ${c("borderSubtle")};
+  border-radius: 6px;
 }
 .ProseMirror th,
 .ProseMirror td {
   /* The table border draws the outer top + left edges; cells draw only the interior grid. */
-  border-right: 1px solid #e0e0dc;
-  border-bottom: 1px solid #e0e0dc;
-  padding: 6px 10px;
+  border-right: 1px solid ${c("borderSubtle")};
+  border-bottom: 1px solid ${c("borderSubtle")};
+  padding: 4px 8px;
   vertical-align: top;
   text-align: left;
   min-width: 3em;
@@ -317,25 +379,26 @@ export const EDITOR_CSS = `
   overflow-wrap: break-word;
   word-break: break-word;
 }
+.ProseMirror th p, .ProseMirror td p { margin: 0; }
 .ProseMirror th:last-child,
 .ProseMirror td:last-child { border-right: none; }
 .ProseMirror tr:last-child th,
 .ProseMirror tr:last-child td { border-bottom: none; }
 /* Round the four corner cells so the header's top and the last row's bottom follow the radius. */
 .ProseMirror tr:first-child th:first-child,
-.ProseMirror tr:first-child td:first-child { border-top-left-radius: 8px; }
+.ProseMirror tr:first-child td:first-child { border-top-left-radius: 5px; }
 .ProseMirror tr:first-child th:last-child,
-.ProseMirror tr:first-child td:last-child { border-top-right-radius: 8px; }
+.ProseMirror tr:first-child td:last-child { border-top-right-radius: 5px; }
 .ProseMirror tr:last-child th:first-child,
-.ProseMirror tr:last-child td:first-child { border-bottom-left-radius: 8px; }
+.ProseMirror tr:last-child td:first-child { border-bottom-left-radius: 5px; }
 .ProseMirror tr:last-child th:last-child,
-.ProseMirror tr:last-child td:last-child { border-bottom-right-radius: 8px; }
+.ProseMirror tr:last-child td:last-child { border-bottom-right-radius: 5px; }
 .ProseMirror th {
-  background: #f5f5f3;
+  background: ${c("surfaceSunken")};
   font-weight: 600;
 }
 /* prosemirror-tables tags the active cell(s) so menu actions have an anchor. */
-.ProseMirror .selectedCell { background: rgba(247, 104, 8, 0.1); }
+.ProseMirror .selectedCell { background: ${c("surfaceSelected")}; }
 
 /* Per-cell hover affordance: a flat vertical-ellipsis button (styled like the toolbar buttons)
    at the end of the hovered cell that opens the table menu. Appended to <body> and positioned
@@ -349,16 +412,17 @@ export const EDITOR_CSS = `
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 5px;
+  border-radius: 3px;
   background: transparent;
   border: none;
-  color: #7b7b75;
+  color: ${c("textQuaternary")};
   cursor: pointer;
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1;
   user-select: none;
 }
-.pm-table-cellbtn:hover { background: rgba(0, 0, 0, 0.08); color: #3e3e3a; }
+.pm-table-cellbtn:hover { background: ${c("surfaceHover")}; color: ${c("textSecondary")}; }
+.pm-table-cellbtn:active { background: ${c("surfaceActive")}; }
 
 /* Built-in HTML table menu (web). Desktop/iOS present a native menu instead; the model is
    identical (see tableMenu.ts). Mirrors the wikilink picker chrome. */
@@ -366,13 +430,13 @@ export const EDITOR_CSS = `
 .pm-table-submenu {
   z-index: 10000;
   min-width: 200px;
-  background: #ffffff;
-  border: 1px solid #e6e6e2;
-  border-radius: 10px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
-  padding: 5px;
-  font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  color: #1a1a18;
+  background: ${c("surfaceOverlay")};
+  border: 1px solid ${c("borderSubtle")};
+  border-radius: 6px;
+  box-shadow: ${SHADOW_MD};
+  padding: 4px;
+  font: 400 13px/18px ${SANS};
+  color: ${c("textPrimary")};
 }
 .pm-table-menu { position: fixed; }
 .pm-table-submenu {
@@ -386,26 +450,28 @@ export const EDITOR_CSS = `
 .pm-table-menu-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 6px;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 6px;
+  border-radius: 3px;
   cursor: pointer;
   white-space: nowrap;
   position: relative;
 }
-.pm-table-menu-item:hover { background: #f5f5f3; }
+.pm-table-menu-item:hover { background: ${c("surfaceHover")}; }
 .pm-table-menu-item.has-submenu:hover > .pm-table-submenu { display: block; }
-.pm-table-menu-item.is-disabled { color: #bcbcb6; cursor: default; }
+.pm-table-menu-item.is-disabled { color: ${c("textDisabled")}; cursor: default; }
 .pm-table-menu-item.is-disabled:hover { background: transparent; }
 .pm-table-menu-label { flex: 1; }
-.pm-table-menu-arrow { color: #9a9a92; font-size: 0.78em; }
+.pm-table-menu-arrow { color: ${c("textQuaternary")}; font-size: 10px; }
 .pm-table-menu-check {
-  width: 14px;
-  flex: 0 0 14px;
-  color: #b7500a;
+  width: 12px;
+  flex: 0 0 12px;
+  color: ${c("textAccent")};
+  font-size: 11px;
   text-align: center;
 }
-.pm-table-menu-sep { height: 1px; background: #efefec; margin: 4px 6px; }
+.pm-table-menu-sep { height: 1px; background: ${c("borderSubtle")}; margin: 4px 0; }
 `;
 
 // Web only: inject the editor CSS into the document head once.

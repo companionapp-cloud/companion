@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { View } from "react-native";
-import { Button, Input, Text, space } from "@companion/design-system";
+import { Button, Input, Text, Wordmark, colors, radius, space } from "@companion/design-system";
 import { auth, keys, cryptoApi } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
 
@@ -71,9 +71,9 @@ export function RecoveryResetScreen({ baseUrl, token, onDone }: { baseUrl: strin
   if (done) {
     return (
       <Card>
-        <Text variant="title">Password reset</Text>
+        <Text variant="heading">Password reset</Text>
         <Text tone="secondary">Your password has been changed. Sign in with your new password.</Text>
-        <Button label="Continue" onPress={onDone} />
+        <Button label="Continue" fullWidth onPress={onDone} />
       </Card>
     );
   }
@@ -81,9 +81,11 @@ export function RecoveryResetScreen({ baseUrl, token, onDone }: { baseUrl: strin
   if (loadError) {
     return (
       <Card>
-        <Text variant="title">Reset link problem</Text>
-        <Text tone="danger">{loadError}</Text>
-        <Button label="Close" variant="secondary" onPress={onDone} />
+        <Text variant="heading">Reset link problem</Text>
+        <Text variant="caption" tone="danger">
+          {loadError}
+        </Text>
+        <Button label="Close" variant="secondary" fullWidth onPress={onDone} />
       </Card>
     );
   }
@@ -91,44 +93,89 @@ export function RecoveryResetScreen({ baseUrl, token, onDone }: { baseUrl: strin
   if (!info) {
     return (
       <Card>
-        <Text tone="secondary">Checking your reset link…</Text>
+        <Text variant="caption" tone="tertiary">
+          Checking your reset link…
+        </Text>
       </Card>
     );
   }
 
   return (
     <Card>
-      <Text variant="title">Reset your password</Text>
-      {info.encrypted ? (
-        <>
-          <Text tone="secondary">
-            This account is encrypted. Enter your recovery code to unlock and re-secure your notes
-            under a new password.
-          </Text>
-          <Input value={recoveryCode} onChangeText={setRecoveryCode} placeholder="Recovery code" autoCapitalize="characters" />
-        </>
-      ) : (
-        <Text tone="secondary">Choose a new password for your account.</Text>
-      )}
-      <Input value={password} onChangeText={setPassword} placeholder="New password" secureTextEntry autoCapitalize="none" />
-      <Input value={confirm} onChangeText={setConfirm} placeholder="Confirm new password" secureTextEntry autoCapitalize="none" />
+      <Text variant="heading">Reset your password</Text>
+      <Text tone="secondary">
+        {info.encrypted
+          ? "This account is encrypted. Enter your recovery code to unlock and re-secure your notes under a new password."
+          : "Choose a new password for your account."}
+      </Text>
+      <View style={styles.fields}>
+        {info.encrypted ? (
+          <Field label="Recovery code">
+            <Input mono value={recoveryCode} onChangeText={setRecoveryCode} placeholder="The code you saved when encryption was set up" autoCapitalize="characters" />
+          </Field>
+        ) : null}
+        <Field label="New password">
+          <Input value={password} onChangeText={setPassword} placeholder="At least 6 characters" secureTextEntry autoCapitalize="none" />
+        </Field>
+        <Field label="Confirm new password">
+          <Input
+            value={confirm}
+            onChangeText={setConfirm}
+            onSubmitEditing={() => void submit()}
+            placeholder="Type it again"
+            secureTextEntry
+            autoCapitalize="none"
+          />
+        </Field>
+      </View>
       {error ? (
         <Text tone="danger" variant="caption">
           {error}
         </Text>
       ) : null}
-      <View style={{ flexDirection: "row", gap: space.md }}>
-        <Button label={busy ? "…" : "Reset password"} onPress={submit} disabled={busy} />
-        <Button label="Cancel" variant="secondary" onPress={onDone} />
+      <View style={styles.actions}>
+        <Button label={busy ? "…" : "Reset password"} fullWidth onPress={submit} disabled={busy} />
+        <Button label="Cancel" variant="ghost" fullWidth onPress={onDone} />
       </View>
     </Card>
   );
 }
 
-function Card({ children }: { children: React.ReactNode }) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: space.xl }}>
-      <View style={{ width: 400, maxWidth: "100%", gap: space.lg }}>{children}</View>
+    <View style={styles.field}>
+      <Text variant="label">{label}</Text>
+      {children}
     </View>
   );
 }
+
+/** The centred 360px card every state of the flow renders in: wordmark, then the content.
+ *  Hairline and a 6px radius — it sits on the page, so no shadow. */
+function Card({ children }: { children: React.ReactNode }) {
+  return (
+    <View style={styles.page}>
+      <View style={styles.card}>
+        <Wordmark />
+        {children}
+      </View>
+    </View>
+  );
+}
+
+const styles = {
+  page: { flex: 1, alignItems: "center" as const, justifyContent: "center" as const, padding: space.xl },
+  card: {
+    width: 360,
+    maxWidth: "100%" as const,
+    gap: space.lg,
+    padding: space.xl2,
+    backgroundColor: colors.surfaceCard,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.lg,
+  },
+  fields: { gap: space.ml },
+  field: { gap: space.xs },
+  actions: { gap: space.sm },
+};

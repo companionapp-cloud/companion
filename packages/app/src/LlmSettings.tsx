@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Pressable, View } from "react-native";
-import { Button, colors, Icon, IconButton, Input, radius, space, Text } from "@companion/design-system";
+import { useCallback, useEffect, useState } from "react";
+import { View } from "react-native";
+import { Badge, Button, colors, Divider, Icon, IconButton, icon, Input, radius, row, space, Text, useDensity } from "@companion/design-system";
 import type { CreateLLMConfigInput, LLMConfig } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
+import { Segmented, SettingsField, SettingsNote } from "./settingsUi";
 
 type Kind = "local" | "openai" | "anthropic";
 
@@ -114,120 +115,87 @@ export function LlmSettings() {
   };
 
   const preset = PRESETS[kind];
+  const touch = useDensity() === "touch";
 
   return (
-    <View style={{ gap: space.lg }}>
-      {configs && configs.length > 0 && (
-        <View style={{ gap: space.sm }}>
-          {configs.map((c) => (
-            <View key={c.id} style={styles.row}>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <View style={styles.nameRow}>
-                  <Text numberOfLines={1} style={{ fontWeight: "600" }}>
-                    {c.name}
-                  </Text>
-                  {c.isDefault && (
-                    <View style={styles.badge}>
-                      <Text variant="caption" tone="accent" style={{ fontWeight: "600" }}>
-                        Default
-                      </Text>
-                    </View>
-                  )}
-                </View>
-                <Text variant="caption" tone="tertiary" numberOfLines={1}>
-                  {c.provider === "anthropic" ? "Anthropic" : c.scope === "device" ? "Local" : "OpenAI-compatible"}
+    <View style={styles.section}>
+      {configs && configs.length > 0 ? (
+        <View style={styles.stack}>
+          <Text variant="eyebrow" tone="quaternary">
+            Providers · {configs.length}
+          </Text>
+          <View style={styles.list}>
+            {configs.map((c, i) => (
+              <View key={c.id} style={[styles.row, { minHeight: touch ? row.touch : 32 }, i === configs.length - 1 ? null : styles.rowDivider]}>
+                <Text variant="label" numberOfLines={1} style={styles.rowName}>
+                  {c.name}
                 </Text>
+                {c.isDefault ? <Badge label="default" tone="accent" /> : null}
+                <View style={{ flex: 1 }} />
+                <Text variant="mono" tone="quaternary" numberOfLines={1}>
+                  {c.provider === "anthropic" ? "anthropic" : c.scope === "device" ? "local" : "openai-compatible"}
+                </Text>
+                {!c.isDefault ? (
+                  <Button label="Make default" variant="secondary" size={touch ? undefined : "sm"} onPress={() => setDefault(c.id)} />
+                ) : null}
+                <IconButton label={`Remove ${c.name}`} size={touch ? undefined : "sm"} onPress={() => remove(c.id)}>
+                  <Icon name="trash" size={touch ? icon.lg : 13} color={colors.textTertiary} />
+                </IconButton>
               </View>
-              {!c.isDefault && <Button label="Use" variant="secondary" size="sm" onPress={() => setDefault(c.id)} />}
-              <IconButton label="Remove" size="sm" onPress={() => remove(c.id)}>
-                <Icon name="trash" size={15} color={colors.textSecondary} />
-              </IconButton>
-            </View>
-          ))}
+            ))}
+          </View>
         </View>
-      )}
+      ) : configs ? (
+        <SettingsNote>No providers yet. Add a local model by URL, or a cloud provider with an API key.</SettingsNote>
+      ) : null}
 
-      <View style={styles.divider} />
+      <Divider />
 
-      <Text variant="caption" tone="tertiary" style={{ fontWeight: "600" }}>
+      <Text variant="eyebrow" tone="quaternary">
         Add a provider
       </Text>
-      <View style={styles.kinds}>
-        {(Object.keys(PRESETS) as Kind[]).map((k) => (
-          <Pressable
-            key={k}
-            onPress={() => pickKind(k)}
-            aria-label={PRESETS[k].label}
-            style={[styles.pill, kind === k && styles.pillActive]}
-          >
-            <Text variant="caption" tone={kind === k ? "accent" : "secondary"} style={{ fontWeight: "600" }}>
-              {PRESETS[k].label}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      <Segmented
+        options={(Object.keys(PRESETS) as Kind[]).map((k) => ({ value: k, label: PRESETS[k].label }))}
+        value={kind}
+        onChange={pickKind}
+      />
 
-      <Field label="Name">
-        <Input value={name} onChangeText={setName} autoCapitalize="none" />
-      </Field>
+      <SettingsField label="Name">
+        <View style={styles.control}>
+          <Input value={name} onChangeText={setName} autoCapitalize="none" />
+        </View>
+      </SettingsField>
       {preset.configureUrl ? (
-        <Field label="Server URL">
-          <Input value={baseUrl} onChangeText={setBaseUrl} placeholder="http://localhost:11434/v1" autoCapitalize="none" />
-        </Field>
+        <SettingsField label="Server URL" help="You’ll pick which model to use in the chat, from the models this server has installed.">
+          <View style={styles.control}>
+            <Input mono value={baseUrl} onChangeText={setBaseUrl} placeholder="http://localhost:11434/v1" autoCapitalize="none" />
+          </View>
+        </SettingsField>
       ) : (
-        <Field label="API key">
-          <Input value={apiKey} onChangeText={setApiKey} placeholder="sk-…" secureTextEntry autoCapitalize="none" />
-        </Field>
+        <SettingsField
+          label="API key"
+          help="Stored on this device (keychain on native, browser storage on web) and never in the database."
+        >
+          <View style={styles.control}>
+            <Input mono value={apiKey} onChangeText={setApiKey} placeholder="sk-…" secureTextEntry autoCapitalize="none" />
+          </View>
+        </SettingsField>
       )}
 
-      {error && (
-        <Text tone="danger" variant="caption">
-          {error}
-        </Text>
-      )}
+      {error ? <SettingsNote tone="danger">{error}</SettingsNote> : null}
       <View style={{ flexDirection: "row" }}>
-        <Button label={busy ? "…" : "Add provider"} onPress={add} disabled={busy} icon={<Icon name="plus" size={15} />} />
+        <Button label={busy ? "…" : "Add provider"} onPress={add} disabled={busy} icon={<Icon name="plus" size={icon.sm} color={colors.onAccent} />} />
       </View>
-      <Text variant="caption" tone="tertiary">
-        {preset.needsKey
-          ? "Your key is stored on this device (keychain on native, browser storage on web) and never in the database."
-          : "You'll pick which model to use in the chat, from the models this server has installed."}
-      </Text>
-    </View>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <View style={{ gap: space.sm }}>
-      <Text variant="caption" tone="tertiary" style={{ fontWeight: "600" }}>
-        {label}
-      </Text>
-      {children}
     </View>
   );
 }
 
 const styles = {
-  row: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.md },
-  nameRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.sm },
-  badge: {
-    paddingHorizontal: space.sm,
-    paddingVertical: 1,
-    backgroundColor: colors.accentSoft,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.accentSoftBorder,
-  },
-  divider: { height: 1, backgroundColor: colors.borderSubtle },
-  kinds: { flexDirection: "row" as const, gap: space.sm },
-  pill: {
-    paddingHorizontal: space.lg,
-    paddingVertical: space.sm,
-    borderRadius: radius.full,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    backgroundColor: colors.surfaceApp,
-  },
-  pillActive: { backgroundColor: colors.accentSoft, borderColor: colors.accentSoftBorder },
+  section: { gap: space.xl },
+  stack: { gap: space.md },
+  control: { width: "100%" as const, maxWidth: 320 },
+  list: { borderWidth: 1, borderColor: colors.borderSubtle, borderRadius: radius.lg, overflow: "hidden" as const },
+  row: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.md, paddingLeft: space.ml, paddingRight: space.xs },
+  rowName: { flexShrink: 1 },
+  rowDivider: { borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
 };

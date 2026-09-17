@@ -1,15 +1,18 @@
-import { StyleSheet, View } from "react-native";
-import { Text } from "./Text";
-import { colors, radius } from "./tokens";
+import { StyleSheet, Text, View } from "react-native";
+import { colors, font, radius } from "./tokens";
 
 export interface AvatarProps {
   name: string;
-  size?: "sm" | "md";
+  /** 18 / 22 / 26px. */
+  size?: "sm" | "md" | "lg";
+  color?: string;
 }
 
-/** Circular initials avatar. */
-export function Avatar({ name, size = "md" }: AvatarProps) {
-  const dim = size === "sm" ? 26 : 32;
+const DIMS = { sm: 18, md: 22, lg: 26 } as const;
+
+/** Circular initials avatar. Companion has no uploaded photos; initials are the identity. */
+export function Avatar({ name, size = "md", color = colors.gray700 }: AvatarProps) {
+  const dim = DIMS[size];
   const initials = name
     .trim()
     .split(/\s+/)
@@ -17,15 +20,13 @@ export function Avatar({ name, size = "md" }: AvatarProps) {
     .map((w) => w[0]?.toUpperCase() ?? "")
     .join("");
   return (
-    <View style={[styles.avatar, { width: dim, height: dim, borderRadius: radius.full }]}>
-      <Text variant="caption" tone="inverse" style={styles.initials}>
-        {initials}
-      </Text>
+    <View style={[styles.avatar, { width: dim, height: dim, backgroundColor: color }]}>
+      <Text style={[styles.initials, { fontSize: size === "sm" ? 9 : 10 }]}>{initials}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  avatar: { alignItems: "center", justifyContent: "center", backgroundColor: colors.gray700, flexShrink: 0 },
-  initials: { fontWeight: "600" },
+  avatar: { alignItems: "center", justifyContent: "center", borderRadius: radius.full, flexShrink: 0 },
+  initials: { fontFamily: font.mono, fontWeight: font.weight.semibold, color: colors.gray0 },
 });

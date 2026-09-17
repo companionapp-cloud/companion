@@ -29,7 +29,7 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
     id: "sync",
     label: "Sync",
     description: "Connect to a server and sync across devices",
-    icon: "link",
+    icon: "refresh",
     Component: SyncSettings,
   },
   {
@@ -43,7 +43,7 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
     id: "objects",
     label: "Objects",
     description: "Archetypes that give notes and tasks structured fields",
-    icon: "file",
+    icon: "table",
     Component: ObjectTypeSettings,
   },
   {

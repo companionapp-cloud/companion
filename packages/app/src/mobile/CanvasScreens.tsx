@@ -1,18 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
-import { FlatList, StyleSheet, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useRoute } from "@react-navigation/native";
 import type { Canvas } from "@companion/core-bridge";
-import { Icon, Spinner, Text, colors, space } from "@companion/design-system";
+import { Center, Input, Spinner, Text, colors, space } from "@companion/design-system";
 import { useNav } from "../nav-context";
 import { useCore } from "../CoreContext";
 import { useProjects } from "../ProjectsProvider";
 import { timeAgo } from "../NotificationRow";
 import { useCanvases } from "../canvas/CanvasesProvider";
-import { CanvasPane } from "../canvas/CanvasPane";
-import { CardRow, Fab } from "./ui";
+import { CanvasEditor } from "../canvas/CanvasEditor";
+import { ConfirmDialog } from "../ConfirmDialog";
+import { MembershipPicker } from "../MembershipPicker";
+import { Card, CardRow, EmptyCaption, FAB_CLEARANCE, Fab, NavAction, NavBar, ROW_ICON_INSET, RowIcon } from "./ui";
 
 // Canvases for the mobile web shell (PLAN-canvases.md): a full-screen list (globally, or
-// scoped to a project's member boards) and the board itself as a pushed route.
+// scoped to a project's member boards) and the board itself as a pushed route. Inside a
+// project the project screen owns the nav bar, so the list renders bare.
 
 /** Tracks a project's member canvas ids, refreshed as memberships change. */
 function useMemberCanvasIds(projectId: string | undefined): Set<string> | null {
@@ -59,52 +62,130 @@ export function CanvasesListScreen({ projectId }: { projectId?: string }) {
     nav.openCanvas(c.id);
   };
 
-  if (store.loading) return <Spinner label="Loading your canvases…" />;
+  const bar = projectId ? null : <NavBar title="Canvases" right={<NavAction icon="plus" label="New canvas" onPress={() => void create()} />} />;
+
+  if (store.loading) {
+    return (
+      <View style={styles.container}>
+        {bar}
+        <Spinner label="Loading your canvases…" />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
-      <FlatList
-        data={canvases}
-        keyExtractor={(c) => c.id}
-        contentContainerStyle={styles.list}
-        ListEmptyComponent={
-          <Text tone="tertiary" style={styles.empty}>
-            No canvases yet. Tap + to start a board.
-          </Text>
-        }
-        renderItem={({ item }) => <CanvasCard canvas={item} onPress={() => nav.openCanvas(item.id)} />}
-      />
+      {bar}
+      <ScrollView contentContainerStyle={styles.list}>
+        {canvases.length ? (
+          <Card>
+            {canvases.map((c, i) => (
+              <CanvasCard key={c.id} canvas={c} isLast={i === canvases.length - 1} onPress={() => nav.openCanvas(c.id)} />
+            ))}
+          </Card>
+        ) : (
+          <EmptyCaption>No canvases yet. Tap + to start a board.</EmptyCaption>
+        )}
+      </ScrollView>
       <Fab label="New canvas" onPress={() => void create()} />
     </View>
   );
 }
 
-function CanvasCard({ canvas, onPress }: { canvas: Canvas; onPress: () => void }) {
+function CanvasCard({ canvas, isLast, onPress }: { canvas: Canvas; isLast: boolean; onPress: () => void }) {
   return (
     <CardRow
-      leading={<Icon name="canvas" size={19} color={colors.textTertiary} />}
+      leading={<RowIcon name="canvas" />}
+      separatorInset={ROW_ICON_INSET}
       title={canvas.name || "Untitled canvas"}
       subtitle={`Edited ${timeAgo(canvas.updatedAt)}`}
-      divided={false}
+      isLast={isLast}
       onPress={onPress}
     />
   );
 }
 
-/** The board route (/canvases/:id): the shared pane (name, projects, delete, editor). */
+/** The board route (/canvases/:id). Native chrome: the board's name is the bar's title
+ *  (tap to rename) and its document actions — projects, delete — are bar icons, over the
+ *  shared editor. The board's tools stay in the editor's own strip: CanvasEditor exposes
+ *  no handle for them, so a bottom tool bar has nothing to drive yet. */
 export function CanvasScreen() {
   const params = (useRoute().params ?? {}) as { id?: string };
   const nav = useNav();
+  const store = useCanvases();
+  const canvas = params.id ? store.byId(params.id) : undefined;
+  const [showProjects, setShowProjects] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  // The title reads as a heading; tapping it swaps in a field to rename (commits on blur/Enter).
+  const [nameDraft, setNameDraft] = useState<string | null>(null);
+  const commitName = () => {
+    const name = nameDraft?.trim();
+    setNameDraft(null);
+    if (canvas && name != null && name !== canvas.name) void store.rename(canvas.id, name);
+  };
+
   if (!params.id) return null;
+  if (!canvas) {
+    return (
+      <View style={styles.container}>
+        <NavBar title="Canvas" />
+        <Center>
+          <Text variant="caption" tone="tertiary">
+            {store.loading ? "Loading…" : "This canvas is gone."}
+          </Text>
+        </Center>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      <CanvasPane key={params.id} canvasId={params.id} onDeleted={nav.back} />
+      <NavBar
+        title={canvas.name || "Untitled canvas"}
+        titleSlot={
+          nameDraft !== null ? (
+            <View style={styles.titleSlot}>
+              <Input value={nameDraft} placeholder="Untitled canvas" autoFocus onChangeText={setNameDraft} onSubmitEditing={commitName} onBlur={commitName} />
+            </View>
+          ) : (
+            <Pressable style={styles.titleSlot} onPress={() => setNameDraft(canvas.name ?? "")} aria-label="Rename canvas">
+              <Text variant="title" tone={canvas.name ? "default" : "tertiary"} numberOfLines={1}>
+                {canvas.name || "Untitled canvas"}
+              </Text>
+            </Pressable>
+          )
+        }
+        right={
+          <>
+            <NavAction icon="folder" label="Projects" active={showProjects} onPress={() => setShowProjects((v) => !v)} />
+            <NavAction icon="trash" label="Delete canvas" onPress={() => setConfirmDelete(true)} />
+          </>
+        }
+      />
+      <View style={styles.board}>
+        <CanvasEditor key={canvas.id} canvasId={canvas.id} />
+      </View>
+      {showProjects ? <MembershipPicker entityType="canvas" entityId={canvas.id} onClose={() => setShowProjects(false)} /> : null}
+      {confirmDelete ? (
+        <ConfirmDialog
+          title="Delete canvas?"
+          message="This canvas moves to the Trash and is permanently deleted after 30 days. Its notes and tasks are untouched."
+          confirmLabel="Delete canvas"
+          onConfirm={async () => {
+            await store.remove(canvas.id);
+            setConfirmDelete(false);
+            nav.back();
+          }}
+          onClose={() => setConfirmDelete(false)}
+        />
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceApp },
-  list: { paddingHorizontal: space.lg, paddingTop: space.md, paddingBottom: 96, gap: space.sm },
-  empty: { padding: space.xl, textAlign: "center", lineHeight: 20 },
+  list: { paddingHorizontal: space.ml, paddingTop: space.ml, paddingBottom: FAB_CLEARANCE, flexGrow: 1 },
+  titleSlot: { flex: 1, minWidth: 0 },
+  board: { flex: 1, minHeight: 0 },
 });

@@ -1,14 +1,15 @@
 import { useMemo, useState } from "react";
 import { ScrollView, View } from "react-native";
 import type { Canvas } from "@companion/core-bridge";
-import { Icon, IconButton, Input, ListRow, Spinner, Text, colors, space } from "@companion/design-system";
+import { Icon, IconButton, Input, ListRow, Spinner, Text, colors, icon, space } from "@companion/design-system";
 import { ListFilterMenu } from "../ListFilterMenu";
 import { timeAgo } from "../NotificationRow";
 import { useCanvases } from "./CanvasesProvider";
 
 /** The canvases browse column, shared by the root Canvases view and a project's Canvases
  *  section. Root mode filters Unsorted/All like the notes list; project mode takes the
- *  project's member boards and shows a back affordance. */
+ *  project's member boards and shows a back affordance. A dense list like notes: 24px rows
+ *  (44 under touch density, via ListRow) with the edit time as mono trailing metadata. */
 export function CanvasesList({
   canvases,
   selectedId,
@@ -42,11 +43,11 @@ export function CanvasesList({
       <View style={styles.listHeader}>
         {onBack ? (
           <IconButton label="Back to sections" size="sm" onPress={onBack}>
-            <Icon name="chevronLeft" size={18} color={colors.textSecondary} />
+            <Icon name="chevronLeft" size={icon.sm} color={colors.textSecondary} />
           </IconButton>
         ) : null}
         {canvases ? (
-          <Text variant="caption" tone="secondary" style={{ flex: 1, fontWeight: "600" }}>
+          <Text variant="label" numberOfLines={1} style={{ flex: 1 }}>
             {title ?? "Canvases"}
           </Text>
         ) : (
@@ -61,26 +62,26 @@ export function CanvasesList({
             />
           </View>
         )}
-        <Text variant="mono" tone="tertiary">
+        <Text variant="mono" tone="quaternary">
           {source.length}
         </Text>
         <IconButton label="New canvas" size="sm" onPress={onCreate}>
-          <Icon name="plus" size={16} color={colors.textSecondary} />
+          <Icon name="plus" size={icon.sm} color={colors.textSecondary} />
         </IconButton>
       </View>
       <View style={styles.search}>
-        <Input size="sm" placeholder="Search canvases" value={query} onChangeText={setQuery} leadingIcon={<Icon name="search" size={15} color={colors.textTertiary} />} />
+        <Input size="sm" placeholder="Search canvases" value={query} onChangeText={setQuery} leadingIcon={<Icon name="search" size={icon.sm} color={colors.textQuaternary} />} />
       </View>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.md, gap: 2 }}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll}>
         {filtered.length ? (
           filtered.map((c) => {
             const selected = c.id === selectedId;
             return (
               <ListRow
                 key={c.id}
-                icon={<Icon name="canvas" size={17} color={selected ? colors.accentHover : colors.textTertiary} />}
+                icon={<Icon name="canvas" size={icon.sm} color={selected ? colors.textAccent : colors.textQuaternary} />}
                 title={c.name || "Untitled canvas"}
-                subtitle={`Edited ${timeAgo(c.updatedAt)}`}
+                trailing={timeAgo(c.updatedAt)}
                 selected={selected}
                 onPress={() => onSelect(c.id)}
               />
@@ -101,14 +102,16 @@ const styles = {
   listHeader: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    gap: space.xs,
-    minHeight: 28 + space.md * 2 + 1,
-    paddingHorizontal: space.md,
-    paddingVertical: space.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderSubtle,
+    gap: space.sm,
+    minHeight: 32,
+    paddingLeft: space.sm,
+    paddingRight: space.sm,
+    paddingTop: space.sm,
+    paddingBottom: space.xs,
+    // Above the search row, so the filter dropdown paints over the input beneath it.
     zIndex: 2,
   },
-  search: { paddingHorizontal: space.md, paddingTop: space.md, paddingBottom: space.md, zIndex: 1 },
-  empty: { padding: space.xl, lineHeight: 20, textAlign: "center" as const },
+  search: { paddingHorizontal: space.sm, paddingBottom: space.sm, zIndex: 1 },
+  scroll: { padding: space.xs, gap: 1 },
+  empty: { padding: space.xl, lineHeight: 18, textAlign: "center" as const },
 };

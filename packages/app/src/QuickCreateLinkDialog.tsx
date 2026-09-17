@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Pressable, View } from "react-native";
 import { Button, Input, Text, colors, radius, shadow, space } from "@companion/design-system";
+import { useDialogKeys } from "./ConfirmDialog";
 
 export interface QuickCreateLinkDialogProps {
   /** The unresolved link's text, prefilled as the new entity's title. */
@@ -31,20 +32,22 @@ export function QuickCreateLinkDialog({ label, onCreate, onCancel }: QuickCreate
     }
   };
 
+  // ⏎ creates the note (the primary action); esc backs out.
+  const hints = useDialogKeys({ onEnter: () => void create("note"), onEscape: busy ? undefined : onCancel });
+
   return (
     <View style={styles.scrim}>
       <Pressable style={styles.scrimFill} onPress={onCancel} aria-label="Cancel" />
       <View style={styles.card}>
-        <Text variant="title">Create a linked item</Text>
+        <Text variant="title">Create “{label}”</Text>
         <Text tone="secondary" style={styles.message}>
-          This link doesn’t point anywhere yet. Create a note or task for it.
+          This link doesn’t point anywhere yet. Create a note or a task with this title and the link will open it.
         </Text>
-        <Input autoFocus value={title} onChangeText={setTitle} placeholder="Title" />
+        <Input autoFocus value={title} onChangeText={setTitle} placeholder="Name the new note or task" />
         <View style={styles.actions}>
-          <Button label="Cancel" variant="ghost" onPress={onCancel} />
-          <View style={{ flex: 1 }} />
+          <Button label="Cancel" variant="ghost" kbd={hints ? "esc" : undefined} onPress={onCancel} />
           <Button label="Create task" variant="secondary" disabled={!canCreate} onPress={() => void create("task")} />
-          <Button label="Create note" variant="primary" disabled={!canCreate} onPress={() => void create("note")} />
+          <Button label="Create note" variant="primary" kbd={hints ? "⏎" : undefined} disabled={!canCreate} onPress={() => void create("note")} />
         </View>
       </View>
     </View>
@@ -60,7 +63,7 @@ const styles = {
     bottom: 0,
     alignItems: "center" as const,
     justifyContent: "center" as const,
-    backgroundColor: "rgba(17,17,16,0.28)",
+    backgroundColor: colors.scrim,
     padding: space.xl,
     zIndex: 100,
   },
@@ -68,7 +71,7 @@ const styles = {
   card: {
     width: 420,
     maxWidth: "100%" as const,
-    backgroundColor: colors.surfaceCard,
+    backgroundColor: colors.surfaceOverlay,
     borderRadius: radius.xl,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
@@ -76,11 +79,13 @@ const styles = {
     padding: space.xl,
     gap: space.md,
   },
-  message: { lineHeight: 20 },
+  message: { lineHeight: 19 },
   actions: {
     flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    justifyContent: "flex-end" as const,
     alignItems: "center" as const,
-    gap: space.md,
+    gap: space.sm,
     marginTop: space.sm,
   },
 };

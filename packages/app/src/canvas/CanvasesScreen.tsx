@@ -1,4 +1,4 @@
-import { Center, SplitView, Text, layout } from "@companion/design-system";
+import { Center, Icon, SplitView, Text, colors } from "@companion/design-system";
 import { useNav } from "../nav-context";
 import { useCanvases } from "./CanvasesProvider";
 import { CanvasesList } from "./CanvasesList";
@@ -19,16 +19,20 @@ export function CanvasesScreen() {
   return (
     <SplitView
       storageKey="companion.canvases.listWidth"
-      defaultWidth={layout.listW}
-      minWidth={220}
-      maxWidth={460}
+      defaultWidth={220}
+      minWidth={180}
+      maxWidth={360}
       aside={<CanvasesList selectedId={canvasId ?? null} onSelect={nav.openCanvas} onCreate={() => void create()} />}
     >
       {canvasId ? (
         <CanvasPane key={canvasId} canvasId={canvasId} onDeleted={() => nav.goView("canvases")} />
       ) : (
-        <Center>
-          <Text tone="tertiary">Select a canvas, or start a new one.</Text>
+        <Center style={{ backgroundColor: colors.surfaceCard }}>
+          <Icon name="canvas" size={18} color={colors.textQuaternary} />
+          <Text variant="title">Nothing selected</Text>
+          <Text variant="caption" tone="tertiary" style={{ maxWidth: 300, textAlign: "center", lineHeight: 18 }}>
+            Pick a canvas from the list, or start a new one.
+          </Text>
         </Center>
       )}
     </SplitView>

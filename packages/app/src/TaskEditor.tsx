@@ -1,7 +1,27 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Platform, Pressable, ScrollView, View, type GestureResponderEvent } from "react-native";
+import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { Platform, Pressable, ScrollView, TextInput, View, type GestureResponderEvent } from "react-native";
 import type { Task, UpdateTaskInput } from "@companion/core-bridge";
-import { Button, Icon, IconButton, Input, Text, TextField, colors, layout, radius, space, type IconName, type PressState } from "@companion/design-system";
+import {
+  Badge,
+  Button,
+  Icon,
+  IconButton,
+  Input,
+  Text,
+  TextField,
+  colors,
+  control,
+  font,
+  layout,
+  motion,
+  radius,
+  row,
+  space,
+  transition,
+  useDensity,
+  type IconName,
+  type PressState,
+} from "@companion/design-system";
 import { Editor, type EditorController, type LinkRef } from "@companion/editor";
 import { useCore } from "./CoreContext";
 import { useTasks } from "./TasksProvider";
@@ -14,6 +34,8 @@ import { TaskGraph } from "./TaskGraph";
 import { MembershipPicker } from "./MembershipPicker";
 import { ArchetypeChip, ObjectMetadataPanel, MetadataSidePanel } from "./ArchetypeSection";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { NavContext } from "./nav-context";
+import { timeAgo } from "./NotificationRow";
 
 export interface TaskEditorProps {
   task: Task;
@@ -55,6 +77,20 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
   // resting state; tapping one reveals the natural-language / preset / picker controls).
   const [expanded, setExpanded] = useState<null | "due" | "reminder" | "repeat">(null);
   const done = task.status === "done";
+  // Touch density (the mobile shells) keeps 44px chrome, `lg` controls and a 22px checkbox.
+  const touch = useDensity() === "touch";
+  // Selecting a task focuses its title — a task is usually renamed the moment it's opened.
+  // Keyed by task id upstream, so this is autofocus-on-mount. Never on touch (it would pop
+  // the keyboard) and never from a background tab; the focus view has no nav context and is
+  // always the visible surface.
+  const visible = useContext(NavContext)?.visible ?? true;
+  const focusTitle = useRef(!touch && visible).current;
+  // The checkbox is the editor's primary control, so it outgrows the 12px list box. Chips and
+  // their editors sit indented past it.
+  const checkSize = touch ? 22 : 18;
+  const indent = { marginLeft: checkSize + space.md };
+  const btn = touch ? undefined : ("sm" as const);
+  const glyph = touch ? 17 : 13;
 
   // Debounce text saves so every keystroke doesn't hit the store (and churn sync).
   const timers = useRef<{ title?: ReturnType<typeof setTimeout>; notes?: ReturnType<typeof setTimeout> }>({});
@@ -68,25 +104,29 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
   return (
     <View style={{ flex: 1 }}>
       {showToolbar ? (
-        <View style={styles.subToolbar}>
+        <View style={[styles.subToolbar, touch ? styles.subToolbarTouch : null]}>
+          <Badge tone={done ? "neutral" : "accent"} label={done ? "done" : "open"} />
+          <Text variant="mono" tone="quaternary" numberOfLines={1}>
+            edited {timeAgo(task.updatedAt)}
+          </Text>
           <View style={{ flex: 1 }} />
-          <IconButton label="Add to projects" size="sm" onPress={() => setShowProjects(true)}>
-            <Icon name="folder" size={16} color={colors.textTertiary} />
+          <IconButton label="Add to projects" size={btn} onPress={() => setShowProjects(true)}>
+            <Icon name="folder" size={glyph} color={colors.textSecondary} />
           </IconButton>
-          <IconButton label={showGraph ? "Show task" : "Show task graph"} size="sm" active={showGraph} onPress={() => setShowGraph((v) => !v)}>
-            <Icon name="graph" size={16} color={showGraph ? colors.accentHover : colors.textTertiary} />
+          <IconButton label={showGraph ? "Show task" : "Show task graph"} size={btn} active={showGraph} onPress={() => setShowGraph((v) => !v)}>
+            <Icon name="graph" size={glyph} color={showGraph ? colors.textAccent : colors.textSecondary} />
           </IconButton>
-          <IconButton label={showMeta ? "Hide metadata" : "Show metadata"} size="sm" active={showMeta} onPress={() => setShowMeta((v) => !v)}>
-            <Icon name="panelRight" size={16} color={showMeta ? colors.accentHover : colors.textTertiary} />
+          <IconButton label={showMeta ? "Hide metadata" : "Show metadata"} size={btn} active={showMeta} onPress={() => setShowMeta((v) => !v)}>
+            <Icon name="panelRight" size={glyph} color={showMeta ? colors.textAccent : colors.textSecondary} />
           </IconButton>
           {onPopOut ? (
-            <IconButton label="Open in tab" size="sm" onPress={() => onPopOut(task.id)}>
-              <Icon name="external" size={15} color={colors.textTertiary} />
+            <IconButton label="Open in tab" size={btn} onPress={() => onPopOut(task.id)}>
+              <Icon name="external" size={glyph} color={colors.textSecondary} />
             </IconButton>
           ) : null}
           {onDelete ? (
-            <IconButton label="Delete task" size="sm" onPress={() => setConfirmDelete(true)}>
-              <Icon name="trash" size={16} color={colors.textTertiary} />
+            <IconButton label="Delete task" size={btn} onPress={() => setConfirmDelete(true)}>
+              <Icon name="trash" size={glyph} color={colors.textSecondary} />
             </IconButton>
           ) : null}
         </View>
@@ -100,14 +140,15 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
           <TaskGraph taskId={task.id} />
         </View>
       ) : (
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.doc}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={touch ? styles.pageTouch : styles.page}>
+        <View style={styles.doc}>
         <View style={styles.titleRow}>
-          <Checkbox checked={done} onPress={toggleDone} />
-          <View style={{ flex: 1 }}>
-            <TextField
-              variant="title"
+          <Checkbox checked={done} onPress={toggleDone} size={checkSize} />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <DocTitleField
               value={title}
               placeholder="Task title"
+              autoFocus={focusTitle}
               onChangeText={(t) => {
                 setTitle(t);
                 debouncedSave("title", { title: t });
@@ -117,12 +158,12 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
         </View>
 
         {/* Metadata reads as a row of chips under the title; a chip expands its editor. */}
-        <View style={styles.metaRow}>
+        <View style={[styles.metaRow, indent]}>
           <MetaChip
             icon="calendar"
             label="Add due date"
             display={task.dueAt ? formatDue(task.dueAt) : null}
-            tone={overdue(task) ? "accent" : "default"}
+            tone={overdue(task) ? "danger" : dueToday(task) ? "accent" : "default"}
             active={expanded === "due"}
             onPress={() => setExpanded((e) => (e === "due" ? null : "due"))}
             onClear={task.dueAt ? () => save(task.id, { clearDueAt: true }) : undefined}
@@ -153,7 +194,7 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
         </View>
 
         {expanded === "due" ? (
-          <View style={styles.metaEditor}>
+          <View style={[styles.metaEditor, indent, touch ? null : styles.narrow]}>
             <DateRow
               value={task.dueAt}
               onSet={(iso) => save(task.id, { dueAt: iso })}
@@ -165,7 +206,7 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
         ) : null}
 
         {expanded === "reminder" ? (
-          <View style={styles.metaEditor}>
+          <View style={[styles.metaEditor, indent, touch ? null : styles.narrow]}>
             <DateRow
               value={task.remindAt}
               onSet={(iso) => save(task.id, { remindAt: iso })}
@@ -177,7 +218,7 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
         ) : null}
 
         {expanded === "repeat" ? (
-          <View style={styles.metaEditor}>
+          <View style={[styles.metaEditor, indent, touch ? null : styles.narrow]}>
             <RepeatRow
               task={task}
               onSet={(rule) => save(task.id, rule ? { repeatRule: rule } : { clearRepeatRule: true })}
@@ -189,7 +230,7 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
         {/* Structured props (PLAN §6.3). On desktop these live in the metadata side panel;
             mobile has no sub-toolbar to toggle it, so once a type is set we show them inline. */}
         {!showToolbar && task.objectTypeId ? (
-          <View style={styles.archetype}>
+          <View style={[styles.archetype, indent]}>
             <ObjectMetadataPanel
               objectTypeId={task.objectTypeId}
               props={task.props}
@@ -199,7 +240,7 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
         ) : null}
 
         {/* Notes read as a rounded input, left-aligned with the due / reminder fields above. */}
-        <View style={styles.notesField}>
+        <View style={[styles.notesField, indent, touch ? null : styles.narrow]}>
           <Editor
             ref={editorRef}
             variant="simple"
@@ -211,8 +252,9 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
             onQuickCreate={quickCreate.onQuickCreate}
             // `tasks.tasks` gets a fresh identity when any task changes, re-hydrating chips.
             linkRevision={tasks.tasks}
-            minHeight={110}
+            minHeight={88}
           />
+        </View>
         </View>
       </ScrollView>
       )}
@@ -246,23 +288,60 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
   );
 }
 
-/** A checkbox that renders a task's done state. `label` overrides the task-flavored
- *  accessibility label for non-task uses (e.g. settings toggles). */
-export function Checkbox({ checked, onPress, size = 22, label }: { checked: boolean; onPress: () => void; size?: number; label?: string }) {
+/** The document title: the 30px display `TextField` with a pointer, 20px on touch density
+ *  (30px clips on a phone). Shared by the note and task editors. */
+export function DocTitleField({
+  value,
+  placeholder,
+  autoFocus,
+  onChangeText,
+}: {
+  value: string;
+  placeholder: string;
+  autoFocus?: boolean;
+  onChangeText: (text: string) => void;
+}) {
+  const touch = useDensity() === "touch";
+  if (!touch) return <TextField variant="title" value={value} placeholder={placeholder} autoFocus={autoFocus} onChangeText={onChangeText} />;
+  return (
+    <TextInput
+      value={value}
+      placeholder={placeholder}
+      placeholderTextColor={colors.textQuaternary}
+      onChangeText={onChangeText}
+      style={styles.titleTouch}
+    />
+  );
+}
+
+/** A checkbox that renders a task's done state: 1px border-strong box, accent fill + white
+ *  check when done. 12px in dense list rows, larger where it is a surface's primary control,
+ *  22px on touch. `label` overrides the task-flavored accessibility label for non-task uses
+ *  (e.g. settings toggles). */
+export function Checkbox({ checked, onPress, size, label }: { checked: boolean; onPress: () => void; size?: number; label?: string }) {
+  const touch = useDensity() === "touch";
+  const dim = size ?? (touch ? 22 : 12);
   return (
     <Pressable
       onPress={onPress}
       aria-label={label ?? (checked ? "Mark not done" : "Mark done")}
-      style={[styles.check, { width: size, height: size }, checked ? styles.checkOn : null]}
+      // Keep the hit target finger/pointer friendly even though the drawn box is small.
+      hitSlop={touch ? 11 : 4}
+      style={[
+        styles.check,
+        transition("background-color, border-color", motion.instant),
+        { width: dim, height: dim, borderRadius: dim > 14 ? radius.sm : radius.xs },
+        checked ? styles.checkOn : null,
+      ]}
     >
-      {checked ? <Icon name="check" size={size - 8} color={colors.gray0} /> : null}
+      {checked ? <Icon name="check" size={Math.round(dim * 0.72)} color={colors.onAccent} strokeWidth={2.5} /> : null}
     </Pressable>
   );
 }
 
-/** A metadata chip under the task title (Reminders-style). Empty shows a ghost "Add …"
- *  affordance; set shows the value with a clear (✕) button. Tapping the body expands the
- *  field's full editor upstream. */
+/** A metadata chip under the task title. Empty shows a ghost "Add …" affordance; set shows
+ *  the value (mono — it is a date or a rule) with a clear (✕) button. Tapping the body
+ *  expands the field's full editor upstream. */
 function MetaChip({
   icon,
   label,
@@ -275,39 +354,49 @@ function MetaChip({
   icon: IconName;
   label: string;
   display: string | null;
-  tone?: "default" | "accent";
+  tone?: "default" | "accent" | "danger";
   active: boolean;
   onPress: () => void;
   onClear?: () => void;
 }) {
+  const touch = useDensity() === "touch";
   const filled = display !== null;
-  const accent = filled && tone === "accent";
-  const iconColor = accent ? colors.accentHover : filled ? colors.textSecondary : colors.textTertiary;
+  const toned = filled && tone !== "default";
+  const iconColor = toned ? (tone === "danger" ? colors.danger : colors.textAccent) : filled ? colors.textSecondary : colors.textTertiary;
   return (
     <Pressable
       onPress={onPress}
-      style={({ hovered }: PressState) => [
+      style={({ hovered, pressed }: PressState) => [
         styles.metaChip,
+        touch ? styles.metaChipTouch : null,
         filled ? styles.metaChipFilled : null,
-        active ? styles.metaChipActive : null,
         hovered ? styles.metaChipHover : null,
+        pressed ? styles.metaChipPressed : null,
+        active ? styles.metaChipActive : null,
       ]}
     >
-      <Icon name={icon} size={13} color={iconColor} />
-      <Text variant="caption" tone={accent ? "accent" : filled ? "secondary" : "tertiary"}>
-        {display ?? label}
-      </Text>
+      <Icon name={icon} size={12} color={iconColor} />
+      {filled ? (
+        <Text variant="mono" tone={toned ? (tone === "danger" ? "danger" : "accent") : "secondary"}>
+          {display}
+        </Text>
+      ) : (
+        <Text variant="caption" tone="tertiary">
+          {label}
+        </Text>
+      )}
       {filled && onClear ? (
-        <Pressable onPress={onClear} aria-label="Clear" style={styles.metaChipClear}>
-          <Icon name="close" size={11} color={colors.textTertiary} />
+        <Pressable onPress={onClear} aria-label="Clear" hitSlop={touch ? 10 : 3} style={styles.metaChipClear}>
+          <Icon name="close" size={11} color={colors.textQuaternary} />
         </Pressable>
       ) : null}
     </Pressable>
   );
 }
 
-/** A compact task list row: checkbox, title (struck through when done), and a due chip.
- *  Shared by the global Tasks list and a project's Tasks section. */
+/** A compact task list row: checkbox, title (struck through when done), and a mono due
+ *  label. 24px with a pointer, 44px on touch. Shared by the global Tasks list and a
+ *  project's Tasks section. */
 export function TaskRow({
   task,
   selected,
@@ -319,30 +408,38 @@ export function TaskRow({
   selected?: boolean;
   onPress: (e: GestureResponderEvent) => void;
   onToggle: () => void;
-  /** Optional trailing controls after the due chip (e.g. a remove-from-list button). Shown
+  /** Optional trailing controls after the due label (e.g. a remove-from-list button). Shown
    *  only while the row is hovered, so a list of rows doesn't read as a wall of buttons;
    *  on touch (no hover) they stay visible. */
   trailing?: ReactNode;
 }) {
+  const touch = useDensity() === "touch";
   const done = task.status === "done";
   return (
     <Pressable
       onPress={onPress}
-      style={({ hovered }: PressState) => [
+      style={({ hovered, pressed }: PressState) => [
         styles.taskRow,
-        { backgroundColor: selected ? colors.accentSoft : hovered ? colors.surfaceHover : "transparent" },
+        touch ? styles.taskRowTouch : null,
+        transition("background-color", motion.instant),
+        { backgroundColor: selected ? colors.surfaceSelected : pressed ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent" },
       ]}
     >
       {(({ hovered }: PressState) => (
         <>
-          <Checkbox checked={done} onPress={onToggle} size={18} />
-          <Text numberOfLines={1} style={[{ flex: 1 }, done ? styles.doneTitle : null]}>
+          <Checkbox checked={done} onPress={onToggle} />
+          <Text
+            variant="label"
+            tone={done ? "quaternary" : selected ? "accent" : "default"}
+            numberOfLines={1}
+            style={[styles.taskTitle, done ? styles.doneTitle : null]}
+          >
             {task.title || "Untitled task"}
           </Text>
-          {task.repeatSeedId ? <Icon name="repeat" size={13} color={colors.textTertiary} /> : null}
+          {task.repeatSeedId ? <Icon name="repeat" size={12} color={colors.textQuaternary} /> : null}
           {task.dueAt ? (
-            <Text variant="caption" tone={overdue(task) ? "accent" : "tertiary"}>
-              {formatDueShort(task.dueAt)}
+            <Text variant="mono" tone={overdue(task) ? "danger" : dueToday(task) ? "accent" : "quaternary"}>
+              {dueToday(task) ? "today" : formatDueShort(task.dueAt)}
             </Text>
           ) : null}
           {trailing ? <View style={{ opacity: hovered || !canHover ? 1 : 0 }}>{trailing}</View> : null}
@@ -359,6 +456,14 @@ function overdue(task: Task): boolean {
   return task.status !== "done" && !!task.dueAt && new Date(task.dueAt).getTime() < Date.now();
 }
 
+/** Due later today and not yet done. A time that has already passed is overdue instead. */
+function dueToday(task: Task): boolean {
+  if (task.status === "done" || !task.dueAt) return false;
+  const d = new Date(task.dueAt);
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate() && d.getTime() >= now.getTime();
+}
+
 function formatDueShort(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
@@ -372,6 +477,15 @@ function formatDue(iso: string): string {
   const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
   if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
   return d.toLocaleDateString(undefined, opts);
+}
+
+/** The natural-language echo — "Thu 17 Sep", plus the time when the phrase carried one. */
+function formatEcho(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const day = `${d.toLocaleDateString(undefined, { weekday: "short" })} ${d.getDate()} ${d.toLocaleDateString(undefined, { month: "short" })}`;
+  if (d.getHours() === 0 && d.getMinutes() === 0) return day;
+  return `${day} · ${d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
 }
 
 /** Chip label for a reminder — the due date plus a time ("Jul 5, 9:00 AM"). */
@@ -397,8 +511,11 @@ function DateRow({
   nlPlaceholder: string;
 }) {
   const { dates } = useCore();
+  const touch = useDensity() === "touch";
   const [nl, setNl] = useState("");
   const [failed, setFailed] = useState(false);
+  // What the last typed phrase resolved to, echoed back as mono `→ Thu 17 Sep`.
+  const [echo, setEcho] = useState<string | null>(null);
 
   const submitNl = async () => {
     const text = nl.trim();
@@ -408,8 +525,10 @@ function DateRow({
       onSet(parsed.at);
       setNl("");
       setFailed(false);
+      setEcho(formatEcho(parsed.at));
     } else {
       setFailed(true);
+      setEcho(null);
     }
   };
 
@@ -426,20 +545,26 @@ function DateRow({
             onChangeText={(t) => {
               setNl(t);
               setFailed(false);
+              if (t) setEcho(null);
             }}
             onSubmitEditing={() => void submitNl()}
-            leadingIcon={<Icon name="calendar" size={14} color={colors.textTertiary} />}
+            leadingIcon={<Icon name="calendar" size={12} color={colors.textQuaternary} />}
           />
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <DateTimeInput value={value} onSet={onSet} />
         </View>
         {value ? (
-          <Pressable onPress={onClear} aria-label="Clear" style={styles.clearBtn}>
-            <Icon name="close" size={14} color={colors.textTertiary} />
-          </Pressable>
+          <IconButton label="Clear" size={touch ? undefined : "sm"} onPress={onClear}>
+            <Icon name="close" size={12} color={colors.textTertiary} />
+          </IconButton>
         ) : null}
       </View>
+      {echo ? (
+        <Text variant="mono" tone="quaternary">
+          → {echo}
+        </Text>
+      ) : null}
       {failed ? (
         <Text variant="caption" tone="tertiary">
           Couldn’t read a date from that — try “tomorrow 3pm” or use a preset.
@@ -448,14 +573,32 @@ function DateRow({
 
       <View style={styles.presets}>
         {presets.map((p) => (
-          <Pressable key={p.label} onPress={() => onSet(p.at().toISOString())} style={styles.chip}>
-            <Text variant="caption" tone="secondary">
-              {p.label}
-            </Text>
-          </Pressable>
+          <PresetChip key={p.label} label={p.label} active={false} onPress={() => onSet(p.at().toISOString())} />
         ))}
       </View>
     </View>
+  );
+}
+
+/** A quick-set preset under a metadata editor: a squared 22px chip (30px on touch); the
+ *  fill steps on hover/press and the chosen repeat cadence takes the soft accent. */
+function PresetChip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  const touch = useDensity() === "touch";
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ hovered, pressed }: PressState) => [
+        styles.chip,
+        touch ? styles.chipTouch : null,
+        hovered ? styles.metaChipHover : null,
+        pressed ? styles.metaChipPressed : null,
+        active ? styles.chipActive : null,
+      ]}
+    >
+      <Text variant="caption" tone={active ? "accent" : "secondary"}>
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -503,9 +646,9 @@ function RepeatRow({ task, onSet, onConnectSync }: { task: Task; onSet: (rule: s
     <View style={{ gap: space.sm }}>
       {!connected ? (
         <View style={styles.repeatCta}>
-          <Icon name="repeat" size={15} color={colors.textSecondary} />
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text variant="caption" tone="secondary" style={{ fontWeight: "600" }}>
+          <Icon name="repeat" size={14} color={colors.textTertiary} />
+          <View style={{ flex: 1, gap: space.xxs }}>
+            <Text variant="label" tone="secondary">
               Repeats need a connected sync server
             </Text>
             <Text variant="caption" tone="tertiary">
@@ -526,7 +669,7 @@ function RepeatRow({ task, onSet, onConnectSync }: { task: Task; onSet: (rule: s
           setFailed(false);
         }}
         onSubmitEditing={() => void submitNl()}
-        leadingIcon={<Icon name="repeat" size={14} color={colors.textTertiary} />}
+        leadingIcon={<Icon name="repeat" size={12} color={colors.textQuaternary} />}
       />
       {failed ? (
         <Text variant="caption" tone="tertiary">
@@ -537,22 +680,14 @@ function RepeatRow({ task, onSet, onConnectSync }: { task: Task; onSet: (rule: s
         {REPEAT_PRESETS.map((p) => {
           const active = p.rule.toUpperCase() === current;
           return (
-            <Pressable
-              key={p.label}
-              onPress={() => onSet(p.rule)}
-              style={[styles.chip, active ? styles.chipActive : null]}
-            >
-              <Text variant="caption" tone={active ? "accent" : "secondary"}>
-                {p.label}
-              </Text>
-            </Pressable>
+            <PresetChip key={p.label} label={p.label} active={active} onPress={() => onSet(p.rule)} />
           );
         })}
       </View>
       {current ? (
         preview && preview.length ? (
-          <Text variant="caption" tone="tertiary">
-            Next: {preview.map((iso) => formatDueShort(iso)).join(" · ")}
+          <Text variant="mono" tone="quaternary">
+            next → {preview.map((iso) => formatDueShort(iso)).join(" · ")}
           </Text>
         ) : (
           <Text variant="caption" tone="tertiary">
@@ -594,27 +729,45 @@ function reminderPresets() {
 }
 
 const styles = {
+  // 28px sub-toolbar with a bottom hairline; icon buttons are `sm` with 13px glyphs.
   subToolbar: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
     gap: space.xs,
-    height: 44,
-    paddingHorizontal: space.md,
+    height: layout.subToolbarH,
+    paddingLeft: space.ml,
+    paddingRight: space.sm,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
     flexShrink: 0,
   },
+  // Touch density: a 44px bar of `lg` buttons.
+  subToolbarTouch: { height: row.touch, paddingLeft: space.xl, paddingRight: space.md },
   body: { flex: 1, flexDirection: "row" as const, minHeight: 0 },
-  doc: { maxWidth: layout.contentMax, width: "100%" as const, marginHorizontal: "auto" as const, padding: space.xxl, gap: space.sm },
-  titleRow: { flexDirection: "row" as const, alignItems: "flex-start" as const, gap: space.md },
-  groupLabel: { fontWeight: "600" as const, letterSpacing: 0.5, marginTop: space.lg },
-  // Chips + their expanded editors sit indented under the title (past the checkbox).
-  metaRow: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: space.sm, marginTop: space.md, marginLeft: 22 + space.md },
-  metaEditor: { marginLeft: 22 + space.md, marginTop: space.xs, marginBottom: space.xs },
-  archetype: { marginLeft: 22 + space.md, marginTop: space.md },
-  // The notes editor as a rounded input, left-aligned with the metadata column above it.
+  // Page gutters: 20px top / 28px sides with a pointer; a tight inset on a phone.
+  page: { paddingTop: space.xl2, paddingHorizontal: 28, paddingBottom: space.huge },
+  pageTouch: { paddingVertical: space.lg, paddingHorizontal: space.xl },
+  doc: { maxWidth: 560, width: "100%" as const, gap: space.sm },
+  titleRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.md },
+  // The 20px touch title (DocTitleField) — 30px clips on a phone.
+  titleTouch: {
+    padding: 0,
+    color: colors.textPrimary,
+    fontFamily: font.sans,
+    fontSize: font.size["2xl"],
+    fontWeight: font.weight.semibold,
+    letterSpacing: font.tracking.snug,
+    ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as Record<string, unknown>) : null),
+  },
+  // Chips + their expanded editors sit indented under the title (past the checkbox; the
+  // indent itself is computed from the checkbox size).
+  metaRow: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: space.sm, marginTop: space.xs, zIndex: 1 },
+  metaEditor: { marginTop: space.xs, marginBottom: space.xs },
+  // With a pointer the editors and the notes field stop at a comfortable 420px.
+  narrow: { maxWidth: 420 },
+  archetype: { marginTop: space.md },
+  // The notes editor as a bordered field, left-aligned with the metadata column above it.
   notesField: {
-    marginLeft: 22 + space.md,
     marginTop: space.sm,
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
@@ -627,21 +780,30 @@ const styles = {
     flexDirection: "row" as const,
     alignItems: "center" as const,
     gap: space.xs,
+    height: control.sm,
     paddingHorizontal: space.md,
-    paddingVertical: 5,
-    borderRadius: radius.full,
+    borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
     backgroundColor: "transparent" as const,
   },
-  metaChipFilled: { backgroundColor: colors.gray50, borderColor: colors.borderSubtle },
+  metaChipTouch: { height: control.lg, paddingHorizontal: space.ml },
+  metaChipFilled: { backgroundColor: colors.surfaceSunken },
+  metaChipHover: { backgroundColor: colors.surfaceHover },
+  metaChipPressed: { backgroundColor: colors.surfaceActive },
   metaChipActive: { backgroundColor: colors.accentSoft, borderColor: colors.accentSoftBorder },
-  metaChipHover: { borderColor: colors.borderDefault },
   metaChipClear: { marginLeft: 1, padding: 3, marginVertical: -3, marginRight: -3 },
   inputRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.sm },
-  clearBtn: { padding: 2 },
-  presets: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: space.sm },
-  chip: { paddingHorizontal: space.md, paddingVertical: space.xs, borderRadius: radius.full, borderWidth: 1, borderColor: colors.borderDefault },
+  presets: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: space.xs },
+  chip: {
+    height: control.sm,
+    justifyContent: "center" as const,
+    paddingHorizontal: space.md,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.borderDefault,
+  },
+  chipTouch: { height: control.lg, paddingHorizontal: space.ml },
   chipActive: { backgroundColor: colors.accentSoft, borderColor: colors.accentSoftBorder },
   repeatCta: {
     flexDirection: "row" as const,
@@ -651,25 +813,26 @@ const styles = {
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
-    backgroundColor: colors.gray50,
+    backgroundColor: colors.surfaceSunken,
   },
   check: {
-    borderRadius: radius.full,
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: colors.borderStrong,
     alignItems: "center" as const,
     justifyContent: "center" as const,
-    marginTop: 6,
     flexShrink: 0,
   },
-  checkOn: { backgroundColor: colors.success, borderColor: colors.success },
+  checkOn: { backgroundColor: colors.accent, borderColor: colors.accent },
+  // 24px dense row (44px on touch): radius 3, padding 0 6, gap 6.
   taskRow: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    gap: space.md,
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
-    borderRadius: radius.md,
+    gap: space.sm,
+    minHeight: row.h,
+    paddingHorizontal: space.sm,
+    borderRadius: radius.sm,
   },
-  doneTitle: { textDecorationLine: "line-through" as const, color: colors.textTertiary },
+  taskRowTouch: { minHeight: row.touch, gap: space.ml },
+  taskTitle: { flex: 1, minWidth: 0 },
+  doneTitle: { textDecorationLine: "line-through" as const },
 };

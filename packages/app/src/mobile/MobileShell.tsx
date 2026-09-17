@@ -9,8 +9,8 @@ import {
   type LinkingOptions,
   type ParamListBase,
 } from "@react-navigation/native";
-import { Icon, IconButton, Text, colors, space } from "@companion/design-system";
-import { NavContext, useNav, type NavLocation, type Navigator, type ProjectSection, type Tab, type ViewId } from "../nav-context";
+import { DensityProvider, colors } from "@companion/design-system";
+import { NavContext, docOfRef, useNav, type NavLocation, type Navigator, type ProjectSection, type Tab, type ViewId } from "../nav-context";
 import { useCore } from "../CoreContext";
 import { setReminderActivationHandler } from "../reminderNav";
 import { NotesProvider } from "../NotesProvider";
@@ -20,16 +20,12 @@ import { CanvasesProvider } from "../canvas/CanvasesProvider";
 import { CanvasesListScreen, CanvasScreen } from "./CanvasScreens";
 import { RemindersProvider, type NotificationScheduler } from "../RemindersProvider";
 import { NotificationsProvider } from "../NotificationsProvider";
-import { NotificationsScreen } from "../NotificationsScreen";
 import { ToolVisibilityProvider, type ToolsStorage } from "../ToolVisibilityProvider";
-import { ProjectsProvider, useProjects } from "../ProjectsProvider";
+import { ProjectsProvider } from "../ProjectsProvider";
 import { ObjectTypesProvider } from "../ObjectTypesProvider";
 import { CalendarProvider } from "../CalendarProvider";
-import { GraphScreen } from "../GraphScreen";
-import { TrashScreen } from "../TrashScreen";
 import { useSync } from "../SyncProvider";
 import { SyncHealthBanner } from "../SyncHealthBanner";
-import { SETTINGS_SECTIONS } from "../settingsSections";
 import { HomeScreen } from "./HomeScreen";
 import { TodayScreen } from "./TodayScreen";
 import { CalendarScreen } from "./CalendarScreens";
@@ -38,6 +34,8 @@ import { NotesListScreen, TasksListScreen } from "./ListScreens";
 import { NoteEditorScreen, TaskEditorScreen } from "./EditorScreens";
 import { ProjectScreen } from "./ProjectScreen";
 import { SettingsListScreen, SettingsSectionScreen } from "./SettingsScreens";
+import { GraphScreen } from "./GraphScreen";
+import { HabitsScreen, NotificationsRouteScreen, TrashRouteScreen } from "./UtilityScreens";
 
 // ---------------------------------------------------------------------------
 // The mobile web shell (phone-width browsers / PWA). Same information architecture as
@@ -46,6 +44,11 @@ import { SettingsListScreen, SettingsSectionScreen } from "./SettingsScreens";
 // providers and screens; only the navigation chrome is mobile-specific. The desktop
 // AppShell (hover rail + workspace tabs) is intentionally not reused here — see
 // apps/mobile/src/MobileShell.tsx for the same decision on native.
+//
+// Chrome follows platform habit: Home owns a large title and has no bar; every other
+// route renders its own 44px NavBar (./ui) so it can put its actions and its segmented
+// control in the bar. The shell mounts touch density once, at the root, so the shared
+// primitives and screens beneath pick 44px rows and `lg` controls.
 //
 // Navigation is React Navigation's StackRouter under a custom navigator (the same
 // technique as AppShell), so URLs stay deep-linkable and compatible with the desktop
@@ -142,24 +145,6 @@ const Nav = createMobileNavigator();
 // carries one, so a single permanently-empty slot stands in.
 const EMPTY_TAB: Tab = { uid: "m0", ref: null, back: [], fwd: [] };
 
-const TITLES: Record<string, string> = {
-  today: "Today",
-  chat: "Chat",
-  chatConversation: "Chat",
-  calendar: "Calendar",
-  notes: "Notes",
-  note: "Note",
-  tasks: "Tasks",
-  task: "Task",
-  canvases: "Canvases",
-  canvas: "Canvas",
-  habits: "Habits",
-  graph: "Graph",
-  trash: "Trash",
-  settings: "Settings",
-  notifications: "Notifications",
-};
-
 // Where the header back button lands when a deep link is the first (only) route.
 const BACK_FALLBACK: Record<string, string> = {
   note: "notes",
@@ -180,8 +165,8 @@ const ACTIVE_VIEW: Record<string, ViewId | "project"> = {
   home: "today",
 };
 
-/** Builds the useNav() API on the router state and renders the shell chrome (sync
- * banner + back header) around the current screen. */
+/** Builds the useNav() API on the router state and renders the shell chrome (the sync
+ * banner) around the current screen; each screen brings its own nav bar. */
 function MobileNavBridge({
   state,
   navigation,
@@ -228,6 +213,7 @@ function MobileNavBridge({
     return {
       current,
       activeView: ACTIVE_VIEW[routeName] ?? (routeName as ViewId),
+      visible: true,
       canBack: state.index > 0,
       canForward: false,
       back: () => {
@@ -248,7 +234,13 @@ function MobileNavBridge({
       openNote,
       openTask,
       // No tab strip here: "open in new tab" (link chips) pushes the editor route.
-      openInNewTab: (ref) => (ref.kind === "note" ? openNote(ref.id) : ref.kind === "task" ? openTask(ref.id) : push("canvas", { id: ref.id })),
+      openInNewTab: (ref) => {
+        const doc = docOfRef(ref);
+        if (!doc) return;
+        if (doc.kind === "note") openNote(doc.id);
+        else if (doc.kind === "task") openTask(doc.id);
+        else push("canvas", { id: doc.id });
+      },
       openCanvas: (id) => {
         if (routeName === "canvas" && params.id === id) return;
         push("canvas", { id });
@@ -286,34 +278,9 @@ function MobileNavBridge({
       <MobileReminderBridge />
       <View style={[styles.root, { paddingTop: topInset }]}>
         <SyncHealthBanner onOpenSettings={() => nav.goView("settings")} />
-        {routeName === "home" ? null : <Header routeName={routeName} params={params} onBack={nav.back} />}
         <View style={styles.content}>{children}</View>
       </View>
     </NavContext.Provider>
-  );
-}
-
-/** The back header on every pushed screen. Titles are static per route; a project
- * resolves its name (and a settings section its label) from the registries. */
-function Header({ routeName, params, onBack }: { routeName: string; params: RouteParams; onBack: () => void }) {
-  const { projects } = useProjects();
-  const title =
-    routeName === "project"
-      ? (projects.find((p) => p.id === params.projectId)?.name ?? "Project")
-      : routeName === "settingsSection"
-        ? (SETTINGS_SECTIONS.find((s) => s.id === params.section)?.label ?? "Settings")
-        : (TITLES[routeName] ?? "");
-  return (
-    <View style={styles.header}>
-      <IconButton label="Back" onPress={onBack}>
-        <Icon name="chevronLeft" size={22} color={colors.textSecondary} />
-      </IconButton>
-      <Text variant="title" numberOfLines={1} style={styles.headerTitle}>
-        {title}
-      </Text>
-      {/* Balance the back button so the title centers optically. */}
-      <View style={styles.headerSpacer} />
-    </View>
   );
 }
 
@@ -340,25 +307,10 @@ function MobileReminderBridge() {
   return null;
 }
 
-// Anchors the notifications route to the shell: opening an entry's task pushes its editor.
-function NotificationsRouteScreen() {
-  const nav = useNav();
-  return <NotificationsScreen onOpenTask={nav.openTask} />;
-}
-
-function HabitsScreen() {
-  return (
-    <View style={styles.placeholder}>
-      <Text tone="tertiary" style={styles.placeholderText}>
-        Habits, streaks, and gentle nudges are on the way.
-      </Text>
-    </View>
-  );
-}
-
 export function MobileWebShell({ topInset = 0, notificationScheduler, toolsStorage }: MobileWebShellProps) {
   const linking = useMemo(mobileLinking, []);
   return (
+    <DensityProvider density="touch">
     <ToolVisibilityProvider storage={toolsStorage}>
       <NotesProvider>
         <TasksProvider>
@@ -384,7 +336,7 @@ export function MobileWebShell({ topInset = 0, notificationScheduler, toolsStora
                         <Nav.Screen name="canvas" component={CanvasScreen} />
                         <Nav.Screen name="habits" component={HabitsScreen} />
                         <Nav.Screen name="graph" component={GraphScreen} />
-                        <Nav.Screen name="trash" component={TrashScreen} />
+                        <Nav.Screen name="trash" component={TrashRouteScreen} />
                         <Nav.Screen name="settings" component={SettingsListScreen} />
                         <Nav.Screen name="settingsSection" component={SettingsSectionScreen} />
                         <Nav.Screen name="notifications" component={NotificationsRouteScreen} />
@@ -401,24 +353,11 @@ export function MobileWebShell({ topInset = 0, notificationScheduler, toolsStora
         </TasksProvider>
       </NotesProvider>
     </ToolVisibilityProvider>
+    </DensityProvider>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.surfaceApp },
   content: { flex: 1, minHeight: 0 },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: space.xs,
-    height: 48,
-    paddingHorizontal: space.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.borderSubtle,
-    backgroundColor: colors.surfaceApp,
-  },
-  headerTitle: { flex: 1, textAlign: "center" },
-  headerSpacer: { width: 34 },
-  placeholder: { flex: 1, alignItems: "center", justifyContent: "center", padding: space.xxxl },
-  placeholderText: { textAlign: "center", maxWidth: 360, lineHeight: 22 },
 });

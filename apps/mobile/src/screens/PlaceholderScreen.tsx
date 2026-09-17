@@ -1,6 +1,6 @@
 import { View, StyleSheet } from 'react-native';
 import { useRoute } from '@react-navigation/native';
-import { Text, space } from '@companion/design-system';
+import { Icon, Text, colors, space, type IconName } from '@companion/design-system';
 
 // Copy keyed by route name; both the global section routes (Chat/Tasks/Calendar) and
 // the project tab routes (ProjectTasks/ProjectCalendar) resolve here.
@@ -14,12 +14,25 @@ const COPY: Record<string, string> = {
   ProjectHabits: 'Habits for this project land in a later milestone.',
 };
 
-// Stand-in for the not-yet-built sections, both global and project-scoped.
+const ICON: Record<string, IconName> = {
+  Chat: 'chat',
+  Calendar: 'calendar',
+  Tasks: 'tasks',
+  Habits: 'habits',
+  ProjectCalendar: 'calendar',
+  ProjectTasks: 'tasks',
+  ProjectHabits: 'habits',
+};
+
+// Stand-in for the not-yet-built sections, both global and project-scoped: the section's
+// quiet glyph over the app's own copy, as a centred caption.
 export function PlaceholderScreen() {
   const route = useRoute();
+  const glyph = ICON[route.name];
   return (
     <View style={styles.center}>
-      <Text tone="tertiary" style={styles.copy}>
+      {glyph ? <Icon name={glyph} size={20} color={colors.textQuaternary} /> : null}
+      <Text variant="caption" tone="tertiary" style={styles.copy}>
         {COPY[route.name] ?? 'Coming soon.'}
       </Text>
     </View>
@@ -27,6 +40,6 @@ export function PlaceholderScreen() {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space.xxl },
-  copy: { textAlign: 'center', lineHeight: 22 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.md, padding: space.xxl, backgroundColor: colors.surfaceApp },
+  copy: { textAlign: 'center', lineHeight: 18 },
 });

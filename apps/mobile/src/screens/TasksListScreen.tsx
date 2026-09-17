@@ -1,22 +1,25 @@
-import { useEffect, useMemo, useState } from 'react';
-import { FlatList, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { FlatList, ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { Task } from '@companion/core-bridge';
-import { useCore, useTasks, useProjects, Checkbox, ListFilterTabs, filterTasksByDue } from '@companion/app';
-import { Icon, Spinner, Text, colors, space } from '@companion/design-system';
+import { useCore, useTasks, useProjects, ListFilterTabs, filterTasksByDue } from '@companion/app';
+import { Spinner, colors, space } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
 import { useProjectScope } from '../ProjectContext';
-import { CardRow } from '../ui/native';
+import { CHECKBOX_INSET, CardRow, Checkbox, EmptyCaption, FAB_CLEARANCE, Fab, GroupedItem, NavAction, NavBarSegments } from '../ui/native';
 
 // A list of tasks with a create FAB. Used globally (all tasks) and inside a project's tab
 // bar, where ProjectContext scopes it to the project's member tasks and makes new tasks
 // members of the project (PLAN §6.4, §6.6). The leading checkbox toggles done in place;
-// tapping the row opens the full-screen editor.
+// tapping the row opens the full-screen editor. The filter segments live in the nav bar's
+// lower storey; the rows are one grouped card, no chevrons.
 export function TasksListScreen() {
   const store = useTasks();
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const projectId = useProjectScope();
+  const insets = useSafeAreaInsets();
   const { core } = useCore();
   const { membershipsForProject, addMember } = useProjects();
 
@@ -57,47 +60,58 @@ export function TasksListScreen() {
     nav.navigate('TaskEditor', { id: task.id });
   };
 
+  // The global list owns its stack header, so "new task" is also an action in the bar.
+  // (Inside a project the header belongs to ProjectScreen; the FAB covers it.) Routed
+  // through a ref so the header callback stays stable while the store's identity churns.
+  const createRef = useRef(createTask);
+  createRef.current = createTask;
+  useLayoutEffect(() => {
+    if (projectId) return;
+    nav.setOptions({
+      headerRight: () => <NavAction icon="plus" label="New task" onPress={() => void createRef.current()} />,
+    });
+  }, [nav, projectId]);
+
   if (store.loading) {
     return <Spinner label="Loading your tasks…" />;
   }
 
   return (
     <View style={styles.container}>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterBar}
-        contentContainerStyle={styles.filterBarContent}
-      >
-        {!projectId ? (
-          <ListFilterTabs
-            value={store.filter}
-            onChange={store.setFilter}
-            options={[
-              { value: 'unsorted', label: 'Unsorted' },
-              { value: 'all', label: 'All' },
-              { value: 'upcoming', label: 'Upcoming' },
-              { value: 'overdue', label: 'Overdue' },
-            ]}
-          />
-        ) : (
-          <ListFilterTabs
-            value={dueFilter}
-            onChange={setDueFilter}
-            options={[
-              { value: 'all', label: 'All' },
-              { value: 'upcoming', label: 'Upcoming' },
-              { value: 'overdue', label: 'Overdue' },
-            ]}
-          />
-        )}
-      </ScrollView>
+      {/* Four segments can outgrow a narrow phone, so the strip scrolls sideways. */}
+      <NavBarSegments detached={!!projectId}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.segments}>
+          {!projectId ? (
+            <ListFilterTabs
+              value={store.filter}
+              onChange={store.setFilter}
+              options={[
+                { value: 'unsorted', label: 'Unsorted' },
+                { value: 'all', label: 'All' },
+                { value: 'upcoming', label: 'Upcoming' },
+                { value: 'overdue', label: 'Overdue' },
+              ]}
+            />
+          ) : (
+            <ListFilterTabs
+              value={dueFilter}
+              onChange={setDueFilter}
+              options={[
+                { value: 'all', label: 'All' },
+                { value: 'upcoming', label: 'Upcoming' },
+                { value: 'overdue', label: 'Overdue' },
+              ]}
+            />
+          )}
+        </ScrollView>
+      </NavBarSegments>
       <FlatList
         data={tasks}
         keyExtractor={(t) => t.id}
-        contentContainerStyle={styles.list}
+        // Project tabs sit above a tab bar that already clears the home indicator.
+        contentContainerStyle={[styles.list, { paddingBottom: FAB_CLEARANCE + space.xl + (projectId ? 0 : insets.bottom) }]}
         ListEmptyComponent={
-          <Text tone="tertiary" style={styles.empty}>
+          <EmptyCaption>
             {projectId
               ? dueFilter === 'upcoming'
                 ? 'No upcoming tasks in this project.'
@@ -105,28 +119,28 @@ export function TasksListScreen() {
                   ? 'No overdue tasks in this project.'
                   : 'No tasks in this project yet. Tap + to add one.'
               : 'Nothing to do. Tap + to add a task.'}
-          </Text>
+          </EmptyCaption>
         }
-        renderItem={({ item }) => (
-          <CardRow
-            leading={
-              <Checkbox
-                checked={item.status === 'done'}
-                onPress={() => void store.setStatus(item.id, item.status === 'done' ? 'open' : 'done')}
-                size={22}
-              />
-            }
-            title={item.title || 'Untitled task'}
-            subtitle={dueLabel(item)}
-            showChevron={false}
-            divided={false}
-            onPress={() => openTask(item.id)}
-          />
+        renderItem={({ item, index }) => (
+          <GroupedItem index={index} count={tasks.length}>
+            <CardRow
+              leading={
+                <Checkbox
+                  checked={item.status === 'done'}
+                  onPress={() => void store.setStatus(item.id, item.status === 'done' ? 'open' : 'done')}
+                />
+              }
+              title={item.title || 'Untitled task'}
+              subtitle={dueLabel(item)}
+              showChevron={false}
+              isLast={index === tasks.length - 1}
+              separatorInset={CHECKBOX_INSET}
+              onPress={() => openTask(item.id)}
+            />
+          </GroupedItem>
         )}
       />
-      <Pressable style={styles.fab} onPress={createTask} aria-label="New task">
-        <Icon name="plus" size={24} color={colors.textInverse} />
-      </Pressable>
+      <Fab label="New task" onPress={() => void createTask()} bottomInset={projectId ? 0 : insets.bottom} />
     </View>
   );
 }
@@ -141,24 +155,6 @@ function dueLabel(task: Task): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceApp },
-  filterBar: { paddingTop: space.sm, flexGrow: 0 },
-  filterBarContent: { paddingHorizontal: space.md },
-  list: { paddingHorizontal: space.md, paddingVertical: space.sm, gap: 2, flexGrow: 1 },
-  empty: { textAlign: 'center', marginTop: space.xxl },
-  fab: {
-    position: 'absolute',
-    right: space.xl,
-    bottom: space.xl,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 4,
-  },
+  segments: { flexGrow: 0 },
+  list: { paddingHorizontal: space.lg, paddingTop: space.md, flexGrow: 1 },
 });

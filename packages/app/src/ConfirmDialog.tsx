@@ -1,6 +1,7 @@
-import { useState, type ReactNode } from "react";
-import { Pressable, View } from "react-native";
-import { Button, Input, Text, colors, radius, shadow, space } from "@companion/design-system";
+import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { Platform, Pressable, View } from "react-native";
+import { Button, Input, Text, colors, radius, shadow, space, useDensity } from "@companion/design-system";
+import { NavContext } from "./nav-context";
 
 export interface ConfirmDialogProps {
   title: string;
@@ -19,7 +20,50 @@ export interface ConfirmDialogProps {
   onClose: () => void;
 }
 
-/** A modal confirmation over a dimmed scrim, styled to match MembershipPicker. Cross-
+/** Wires ⏎ / esc for a dialog while it is open, and reports whether the hints should show.
+ *  Web + pointer density only (a phone has no keys to hint at), and only in the visible tab —
+ *  a dialog left open in a background tab must not act on a keypress meant for another.
+ *  Capture phase, so the editor or overlay underneath never sees the key. A focused button
+ *  keeps its own Enter, so tabbing to Cancel and pressing ⏎ still cancels. */
+export function useDialogKeys({ onEnter, onEscape }: { onEnter?: () => void; onEscape?: () => void }): boolean {
+  const density = useDensity();
+  const visible = useContext(NavContext)?.visible ?? true;
+  const enabled = Platform.OS === "web" && density === "pointer" && typeof window !== "undefined";
+  const handlers = useRef({ onEnter, onEscape });
+  handlers.current = { onEnter, onEscape };
+
+  // The control that opened the dialog still holds focus; drop it so ⏎ reaches the dialog
+  // instead of re-pressing that control. (An autoFocus field takes focus after this.)
+  useEffect(() => {
+    if (!enabled) return;
+    const active = document.activeElement as HTMLElement | null;
+    if (active && active.tagName !== "INPUT" && active.tagName !== "TEXTAREA") active.blur?.();
+  }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled || !visible) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && handlers.current.onEscape) {
+        e.preventDefault();
+        e.stopPropagation();
+        handlers.current.onEscape();
+      } else if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && handlers.current.onEnter) {
+        const active = document.activeElement as HTMLElement | null;
+        if (active && (active.tagName === "BUTTON" || active.getAttribute("role") === "button")) return;
+        e.preventDefault();
+        e.stopPropagation();
+        handlers.current.onEnter();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [enabled, visible]);
+
+  return enabled;
+}
+
+/** A modal confirmation over the scrim: an overlay panel with the title, the consequence,
+ *  and a right-aligned Cancel / confirm footer. No entrance animation. Cross-
  *  platform (RN primitives → works on web via react-native-web and on native). The
  *  `confirmText` variant requires typing an exact string before the destructive action
  *  unlocks; otherwise a single Confirm press suffices. The host is expected to unmount
@@ -50,6 +94,8 @@ export function ConfirmDialog({
       setBusy(false);
     }
   };
+
+  const hints = useDialogKeys({ onEnter: () => void confirm(), onEscape: busy ? undefined : onClose });
 
   return (
     <View style={styles.scrim}>
@@ -86,8 +132,8 @@ export function ConfirmDialog({
           </View>
         ) : null}
         <View style={styles.actions}>
-          <Button label={cancelLabel} variant="secondary" onPress={onClose} />
-          <Button label={confirmLabel} variant="danger" disabled={!canConfirm} onPress={() => void confirm()} />
+          <Button label={cancelLabel} variant="ghost" kbd={hints ? "esc" : undefined} onPress={onClose} />
+          <Button label={confirmLabel} variant="danger" kbd={hints ? "⏎" : undefined} disabled={!canConfirm} onPress={() => void confirm()} />
         </View>
       </View>
     </View>
@@ -103,7 +149,7 @@ const styles = {
     bottom: 0,
     alignItems: "center" as const,
     justifyContent: "center" as const,
-    backgroundColor: "rgba(17,17,16,0.28)",
+    backgroundColor: colors.scrim,
     padding: space.xl,
     zIndex: 100,
   },
@@ -111,7 +157,7 @@ const styles = {
   card: {
     width: 400,
     maxWidth: "100%" as const,
-    backgroundColor: colors.surfaceCard,
+    backgroundColor: colors.surfaceOverlay,
     borderRadius: radius.xl,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
@@ -119,12 +165,12 @@ const styles = {
     padding: space.xl,
     gap: space.md,
   },
-  message: { lineHeight: 20 },
+  message: { lineHeight: 19 },
   confirmField: { gap: space.sm },
   actions: {
     flexDirection: "row" as const,
     justifyContent: "flex-end" as const,
-    gap: space.md,
+    gap: space.sm,
     marginTop: space.sm,
   },
 };
