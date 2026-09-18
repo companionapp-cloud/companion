@@ -1,7 +1,7 @@
 import type { ComponentType } from "react";
 import type { IconName } from "@companion/design-system";
 import { SyncSettings } from "./SyncSettings";
-import { LlmSettings } from "./LlmSettings";
+import { AgentsSettings } from "./AgentsSettings";
 import { ObjectTypeSettings } from "./ObjectTypeSettings";
 import { ToolSettings } from "./ToolSettings";
 import { CalendarSettings } from "./CalendarSettings";
@@ -35,9 +35,9 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
   {
     id: "ai",
     label: "AI",
-    description: "Local and cloud LLM providers",
+    description: "Agents: tools on this computer and cloud APIs",
     icon: "chat",
-    Component: LlmSettings,
+    Component: AgentsSettings,
   },
   {
     id: "objects",

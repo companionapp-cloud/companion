@@ -17,6 +17,9 @@ type HTTPTransport struct {
 	BaseURL string
 	Token   string
 	Client  *http.Client
+	// DeviceID, when set, is sent as X-Companion-Device so the server can bump this device's
+	// last-seen time without a separate heartbeat (PLAN-agents.md §2.2).
+	DeviceID string
 }
 
 // NewHTTPTransport builds a transport for a server base URL and bearer token.
@@ -61,6 +64,9 @@ func (t *HTTPTransport) do(method, path string, body, out any) error {
 	}
 	if t.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+t.Token)
+	}
+	if t.DeviceID != "" {
+		req.Header.Set("X-Companion-Device", t.DeviceID)
 	}
 	client := t.Client
 	if client == nil {

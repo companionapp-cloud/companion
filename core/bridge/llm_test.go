@@ -1,11 +1,14 @@
 package bridge
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"companion/core/agents"
 )
 
 // fakeSecrets is an in-memory SecretStore standing in for the OS keychain.
@@ -69,16 +72,15 @@ func TestChatsSendNoConfig(t *testing.T) {
 	}
 }
 
-// TestLLMConfigStoresKeyInKeychain verifies the API key goes to the keychain (not the DB)
-// and the row keeps only a ref.
-func TestLLMConfigStoresKeyInKeychain(t *testing.T) {
+// TestAgentInstallStoresKeyInKeychain verifies that, without E2EE, the API key goes to the
+// device keychain (not the DB) and the row keeps only a ref.
+func TestAgentInstallStoresKeyInKeychain(t *testing.T) {
 	c, _ := newTestCore(t)
 	secrets := newFakeSecrets()
 	c.SetSecretStore(secrets)
 
-	out, err := c.Invoke("llm.configs.create", mustJSON(map[string]any{
-		"scope": "account", "name": "Claude", "baseUrl": "https://api.anthropic.com",
-		"provider": "anthropic", "apiKey": "sk-secret",
+	out, err := c.Invoke("agents.install", mustJSON(map[string]any{
+		"name": "Claude", "runtime": "anthropic-api", "apiKey": "sk-secret",
 	}))
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -94,8 +96,8 @@ func TestLLMConfigStoresKeyInKeychain(t *testing.T) {
 	if got := secrets.m[*cfg.APIKeyRef]; got != "sk-secret" {
 		t.Errorf("key not stored in keychain, got %q", got)
 	}
-	// Deleting the config removes the key too.
-	if _, err := c.Invoke("llm.configs.delete", mustJSON(map[string]any{"id": cfg.ID})); err != nil {
+	// Deleting the agent removes the key too.
+	if _, err := c.Invoke("agents.remove", mustJSON(map[string]any{"id": cfg.ID})); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 	if _, ok := secrets.m[*cfg.APIKeyRef]; ok {
@@ -137,9 +139,8 @@ func TestLLMModelsList(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := newTestCore(t)
-	out, err := c.Invoke("llm.configs.create", mustJSON(map[string]any{
-		"scope": "device", "name": "Local", "baseUrl": srv.URL + "/v1",
-		"provider": "openai-compatible", "isDefault": true,
+	out, err := c.Invoke("agents.install", mustJSON(map[string]any{
+		"name": "Local", "runtime": "openai-compatible", "baseUrl": srv.URL + "/v1", "isDefault": true,
 	}))
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -149,7 +150,7 @@ func TestLLMModelsList(t *testing.T) {
 	}
 	json.Unmarshal(out, &cfg)
 
-	got, err := c.Invoke("llm.models.list", mustJSON(map[string]any{"configId": cfg.ID}))
+	got, err := c.Invoke("agents.models", mustJSON(map[string]any{"agentId": cfg.ID}))
 	if err != nil {
 		t.Fatalf("models.list: %v", err)
 	}
@@ -158,4 +159,102 @@ func TestLLMModelsList(t *testing.T) {
 	if len(models) != 2 || models[0] != "llama3.1" || models[1] != "qwen2.5" {
 		t.Errorf("models = %v, want sorted [llama3.1 qwen2.5]", models)
 	}
+}
+
+// TestAgentInstallEncryptsKeyOnE2EEAccount verifies that with the master key unlocked the API
+// key rides in the synced row (apiKeyEnc) rather than the device keychain.
+func TestAgentInstallEncryptsKeyOnE2EEAccount(t *testing.T) {
+	c, _ := newTestCore(t)
+	secrets := newFakeSecrets()
+	c.SetSecretStore(secrets)
+	c.masterKey = make([]byte, 32)
+
+	out, err := c.Invoke("agents.install", mustJSON(map[string]any{"name": "OpenAI", "runtime": "openai-api", "apiKey": "sk-e2ee"}))
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	var a struct {
+		ID        string  `json:"id"`
+		APIKeyEnc *string `json:"apiKeyEnc"`
+		APIKeyRef *string `json:"apiKeyRef"`
+		BaseURL   string  `json:"baseUrl"`
+		IsDefault bool    `json:"isDefault"`
+	}
+	json.Unmarshal(out, &a)
+	if a.APIKeyEnc == nil || *a.APIKeyEnc != "sk-e2ee" || a.APIKeyRef != nil {
+		t.Errorf("key should be on the row for an E2EE account: %+v", a)
+	}
+	if len(secrets.m) != 0 {
+		t.Error("keychain should be untouched on an E2EE account")
+	}
+	if a.BaseURL != "https://api.openai.com/v1" || !a.IsDefault {
+		t.Errorf("runtime defaults not applied: %+v", a)
+	}
+}
+
+// TestAgentInstallLocalPinsHost verifies a discovered local tool is pinned to this device and
+// that discovery reports it as installed afterwards.
+func TestAgentInstallLocalPinsHost(t *testing.T) {
+	c, _ := newTestCore(t)
+	c.SetDeviceInfo("macos", "Test Mac", true)
+	c.SetAgentDiscoverer(fakeDiscoverer{{Runtime: "claude-cli", Name: "Claude Code", Path: "/usr/local/bin/claude", Status: "ready"}})
+
+	out, err := c.Invoke("agents.install", mustJSON(map[string]any{
+		"name": "Claude Code", "runtime": "claude-cli", "binaryPath": "/usr/local/bin/claude", "binaryVersion": "2.0.0",
+	}))
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	var a struct {
+		ID           string  `json:"id"`
+		HostDeviceID *string `json:"hostDeviceId"`
+		HostName     *string `json:"hostName"`
+		HostedHere   bool    `json:"hostedHere"`
+		Online       bool    `json:"online"`
+	}
+	json.Unmarshal(out, &a)
+	me, _ := c.store.EnsureDeviceID()
+	if a.HostDeviceID == nil || *a.HostDeviceID != me || a.HostName == nil || *a.HostName != "Test Mac" || !a.HostedHere {
+		t.Errorf("local agent not pinned to this device: %+v", a)
+	}
+	if a.Online {
+		t.Error("a CLI agent with no runner factory injected should read as offline")
+	}
+
+	disc, err := c.Invoke("agents.discover", nil)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	var found []struct {
+		Runtime          string  `json:"runtime"`
+		InstalledAgentID *string `json:"installedAgentId"`
+	}
+	json.Unmarshal(disc, &found)
+	if len(found) != 1 || found[0].InstalledAgentID == nil || *found[0].InstalledAgentID != a.ID {
+		t.Errorf("discovery should mark the tool installed: %+v", found)
+	}
+
+	// A device's rename propagates to the host label on its agents.
+	if _, err := c.Invoke("devices.rename", mustJSON(map[string]any{"name": "Studio"})); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	got, _ := c.store.Agents.Get(a.ID)
+	if got.HostName == nil || *got.HostName != "Studio" {
+		t.Errorf("host name not refreshed after rename: %v", got.HostName)
+	}
+}
+
+// TestAgentsDiscoverWithoutDiscoverer proves web/mobile shells get an empty list, not an error.
+func TestAgentsDiscoverWithoutDiscoverer(t *testing.T) {
+	c, _ := newTestCore(t)
+	out, err := c.Invoke("agents.discover", nil)
+	if err != nil || string(out) != "[]" {
+		t.Errorf("discover = %s, %v; want []", out, err)
+	}
+}
+
+type fakeDiscoverer []agents.Discovered
+
+func (f fakeDiscoverer) Discover(context.Context) ([]agents.Discovered, error) {
+	return append([]agents.Discovered(nil), f...), nil
 }

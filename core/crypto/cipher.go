@@ -29,3 +29,18 @@ func (c *Cipher) EncryptRow(entityType string, row []byte) ([]byte, error) {
 func (c *Cipher) DecryptRow(entityType string, row []byte) ([]byte, error) {
 	return DecryptRow(c.masterKey, entityType, row)
 }
+
+// AAD label for whole-payload relay envelopes (PLAN-agents.md §1.3). Distinct from every row
+// field label so a relay blob can never be replayed as a field value or vice versa.
+const aadRelay = "companion-relay-v1"
+
+// SealBlob encrypts an opaque payload (a relay request or response frame) under the master
+// key, returning an enc$v1$ envelope. Unlike row fields, the whole body is one ciphertext.
+func (c *Cipher) SealBlob(plaintext []byte) (string, error) {
+	return seal(c.masterKey, plaintext, aadRelay)
+}
+
+// OpenBlob reverses SealBlob.
+func (c *Cipher) OpenBlob(envelope string) ([]byte, error) {
+	return open(c.masterKey, envelope, aadRelay)
+}

@@ -4,12 +4,15 @@
 package bridge
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
 
+	"companion/core/agents"
 	"companion/core/blob"
+	"companion/core/mcp"
 	"companion/core/store"
 )
 
@@ -46,11 +49,29 @@ type Core struct {
 	// blob pass and rendering must fall back to "not downloaded".
 	blobs blob.Store
 
+	// Local agents (PLAN-agents.md): the desktop shell injects a discoverer (scan this machine
+	// for Claude Code / Codex / Ollama / LM Studio) and a runner factory (drive the CLI ones as
+	// child processes). Other shells leave both nil: discovery returns nothing and hosted
+	// agents are reached through the relay.
+	discoverer agents.Discoverer
+	runners    agents.RunnerFactory
+	device     deviceShell
+	presence   presenceTable
+	relay      *relayClient
+	// mcp serves Companion's tools to CLI agents (PLAN-agents.md §4.5); started lazily on the
+	// first CLI run. mcpTokens maps agent id → its issued bearer token.
+	mcp       *mcp.Server
+	mcpTokens map[string]string
+	tapMu     sync.Mutex
+	taps      map[int]func(string, []byte)
+	tapSeq    int
+
 	// Chat runs execute on background goroutines so an answer keeps generating (and is saved)
-	// even when the user navigates away (§6.8). working tracks the chats with a live run, so
-	// lists can show a spinner; guarded by chatMu.
+	// even when the user navigates away (§6.8). working maps each chat with a live run to the
+	// cancel func that aborts it (chats.cancel), so lists can show a spinner and the user can
+	// stop a runaway CLI; guarded by chatMu.
 	chatMu  sync.Mutex
-	working map[string]bool
+	working map[string]context.CancelFunc
 
 	// masterKey is the unlocked end-to-end encryption key (PLAN §E2EE): non-nil means the store
 	// is unlocked and sync transparently encrypts/decrypts; nil means locked or a plaintext
@@ -62,7 +83,7 @@ type Core struct {
 
 // New builds a Core over an already-open store.
 func New(st *store.Store) *Core {
-	return &Core{store: st, working: map[string]bool{}}
+	return &Core{store: st, working: map[string]context.CancelFunc{}}
 }
 
 // SetEventHandler registers the sink for events emitted by the core.
@@ -74,11 +95,44 @@ func (c *Core) SetSecretStore(s SecretStore) { c.secrets = s }
 // SetBlobStore registers the platform store for document bytes (PLAN §6.9).
 func (c *Core) SetBlobStore(b blob.Store) { c.blobs = b }
 
+// SetAgentDiscoverer registers the local-tool scanner (desktop only, PLAN-agents.md §3).
+func (c *Core) SetAgentDiscoverer(d agents.Discoverer) { c.discoverer = d }
+
+// SetAgentRunners registers the CLI runner factory (desktop only, PLAN-agents.md §4).
+func (c *Core) SetAgentRunners(f agents.RunnerFactory) { c.runners = f }
+
 // emit fans an event out to the registered handler, if any. payload is the
 // already-marshalled JSON body for the event.
 func (c *Core) emit(name string, payload []byte) {
 	if c.handler != nil {
 		c.handler.OnEvent(name, payload)
+	}
+	c.tapMu.Lock()
+	taps := make([]func(string, []byte), 0, len(c.taps))
+	for _, t := range c.taps {
+		taps = append(taps, t)
+	}
+	c.tapMu.Unlock()
+	for _, t := range taps {
+		t(name, payload)
+	}
+}
+
+// tapEvents registers an in-process observer of every emitted event (the relay host forwards
+// a chat's stream to the caller this way). It returns the function that removes the tap.
+func (c *Core) tapEvents(fn func(name string, payload []byte)) func() {
+	c.tapMu.Lock()
+	c.tapSeq++
+	id := c.tapSeq
+	if c.taps == nil {
+		c.taps = map[int]func(string, []byte){}
+	}
+	c.taps[id] = fn
+	c.tapMu.Unlock()
+	return func() {
+		c.tapMu.Lock()
+		delete(c.taps, id)
+		c.tapMu.Unlock()
 	}
 }
 
@@ -257,6 +311,8 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.syncConfigure(payload)
 	case "sync.run":
 		return c.syncRun()
+	case "sync.disconnect":
+		return c.syncDisconnect()
 	case "crypto.setup":
 		return c.cryptoSetup(payload)
 	case "crypto.deriveAuthKey":
@@ -287,18 +343,28 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.graphLookup(payload)
 	case "graph.rebuild":
 		return c.graphRebuild()
-	case "llm.configs.list":
-		return c.llmConfigsList()
-	case "llm.configs.create":
-		return c.llmConfigsCreate(payload)
-	case "llm.configs.update":
-		return c.llmConfigsUpdate(payload)
-	case "llm.configs.delete":
-		return c.llmConfigsDelete(payload)
-	case "llm.configs.setDefault":
-		return c.llmConfigsSetDefault(payload)
+	case "agents.list", "llm.configs.list":
+		return c.agentsList()
+	case "agents.install", "llm.configs.create":
+		return c.agentsInstall(payload)
+	case "agents.update", "llm.configs.update":
+		return c.agentsUpdate(payload)
+	case "agents.remove", "llm.configs.delete":
+		return c.agentsRemove(payload)
+	case "agents.setDefault", "llm.configs.setDefault":
+		return c.agentsSetDefault(payload)
+	case "agents.models":
+		return c.agentsModels(payload)
 	case "llm.models.list":
 		return c.llmModelsList(payload)
+	case "agents.discover":
+		return c.agentsDiscover()
+	case "devices.this":
+		return c.devicesThis()
+	case "devices.rename":
+		return c.devicesRename(payload)
+	case "devices.list":
+		return c.devicesList()
 	case "chats.list":
 		return c.chatsList()
 	case "chats.get":
@@ -313,6 +379,8 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.chatsSend(payload)
 	case "chats.working":
 		return c.chatsWorking()
+	case "chats.cancel":
+		return c.chatsCancel(payload)
 	case "calendar.feeds.list":
 		return c.calendarFeedsList()
 	case "calendar.feeds.create":

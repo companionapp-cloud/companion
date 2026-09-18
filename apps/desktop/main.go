@@ -15,7 +15,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 
+	"companion/core/agentrt"
 	"companion/core/blob"
 	"companion/core/bridge"
 	"companion/core/secrets"
@@ -57,13 +60,21 @@ func main() {
 	// LLM API keys (PLAN §6.8): stored beside the database in a 0600 file (keychain is the
 	// later hardening upgrade). Local Ollama configs need no key and work without this.
 	core.SetSecretStore(secrets.NewFileStore(filepath.Join(filepath.Dir(dbPath), "secrets.json")))
+	// Local agents (PLAN-agents.md): only the desktop can scan this machine for Claude Code /
+	// Codex / Ollama / LM Studio and run the CLI ones as child processes, so it injects the
+	// discoverer and runner factory and declares itself able to host. Device identity is what
+	// installed local agents are pinned to (and what other devices route to).
+	core.SetDeviceInfo(desktopPlatform(), defaultDeviceName(), true)
+	core.SetAgentDiscoverer(agentrt.NewDiscoverer())
+	core.SetAgentRunners(agentrt.NewFactory(filepath.Dir(dbPath)))
 
 	// Reminder delivery (PLAN §6.4): the Wails notifications service registers real OS
 	// notifications for the plan core computes. Registering it as a service runs its
 	// platform Startup so authorization + scheduling work. macOS only delivers from a
 	// bundled .app with a bundle identifier — not from `go run`/unbundled dev builds.
 	notifSvc := notifications.New()
-	notifHandler := newNotificationsHandler(notifSvc)
+	bundled := runningFromBundle()
+	notifHandler := newNotificationsHandler(notifSvc, bundled)
 
 	// Assigned right after the app is built; the /window handler (below) captures it by
 	// reference and only runs once requests arrive, so the app is set by then. mainWindow
@@ -144,12 +155,20 @@ func main() {
 	// start(app) below, once the app exists.
 	shortcuts := newShortcutManager(shortcutPrefsPath(dbPath), openCaptureWindow)
 
+	// The notifications service only starts inside a signed .app bundle (it needs a bundle
+	// identifier); registering it from `go run` aborts startup. Skip it in dev so the app
+	// still runs — reminders then no-op until launched via `make desktop-app-run`.
+	var services []application.Service
+	if bundled {
+		services = append(services, application.NewService(notifSvc))
+	} else {
+		log.Printf("notify: not running from an app bundle; OS notifications disabled (use make desktop-app-run)")
+	}
+
 	app = application.New(application.Options{
 		Name:        "Companion",
 		Description: "Offline-first notes, tasks, habits, and calendar.",
-		Services: []application.Service{
-			application.NewService(notifSvc),
-		},
+		Services:    services,
 		// Single instance (PLAN §6.4): as a menu-bar app we stay running with the window
 		// hidden. Without this, tapping a reminder (or relaunching from the Dock) starts a
 		// *second* process that opens its own window; the lock forwards that launch to the
@@ -166,7 +185,7 @@ func main() {
 		Assets: application.AssetOptions{
 			Handler: rootHandler(handler, notifHandler, openFocusWindow, func(w http.ResponseWriter, r *http.Request) {
 				tableCtxMenu.handleOpen(w, r)
-			}, shortcuts.handleShortcuts),
+			}, shortcuts.handleShortcuts, windowChromeHandler(func() *application.WebviewWindow { return mainWindow })),
 		},
 	})
 
@@ -240,7 +259,7 @@ func main() {
 // (/invoke, /events) to the bridge handler. /window spawns a focus-mode window for a
 // document (the workspace's expand/pop-out action) — browser window.open can't create a
 // real app window in the Wails webview, so the frontend asks the Go side here.
-func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusWindow func(url string), openTableMenu http.HandlerFunc, shortcuts http.HandlerFunc) http.Handler {
+func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusWindow func(url string), openTableMenu http.HandlerFunc, shortcuts http.HandlerFunc, chrome http.HandlerFunc) http.Handler {
 	frontend, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {
 		log.Fatalf("mount frontend assets: %v", err)
@@ -266,6 +285,8 @@ func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusW
 	mux.HandleFunc("/table-menu", openTableMenu)
 	// Read/rebind the OS-wide shortcuts (Settings › Shortcuts).
 	mux.HandleFunc("/shortcuts", shortcuts)
+	// Where the native window buttons sit over the page (macOS), so the UI can clear them.
+	mux.HandleFunc("/chrome", chrome)
 	mux.Handle("/", files)
 	return mux
 }
@@ -281,4 +302,39 @@ func databasePath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(appDir, "companion.db"), nil
+}
+
+// desktopPlatform is the device platform id shown in Settings › Sync and synced to the server.
+func desktopPlatform() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "macos"
+	default:
+		return runtime.GOOS
+	}
+}
+
+// defaultDeviceName is the host's name until the user renames the device ("Chris's MacBook Pro"
+// on macOS comes through as "Chriss-MacBook-Pro.local"; trim the suffix and un-dash it).
+func defaultDeviceName() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		return "This computer"
+	}
+	host = strings.TrimSuffix(host, ".local")
+	host = strings.TrimSuffix(host, ".lan")
+	return strings.ReplaceAll(host, "-", " ")
+}
+
+// runningFromBundle reports whether the executable lives inside a macOS .app bundle, which
+// is what gives it a bundle identifier. Non-macOS builds always report true.
+func runningFromBundle() bool {
+	if runtime.GOOS != "darwin" {
+		return true
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(exe, ".app/Contents/MacOS/")
 }

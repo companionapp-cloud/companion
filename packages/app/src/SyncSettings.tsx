@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { View } from "react-native";
-import { Button, Divider, Input, Text, colors, font, radius, space } from "@companion/design-system";
-import { auth } from "@companion/core-bridge";
+import { Badge, Button, Divider, Input, Text, colors, font, radius, space } from "@companion/design-system";
+import { auth, type Device } from "@companion/core-bridge";
+import { useCore } from "./CoreContext";
 import { useSync, type AuthMode } from "./SyncProvider";
 import { RecoveryResetScreen } from "./RecoveryResetScreen";
 import { parseResetLink } from "./resetLink";
@@ -276,6 +277,7 @@ export function SyncSettings() {
             <Input disabled value={sync.email ?? ""} />
           </View>
         </SettingsField>
+        <ThisDevice />
         <Divider />
         <SettingsField
           label="Encryption"
@@ -361,6 +363,8 @@ export function SyncSettings() {
         Point web, desktop, and mobile at the same server + account to sync everything. New accounts are end-to-end
         encrypted — the server can’t read your notes.
       </SettingsNote>
+      <ThisDevice />
+      <Divider />
       <SettingsField label="Server" help="Leave blank to use Companion Cloud.">
         <View style={styles.control}>
           <Input mono value={baseUrl} onChangeText={setBaseUrl} placeholder={DEFAULT_BASE_URL} autoCapitalize="none" />
@@ -434,7 +438,7 @@ function SelfHosting() {
 }
 
 const SELF_HOST_SNIPPET =
-  "docker run -p 8080:8080 \\\n  -e DATABASE_URL=postgres://user:pass@host:5432/companion \\\n  ghcr.io/chrisdmacrae/companion-server:latest";
+  "docker run -p 8080:8080 \\\n  -e DATABASE_URL=postgres://user:pass@host:5432/companion \\\n  ghcr.io/companionapp-cloud/companion-server:0.5.0";
 
 function baseUrlLabel(url: string): string {
   return url.replace(/^https?:\/\//, "").replace(/\/+$/, "");
@@ -465,6 +469,64 @@ function useTicker(ms: number) {
     const id = setInterval(() => setTick((t) => t + 1), ms);
     return () => clearInterval(id);
   }, [ms]);
+}
+
+/** ThisDevice shows the install's identity (PLAN-agents.md §6.3): the name other devices see
+ *  (and that local agents are labelled with), its platform, and whether it can host agents. */
+function ThisDevice() {
+  const { devices } = useCore();
+  const [device, setDevice] = useState<Device | null>(null);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const reload = useCallback(() => {
+    devices
+      .this()
+      .then((d) => {
+        setDevice(d);
+        setName(d.name);
+      })
+      .catch((e) => setError(String(e)));
+  }, [devices]);
+  useEffect(reload, [reload]);
+  if (!device) return null;
+  const rename = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const d = await devices.rename(name.trim());
+      setDevice(d);
+      setName(d.name);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <SettingsField
+      label="This device"
+      help={
+        device.canHost
+          ? "Local agents installed here are labelled with this name on your other devices."
+          : "How this device appears to your other devices."
+      }
+    >
+      <View style={styles.row}>
+        <View style={styles.control}>
+          <Input value={name} onChangeText={setName} autoCapitalize="words" />
+        </View>
+        <Button label={busy ? "…" : "Rename"} variant="secondary" size="sm" disabled={busy || !name.trim() || name.trim() === device.name} onPress={rename} />
+      </View>
+      <View style={styles.row}>
+        <Text variant="mono" tone="quaternary">
+          {device.platform || "unknown"}
+        </Text>
+        {device.canHost ? <Badge label="can host agents" tone="info" /> : null}
+      </View>
+      {error ? <SettingsNote tone="danger">{error}</SettingsNote> : null}
+    </SettingsField>
+  );
 }
 
 const styles = {

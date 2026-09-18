@@ -19,7 +19,7 @@ import {
 } from "@companion/design-system";
 import type { CalendarItem } from "@companion/core-bridge";
 import { Editor, type EditorController, type FormatState, type LinkRef } from "@companion/editor";
-import { Agenda } from "./CalendarAgenda";
+import { Agenda, itemDay } from "./CalendarAgenda";
 import { FormattingBar } from "./FormattingBar";
 import { tableMenuPresenter } from "./tableMenu";
 import { useNav } from "./nav-context";
@@ -57,7 +57,13 @@ export function formatFullDate(iso: string): string {
 
 export function TodayScreen() {
   const nav = useNav();
-  const [selected, setSelected] = useState(todayISO);
+  // The tab may have been opened on a specific day (a dated note followed from the
+  // calendar, or a /today/<date> link); it seeds the selection and re-selects if it changes.
+  const requestedDay = nav.current.kind === "view" ? nav.current.date : undefined;
+  const [selected, setSelected] = useState(() => requestedDay ?? todayISO());
+  useEffect(() => {
+    if (requestedDay) setSelected(requestedDay);
+  }, [requestedDay]);
   // The wall clock can roll past midnight while the screen is mounted; recompute "today" so
   // future-day gating and the "today" markers stay honest without a manual refresh.
   const [today, setToday] = useState(todayISO);
@@ -85,7 +91,9 @@ export function TodayScreen() {
           visible={nav.visible}
           onSelect={setSelected}
           onOpenItem={(item) => {
-            if (item.kind === "task" || item.kind === "note") nav.openInNewTab({ kind: item.kind, id: item.sourceId });
+            // A dated note is a daily note: select its day here instead of opening a tab.
+            if (item.kind === "task") nav.openInNewTab({ kind: "task", id: item.sourceId });
+            else if (item.kind === "note") setSelected(itemDay(item));
           }}
         />
       }

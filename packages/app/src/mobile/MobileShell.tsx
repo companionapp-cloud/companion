@@ -72,7 +72,7 @@ function mobileLinking(): LinkingOptions<ParamListBase> | undefined {
     config: {
       screens: {
         home: "",
-        today: "today",
+        today: "today/:date?",
         chat: "chat",
         chatConversation: "chat/:chatId",
         calendar: "calendar",
@@ -96,6 +96,7 @@ function mobileLinking(): LinkingOptions<ParamListBase> | undefined {
 
 interface RouteParams {
   id?: string;
+  date?: string;
   chatId?: string;
   projectId?: string;
   section?: string;
@@ -208,7 +209,11 @@ function MobileNavBridge({
             ? { kind: "tasks" }
             : routeName === "canvases" || routeName === "canvas"
               ? { kind: "canvases", canvasId: routeName === "canvas" ? params.id : undefined }
-              : { kind: "view", view: (ACTIVE_VIEW[routeName] ?? routeName) as Exclude<ViewId, "notes" | "tasks" | "canvases"> };
+              : {
+                  kind: "view",
+                  view: (ACTIVE_VIEW[routeName] ?? routeName) as Exclude<ViewId, "notes" | "tasks" | "canvases">,
+                  date: routeName === "today" ? params.date : undefined,
+                };
 
     return {
       current,
@@ -233,8 +238,14 @@ function MobileNavBridge({
       activeTab: EMPTY_TAB,
       openNote,
       openTask,
-      // No tab strip here: "open in new tab" (link chips) pushes the editor route.
+      // No tab strip here: "open in new tab" (link chips) pushes the editor route. Today
+      // opened on a day (a dated note from the calendar) navigates there with the date.
       openInNewTab: (ref) => {
+        if (ref.kind === "view") {
+          if (ref.view === "today") navigation.navigate("today", ref.date ? { date: ref.date } : undefined);
+          else if (routeName !== ref.view) navigation.navigate(ref.view);
+          return;
+        }
         const doc = docOfRef(ref);
         if (!doc) return;
         if (doc.kind === "note") openNote(doc.id);

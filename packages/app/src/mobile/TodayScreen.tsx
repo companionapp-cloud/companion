@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import type { LinkRef } from "@companion/editor";
 import { Button, colors, space } from "@companion/design-system";
@@ -14,7 +14,13 @@ import { NavAction, NavBar } from "./ui";
 // toggles from an action row instead, and picking a day hands the screen back to the note.
 export function TodayScreen() {
   const nav = useNav();
-  const [selected, setSelected] = useState(todayISO);
+  // Opened on a specific day (a dated note from the calendar, or /today/<date>)? Seed the
+  // selection with it and follow it if the route's date changes.
+  const requestedDay = nav.current.kind === "view" ? nav.current.date : undefined;
+  const [selected, setSelected] = useState(() => requestedDay ?? todayISO());
+  useEffect(() => {
+    if (requestedDay) setSelected(requestedDay);
+  }, [requestedDay]);
   const [today, setToday] = useState(todayISO);
   const [showCalendar, setShowCalendar] = useState(false);
   const { openItem, sheet } = useCalendarItemSheet();

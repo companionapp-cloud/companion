@@ -19,6 +19,7 @@ import {
   type PressState,
 } from "@companion/design-system";
 import { useCalendar } from "./CalendarProvider";
+import { itemDay } from "./CalendarAgenda";
 import { CalendarItemInfo } from "./CalendarItemInfo";
 import { useTasks } from "./TasksProvider";
 import { useNav } from "./nav-context";
@@ -130,10 +131,12 @@ export function CalendarScreen() {
   const { range, revision, refresh, getViewState, setViewState } = useCalendar();
   const tasks = useTasks();
   const nav = useNav();
-  // Tasks and notes open in a new workspace tab; feed events aren't linkable (read-only, no
-  // local entity) — they surface their detail via the hover card instead.
+  // Tasks open in a new workspace tab. A dated note is a daily note, so it opens the Today
+  // tool on that day rather than the notes browse list. Feed events aren't linkable
+  // (read-only, no local entity) — they surface their detail via the hover card instead.
   const openItem = (item: CalendarItem) => {
-    if (item.kind === "task" || item.kind === "note") nav.openInNewTab({ kind: item.kind, id: item.sourceId });
+    if (item.kind === "task") nav.openInNewTab({ kind: "task", id: item.sourceId });
+    else if (item.kind === "note") nav.openInNewTab({ kind: "view", view: "today", date: itemDay(item) });
   };
   // Restore the last visible week (persisted on the provider so it survives navigating away).
   const [anchor, setAnchor] = useState(() => {
@@ -279,7 +282,7 @@ export function CalendarScreen() {
       // All-day items (dated notes, all-day events) carry a date-only marker stored as
       // midnight UTC; converting that instant to local time would shift it a day in some
       // zones, so bucket them by the date portion directly. Timed items use their instant.
-      const iso = it.allDay ? it.startsAt.slice(0, 10) : toISODate(new Date(it.startsAt));
+      const iso = itemDay(it);
       const bucket = map.get(iso);
       if (!bucket) continue;
       (it.allDay ? bucket.allDay : bucket.timed).push(it);

@@ -6,14 +6,20 @@ import (
 	"errors"
 	"strings"
 
+	"companion/core/agents"
 	"companion/core/domain"
 	"companion/core/llm"
 )
 
-// Chat bridge methods (PLAN §6.8). A chat is a persisted, synced conversation; sending a
-// message runs the agentic loop on a background goroutine so the answer keeps generating —
-// and is saved — even if the user navigates away. Streaming text and tool actions go out as
-// events tagged with the chat id; list/detail screens re-read the store on chat.changed.
+// Chat bridge methods (PLAN §6.8, PLAN-agents.md §2.3). A chat is a persisted, synced
+// conversation; sending a message runs the agent on a background goroutine so the answer keeps
+// generating — and is saved — even if the user navigates away. Streaming text and tool actions
+// go out as events tagged with the chat id; list/detail screens re-read the store on
+// chat.changed.
+//
+// Routing: an HTTP agent (cloud API, Ollama, LM Studio) runs the built-in agentic loop here; a
+// CLI agent hosted by this device runs as a child process; an agent hosted by another device
+// is driven through the relay, and its host persists the transcript.
 
 const (
 	eventChatChanged = "chat.changed" // a chat's messages or title changed; reload it
@@ -66,12 +72,16 @@ func (c *Core) chatsGet(payload []byte) ([]byte, error) {
 func (c *Core) chatsCreate(payload []byte) ([]byte, error) {
 	var args struct {
 		Title    string  `json:"title"`
-		ConfigID *string `json:"configId"`
+		AgentID  *string `json:"agentId"`
+		ConfigID *string `json:"configId"` // legacy alias
 	}
 	if err := unmarshal(payload, &args); err != nil {
 		return nil, err
 	}
-	chat, err := c.store.Chats.Create(args.Title, args.ConfigID)
+	if args.AgentID == nil {
+		args.AgentID = args.ConfigID
+	}
+	chat, err := c.store.Chats.Create(args.Title, args.AgentID)
 	if err != nil {
 		return nil, err
 	}
@@ -101,6 +111,7 @@ func (c *Core) chatsDelete(payload []byte) ([]byte, error) {
 	if err := unmarshal(payload, &args); err != nil {
 		return nil, err
 	}
+	c.cancelChat(args.ID)
 	if err := c.store.Chats.Delete(args.ID); err != nil {
 		return nil, mapStoreErr(err)
 	}
@@ -121,20 +132,43 @@ func (c *Core) chatsWorking() ([]byte, error) {
 	return json.Marshal(ids)
 }
 
-// chatsSend appends the user's message to a chat and launches the assistant run in the
+// chatsCancel aborts a chat's in-flight run (kills a CLI child, closes an HTTP stream). Whatever
+// the run had already produced is not persisted; the user turn stays.
+func (c *Core) chatsCancel(payload []byte) ([]byte, error) {
+	var args struct {
+		ChatID string `json:"chatId"`
+	}
+	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	cancelled := c.cancelChat(args.ChatID)
+	if !cancelled && c.relay != nil {
+		cancelled = c.relay.cancelRemote(args.ChatID)
+	}
+	return json.Marshal(map[string]bool{"ok": true, "cancelled": cancelled})
+}
+
+// chatsSend appends the user's message to a chat and launches the agent run in the
 // background, returning immediately. Streaming text/tool events and, on completion, the
 // persisted reply reach the UI via events.
 func (c *Core) chatsSend(payload []byte) ([]byte, error) {
 	var args struct {
 		ChatID   string  `json:"chatId"`
 		Text     string  `json:"text"`
-		ConfigID *string `json:"configId"`
+		AgentID  *string `json:"agentId"`
+		ConfigID *string `json:"configId"` // legacy alias
 		Model    *string `json:"model"`
+		// Resume means the user turn is already persisted (it arrived via sync from the device
+		// that typed it) and only the assistant run is wanted. Set by the relay host path only.
+		Resume bool `json:"resume"`
 	}
 	if err := unmarshal(payload, &args); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(args.Text) == "" {
+	if args.AgentID == nil {
+		args.AgentID = args.ConfigID
+	}
+	if strings.TrimSpace(args.Text) == "" && !args.Resume {
 		return nil, errors.New("empty message")
 	}
 	chat, err := c.store.Chats.Get(args.ChatID)
@@ -144,10 +178,15 @@ func (c *Core) chatsSend(payload []byte) ([]byte, error) {
 	if c.isWorking(chat.ID) {
 		return nil, errors.New("this chat is already generating a reply")
 	}
-	// Re-pin the chat's provider if the composer picked a different one.
-	if args.ConfigID != nil && chatDerefStr(args.ConfigID) != chatDerefStr(chat.ConfigID) {
-		_ = c.store.Chats.SetConfig(chat.ID, args.ConfigID)
-		chat.ConfigID = args.ConfigID
+	// Re-pin the chat's agent if the composer picked a different one. Switching agents also
+	// drops any CLI session, since it belongs to the previous tool.
+	if args.AgentID != nil && chatDerefStr(args.AgentID) != chatDerefStr(chat.ConfigID) {
+		_ = c.store.Chats.SetConfig(chat.ID, args.AgentID)
+		chat.ConfigID = args.AgentID
+		if chat.AgentSessionID != nil {
+			_ = c.store.Chats.SetAgentSession(chat.ID, nil)
+			chat.AgentSessionID = nil
+		}
 	}
 	// Re-pin the chat's model if the composer picked a different one.
 	if args.Model != nil && chatDerefStr(args.Model) != chatDerefStr(chat.Model) {
@@ -155,44 +194,89 @@ func (c *Core) chatsSend(payload []byte) ([]byte, error) {
 		chat.Model = args.Model
 	}
 
+	agent, err := c.resolveAgent(chatDerefStr(chat.ConfigID))
+	if err != nil {
+		return nil, err
+	}
+	me, _ := c.store.EnsureDeviceID()
+	remote := agent.IsLocal() && !agent.IsHostedBy(me)
+
 	// Persist the user turn and (for a fresh chat) name it from that first message.
-	if _, err := c.store.ChatMessages.Append(chat.ID, domain.ChatRoleUser, args.Text, nil, nil); err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(chat.Title) == "" {
-		_ = c.store.Chats.SetTitle(chat.ID, truncateTitle(args.Text))
-	} else {
-		_ = c.store.Chats.Touch(chat.ID)
-	}
-	c.emitChatChanged(chat.ID)
-
-	engine, err := c.buildEngine(chatDerefStr(chat.ConfigID), chatDerefStr(chat.Model))
-	if err != nil {
-		c.emitLLMError(chat.ID, err)
-		return nil, err
+	if !args.Resume {
+		if _, err := c.store.ChatMessages.Append(chat.ID, domain.ChatRoleUser, args.Text, nil, nil); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(chat.Title) == "" {
+			_ = c.store.Chats.SetTitle(chat.ID, truncateTitle(args.Text))
+		} else {
+			_ = c.store.Chats.Touch(chat.ID)
+		}
+		c.emitChatChanged(chat.ID)
 	}
 
-	// Snapshot the transcript and hand the run to a goroutine so Invoke returns now.
-	msgs, err := c.store.ChatMessages.ListForChat(chat.ID)
-	if err != nil {
-		return nil, err
+	if remote {
+		return c.sendRemote(chat, agent, args.Text)
 	}
-	history := toLLMMessages(msgs)
+	if args.Resume && args.Text == "" {
+		// Recover the prompt for CLI runtimes from the last persisted user turn.
+		if msgs, err := c.store.ChatMessages.ListForChat(chat.ID); err == nil {
+			for i := len(msgs) - 1; i >= 0; i-- {
+				if msgs[i].Role == domain.ChatRoleUser {
+					args.Text = msgs[i].Text
+					break
+				}
+			}
+		}
+	}
 
-	c.setWorking(chat.ID, true)
-	go c.runChat(chat.ID, engine, history)
+	ctx, cancel := context.WithCancel(context.Background())
+	switch {
+	case agent.Runtime.IsCLI():
+		runner, err := c.runnerFor(agent)
+		if err != nil {
+			cancel()
+			c.emitLLMError(chat.ID, err)
+			return nil, err
+		}
+		cwd, err := c.runners.WorkDir(agent.ID)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+		req := agents.RunRequest{
+			Prompt:     args.Text,
+			Model:      chatDerefStr(chat.Model),
+			SessionID:  chatDerefStr(chat.AgentSessionID),
+			AllowSystem: agent.AllowSystem,
+			Cwd:        cwd,
+			MCP:        c.mcpEndpointFor(agent),
+		}
+		c.setWorking(chat.ID, cancel)
+		go c.runCLIChat(ctx, chat.ID, runner, req)
+	default:
+		engine, err := c.buildEngine(agent, chatDerefStr(chat.Model))
+		if err != nil {
+			cancel()
+			c.emitLLMError(chat.ID, err)
+			return nil, err
+		}
+		// Snapshot the transcript and hand the run to a goroutine so Invoke returns now.
+		msgs, err := c.store.ChatMessages.ListForChat(chat.ID)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+		c.setWorking(chat.ID, cancel)
+		go c.runChat(ctx, chat.ID, engine, toLLMMessages(msgs))
+	}
 
 	return json.Marshal(map[string]any{"ok": true, "working": true})
 }
 
-// runChat drives one assistant turn to completion off the request path, streaming events and
-// persisting every new message so the reply survives navigating away or closing the screen.
-func (c *Core) runChat(chatID string, engine *llm.Engine, history []llm.Message) {
-	defer func() {
-		c.setWorking(chatID, false)
-		c.emitChatChanged(chatID)
-		c.emitDataChanged("", "")
-	}()
+// runChat drives one assistant turn of the built-in engine to completion off the request path,
+// streaming events and persisting every new message so the reply survives navigating away.
+func (c *Core) runChat(ctx context.Context, chatID string, engine *llm.Engine, history []llm.Message) {
+	defer c.finishRun(chatID)
 
 	onDelta := func(text string) {
 		p, _ := json.Marshal(map[string]string{"chatId": chatID, "text": text})
@@ -204,9 +288,11 @@ func (c *Core) runChat(chatID string, engine *llm.Engine, history []llm.Message)
 	}
 
 	inputLen := len(history)
-	result, err := engine.Run(context.Background(), history, onDelta, onTool)
+	result, err := engine.Run(ctx, history, onDelta, onTool)
 	if err != nil {
-		c.emitLLMError(chatID, err)
+		if ctx.Err() == nil {
+			c.emitLLMError(chatID, err)
+		}
 		return
 	}
 	// Persist the messages the run appended (assistant replies + tool-result turns).
@@ -219,16 +305,88 @@ func (c *Core) runChat(chatID string, engine *llm.Engine, history []llm.Message)
 	_ = c.store.Chats.Touch(chatID)
 }
 
+// runCLIChat drives one turn of a CLI agent (Claude Code, Codex). The CLI owns the
+// conversation state; we stream its text and tool uses as the same events the built-in engine
+// emits, then persist the final reply (with the tools it used, as an assistant tool_calls list)
+// and remember the CLI session so the next turn resumes it.
+func (c *Core) runCLIChat(ctx context.Context, chatID string, runner agents.Runner, req agents.RunRequest) {
+	defer c.finishRun(chatID)
+
+	onDelta := func(text string) {
+		p, _ := json.Marshal(map[string]string{"chatId": chatID, "text": text})
+		c.emit(eventLLMToken, p)
+	}
+	var used []llm.ToolCall
+	onTool := func(tu agents.ToolUse) {
+		call := llm.ToolCall{ID: "", Name: tu.Name, Args: json.RawMessage(quoteJSON(tu.Input))}
+		used = append(used, call)
+		p, _ := json.Marshal(map[string]any{
+			"chatId": chatID,
+			"call":   call,
+			"result": llm.ToolResult{Content: tu.Output},
+		})
+		c.emit(eventLLMTool, p)
+	}
+
+	res, err := runner.Run(ctx, req, onDelta, onTool)
+	if err != nil {
+		if ctx.Err() == nil {
+			c.emitLLMError(chatID, err)
+		}
+		return
+	}
+	if res.SessionID != "" && res.SessionID != req.SessionID {
+		_ = c.store.Chats.SetAgentSession(chatID, &res.SessionID)
+	}
+	if _, err := c.store.ChatMessages.Append(chatID, domain.ChatRoleAssistant, res.Text, marshalRaw(used), nil); err != nil {
+		c.emitLLMError(chatID, err)
+		return
+	}
+	_ = c.store.Chats.Touch(chatID)
+}
+
+// finishRun clears the working flag and pokes the UI to reload the persisted transcript.
+func (c *Core) finishRun(chatID string) {
+	c.clearWorking(chatID)
+	c.emitChatChanged(chatID)
+	c.emitDataChanged("", "")
+}
+
+// quoteJSON wraps a plain string as a JSON value (a CLI tool's input is opaque text, not our
+// tool-args object), so it round-trips through the ToolCall.Args json.RawMessage.
+func quoteJSON(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
 // --- working set ----------------------------------------------------------
 
-func (c *Core) setWorking(chatID string, working bool) {
+func (c *Core) setWorking(chatID string, cancel context.CancelFunc) {
 	c.chatMu.Lock()
-	if working {
-		c.working[chatID] = true
-	} else {
-		delete(c.working, chatID)
-	}
+	c.working[chatID] = cancel
 	c.chatMu.Unlock()
+	c.emitWorking(chatID, true)
+}
+
+func (c *Core) clearWorking(chatID string) {
+	c.chatMu.Lock()
+	delete(c.working, chatID)
+	c.chatMu.Unlock()
+	c.emitWorking(chatID, false)
+}
+
+// cancelChat aborts a live local run; reports whether there was one.
+func (c *Core) cancelChat(chatID string) bool {
+	c.chatMu.Lock()
+	cancel, ok := c.working[chatID]
+	c.chatMu.Unlock()
+	if ok && cancel != nil {
+		cancel()
+	}
+	return ok
+}
+
+func (c *Core) emitWorking(chatID string, working bool) {
 	p, _ := json.Marshal(map[string]any{"chatId": chatID, "working": working})
 	c.emit(eventChatWorking, p)
 }
@@ -236,7 +394,8 @@ func (c *Core) setWorking(chatID string, working bool) {
 func (c *Core) isWorking(chatID string) bool {
 	c.chatMu.Lock()
 	defer c.chatMu.Unlock()
-	return c.working[chatID]
+	_, ok := c.working[chatID]
+	return ok
 }
 
 func (c *Core) emitChatChanged(chatID string) {
@@ -284,7 +443,7 @@ func truncateTitle(s string) string {
 	return strings.TrimSpace(s[:chatTitleMax]) + "…"
 }
 
-// derefStr returns the pointed-to string, or "" for nil (chat config id → default provider).
+// chatDerefStr returns the pointed-to string, or "" for nil (chat agent id → default agent).
 func chatDerefStr(s *string) string {
 	if s == nil {
 		return ""

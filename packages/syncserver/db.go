@@ -373,6 +373,52 @@ CREATE TABLE IF NOT EXISTS user_keys (
   public_key         TEXT,            -- base64 X25519 public key (reserved for sealed-box calendar)
   updated_at         TEXT NOT NULL
 );
+
+-- Devices (PLAN-agents.md §1.4). One row per install; the client mints the id. name is an
+-- enc$v1$ envelope on encrypted accounts. can_host marks desktops that run local agents;
+-- "online" is not stored — it is whether the device holds an open relay inbox right now.
+CREATE TABLE IF NOT EXISTS devices (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL REFERENCES users(id),
+  name         TEXT NOT NULL DEFAULT '',
+  platform     TEXT NOT NULL DEFAULT '',
+  can_host     INTEGER NOT NULL DEFAULT 0,
+  last_seen_at TEXT NOT NULL,
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_devices_user ON devices (user_id);
+
+-- Installed agents (PLAN-agents.md): the synced "agent" entity. Content fields travel inside
+-- row_json (encrypted per field on E2EE accounts); runtime and host_device_id are mirrored as
+-- plaintext columns so routing never needs to decrypt.
+CREATE TABLE IF NOT EXISTS agents (
+  id             TEXT PRIMARY KEY,
+  user_id        TEXT NOT NULL REFERENCES users(id),
+  runtime        TEXT NOT NULL DEFAULT '',
+  host_device_id TEXT,
+  row_json       TEXT NOT NULL,
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL,
+  deleted_at     TEXT,
+  version        BIGINT NOT NULL DEFAULT 0,
+  server_seq     BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agents_user_seq ON agents (user_id, server_seq);
+
+-- Relay requests (PLAN-agents.md §5.1): a short-lived record of one device asking another to
+-- run something. payload is sealed by the client; the server routes on device ids only. Rows
+-- expire after a few minutes and exist so a lost frame yields a definite error, not silence.
+CREATE TABLE IF NOT EXISTS relay_requests (
+  id             TEXT PRIMARY KEY,
+  user_id        TEXT NOT NULL,
+  from_device_id TEXT NOT NULL,
+  to_device_id   TEXT NOT NULL,
+  method         TEXT NOT NULL,
+  status         TEXT NOT NULL,
+  created_at     TEXT NOT NULL,
+  expires_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_relay_requests_user ON relay_requests (user_id, created_at);
 `
 
 // OpenDB opens the store, choosing the driver from the DSN: a postgres:// URL uses

@@ -83,20 +83,11 @@ export type { GraphApi, Graph, GraphNode, GraphEdge } from "./graph";
 export { chatsApi } from "./chats";
 export type { ChatsApi, Chat, ChatDetail, StoredChatMessage, ChatChangedEvent, ChatWorkingEvent } from "./chats";
 export { llmApi } from "./llm";
-export type {
-  LlmApi,
-  LLMConfig,
-  LLMScope,
-  LLMProvider,
-  CreateLLMConfigInput,
-  UpdateLLMConfigInput,
-  ChatMessage,
-  ToolCall,
-  ToolResult,
-  LLMTokenEvent,
-  LLMToolEvent,
-  LLMErrorEvent,
-} from "./llm";
+export type { LlmApi, ChatMessage, ToolCall, ToolResult, LLMTokenEvent, LLMToolEvent, LLMErrorEvent } from "./llm";
+export { agentsApi, runtimeLabel, isCliRuntime, isCloudRuntime, CLI_RUNTIMES, CLOUD_RUNTIMES } from "./agents";
+export type { AgentsApi, Agent, AgentRuntime, DiscoveredAgent, InstallAgentInput, UpdateAgentInput } from "./agents";
+export { devicesApi } from "./devices";
+export type { DevicesApi, Device, DevicePresenceEvent } from "./devices";
 export { createSyncNotifier } from "./notifier";
 export type { SyncNotifier } from "./notifier";
 export { createNativeSyncNotifier } from "./notifier.native";

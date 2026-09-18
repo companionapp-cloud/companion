@@ -48,6 +48,9 @@ func initCore(_ js.Value, args []js.Value) any {
 			}
 			core := bridge.New(st)
 			core.SetEventHandler(jsEventHandler{onEvent: onEvent})
+			// Device identity (PLAN-agents.md §2.2): a browser tab cannot host local agents; it
+			// drives the ones a desktop hosts through the relay.
+			core.SetDeviceInfo("web", "Web browser", false)
 			// LLM API keys (PLAN §6.8): the browser has no OS keychain, so the shell injects
 			// a localStorage-backed secrets object. Absent it, only local (no-key) providers work.
 			if secrets.Type() == js.TypeObject {

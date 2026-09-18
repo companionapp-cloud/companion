@@ -19,6 +19,7 @@ type Server struct {
 	dialect  string
 	clock    domain.Clock
 	hub      *Hub
+	relay    *relayHub
 	entities map[string]*entityHandler // per-entity sync SQL, lazily built
 	// blobs stores document bytes in object storage (PLAN §6.9); maxBlobSize caps an
 	// upload. Selected from the environment (S3 / filesystem / in-memory).
@@ -153,7 +154,7 @@ func New(db *sql.DB, dialect string, opts ...Option) *Server {
 		log.Fatalf("blob backend: %v", err)
 	}
 	s := &Server{
-		db: db, dialect: dialect, clock: domain.SystemClock{}, hub: NewHub(),
+		db: db, dialect: dialect, clock: domain.SystemClock{}, hub: NewHub(), relay: newRelayHub(),
 		blobs: backend, maxBlobSize: maxBlobSizeFromEnv(),
 		authLimiter:  NewRateLimiter(authRatePerMinute, authBurst),
 		emailLimiter: NewRateLimiter(emailRatePerMinute, emailBurst),
@@ -237,6 +238,17 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/sync/push", s.authed(s.handlePush))
 	mux.Handle("GET /v1/sync/events", s.authed(s.handleEvents))
 
+	// Devices + relay (PLAN-agents.md §5): a phone drives an agent hosted by a desktop. The host
+	// holds an SSE inbox; callers post sealed requests and stream sealed responses. All device
+	// rows and frames are scoped to the caller's user.
+	mux.Handle("POST /v1/devices", s.authed(s.handleDevicesUpsert))
+	mux.Handle("GET /v1/devices", s.authed(s.handleDevicesList))
+	mux.Handle("GET /v1/relay/inbox", s.authed(s.handleRelayInbox))
+	mux.Handle("POST /v1/relay/request", s.authed(s.handleRelayRequest))
+	mux.Handle("GET /v1/relay/response/{id}", s.authed(s.handleRelayResponseStream))
+	mux.Handle("POST /v1/relay/response/{id}", s.authed(s.handleRelayResponsePost))
+	mux.Handle("POST /v1/relay/cancel/{id}", s.authed(s.handleRelayCancel))
+
 	// End-to-end encryption key material (PLAN §E2EE): the server is a blind custodian.
 	mux.Handle("GET /v1/keys", s.authed(s.handleGetKeys))
 	mux.Handle("PUT /v1/keys", s.authed(s.handlePutKeys))
@@ -280,7 +292,7 @@ func CORS(origins []string) func(http.Handler) http.Handler {
 				h.Add("Vary", "Origin")
 			}
 			h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
-			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Companion-Device")
 			h.Set("Access-Control-Expose-Headers", "X-Final-URL")
 			h.Set("Access-Control-Max-Age", "600")
 			if r.Method == http.MethodOptions {

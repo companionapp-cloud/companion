@@ -441,13 +441,15 @@ export function SyncProvider({
   const disconnect = useCallback(() => {
     // Drop the in-memory master key (and native cache) so signing out also locks the store.
     void crypto.lock();
+    // Tell the core too: it closes the relay inbox so this device reads as offline elsewhere.
+    void api.disconnect().catch(() => {});
     clearConfig(storageRef.current);
     setConfig(null);
     setStatus("disconnected");
     setLastError(null);
     setLastSyncedAt(null);
     setNeedsReauth(false);
-  }, [crypto]);
+  }, [crypto, api]);
 
   const value = useMemo<SyncController>(
     () => ({

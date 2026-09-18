@@ -8,7 +8,16 @@ import { useSync } from "./SyncProvider";
  *  - needsReauth: the session expired and the refresh token is dead — sign in again.
  * It stays hidden for healthy sync and for transient network errors (which recover on their own),
  * so it only appears when there's a real, user-actionable problem. */
-export function SyncHealthBanner({ onOpenSettings, topInset = 0 }: { onOpenSettings: () => void; topInset?: number }) {
+export function SyncHealthBanner({
+  onOpenSettings,
+  topInset = 0,
+  leftInset = 0,
+}: {
+  onOpenSettings: () => void;
+  topInset?: number;
+  /** Extra leading room kept clear for native window controls (macOS traffic lights). */
+  leftInset?: number;
+}) {
   const sync = useSync();
   if (!sync.connected) return null;
 
@@ -32,6 +41,7 @@ export function SyncHealthBanner({ onOpenSettings, topInset = 0 }: { onOpenSetti
         minHeight: (touch ? row.touch : layout.subToolbarH) + topInset,
         paddingTop: topInset,
         paddingHorizontal: touch ? space.xl : space.lg,
+        paddingLeft: (touch ? space.xl : space.lg) + leftInset,
         backgroundColor: colors.dangerSoft,
         borderBottomWidth: 1,
         borderBottomColor: colors.danger,

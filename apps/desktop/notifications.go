@@ -26,10 +26,13 @@ import (
 // over the complete current plan each time.
 type notificationsHandler struct {
 	svc *notifications.NotificationService
+	// enabled is false when the process is not a signed .app bundle (a `go run` dev build):
+	// UNUserNotificationCenter aborts the process in that case, so every call no-ops instead.
+	enabled bool
 }
 
-func newNotificationsHandler(svc *notifications.NotificationService) *notificationsHandler {
-	return &notificationsHandler{svc: svc}
+func newNotificationsHandler(svc *notifications.NotificationService, enabled bool) *notificationsHandler {
+	return &notificationsHandler{svc: svc, enabled: enabled}
 }
 
 // taskNotification mirrors core/notify.Notification (and core-bridge's TaskNotification)
@@ -62,6 +65,11 @@ func (h *notificationsHandler) handleAuthorize(w http.ResponseWriter, r *http.Re
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !h.enabled {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"granted": false})
+		return
+	}
 	granted, err := h.svc.RequestNotificationAuthorization()
 	if err != nil {
 		log.Printf("notify: authorization request failed: %v", err)
@@ -86,6 +94,10 @@ func (h *notificationsHandler) handleReconcile(w http.ResponseWriter, r *http.Re
 	var plan []taskNotification
 	if err := json.Unmarshal(body, &plan); err != nil {
 		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if !h.enabled {
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 

@@ -20,7 +20,9 @@ export type DocRef = { kind: "note" | "task" | "canvas"; id: string };
 export type TabRef =
   | DocRef
   | { kind: "browse"; section: WorkspaceSection }
-  | { kind: "view"; view: SurfaceViewId }
+  /** A view. `date` (YYYY-MM-DD) asks the Today view to open on that day — how a dated
+   *  note is followed from the calendar into the daily-notes tool. */
+  | { kind: "view"; view: SurfaceViewId; date?: string }
   | { kind: "project"; projectId: string; section?: ProjectSection; itemId?: string; subItemId?: string };
 
 /** One tab slot: a stable uid, what it holds (null = a fresh, empty tab), and that tab's
@@ -50,7 +52,7 @@ export function keyOfRef(ref: TabRef | null): string {
     case "browse":
       return `browse:${ref.section}`;
     case "view":
-      return `view:${ref.view}`;
+      return ref.date ? `view:${ref.view}:${ref.date}` : `view:${ref.view}`;
     case "project":
       return `project:${ref.projectId}:${ref.section ?? ""}:${ref.itemId ?? ""}:${ref.subItemId ?? ""}`;
     default:
@@ -65,7 +67,7 @@ export function locationOfRef(ref: TabRef | null): NavLocation {
     case "browse":
       return ref.section === "canvases" ? { kind: "canvases" } : { kind: ref.section };
     case "view":
-      return { kind: "view", view: ref.view };
+      return { kind: "view", view: ref.view, date: ref.date };
     case "project":
       return { kind: "project", projectId: ref.projectId, section: ref.section, itemId: ref.itemId, subItemId: ref.subItemId };
     case "canvas":
@@ -92,7 +94,8 @@ export function viewOfRef(ref: TabRef | null): ViewId | "project" | null {
 export type NavLocation =
   /** A fresh tab holding nothing yet. */
   | { kind: "empty" }
-  | { kind: "view"; view: SurfaceViewId }
+  /** A view; `date` is the day the Today view was asked to open on (see TabRef). */
+  | { kind: "view"; view: SurfaceViewId; date?: string }
   | { kind: "notes" }
   | { kind: "tasks" }
   /** The canvases browse list, with the open board (if any) in the URL: /canvases/:id. */

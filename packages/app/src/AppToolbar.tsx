@@ -9,9 +9,12 @@ import {
   Toolbar,
   colors,
   icon,
+  layout,
+  motion,
   space,
   themeSwitchable,
   toggleTheme,
+  transition,
   useTheme,
   type IconName,
 } from "@companion/design-system";
@@ -45,8 +48,21 @@ const DOC_ICON: Record<DocRef["kind"], IconName> = { note: "file", task: "tasks"
 
 /** The app's top toolbar: the active tab's back/forward history, the tab strip — every
  * open surface, document or view — a "+" for an empty tab, then quick capture, the theme
- * toggle, notifications and the signed-in account. */
-export function AppToolbar({ onCapture }: { onCapture: () => void }) {
+ * toggle, notifications and the signed-in account. `leftInset` is extra leading space
+ * kept clear for native window controls (the macOS traffic lights) that overhang the
+ * rail; it animates with the rail's width so the strip doesn't jump. */
+export function AppToolbar({
+  onCapture,
+  leftInset = 0,
+  verticalInset = 0,
+}: {
+  onCapture: () => void;
+  /** Leading room kept clear of native window controls overhanging the rail. */
+  leftInset?: number;
+  /** Padding above and below the row, so it sits level with those controls and the
+   *  content beneath gets the same breathing room. */
+  verticalInset?: number;
+}) {
   const nav = useNav();
   const notes = useNotes();
   const tasks = useTasks();
@@ -72,7 +88,8 @@ export function AppToolbar({ onCapture }: { onCapture: () => void }) {
   };
 
   return (
-    <Toolbar>
+    <Toolbar style={verticalInset > 0 ? { height: layout.toolbarH + verticalInset * 2, paddingVertical: verticalInset } : undefined}>
+      {leftInset > 0 ? <View style={[{ width: leftInset, marginLeft: -space.sm }, transition("width", motion.medium)]} /> : null}
       <IconButton label="Back" size="sm" disabled={!nav.canBack} onPress={nav.back}>
         <Icon name="chevronLeft" size={icon.md} color={colors.textSecondary} />
       </IconButton>

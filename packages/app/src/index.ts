@@ -1,4 +1,5 @@
 export { App } from "./App";
+export type { WindowControls } from "./AppShell";
 export { AppShell } from "./AppShell";
 export { MobileWebShell } from "./mobile/MobileShell";
 export type { MobileWebShellProps } from "./mobile/MobileShell";
@@ -25,7 +26,7 @@ export { CalendarSettings } from "./CalendarSettings";
 export { setIcsFilePicker, pickIcsFile, canPickIcsFile } from "./icsFile";
 export type { IcsFile } from "./icsFile";
 export { ChatView, ChatList, ChatsScreen } from "./ChatScreen";
-export { LlmSettings } from "./LlmSettings";
+export { AgentsSettings } from "./AgentsSettings";
 export { NoteGraph } from "./NoteGraph";
 export { GraphCanvas } from "./GraphCanvas";
 export type { GraphCanvasProps } from "./GraphCanvas";

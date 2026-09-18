@@ -20,7 +20,7 @@ The server ships as a container image:
 ```
 docker run -p 8080:8080 \
   -e DATABASE_URL=postgres://user:pass@host:5432/companion \
-  ghcr.io/chrisdmacrae/companion-server:latest
+  ghcr.io/companionapp-cloud/companion-server:0.5.0
 ```
 
 It listens on **8080** by default (`COMPANION_ADDR` to change it). For anything real, point `DATABASE_URL` at Postgres. Without it the server falls back to a local SQLite file, which is fine for a try-out on your laptop and not much else.

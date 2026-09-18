@@ -48,6 +48,18 @@ func (r *Registry) Specs() []ToolSpec {
 	return specs
 }
 
+// ReadOnly returns a copy of the registry without its write tools, for agents whose
+// Companion write access is switched off.
+func (r *Registry) ReadOnly() *Registry {
+	out := NewRegistry()
+	for name, t := range r.tools {
+		if !t.Write {
+			out.tools[name] = t
+		}
+	}
+	return out
+}
+
 // IsWrite reports whether the named tool mutates state (unknown tools report false).
 func (r *Registry) IsWrite(name string) bool {
 	t, ok := r.tools[name]

@@ -65,6 +65,7 @@ func (s *Server) handlers() map[string]*entityHandler {
 			protocol.EntityDocument:         documentHandler,
 			protocol.EntityChat:             chatHandler,
 			protocol.EntityChatMessage:      chatMessageHandler,
+			protocol.EntityAgent:            agentHandler,
 			protocol.EntityNotificationRead: notificationReadHandler,
 			protocol.EntityCalendarFeed:     calendarFeedHandler,
 			protocol.EntityCalendarEvent:    calendarEventHandler,
@@ -85,6 +86,7 @@ func (s *Server) handlePull(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid := userID(r)
+	s.touchDevice(uid, r)
 	cursor, _ := strconv.ParseInt(r.URL.Query().Get("cursor"), 10, 64)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 || limit > defaultPullLimit {
@@ -120,6 +122,7 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid := userID(r)
+	s.touchDevice(uid, r)
 	var req protocol.PushRequest
 	if err := decode(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")

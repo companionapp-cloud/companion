@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -20,6 +21,83 @@ func (s *Store) EnsureSyncState(deviceID string) error {
 		 ON CONFLICT(id) DO NOTHING;`, deviceID)
 	if err != nil {
 		return fmt.Errorf("ensure sync_state: %w", err)
+	}
+	return nil
+}
+
+// EnsureDeviceID returns this device's stable id, minting and persisting one on first use.
+// The id exists before (and independently of) sync so a local agent can be pinned to its host
+// even on a signed-out desktop; sync.configure later reuses the same value.
+func (s *Store) EnsureDeviceID() (string, error) {
+	rows, err := s.db.Query(`SELECT device_id FROM sync_state WHERE id = 1;`)
+	if err != nil {
+		return "", fmt.Errorf("read device id: %w", err)
+	}
+	var id string
+	if rows.Next() {
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return "", err
+		}
+	}
+	rows.Close()
+	if id != "" {
+		return id, nil
+	}
+	fresh, err := uuid.NewV7()
+	if err != nil {
+		return "", err
+	}
+	if err := s.EnsureSyncState(fresh.String()); err != nil {
+		return "", err
+	}
+	return fresh.String(), nil
+}
+
+// DeviceInfo is the persisted identity of this device (PLAN-agents.md §2.2).
+type DeviceInfo struct {
+	ID       string
+	Name     string
+	Platform string
+}
+
+// DeviceInfo returns the persisted device identity (name/platform may be empty until set).
+func (s *Store) DeviceInfo() (DeviceInfo, error) {
+	id, err := s.EnsureDeviceID()
+	if err != nil {
+		return DeviceInfo{}, err
+	}
+	rows, err := s.db.Query(`SELECT device_name, device_platform FROM sync_state WHERE id = 1;`)
+	if err != nil {
+		return DeviceInfo{}, fmt.Errorf("read device info: %w", err)
+	}
+	defer rows.Close()
+	info := DeviceInfo{ID: id}
+	if rows.Next() {
+		var name, platform sql.NullString
+		if err := rows.Scan(&name, &platform); err != nil {
+			return DeviceInfo{}, err
+		}
+		info.Name, info.Platform = name.String, platform.String
+	}
+	return info, rows.Err()
+}
+
+// SetDeviceInfo records the device's display name and platform. Empty values are left as-is
+// so a shell can set the platform without clobbering a user-chosen name.
+func (s *Store) SetDeviceInfo(name, platform string) error {
+	if _, err := s.EnsureDeviceID(); err != nil {
+		return err
+	}
+	if name != "" {
+		if _, err := s.db.Exec(`UPDATE sync_state SET device_name = ? WHERE id = 1;`, name); err != nil {
+			return fmt.Errorf("set device name: %w", err)
+		}
+	}
+	if platform != "" {
+		if _, err := s.db.Exec(`UPDATE sync_state SET device_platform = ? WHERE id = 1;`, platform); err != nil {
+			return fmt.Errorf("set device platform: %w", err)
+		}
 	}
 	return nil
 }

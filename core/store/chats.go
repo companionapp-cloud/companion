@@ -19,7 +19,7 @@ type ChatsRepo struct {
 	clock domain.Clock
 }
 
-const chatColumns = `id, title, config_id, model, created_at, updated_at, deleted_at, version, dirty`
+const chatColumns = `id, title, config_id, model, agent_session_id, created_at, updated_at, deleted_at, version, dirty`
 
 // Create inserts a new chat (UUIDv7 id, version 0, dirty).
 func (r *ChatsRepo) Create(title string, configID *string) (*domain.Chat, error) {
@@ -95,6 +95,12 @@ func (r *ChatsRepo) SetConfig(id string, configID *string) error {
 // chat time from the provider's live model list, not baked into the config.
 func (r *ChatsRepo) SetModel(id string, model *string) error {
 	return r.patch(id, `model = ?`, model)
+}
+
+// SetAgentSession records the CLI runtime's own session id for a chat (nil clears it), so the
+// next turn resumes the same Claude Code / Codex session instead of starting fresh.
+func (r *ChatsRepo) SetAgentSession(id string, sessionID *string) error {
+	return r.patch(id, `agent_session_id = ?`, sessionID)
 }
 
 // patch applies an optional `set` fragment plus updated_at/dirty to a live chat.
@@ -173,13 +179,14 @@ func (r *ChatsRepo) Apply(c *domain.Chat) error {
 		deletedAt = c.DeletedAt.UTC().Format(timeFormat)
 	}
 	_, err := r.db.Exec(
-		`INSERT INTO chats (id, title, config_id, model, created_at, updated_at, deleted_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+		`INSERT INTO chats (id, title, config_id, model, agent_session_id, created_at, updated_at, deleted_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 		 ON CONFLICT(id) DO UPDATE SET
 		   title = excluded.title, config_id = excluded.config_id, model = excluded.model,
+		   agent_session_id = excluded.agent_session_id,
 		   created_at = excluded.created_at, updated_at = excluded.updated_at,
 		   deleted_at = excluded.deleted_at, version = excluded.version, dirty = 0;`,
-		c.ID, c.Title, c.ConfigID, c.Model, c.CreatedAt.UTC().Format(timeFormat), c.UpdatedAt.UTC().Format(timeFormat), deletedAt, c.Version,
+		c.ID, c.Title, c.ConfigID, c.Model, c.AgentSessionID, c.CreatedAt.UTC().Format(timeFormat), c.UpdatedAt.UTC().Format(timeFormat), deletedAt, c.Version,
 	)
 	if err != nil {
 		return fmt.Errorf("apply chat: %w", err)
@@ -232,13 +239,13 @@ func (r *ChatsRepo) ConflictedCopy(local *domain.Chat, suffix string) error {
 
 func scanChat(rows Rows) (*domain.Chat, error) {
 	var (
-		c                    domain.Chat
-		configID, model      sql.NullString
-		deletedAt            sql.NullString
-		createdAt, updatedAt string
-		dirty                int
+		c                        domain.Chat
+		configID, model, session sql.NullString
+		deletedAt                sql.NullString
+		createdAt, updatedAt     string
+		dirty                    int
 	)
-	if err := rows.Scan(&c.ID, &c.Title, &configID, &model, &createdAt, &updatedAt, &deletedAt, &c.Version, &dirty); err != nil {
+	if err := rows.Scan(&c.ID, &c.Title, &configID, &model, &session, &createdAt, &updatedAt, &deletedAt, &c.Version, &dirty); err != nil {
 		return nil, fmt.Errorf("scan chat: %w", err)
 	}
 	if configID.Valid {
@@ -246,6 +253,9 @@ func scanChat(rows Rows) (*domain.Chat, error) {
 	}
 	if model.Valid {
 		c.Model = &model.String
+	}
+	if session.Valid {
+		c.AgentSessionID = &session.String
 	}
 	var err error
 	if c.CreatedAt, err = time.Parse(timeFormat, createdAt); err != nil {

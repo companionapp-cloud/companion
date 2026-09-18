@@ -20,12 +20,14 @@ type Store struct {
 	ProjectMembers *ProjectMembersRepo
 	// Lists are project-scoped, drag-ordered task collections; ListItems are their rows
 	// (task references and grouping headings).
-	Lists        *ListsRepo
-	ListItems    *ListItemsRepo
-	ObjectTypes  *ObjectTypesRepo
-	Links        *LinksRepo
-	Search       *SearchRepo
-	LLMConfigs   *LLMConfigsRepo
+	Lists       *ListsRepo
+	ListItems   *ListItemsRepo
+	ObjectTypes *ObjectTypesRepo
+	Links       *LinksRepo
+	Search      *SearchRepo
+	// Agents are the installed AI agents (cloud APIs and desktop-hosted local tools) that
+	// back the chat assistant (PLAN-agents.md).
+	Agents       *AgentsRepo
 	Chats        *ChatsRepo
 	ChatMessages *ChatMessagesRepo
 	// NotificationReads marks in-app notifications read; the feed itself is derived
@@ -81,8 +83,8 @@ func New(d Driver, clock domain.Clock) (*Store, error) {
 	// Full-text search reads the trigger-maintained notes_fts / tasks_fts indexes; it backs
 	// the LLM search_notes retrieval tool (PLAN §6.8).
 	s.Search = &SearchRepo{db: d}
-	// LLM provider configs (device-local + account-scoped) back the chat assistant (§6.8).
-	s.LLMConfigs = &LLMConfigsRepo{db: d, clock: clock}
+	// Installed agents (synced; local ones pinned to a host device) back the chat assistant.
+	s.Agents = &AgentsRepo{db: d, clock: clock}
 	// Chats + their messages persist and sync conversations across devices (§6.8).
 	s.Chats = &ChatsRepo{db: d, clock: clock}
 	s.ChatMessages = &ChatMessagesRepo{db: d, clock: clock}

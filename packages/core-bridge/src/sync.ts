@@ -7,6 +7,8 @@ export function syncApi(core: CoreBridge) {
     configure: (baseUrl: string, token: string) =>
       core.invoke<{ ok: boolean }>("sync.configure", { baseUrl, token }),
     run: () => core.invoke<{ ok: boolean }>("sync.run"),
+    /** Forget the server: stops hosting agents for other devices and clears presence. */
+    disconnect: () => core.invoke<{ ok: boolean }>("sync.disconnect"),
   };
 }
 

@@ -26,7 +26,7 @@ import {
   type PressState,
 } from "@companion/design-system";
 import { Editor, type LinkRef, type LinkSource } from "@companion/editor";
-import type { Chat, LLMConfig, StoredChatMessage } from "@companion/core-bridge";
+import { runtimeLabel, type Agent, type Chat, type StoredChatMessage } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
 import { useLinkSource } from "./useLinkSource";
 import { useNav } from "./nav-context";
@@ -67,14 +67,14 @@ export function ChatView({
   composer?: "bar" | "floating";
   bottomInset?: number;
 }) {
-  const { chats, llm } = useCore();
+  const { chats, llm, agents: agentsApi } = useCore();
   const linkSource = useLinkSource();
   const [messages, setMessages] = useState<StoredChatMessage[]>([]);
   const [working, setWorking] = useState(false);
   const [live, setLive] = useState<{ text: string; actions: ToolAction[] } | null>(null);
-  const [configs, setConfigs] = useState<LLMConfig[] | null>(null);
+  const [configs, setConfigs] = useState<Agent[] | null>(null);
   const [configId, setConfigId] = useState<string | null>(null);
-  // The model is chosen per chat from the provider's live list (fetched when configId changes).
+  // The model is chosen per chat from the agent's live list (fetched when configId changes).
   const [model, setModel] = useState<string | null>(null);
   const [models, setModels] = useState<string[] | null>(null);
   // The composer editor is uncontrolled; `draft` mirrors it (for the send button's enabled
@@ -107,18 +107,18 @@ export function ChatView({
     reload();
   }, [reload]);
 
-  // Provider list for the selector.
-  const reloadConfigs = useCallback(() => llm.configs.list().then(setConfigs).catch(() => {}), [llm]);
+  // Agent list for the selector (re-fetched when agents or their online state change).
+  const reloadConfigs = useCallback(() => agentsApi.list().then(setConfigs).catch(() => {}), [agentsApi]);
   useEffect(() => {
     void reloadConfigs();
   }, [reloadConfigs]);
-  useEffect(() => llm.onConfigsChanged(() => void reloadConfigs()), [llm, reloadConfigs]);
+  useEffect(() => agentsApi.onChanged(() => void reloadConfigs()), [agentsApi, reloadConfigs]);
   useEffect(() => {
     if (!configs || configs.length === 0) return;
     setConfigId((cur) => (cur && configs.some((c) => c.id === cur) ? cur : (configs.find((c) => c.isDefault) ?? configs[0]).id));
   }, [configs]);
 
-  // Fetch the chosen provider's live model list whenever it changes.
+  // Fetch the chosen agent's live model list whenever it changes.
   useEffect(() => {
     if (!configId) {
       setModels(null);
@@ -126,14 +126,14 @@ export function ChatView({
     }
     let alive = true;
     setModels(null);
-    llm.models
-      .list(configId)
+    agentsApi
+      .models(configId)
       .then((m) => alive && setModels(m))
       .catch(() => alive && setModels([]));
     return () => {
       alive = false;
     };
-  }, [configId, llm]);
+  }, [configId, agentsApi]);
 
   // Default the model to the first one offered, but keep an already-chosen model even if it's
   // not in the live list (e.g. a config restored from a chat, or an Ollama model not pulled here).
@@ -142,7 +142,7 @@ export function ChatView({
     setModel((cur) => cur ?? models[0]);
   }, [models]);
 
-  // Switching provider clears the model so it re-seeds from the new provider's list.
+  // Switching agent clears the model so it re-seeds from the new agent's list.
   const pickConfig = useCallback((id: string) => {
     setConfigId(id);
     setModel(null);
@@ -179,7 +179,14 @@ export function ChatView({
   }, [chats, llm, chatId, reload]);
 
   const hasProvider = (configs?.length ?? 0) > 0;
-  const canSend = hasProvider && !!model;
+  const currentAgent = configs?.find((c) => c.id === configId) ?? null;
+  // A local agent hosted by another device is only usable while that host is reachable.
+  const hostOffline = !!currentAgent && !!currentAgent.hostDeviceId && !currentAgent.online;
+  const canSend = hasProvider && !!model && !hostOffline;
+
+  const stop = useCallback(() => {
+    void chats.cancel(chatId).catch(() => {});
+  }, [chats, chatId]);
 
   // `raw` is the editor's exact content on Enter; the send button passes draftRef instead.
   const send = useCallback(async (raw?: string) => {
@@ -280,6 +287,10 @@ export function ChatView({
             <Text variant="caption" tone="danger" style={styles.error}>
               {error}
             </Text>
+          ) : hostOffline && currentAgent ? (
+            <Text variant="caption" tone="tertiary" style={styles.error}>
+              {currentAgent.hostName || "The computer hosting this agent"} is offline. {currentAgent.name} will be available when it’s back.
+            </Text>
           ) : null}
 
           {hasProvider &&
@@ -297,15 +308,15 @@ export function ChatView({
                     />
                   </View>
                   <Pressable
-                    onPress={() => void send()}
-                    disabled={sendDisabled}
-                    aria-label="Send"
+                    onPress={() => (working ? stop() : void send())}
+                    disabled={working ? false : sendDisabled}
+                    aria-label={working ? "Stop" : "Send"}
                     style={({ pressed }: PressState) => [
                       styles.sendCircle,
-                      sendDisabled ? styles.sendCircleOff : pressed ? styles.sendCirclePressed : null,
+                      !working && sendDisabled ? styles.sendCircleOff : pressed ? styles.sendCirclePressed : null,
                     ]}
                   >
-                    <Icon name="chevronRight" size={18} color={colors.onAccent} />
+                    <Icon name={working ? "close" : "chevronRight"} size={18} color={colors.onAccent} />
                   </Pressable>
                 </View>
                 {selector("below")}
@@ -322,7 +333,11 @@ export function ChatView({
                     onOpenRef={(ref) => onOpenEntity?.(ref.type, ref.id)}
                   />
                 </ComposerField>
-                <Button label={working ? "…" : "Send"} onPress={() => void send()} disabled={sendDisabled} />
+                {working ? (
+                  <Button label="Stop" variant="secondary" onPress={stop} />
+                ) : (
+                  <Button label="Send" onPress={() => void send()} disabled={sendDisabled} />
+                )}
               </View>
             ))}
         </View>
@@ -502,11 +517,11 @@ function ChatRow({
 // ===========================================================================
 
 export function ChatsScreen() {
-  const { chats: chatsApi, llm } = useCore();
+  const { chats: chatsApi, agents: agentsApi } = useCore();
   const nav = useNav();
   const [chats, setChats] = useState<Chat[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [configs, setConfigs] = useState<LLMConfig[] | null>(null);
+  const [configs, setConfigs] = useState<Agent[] | null>(null);
 
   const reload = useCallback(() => chatsApi.list().then(setChats).catch(() => {}), [chatsApi]);
   useEffect(() => {
@@ -521,11 +536,11 @@ export function ChatsScreen() {
     };
   }, [chatsApi, reload]);
 
-  const reloadConfigs = useCallback(() => llm.configs.list().then(setConfigs).catch(() => {}), [llm]);
+  const reloadConfigs = useCallback(() => agentsApi.list().then(setConfigs).catch(() => {}), [agentsApi]);
   useEffect(() => {
     void reloadConfigs();
   }, [reloadConfigs]);
-  useEffect(() => llm.onConfigsChanged(() => void reloadConfigs()), [llm, reloadConfigs]);
+  useEffect(() => agentsApi.onChanged(() => void reloadConfigs()), [agentsApi, reloadConfigs]);
 
   useEffect(() => {
     setSelectedId((cur) => (cur && chats.some((c) => c.id === cur) ? cur : (chats[0]?.id ?? null)));
@@ -768,6 +783,19 @@ function humanizeTool(name: string): string {
     update_note: "updated a note",
     create_task: "created a task",
     update_task: "updated a task",
+    // CLI agents (Claude Code / Codex) report their own tools.
+    Read: "read a file",
+    Glob: "listed files",
+    Grep: "searched files",
+    Bash: "ran a command",
+    shell: "ran a command",
+    Edit: "edited a file",
+    Write: "wrote a file",
+    edit: "edited files",
+    WebFetch: "read a web page",
+    WebSearch: "searched the web",
+    web_search: "searched the web",
+    Task: "delegated to a subagent",
   };
   return map[name] ?? name.replace(/_/g, " ");
 }
@@ -852,13 +880,20 @@ function Composer({
   );
 }
 
-// --- provider + model selectors --------------------------------------------
+// --- agent + model selectors ------------------------------------------------
 
-function configLabel(c: LLMConfig): string {
-  return c.provider === "anthropic" ? "Anthropic" : c.scope === "device" ? "Local" : "OpenAI";
+/** configLabel describes an agent for the picker: its runtime, plus where it runs for local
+ *  ones ("Claude Code · Chris's MacBook · offline"). */
+function configLabel(c: Agent): string {
+  const parts = [runtimeLabel(c.runtime)];
+  if (c.hostDeviceId) {
+    parts.push(c.hostedHere ? "this computer" : c.hostName || "another device");
+    if (!c.online) parts.push("offline");
+  }
+  return parts.join(" · ");
 }
 
-/** SelectorBar is the provider + model picker. "header" is the desktop thread header's mono
+/** SelectorBar is the agent + model picker. "header" is the desktop thread header's mono
  *  model line (`model · provider`, menus open downward); "below" sits under the floating
  *  composer (`provider › model`, menus open upward). The provider is a picker only when
  *  there is more than one; the model lists what the chosen provider offers live. */
@@ -872,7 +907,7 @@ function SelectorBar({
   onPickModel,
 }: {
   placement: "header" | "below";
-  configs: LLMConfig[];
+  configs: Agent[];
   configId: string | null;
   onPickConfig: (id: string) => void;
   models: string[] | null;
@@ -886,7 +921,7 @@ function SelectorBar({
     configs.length >= 2 ? (
       <Dropdown
         label={current.name}
-        ariaLabel="Choose a provider"
+        ariaLabel="Choose an agent"
         opens={opens}
         options={configs.map((c) => ({ value: c.id, label: `${c.name} — ${configLabel(c)}` }))}
         value={current.id}
@@ -1026,10 +1061,10 @@ function EmptyState({ onConfigure }: { onConfigure?: () => void }) {
   return (
     <View style={styles.empty}>
       <Icon name="chat" size={iconSize.tile} color={colors.textQuaternary} />
-      <Text variant="title">No AI provider yet</Text>
+      <Text variant="title">No agent yet</Text>
       <Text variant="caption" tone="tertiary" style={styles.emptyBody}>
-        Connect a model to chat with your notes and tasks. Set up a local Ollama server or an OpenAI / Anthropic key in
-        Settings, then pick a model here.
+        Install an agent to chat with your notes and tasks: Claude Code, Codex or Ollama found on your computer, or an
+        Anthropic / OpenAI key. Then pick a model here.
       </Text>
       {onConfigure ? (
         <Button label="Set up in Settings" onPress={onConfigure} icon={<Icon name="settings" size={iconSize.sm} color={colors.onAccent} />} />

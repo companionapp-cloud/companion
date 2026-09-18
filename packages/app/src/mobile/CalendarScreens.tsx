@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet, View } from "react-native";
 import type { CalendarItem } from "@companion/core-bridge";
 import { Spinner, Text, colors, control, radius, space } from "@companion/design-system";
 import { TodayCalendar, todayISO, formatFullDate } from "../TodayScreen";
-import { Agenda } from "../CalendarAgenda";
+import { Agenda, itemDay } from "../CalendarAgenda";
 import { CalendarItemInfo } from "../CalendarItemInfo";
 import { useCalendar } from "../CalendarProvider";
 import { useNav } from "../nav-context";
@@ -14,14 +14,16 @@ import { BottomSheet, NavAction, NavBar } from "./ui";
 // day view: a month card to choose a day, a mono date label, then that day's agenda
 // (merged feed events, due tasks, dated notes). Resync is an icon in the nav bar.
 
-/** Routes an agenda item tap: tasks and notes push their editors; a feed event has no
+/** Routes an agenda item tap: tasks push their editor, a dated note opens Today on its day
+ *  (it's a daily note, not a browse-list note); a feed event has no
  *  local entity, so it opens as a read-only bottom sheet (the native app pushes a detail
  *  screen, but the item isn't URL-serializable, so on web it stays an overlay). */
 export function useCalendarItemSheet(): { openItem: (item: CalendarItem) => void; sheet: ReactNode } {
   const nav = useNav();
   const [item, setItem] = useState<CalendarItem | null>(null);
   const openItem = (it: CalendarItem) => {
-    if (it.kind === "task" || it.kind === "note") nav.openInNewTab({ kind: it.kind, id: it.sourceId });
+    if (it.kind === "task") nav.openInNewTab({ kind: "task", id: it.sourceId });
+    else if (it.kind === "note") nav.openInNewTab({ kind: "view", view: "today", date: itemDay(it) });
     else setItem(it);
   };
   const sheet = item ? (

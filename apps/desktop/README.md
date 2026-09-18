@@ -42,6 +42,20 @@ WebKit/WebView window) and the platform webview toolchain that Wails needs.
 `make desktop-run`/`make desktop` build the react-native-web frontend into
 `frontend/dist` first; the Go binary embeds it. Re-run after changing UI code.
 
+## Install a release (Homebrew)
+
+Tagged releases build a universal `Companion.app` on a macOS runner and publish it
+through our own tap. The bundle is ad-hoc signed (CI has no Apple signing identity),
+so Homebrew must be told not to quarantine the download:
+
+```bash
+brew install --cask --no-quarantine companionapp-cloud/tap/companion
+```
+
+The cask lives in [`homebrew/Casks/companion.rb`](../../homebrew/Casks/companion.rb)
+in this repo; the Release workflow stamps the version + sha256 and pushes the whole
+`homebrew/` folder to `companionapp-cloud/homebrew-tap`. Edit it here, not in the tap.
+
 ## Build a binary
 
 ```bash

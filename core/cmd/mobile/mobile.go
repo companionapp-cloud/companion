@@ -12,6 +12,7 @@ package mobile
 
 import (
 	"path/filepath"
+	"runtime"
 
 	"companion/core/blob"
 	"companion/core/bridge"
@@ -40,6 +41,9 @@ func New(dbPath string) (*Core, error) {
 		return nil, err
 	}
 	core := bridge.New(st)
+	// Device identity (PLAN-agents.md §2.2): phones cannot host local agents; they drive the
+	// ones a desktop hosts through the relay. The user can rename the device in Settings › Sync.
+	core.SetDeviceInfo(runtime.GOOS, mobileDefaultName(), false)
 	// LLM API keys (PLAN §6.8): stored beside the database in the app's documents dir.
 	// SecureStore is the intended hardening upgrade; local Ollama needs no key.
 	core.SetSecretStore(secrets.NewFileStore(filepath.Join(filepath.Dir(dbPath), "secrets.json")))
@@ -82,4 +86,16 @@ func (a eventAdapter) OnEvent(name string, payload []byte) {
 		payload = []byte{}
 	}
 	a.h.OnEvent(name, payload)
+}
+
+// mobileDefaultName is the device's display name until the user renames it.
+func mobileDefaultName() string {
+	switch runtime.GOOS {
+	case "ios":
+		return "iPhone"
+	case "android":
+		return "Android phone"
+	default:
+		return "Phone"
+	}
 }

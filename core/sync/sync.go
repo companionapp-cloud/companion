@@ -249,6 +249,9 @@ func New(st *store.Store, t Transport, clock domain.Clock) *Engine {
 	// reference their chat by id; a message arriving before its chat is a tolerated dangle.
 	e.register(newRepoSyncer[*domain.Chat](st.Chats, clock))
 	e.register(newRepoSyncer[*domain.ChatMessage](st.ChatMessages, clock))
+	// Agents (PLAN-agents.md): installed AI agents sync so a phone sees the tools its desktop
+	// hosts. Chats reference an agent by id; a chat outrunning its agent is a tolerated dangle.
+	e.register(newRepoSyncer[*domain.Agent](st.Agents, clock))
 	// Notification read receipts (§6.4): deterministic ids make cross-device reads converge.
 	e.register(newRepoSyncer[*domain.NotificationRead](st.NotificationReads, clock))
 	// Calendar (§6.7): feeds are user-authored (bidirectional); events are server-owned

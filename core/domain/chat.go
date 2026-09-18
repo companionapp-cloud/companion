@@ -20,15 +20,18 @@ const (
 // "the account default at run time") and the model chosen for it (Model; nil until the user
 // picks one from the provider's live model list).
 type Chat struct {
-	ID        string     `json:"id"`
-	Title     string     `json:"title"`
-	ConfigID  *string    `json:"configId,omitempty"`
-	Model     *string    `json:"model,omitempty"`
-	CreatedAt time.Time  `json:"createdAt"`
-	UpdatedAt time.Time  `json:"updatedAt"`
-	DeletedAt *time.Time `json:"deletedAt,omitempty"`
-	Version   int64      `json:"version"`
-	Dirty     bool       `json:"dirty"`
+	ID       string  `json:"id"`
+	Title    string  `json:"title"`
+	ConfigID *string `json:"configId,omitempty"`
+	Model    *string `json:"model,omitempty"`
+	// AgentSessionID is the CLI runtime's own conversation id (Claude Code / Codex session),
+	// so later turns resume it. Nil for HTTP runtimes and until the first turn completes.
+	AgentSessionID *string    `json:"agentSessionId,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
+	DeletedAt      *time.Time `json:"deletedAt,omitempty"`
+	Version        int64      `json:"version"`
+	Dirty          bool       `json:"dirty"`
 }
 
 // ErrInvalidChat is returned when a chat fails validation.

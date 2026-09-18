@@ -6,6 +6,25 @@ name: Release
 # binaries and image links to the GitHub release. Building the web image here (vs.
 # on every push to main) keeps the web app in lockstep with the server/cloud
 # releases — one tag ships all three at the same version.
+#
+# It also builds the macOS desktop app (Wails needs cgo + WebKit, so that job runs
+# on a macOS runner), attaches Companion-<version>-macos-universal.zip to the
+# release, and publishes it to Homebrew: the `homebrew-tap` job stamps the new
+# version + sha256 into homebrew/Casks/companion.rb and pushes the whole homebrew/
+# folder to the companionapp-cloud/homebrew-tap repo, which is what
+# `brew tap companionapp-cloud/tap` clones. That folder is the tap's only source;
+# the tap repo is never edited by hand.
+#
+# One-time setup for the tap:
+#   - Create the (public) repo companionapp-cloud/homebrew-tap. It can be empty.
+#   - Generate a key pair:  ssh-keygen -t ed25519 -N "" -f tap-deploy-key -C "companion release -> homebrew-tap"
+#   - Add tap-deploy-key.pub to the tap repo under Settings → Deploy keys, with
+#     "Allow write access" ticked.
+#   - Add the private key (tap-deploy-key, the whole file) as the
+#     HOMEBREW_TAP_DEPLOY_KEY Actions secret on THIS repo
+#     (Settings → Secrets and variables → Actions), then delete the local files.
+#   A deploy key is scoped to the one repo, never expires, and isn't tied to a
+#   person's account, which is why it's used instead of a PAT.
 on:
   push:
     tags:
@@ -27,6 +46,9 @@ env:
   SERVER_IMAGE: companion-server
   CLOUD_IMAGE: companion-cloud
   WEB_IMAGE: companion-web
+  # Homebrew tap that the `homebrew-tap` job pushes homebrew/ into.
+  TAP_REPO: companionapp-cloud/homebrew-tap
+  TAP_BRANCH: main
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -122,12 +144,166 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
   # ---------------------------------------------------------------------------
+  # macOS desktop app. Wails v3 links against WebKit through cgo, so this can't be
+  # cross-compiled from Linux like the server. The arm64 runner builds both slices
+  # (Go passes the right -arch to clang for darwin/amd64) and lipo joins them into
+  # one universal binary. The bundle is ad-hoc signed: CI has no Apple signing
+  # identity, so users install with `--no-quarantine` (see homebrew/README.md).
+  # ---------------------------------------------------------------------------
+  desktop-macos:
+    name: desktop (macOS universal)
+    runs-on: macos-latest
+    outputs:
+      sha256: ${{ steps.pack.outputs.sha256 }}
+      asset: ${{ steps.pack.outputs.asset }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+          cache-dependency-path: |
+            apps/desktop/go.sum
+            core/go.sum
+
+      - name: Build webview frontend
+        run: |
+          npm ci
+          npm run build -w @companion/desktop-frontend
+
+      - name: Build universal binary
+        env:
+          CGO_ENABLED: "1"
+          # Matches LSMinimumSystemVersion in apps/desktop/packaging/Info.plist.
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+        run: |
+          mkdir -p build
+          GOARCH=arm64 go build -C apps/desktop -trimpath -ldflags="-s -w" -o "$(pwd)/build/companion-desktop-arm64" .
+          GOARCH=amd64 go build -C apps/desktop -trimpath -ldflags="-s -w" -o "$(pwd)/build/companion-desktop-amd64" .
+          lipo -create -output build/companion-desktop build/companion-desktop-arm64 build/companion-desktop-amd64
+          lipo -info build/companion-desktop
+
+      - name: Bundle, sign (ad-hoc) and zip
+        id: pack
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          app="build/Companion.app"
+          rm -rf "$app"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          cp apps/desktop/packaging/Info.plist "$app/Contents/Info.plist"
+          cp apps/desktop/packaging/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
+          cp build/companion-desktop "$app/Contents/MacOS/companion-desktop"
+          # Stamp the release version over the placeholder in the checked-in plist.
+          plutil -replace CFBundleShortVersionString -string "$version" "$app/Contents/Info.plist"
+          plutil -replace CFBundleVersion -string "$GITHUB_RUN_NUMBER" "$app/Contents/Info.plist"
+          codesign --force --sign - --identifier com.companion.desktop "$app"
+          codesign --verify --verbose=2 "$app"
+
+          asset="Companion-${version}-macos-universal.zip"
+          # ditto (not zip) keeps the bundle layout, symlinks and signature intact.
+          ditto -c -k --keepParent "$app" "build/$asset"
+          sha="$(shasum -a 256 "build/$asset" | cut -d' ' -f1)"
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+          ls -lh "build/$asset"
+          echo "sha256 $sha"
+
+      - name: Attach bundle to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: build/Companion-*-macos-universal.zip
+
+  # ---------------------------------------------------------------------------
+  # Publish to Homebrew: mirror this repo's homebrew/ folder into the tap repo
+  # with the cask's version + sha256 stamped from the bundle built above.
+  # Pre-releases (v1.2.3-rc1) are skipped so the tap only ever serves stable
+  # builds. The tap repo may be empty on the very first run.
+  # ---------------------------------------------------------------------------
+  homebrew-tap:
+    name: homebrew tap
+    runs-on: ubuntu-latest
+    needs: [desktop-macos]
+    if: ${{ !contains(github.event.inputs.tag || github.ref_name, '-') }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the tap deploy key
+        env:
+          DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DEPLOY_KEY" ]; then
+            echo "::error::HOMEBREW_TAP_DEPLOY_KEY secret is not set; cannot push to $TAP_REPO"
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/tap_deploy_key
+          chmod 600 ~/.ssh/tap_deploy_key
+          # Pin GitHub's host keys rather than trusting on first use.
+          ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          # Every git call in this job goes through this key and nothing else.
+          echo "GIT_SSH_COMMAND=ssh -i ~/.ssh/tap_deploy_key -o IdentitiesOnly=yes -o UserKnownHostsFile=~/.ssh/known_hosts" >> "$GITHUB_ENV"
+
+      - name: Sync homebrew/ into the tap and push
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          SHA256: ${{ needs.desktop-macos.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          remote="git@github.com:${TAP_REPO}.git"
+
+          # Clone the tap (works on an empty repo too; falls back to init if the
+          # repo has no default branch yet).
+          rm -rf tap
+          git clone --depth 1 --branch "$TAP_BRANCH" "$remote" tap 2>/dev/null \
+            || { git clone --depth 1 "$remote" tap; }
+          git -C tap checkout -B "$TAP_BRANCH"
+
+          # Mirror the folder. --delete keeps the tap identical to homebrew/;
+          # .git is the only thing preserved.
+          rsync -a --delete --exclude .git homebrew/ tap/
+
+          # Stamp the release into the cask.
+          cask="tap/Casks/companion.rb"
+          sed -i -E \
+            -e "s|^([[:space:]]*version )\"[^\"]*\"|\1\"${version}\"|" \
+            -e "s|^([[:space:]]*sha256 )\"[^\"]*\"|\1\"${SHA256}\"|" \
+            "$cask"
+          grep -E '^[[:space:]]*(version|sha256) ' "$cask"
+          if ! grep -q "version \"${version}\"" "$cask" || ! grep -q "sha256 \"${SHA256}\"" "$cask"; then
+            echo "::error::failed to stamp version/sha256 into $cask"
+            exit 1
+          fi
+
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "tap already up to date for ${version}"
+            exit 0
+          fi
+          git commit -m "companion ${version}" \
+            -m "Synced from companionapp-cloud/companion@${GITHUB_SHA} (tag ${TAG})."
+          git push origin "HEAD:${TAP_BRANCH}"
+
+  # ---------------------------------------------------------------------------
   # Once the images are pushed, append their GHCR links to the release notes.
   # ---------------------------------------------------------------------------
   release-notes:
     name: release notes
     runs-on: ubuntu-latest
-    needs: [server-binaries, images]
+    needs: [server-binaries, images, desktop-macos]
     steps:
       - uses: actions/checkout@v4
 
@@ -139,6 +315,16 @@ jobs:
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           version="${TAG#v}"
           notes=$(cat <<EOF
+
+          ### macOS desktop (Homebrew)
+
+          \`\`\`bash
+          brew install --cask --no-quarantine companionapp-cloud/tap/companion
+          \`\`\`
+
+          The bundle is ad-hoc signed, so \`--no-quarantine\` is required. Or download
+          \`Companion-${version}-macos-universal.zip\` above and run
+          \`xattr -dr com.apple.quarantine Companion.app\` after unzipping.
 
           ### Docker images
 

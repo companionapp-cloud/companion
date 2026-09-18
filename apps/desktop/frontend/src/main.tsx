@@ -6,7 +6,7 @@ import { Window } from "@wailsio/runtime";
 import { createElement } from "react";
 import { AppRegistry } from "react-native";
 import { App, setFocusWindowOpener, setCaptureWindowCloser, setTableMenuPresenter, setShortcutStore } from "@companion/app";
-import type { ShortcutBinding, ShortcutId } from "@companion/app";
+import type { ShortcutBinding, ShortcutId, WindowControls } from "@companion/app";
 import { createHttpBridge, documentsApi } from "@companion/core-bridge";
 import type { CoreBridge } from "@companion/core-bridge";
 import type { DocumentSource } from "@companion/editor";
@@ -78,11 +78,29 @@ setShortcutStore({
 // event (see ./tableMenu.ts + apps/desktop/table_menu.go).
 setTableMenuPresenter(desktopTableMenuPresenter());
 
-// macOS uses a transparent titlebar (main.go MacTitleBarHiddenInset), so content
-// draws under the traffic lights — reserve space for them. Windows/Linux keep their
-// native titlebar above the webview, so no inset is needed.
+// macOS uses a transparent titlebar (main.go MacTitleBarHiddenInset), so content draws
+// under the traffic lights and the shell has to keep clear of them: the rail pads its top
+// past their bottom edge, the toolbar beside it starts after their right edge and centres
+// on them vertically. Their box is measured from the real window (GET /chrome, see
+// apps/desktop/window_chrome_darwin.go) because macOS 26 draws them larger and lower than
+// earlier releases. Windows/Linux keep their native titlebar above the webview: /chrome
+// answers 204 and no inset applies.
 const isMac = /mac/i.test(navigator.platform || navigator.userAgent);
-const topInset = isMac ? 28 : 0;
+// Fallback if the measurement fails on macOS (macOS 26 geometry).
+const MAC_WINDOW_CONTROLS: WindowControls = { left: 80, top: 20, bottom: 34 };
+async function fetchWindowControls(): Promise<WindowControls | undefined> {
+  try {
+    const res = await fetch("/chrome");
+    if (res.status === 204) return undefined;
+    if (!res.ok) throw new Error(res.statusText);
+    const box = (await res.json()) as WindowControls;
+    if (!(box.left > 0 && box.bottom > box.top)) throw new Error("empty window-controls box");
+    return box;
+  } catch (err) {
+    console.warn("window controls: falling back to defaults", err);
+    return isMac ? MAC_WINDOW_CONTROLS : undefined;
+  }
+}
 
 // Reminders (PLAN §6.4): register OS notifications via the Go notifications service
 // rather than the shared web fallback, which the Wails webview can't honour.
@@ -94,15 +112,20 @@ const notificationScheduler = desktopNotificationScheduler();
 // paste — since desktop is DOM.
 const documentSource = desktopDocumentSource(core);
 
-const rootTag = document.getElementById("root")!;
-rootTag.innerHTML = "";
-AppRegistry.registerComponent(
-  "Companion",
-  // shell: "desktop" — the desktop app never renders the mobile shell, however narrow
-  // its window gets.
-  () => () => createElement(App, { core, shell: "desktop", topInset, notificationScheduler, documentSource }),
-);
-AppRegistry.runApplication("Companion", { rootTag });
+void fetchWindowControls().then((windowControls) => {
+  // The rail (and a focus window's drag strip) clear the lights' bottom edge.
+  const topInset = windowControls ? Math.ceil(windowControls.bottom) : 0;
+  const rootTag = document.getElementById("root")!;
+  rootTag.innerHTML = "";
+  AppRegistry.registerComponent(
+    "Companion",
+    // shell: "desktop" — the desktop app never renders the mobile shell, however narrow
+    // its window gets.
+    () => () =>
+      createElement(App, { core, shell: "desktop", topInset, windowControls, notificationScheduler, documentSource }),
+  );
+  AppRegistry.runApplication("Companion", { rootTag });
+});
 
 function desktopDocumentSource(core: CoreBridge): DocumentSource {
   const documents = documentsApi(core);

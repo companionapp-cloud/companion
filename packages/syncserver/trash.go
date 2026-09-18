@@ -29,6 +29,10 @@ func (s *Server) StartTrashCollector(ctx context.Context) {
 		} else if n > 0 {
 			log.Printf("trash collector: purged %d expired row(s)", n)
 		}
+		// Relay bookkeeping rides the same tick (PLAN-agents.md §5.1).
+		if err := s.ExpireRelayRequests(ctx); err != nil {
+			log.Printf("relay expiry: %v", err)
+		}
 	}
 	sweep()
 	go func() {

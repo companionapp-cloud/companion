@@ -1,13 +1,13 @@
 package bridge
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	cryptopkg "companion/core/crypto"
 	syncpkg "companion/core/sync"
-
-	"github.com/google/uuid"
 )
 
 // syncConfig holds the server endpoint + bearer token the client syncs against. The
@@ -30,18 +30,45 @@ func (c *Core) syncConfigure(payload []byte) ([]byte, error) {
 	if args.BaseURL == "" {
 		return nil, errors.New("baseUrl is required")
 	}
-	if c.sync.deviceID == "" {
-		id, err := uuid.NewV7()
-		if err != nil {
-			return nil, err
-		}
-		c.sync.deviceID = id.String()
-	}
-	if err := c.store.EnsureSyncState(c.sync.deviceID); err != nil {
+	// The device id is minted once per install (store.EnsureDeviceID) and reused here, so it is
+	// stable across restarts and matches the id local agents are pinned to.
+	id, err := c.store.EnsureDeviceID()
+	if err != nil {
 		return nil, err
 	}
+	c.sync.deviceID = id
 	c.sync.baseURL = args.BaseURL
 	c.sync.token = args.Token
+	// Relay + presence (PLAN-agents.md §5): register this device and, on a desktop that can
+	// host, keep the relay inbox open so other devices can drive the agents installed here.
+	// Reconfiguring (a token refresh) just updates credentials; the inbox loop keeps running.
+	if c.relay == nil {
+		c.relay = newRelayClient(args.BaseURL, args.Token, id)
+	} else {
+		c.relay.setCreds(args.BaseURL, args.Token)
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := c.registerDevice(ctx); err != nil {
+			return // best effort; the next sync's header heartbeat keeps last_seen fresh
+		}
+		_ = c.refreshPresence(ctx)
+		c.startHosting()
+	}()
+	return json.Marshal(map[string]bool{"ok": true})
+}
+
+// syncDisconnect forgets the server, stops hosting (so this device reads as offline elsewhere)
+// and clears presence.
+func (c *Core) syncDisconnect() ([]byte, error) {
+	c.stopHosting()
+	c.sync.baseURL, c.sync.token = "", ""
+	c.relay = nil
+	c.presence.mu.Lock()
+	c.presence.devices = nil
+	c.presence.mu.Unlock()
+	c.emitAgentsChanged()
 	return json.Marshal(map[string]bool{"ok": true})
 }
 
@@ -49,7 +76,9 @@ func (c *Core) syncConfigure(payload []byte) ([]byte, error) {
 // encryption when the store is unlocked. A nil master key leaves it in plaintext mode — the shell
 // must unlock before syncing an encrypted account, or it would push plaintext (PLAN §E2EE).
 func (c *Core) newSyncEngine() *syncpkg.Engine {
-	engine := syncpkg.New(c.store, syncpkg.NewHTTPTransport(c.sync.baseURL, c.sync.token), nil)
+	transport := syncpkg.NewHTTPTransport(c.sync.baseURL, c.sync.token)
+	transport.DeviceID = c.sync.deviceID
+	engine := syncpkg.New(c.store, transport, nil)
 	if mk := c.getMasterKey(); mk != nil {
 		engine.SetCipher(cryptopkg.NewCipher(mk))
 	}
@@ -78,6 +107,15 @@ func (c *Core) syncRun() ([]byte, error) {
 	if pc := c.store.Notes.PendingConflict(); pc != nil {
 		payload, _ := json.Marshal(noteConflictInfo(pc))
 		c.emit(notesConflictEvent, payload)
+	}
+	// Presence piggybacks on the sync cadence: who is online decides which hosted agents the
+	// composer lets you pick. Best effort and off the critical path.
+	if c.relay != nil {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = c.refreshPresence(ctx)
+		}()
 	}
 	return json.Marshal(map[string]bool{"ok": true})
 }

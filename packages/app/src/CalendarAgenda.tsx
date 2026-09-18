@@ -17,6 +17,17 @@ import {
 } from "@companion/design-system";
 import { useCalendar } from "./CalendarProvider";
 
+/** The local calendar day ('YYYY-MM-DD') an item falls on. All-day items (dated notes,
+ *  all-day events) carry a date-only marker stored as midnight UTC; converting that instant
+ *  to local time would shift it a day in some zones, so their date portion is used directly.
+ *  Timed items use their instant in the user's timezone. */
+export function itemDay(item: CalendarItem): string {
+  if (item.allDay) return item.startsAt.slice(0, 10);
+  const d = new Date(item.startsAt);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 // Per-kind accent for the touch agenda dot (PLAN §6.7). Events lean neutral, tasks read blue,
 // dated notes read green — one glance tells you what a line is.
 const KIND_COLOR: Record<CalendarItemKind, string> = {

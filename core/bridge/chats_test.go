@@ -18,9 +18,8 @@ func TestChatsBackgroundRun(t *testing.T) {
 
 	c, _ := newTestCore(t)
 	c.SetSecretStore(newFakeSecrets())
-	if _, err := c.Invoke("llm.configs.create", mustJSON(map[string]any{
-		"scope": "device", "name": "Local", "baseUrl": srv.URL + "/v1",
-		"provider": "openai-compatible", "isDefault": true,
+	if _, err := c.Invoke("agents.install", mustJSON(map[string]any{
+		"name": "Local", "runtime": "openai-compatible", "baseUrl": srv.URL + "/v1", "isDefault": true,
 	})); err != nil {
 		t.Fatalf("config: %v", err)
 	}

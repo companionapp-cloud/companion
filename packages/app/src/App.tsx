@@ -9,7 +9,7 @@ import { NotesProvider } from "./NotesProvider";
 import { TasksProvider } from "./TasksProvider";
 import { ProjectsProvider } from "./ProjectsProvider";
 import { ObjectTypesProvider } from "./ObjectTypesProvider";
-import { AppShell } from "./AppShell";
+import { AppShell, type WindowControls } from "./AppShell";
 import { MobileWebShell } from "./mobile/MobileShell";
 import { useMobileWebShell } from "./mobile/shellMode";
 import type { NotificationScheduler } from "./RemindersProvider";
@@ -24,17 +24,19 @@ import { captureRequested } from "./capture";
 function ShellSwitch({
   shell,
   topInset,
+  windowControls,
   notificationScheduler,
 }: {
   shell?: "auto" | "desktop";
   topInset?: number;
+  windowControls?: WindowControls;
   notificationScheduler?: NotificationScheduler;
 }) {
   const mobile = useMobileWebShell() && shell !== "desktop";
   return mobile ? (
     <MobileWebShell topInset={topInset} notificationScheduler={notificationScheduler} />
   ) : (
-    <AppShell topInset={topInset} notificationScheduler={notificationScheduler} />
+    <AppShell topInset={topInset} windowControls={windowControls} notificationScheduler={notificationScheduler} />
   );
 }
 
@@ -49,6 +51,7 @@ export function App({
   core,
   shell = "auto",
   topInset,
+  windowControls,
   notificationScheduler,
   documentSource,
 }: {
@@ -57,7 +60,12 @@ export function App({
    *  widths get the mobile stacked shell. The desktop app pins "desktop": it must never
    *  render the mobile shell, however narrow its window. */
   shell?: "auto" | "desktop";
+  /** Space to reserve at the top of the page for native chrome drawn over it (the macOS
+   *  traffic lights on desktop, the status bar on mobile). */
   topInset?: number;
+  /** The box native window controls occupy over the page (macOS traffic lights, measured
+   *  by the desktop host). The desktop shell lines its toolbar up with them. */
+  windowControls?: WindowControls;
   /** Platform reminder scheduler (PLAN §6.4). Desktop/mobile shells inject a native
    *  one; omitted, RemindersProvider falls back to the best-effort web scheduler. */
   notificationScheduler?: NotificationScheduler;
@@ -102,7 +110,7 @@ export function App({
             </TasksProvider>
           </NotesProvider>
         ) : (
-          <ShellSwitch shell={shell} topInset={topInset} notificationScheduler={notificationScheduler} />
+          <ShellSwitch shell={shell} topInset={topInset} windowControls={windowControls} notificationScheduler={notificationScheduler} />
         )}
         </SyncProvider>
       </DocumentSourceProvider>

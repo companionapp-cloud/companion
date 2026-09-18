@@ -134,13 +134,14 @@ export function ProjectView() {
   const sections = SECTIONS.filter((s) => !hidden.has(s.tool));
   // The bare project URL lands on the first section's list (with nothing selected).
   const section: ProjectSection | undefined = loc.section ?? sections[0]?.id;
+  const doneCount = tasks.filter((t) => t.status === "done").length;
+  // The tasks chip counts what's left to do, not everything ever added to the project.
   const counts: Partial<Record<ProjectSection, number>> = {
     notes: notes.length,
-    tasks: tasks.length + seeds.length,
+    tasks: tasks.length - doneCount,
     lists: projectLists.length,
     canvases: canvases.length,
   };
-  const doneCount = tasks.filter((t) => t.status === "done").length;
 
   return (
     <View style={styles.root}>

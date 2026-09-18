@@ -16,16 +16,19 @@ import (
 // carry title/location/description, so a client-side fetch design (feeds fetched on-device, events
 // pushed like any entity) keeps them opaque to the server.
 var protectedFields = map[string][]string{
-	protocol.EntityNote:          {"title", "contentMd", "props"},
-	protocol.EntityTask:          {"title", "notesMd", "props"},
-	protocol.EntityArea:          {"name"},
-	protocol.EntityProject:       {"name"},
-	protocol.EntityList:          {"name"},
-	protocol.EntityListItem:      {"title"},
-	protocol.EntityObjectType:    {"name", "schemaJson"},
-	protocol.EntityDocument:      {"filename"},
-	protocol.EntityChat:          {"title"},
-	protocol.EntityChatMessage:   {"text", "toolCalls", "toolResults"},
+	protocol.EntityNote:        {"title", "contentMd", "props"},
+	protocol.EntityTask:        {"title", "notesMd", "props"},
+	protocol.EntityArea:        {"name"},
+	protocol.EntityProject:     {"name"},
+	protocol.EntityList:        {"name"},
+	protocol.EntityListItem:    {"title"},
+	protocol.EntityObjectType:  {"name", "schemaJson"},
+	protocol.EntityDocument:    {"filename"},
+	protocol.EntityChat:        {"title"},
+	protocol.EntityChatMessage: {"text", "toolCalls", "toolResults"},
+	// Agents (PLAN-agents.md §1.3): the name, endpoint, API key, binary path, host display name and
+	// settings are content; runtime, host device id and default flag stay plaintext for routing.
+	protocol.EntityAgent:         {"name", "baseUrl", "apiKeyEnc", "binaryPath", "hostName", "settingsJson"},
 	protocol.EntityCalendarFeed:  {"name", "url", "icsText"},
 	protocol.EntityCalendarEvent: {"title", "location", "description", "icsUid"},
 	// Canvas content: the board name, each node's kind-specific payload (sticky text, group label,

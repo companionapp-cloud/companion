@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { StyleSheet, View } from "react-native";
+import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import { dragRegion } from "./platform";
 import { Text } from "./Text";
 import { colors, layout, radius, space } from "./tokens";
@@ -7,8 +7,8 @@ import { colors, layout, radius, space } from "./tokens";
 /** The toolbar sits directly on the app canvas — no fill, no border. It doubles as a
  * window drag handle on desktop (interactive children opt out via noDragRegion).
  * `dense` is the 28px sub-toolbar used inside a panel. */
-export function Toolbar({ children, dense = false }: { children?: ReactNode; dense?: boolean }) {
-  return <View style={[styles.toolbar, dense ? styles.toolbarDense : dragRegion]}>{children}</View>;
+export function Toolbar({ children, dense = false, style }: { children?: ReactNode; dense?: boolean; style?: StyleProp<ViewStyle> }) {
+  return <View style={[styles.toolbar, dense ? styles.toolbarDense : dragRegion, style]}>{children}</View>;
 }
 
 /** Icon + label lockup for a toolbar or pane header. */

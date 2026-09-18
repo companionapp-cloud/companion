@@ -26,6 +26,9 @@ const (
 	EntityDocument    = "document"
 	EntityChat        = "chat"
 	EntityChatMessage = "chat_message"
+	// An installed AI agent (PLAN-agents.md): cloud API or a desktop-hosted local tool. The
+	// runtime and host device id stay plaintext so any device can route to the host.
+	EntityAgent = "agent"
 	// A read receipt for one in-app notification fire (PLAN §6.4).
 	EntityNotificationRead = "notification_read"
 	// A user-authored ICS subscription (PLAN §6.7). Feeds sync bidirectionally.

@@ -25,6 +25,8 @@ export interface TasksStore {
   tasks: Task[];
   /** The list the global browse view shows: `tasks` narrowed by `filter` (PLAN §6.6). */
   visible: Task[];
+  /** Open (not done) tasks in no project, regardless of `filter` — what the sidebar badge counts. */
+  openUnsorted: Task[];
   filter: TaskFilter;
   setFilter: (f: TaskFilter) => void;
   /** Repeating-task definitions (seeds), each with its next occurrence. Seeds are excluded
@@ -142,6 +144,10 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     [api, syncTrigger],
   );
 
+  const openUnsorted = useMemo(
+    () => tasks.filter((t) => t.status !== "done" && !memberIds.has(t.id)),
+    [tasks, memberIds],
+  );
   const visible = useMemo(() => {
     switch (filter) {
       case "all":
@@ -158,6 +164,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     () => ({
       tasks,
       visible,
+      openUnsorted,
       filter,
       setFilter,
       seeds,
@@ -170,7 +177,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
       remove,
       removeMany,
     }),
-    [tasks, visible, filter, seeds, loading, create, update, setStatus, remove, removeMany],
+    [tasks, visible, openUnsorted, filter, seeds, loading, create, update, setStatus, remove, removeMany],
   );
 
   return <TasksCtx.Provider value={value}>{children}</TasksCtx.Provider>;

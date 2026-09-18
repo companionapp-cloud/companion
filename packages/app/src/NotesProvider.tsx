@@ -11,6 +11,8 @@ export interface NotesStore {
   notes: Note[];
   /** The list the global browse view shows: `notes` narrowed by `filter`, minus daily notes. */
   visible: Note[];
+  /** Browse notes in no project, regardless of `filter` — what the sidebar badge counts. */
+  unsorted: Note[];
   filter: MembershipFilter;
   setFilter: (f: MembershipFilter) => void;
   loading: boolean;
@@ -127,15 +129,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   // Daily notes (stamped with a `date`) live under Today, not in the browse list — they'd
   // otherwise flood it with one entry per day. `notes` still carries them for lookups.
-  const visible = useMemo(
-    () => notes.filter((n) => !n.date && (filter === "all" || !memberIds.has(n.id))),
-    [notes, memberIds, filter],
-  );
+  const unsorted = useMemo(() => notes.filter((n) => !n.date && !memberIds.has(n.id)), [notes, memberIds]);
+  const visible = useMemo(() => (filter === "all" ? notes.filter((n) => !n.date) : unsorted), [notes, unsorted, filter]);
 
   const value = useMemo<NotesStore>(
     () => ({
       notes,
       visible,
+      unsorted,
       filter,
       setFilter,
       loading,
@@ -146,7 +147,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       save,
       update,
     }),
-    [notes, visible, filter, loading, create, remove, removeMany, save, update],
+    [notes, visible, unsorted, filter, loading, create, remove, removeMany, save, update],
   );
 
   return <NotesCtx.Provider value={value}>{children}</NotesCtx.Provider>;

@@ -93,8 +93,18 @@ const PLACEHOLDER: Record<PlaceholderView, string> = {
   habits: "Habits, streaks, and gentle nudges are on the way.",
 };
 
+/** The box native window controls (macOS traffic lights) occupy over the page, in CSS px
+ * from the window's top-left. Measured by the desktop host (apps/desktop /chrome). */
+export interface WindowControls {
+  left: number;
+  top: number;
+  bottom: number;
+}
+
 export interface AppShellProps {
   topInset?: number;
+  /** Native window controls drawn over the page; the shell keeps its toolbar clear of them. */
+  windowControls?: WindowControls;
   /** Per-platform reminder scheduler (PLAN §6.4); passed straight to RemindersProvider.
    *  When omitted it uses the best-effort web `Notification` scheduler. */
   notificationScheduler?: NotificationScheduler;
@@ -116,7 +126,8 @@ function webLinking(): LinkingOptions<ParamListBase> | undefined {
     prefixes: [window.location.origin],
     config: {
       screens: {
-        today: "today",
+        // Today takes an optional day (/today/2026-07-08) so a dated note can deep-link.
+        today: "today/:date?",
         chat: "chat",
         calendar: "calendar",
         // notes/tasks are the workspace browse lists; the active tab's open document is
@@ -146,6 +157,7 @@ function RouteAnchor() {
 
 interface RouteParams {
   id?: string;
+  date?: string;
   projectId?: string;
   section?: string;
   itemId?: string;
@@ -179,7 +191,7 @@ function refOfRoute(route: RouteLike): TabRef {
       subItemId: p.subItemId,
     };
   }
-  return { kind: "view", view: route.name as SurfaceViewId };
+  return { kind: "view", view: route.name as SurfaceViewId, date: route.name === "today" ? p.date : undefined };
 }
 
 /** The route that mirrors a tab's contents into the URL. */
@@ -188,7 +200,7 @@ function routeOfRef(ref: TabRef): { name: string; params?: RouteParams } {
     case "browse":
       return { name: ref.section };
     case "view":
-      return { name: ref.view };
+      return ref.date ? { name: ref.view, params: { date: ref.date } } : { name: ref.view };
     case "project":
       return { name: "project", params: { projectId: ref.projectId, section: ref.section, itemId: ref.itemId, subItemId: ref.subItemId } };
     default:
@@ -201,11 +213,13 @@ function CompanionNavigator({
   children,
   screenOptions,
   topInset,
+  windowControls,
 }: {
   initialRouteName?: string;
   children: ReactNode;
   screenOptions?: unknown;
   topInset: number;
+  windowControls?: WindowControls;
 }) {
   const { state, navigation, NavigationContent } = useNavigationBuilder(StackRouter, {
     initialRouteName,
@@ -215,7 +229,7 @@ function CompanionNavigator({
   });
   return (
     <NavigationContent>
-      <NavBridge state={state} navigation={navigation} topInset={topInset} />
+      <NavBridge state={state} navigation={navigation} topInset={topInset} windowControls={windowControls} />
     </NavigationContent>
   );
 }
@@ -227,7 +241,17 @@ const Nav = createCompanionNavigator();
 /** Builds the useNav() API. Tabs are the source of truth: each holds a surface and its own
  * Back/Forward history. The router mirrors the active tab (URL + browser history) and
  * feeds deep links / browser Back into it. */
-function NavBridge({ state, navigation, topInset }: { state: StateLike; navigation: NavLike; topInset: number }) {
+function NavBridge({
+  state,
+  navigation,
+  topInset,
+  windowControls,
+}: {
+  state: StateLike;
+  navigation: NavLike;
+  topInset: number;
+  windowControls?: WindowControls;
+}) {
   const route = state.routes[state.index];
 
   // Always ≥ 1 tab. Tabs are session state; the first is seeded from the landing route (a
@@ -364,7 +388,7 @@ function NavBridge({ state, navigation, topInset }: { state: StateLike; navigati
       <ReminderNavigationBridge />
       <MultiSelectProvider>
         <DndProvider>
-          <Shell topInset={topInset} />
+          <Shell topInset={topInset} windowControls={windowControls} />
         </DndProvider>
       </MultiSelectProvider>
     </NavContext.Provider>
@@ -396,7 +420,7 @@ function ReminderNavigationBridge() {
   return null;
 }
 
-export function AppShell({ topInset = 0, notificationScheduler, toolsStorage }: AppShellProps) {
+export function AppShell({ topInset = 0, windowControls, notificationScheduler, toolsStorage }: AppShellProps) {
   return (
     <ToolVisibilityProvider storage={toolsStorage}>
     <NotesProvider>
@@ -408,7 +432,7 @@ export function AppShell({ topInset = 0, notificationScheduler, toolsStorage }: 
          <CanvasesProvider>
          <ObjectTypesProvider>
           <CalendarProvider>
-          <ShellRoutes topInset={topInset} />
+          <ShellRoutes topInset={topInset} windowControls={windowControls} />
           </CalendarProvider>
          </ObjectTypesProvider>
          </CanvasesProvider>
@@ -425,13 +449,13 @@ export function AppShell({ topInset = 0, notificationScheduler, toolsStorage }: 
 /** The router + screens. Lives under ToolVisibilityProvider so a fresh landing (no URL
  * path to restore) starts on the user's first *visible* tool, not a hardcoded section.
  * Settings is the fallback — it's the one view that can't be hidden. */
-function ShellRoutes({ topInset }: { topInset: number }) {
+function ShellRoutes({ topInset, windowControls }: { topInset: number; windowControls?: WindowControls }) {
   const linking = useMemo(webLinking, []);
   const { tools, hidden } = useToolVisibility();
   const initialRoute = tools.find((t) => !hidden.has(t.id))?.id ?? "settings";
   return (
     <NavigationContainer linking={linking} documentTitle={{ enabled: false }}>
-      <Nav.Navigator initialRouteName={initialRoute} topInset={topInset}>
+      <Nav.Navigator initialRouteName={initialRoute} topInset={topInset} windowControls={windowControls}>
         <Nav.Screen name="today" component={RouteAnchor} />
         <Nav.Screen name="chat" component={RouteAnchor} />
         <Nav.Screen name="calendar" component={RouteAnchor} />
@@ -451,7 +475,7 @@ function ShellRoutes({ topInset }: { topInset: number }) {
 
 /** The persistent chrome: a hover-reveal rail beside an inset Frame (toolbar with the tab
  * strip over the content panel), and a mono status bar spanning the window beneath both. */
-function Shell({ topInset }: { topInset: number }) {
+function Shell({ topInset, windowControls }: { topInset: number; windowControls?: WindowControls }) {
   const nav = useNav();
   const sync = useSync();
   const dnd = useDnd();
@@ -494,6 +518,16 @@ function Shell({ topInset }: { topInset: number }) {
     return () => clearTimeout(t);
   }, [dragNearRail, dnd.remeasure]);
   const expanded = open || pinned || dragNearRail;
+  const railWidth = expanded ? layout.railOpenW : layout.railW;
+  // macOS traffic lights sit over the rail's padded top, but they're wider than the
+  // collapsed rail — push the toolbar (and the sync banner above it) past their right
+  // edge. Nothing to do once the rail is open, or on platforms with a native titlebar.
+  const chromeInset = windowControls ? Math.max(0, windowControls.left - railWidth) : 0;
+  // And line the toolbar up with them vertically: pad it so its row is centred on the
+  // lights, mirrored below so the content panel gets the same breathing room.
+  const toolbarInset = windowControls
+    ? Math.max(0, Math.round((windowControls.top + windowControls.bottom) / 2 - layout.toolbarH / 2))
+    : 0;
   const activeProjectId = nav.current.kind === "project" ? nav.current.projectId : null;
 
   // Sync on navigation (§5.4). Key on the active tab's contents so every move fires.
@@ -524,9 +558,9 @@ function Shell({ topInset }: { topInset: number }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [addTab]);
 
-  const openTaskCount = useMemo(() => tasks.tasks.filter((t) => t.status !== "done").length, [tasks.tasks]);
+  // Sidebar badges count what needs sorting: notes in no project, and open tasks in no project.
   const badgeFor = (id: string) =>
-    id === "notes" ? countLabel(notes.notes.length) : id === "tasks" ? countLabel(openTaskCount) : undefined;
+    id === "notes" ? countLabel(notes.unsorted.length) : id === "tasks" ? countLabel(tasks.openUnsorted.length) : undefined;
   const railIcon = (name: IconName, id: string) => (
     <Icon name={name} size={icon.lg} color={nav.activeView === id ? colors.textAccent : colors.textSecondary} />
   );
@@ -540,7 +574,7 @@ function Shell({ topInset }: { topInset: number }) {
           style={[
             dragRegion,
             styles.rail,
-            { width: expanded ? layout.railOpenW : layout.railW, paddingTop: space.md + topInset },
+            { width: railWidth, paddingTop: space.md + topInset },
             transition("width", motion.medium),
           ]}
         >
@@ -606,8 +640,8 @@ function Shell({ topInset }: { topInset: number }) {
 
         <View style={{ flex: 1, minWidth: 0 }}>
           {/* Sync health: prompts re-auth / unlock in Settings when sync is blocked (§7). */}
-          <SyncHealthBanner onOpenSettings={() => nav.goView("settings")} />
-          <Frame toolbar={<AppToolbar onCapture={() => setCaptureOpen(true)} />}>
+          <SyncHealthBanner onOpenSettings={() => nav.goView("settings")} leftInset={chromeInset} />
+          <Frame toolbar={<AppToolbar onCapture={() => setCaptureOpen(true)} leftInset={chromeInset} verticalInset={toolbarInset} />}>
             {/* Every tab's surface stays mounted and only the active one is shown, so an
                 editor's draft, a chat's scroll or a graph's layout survives a tab switch. */}
             {nav.tabs.map((tab, i) => (

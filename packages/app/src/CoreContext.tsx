@@ -1,5 +1,7 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import {
+  agentsApi,
+  devicesApi,
   calendarApi,
   canvasesApi,
   chatsApi,
@@ -13,6 +15,8 @@ import {
   projectsApi,
   tasksApi,
   trashApi,
+  type AgentsApi,
+  type DevicesApi,
   type CalendarApi,
   type CanvasesApi,
   type ChatsApi,
@@ -41,6 +45,8 @@ interface CoreValue {
   notify: NotifyApi;
   dates: DatesApi;
   llm: LlmApi;
+  agents: AgentsApi;
+  devices: DevicesApi;
   chats: ChatsApi;
   calendar: CalendarApi;
   canvases: CanvasesApi;
@@ -63,6 +69,8 @@ export function CoreProvider({ core, children }: { core: CoreBridge; children: R
       notify: notifyApi(core),
       dates: datesApi(core),
       llm: llmApi(core),
+      agents: agentsApi(core),
+      devices: devicesApi(core),
       chats: chatsApi(core),
       calendar: calendarApi(core),
       canvases: canvasesApi(core),
