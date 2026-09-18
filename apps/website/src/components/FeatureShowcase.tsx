@@ -118,7 +118,8 @@ export function FeatureShowcase() {
             </svg>
           </div>
         </div>
-        <div style={{ height: 480, background: "#f5f5f3" }}>
+        {/* The mockup sets its own height: the app window's aspect ratio at this width. */}
+        <div style={{ background: "#f5f5f3" }}>
           <FeatureMockups feature={feature} />
         </div>
       </div>
