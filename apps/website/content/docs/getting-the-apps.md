@@ -26,13 +26,7 @@ brew install --cask companionapp-cloud/tap/companion
 
 That adds the Companion tap and puts **Companion** in your Applications folder. Open it from Launchpad or Spotlight.
 
-Companion keeps itself up to date. When a new version comes out, it downloads it, installs it and restarts. Versions 0.6.1 and earlier don't, so if you have one of those, upgrade once through Homebrew:
-
-```bash
-brew upgrade --cask companion
-```
-
-Companion isn't notarized by Apple yet, so the cask clears the app's quarantine flag after installing it — without that, macOS would refuse to open it.
+Companion keeps itself up to date. When a new version comes out, it downloads it, installs it and restarts. 
 :::
 ::: tab Windows
 **Coming soon.** There's no Windows build to download yet. Until there is, [use Companion on the web](#use-companion-on-the-web) — it runs in any modern browser.
