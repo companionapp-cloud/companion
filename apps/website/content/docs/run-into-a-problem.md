@@ -2,7 +2,7 @@
 title: Run into a problem?
 group: Troubleshooting
 groupIcon: settings
-groupOrder: 5
+groupOrder: 6
 order: 1
 excerpt: Start here for the most common fixes.
 featured: true

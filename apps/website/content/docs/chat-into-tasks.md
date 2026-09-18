@@ -2,7 +2,7 @@
 title: Turning chat into tasks
 group: Made for AI
 groupIcon: chat
-groupOrder: 4
+groupOrder: 5
 order: 2
 excerpt: Let the AI create real notes and tasks from a conversation.
 badge: Made for AI

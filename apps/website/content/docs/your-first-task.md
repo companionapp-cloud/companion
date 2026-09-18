@@ -8,7 +8,7 @@ excerpt: Track something you need to get done.
 badge: Get started
 readTime: 3 min read
 updated: Jul 2026
-related: [your-first-note, your-first-project]
+related: [creating-and-linking-tasks, your-first-project]
 ---
 
 Tasks are how intentions become done. They can stand on their own, hang off a note, or be created for you by the AI from a conversation.
@@ -33,10 +33,10 @@ Click **Add due date** and type it how you'd say it: "tomorrow", "next friday", 
 
 The list header is a filter. **Unsorted tasks** (the default) shows everything that isn't in a project yet; **All tasks**, **Upcoming tasks**, and **Overdue tasks** do what they say. Overdue tasks stay on their original date rather than rolling forward — nothing quietly rewrites your history.
 
-Tasks also surface on [Today](/docs/today-home-base) and in the [calendar](/docs/calendar-and-reminders), next to your events.
+Tasks also surface on [Today](/docs/today-home-base) and in the [calendar](/docs/calendars), next to your events.
 
 > **Tip:** Tasks can be linked from any note with `[[`, and given structured fields with an [object type](/docs/object-types), exactly like notes.
 
 ## Next steps
 
-Group your work with [your first project](/docs/your-first-project), or see how [chat turns into tasks](/docs/chat-into-tasks).
+Go deeper with [creating & linking tasks](/docs/creating-and-linking-tasks), group your work with [your first project](/docs/your-first-project), or see how [chat turns into tasks](/docs/chat-into-tasks).
