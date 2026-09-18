@@ -33,10 +33,10 @@ import {
   type SimulationLinkDatum,
   type SimulationNodeDatum,
 } from "d3-force";
-import { Icon, colors, type IconName } from "@companion/design-system";
+import { Icon, colors, control, font, layout, motion, radius, space, useTheme, type IconName } from "@companion/design-system";
 import type { Graph, GraphNode } from "@companion/core-bridge";
 import { DEFAULT_PHYSICS, applyGraphFilters, nodeKey, typeColor, type GraphPhysics } from "./graphModel";
-import { GraphMenu, useGraphSettings } from "./GraphMenu.web";
+import { GRAPH_CHROME_CSS, GraphMenu, useGraphSettings } from "./GraphMenu.web";
 
 export { nodeKey };
 
@@ -48,6 +48,47 @@ const GraphOpenContext = createContext<OpenNodeHandler>(() => {});
 /** Report which node the pointer is over (its key, or null on leave) up to GraphCanvas so
  * the edge layers can highlight that node's connections. */
 const GraphHoverContext = createContext<(id: string | null) => void>(() => {});
+
+/** What a tap/click on a node reports to the host — every node kind, ghosts included. */
+export interface GraphSelection {
+  /** The node's composite key (`nodeKey(type, id)`), the same value `selectedKey` takes. */
+  key: string;
+  type: string;
+  id: string;
+  label: string;
+  /** Undirected connection count within the graph as currently filtered. */
+  degree: number;
+  ghost: boolean;
+}
+export type SelectNodeHandler = (node: GraphSelection | null) => void;
+
+/** Selection plumbing for the node renderer: the host's handler, the key it wants drawn as
+ * selected, and whether the pointer is coarse (no hover on phones, so no hover popup). */
+const GraphSelectContext = createContext<{ onSelect: SelectNodeHandler | null; selectedKey: string | null; coarse: boolean }>({
+  onSelect: null,
+  selectedKey: null,
+  coarse: false,
+});
+
+/** Whether the primary pointer is coarse (a finger). Live, for convertibles. */
+function useCoarsePointer(): boolean {
+  const query = "(pointer: coarse)";
+  const [coarse, setCoarse] = useState(() => typeof window !== "undefined" && !!window.matchMedia?.(query).matches);
+  useEffect(() => {
+    const mq = typeof window !== "undefined" ? window.matchMedia?.(query) : undefined;
+    if (!mq) return;
+    const on = () => setCoarse(mq.matches);
+    on();
+    // Safari < 14 only has the deprecated addListener.
+    if (mq.addEventListener) mq.addEventListener("change", on);
+    else mq.addListener(on);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", on);
+      else mq.removeListener(on);
+    };
+  }, []);
+  return coarse;
+}
 
 // The React Flow renderer shared by the full knowledgebase graph (GraphScreen) and the
 // per-note neighborhood (NoteGraph). React Flow is DOM-only, so this whole module is
@@ -143,27 +184,31 @@ const handleStyle: CSSProperties = {
   border: "none",
 };
 
+// The hover popup floats above the canvas, so it is the one piece of node chrome with a
+// shadow: overlay surface, hairline, 6px radius, the menu shadow.
 const popupStyle: CSSProperties = {
   position: "absolute",
-  bottom: "calc(100% + 8px)",
+  bottom: "calc(100% + 6px)",
   left: "50%",
   transform: "translateX(-50%)",
   zIndex: 1000,
   display: "flex",
   alignItems: "center",
-  gap: 6,
+  gap: space.xs,
   maxWidth: 240,
-  padding: "6px 8px 6px 12px",
-  borderRadius: 8,
-  background: colors.surfaceCard,
+  height: control.md,
+  padding: `0 ${space.sm}px 0 ${space.md}px`,
+  borderRadius: radius.lg,
+  background: colors.surfaceOverlay,
   border: `1px solid ${colors.borderSubtle}`,
-  boxShadow: "0 6px 20px rgba(0,0,0,0.12)",
+  boxShadow: "0 4px 12px rgba(17,17,16,0.1)",
   cursor: "pointer",
-  font: "inherit",
+  fontFamily: font.sans,
 };
 
 const popupLabelStyle: CSSProperties = {
-  fontSize: 12,
+  fontSize: font.size.sm,
+  fontWeight: font.weight.medium,
   color: colors.textPrimary,
   whiteSpace: "nowrap",
   overflow: "hidden",
@@ -178,13 +223,14 @@ const truncateLabel = (s: string) => (s.length > LABEL_MAX ? s.slice(0, LABEL_MA
 
 const nodeLabelStyle: CSSProperties = {
   position: "absolute",
-  top: "calc(100% + 6px)",
+  top: "calc(100% + 3px)",
   left: "50%",
   transform: "translateX(-50%)",
   width: 132,
   textAlign: "center",
-  fontSize: 11,
-  lineHeight: 1.25,
+  fontFamily: font.sans,
+  fontSize: font.size.xs,
+  lineHeight: "13px",
   color: colors.textSecondary,
   overflowWrap: "break-word",
   pointerEvents: "none",
@@ -196,23 +242,87 @@ const fillStyle: CSSProperties = {
   right: 0,
   bottom: 0,
   left: 0,
-  background: colors.surfaceApp,
+  display: "flex",
+  flexDirection: "column",
+  background: colors.surfaceCard,
+  fontFamily: font.sans,
 };
+
+// The 28px sub-toolbar above the whole-knowledgebase graph (counts, fit, settings) and the
+// 22px mono legend beneath it. Per-note neighborhoods (no menu) get neither.
+const toolbarStyle: CSSProperties = {
+  position: "relative",
+  zIndex: 5,
+  display: "flex",
+  alignItems: "center",
+  gap: space.xxs,
+  // A minimum, so the coarse-pointer button size (GRAPH_CHROME_CSS) can grow the strip.
+  minHeight: layout.subToolbarH,
+  flexShrink: 0,
+  boxSizing: "border-box",
+  padding: `0 ${space.sm}px 0 ${space.ml}px`,
+  borderBottom: `1px solid ${colors.borderSubtle}`,
+};
+
+const legendStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: space.ml,
+  height: layout.statusbarH,
+  flexShrink: 0,
+  boxSizing: "border-box",
+  padding: `0 ${space.ml}px`,
+  borderTop: `1px solid ${colors.borderSubtle}`,
+  background: colors.surfaceApp,
+  overflow: "hidden",
+  whiteSpace: "nowrap",
+};
+
+const monoStyle: CSSProperties = {
+  fontFamily: font.mono,
+  fontSize: font.size.xs,
+  color: colors.textQuaternary,
+  whiteSpace: "nowrap",
+};
+
+const canvasFillStyle: CSSProperties = { position: "absolute", top: 0, right: 0, bottom: 0, left: 0 };
+
+// The legend strip: one ring per entity type, in its typeColor.
+const LEGEND: [string, string][] = [
+  ["note", "notes"],
+  ["task", "tasks"],
+  ["canvas", "canvases"],
+  ["project", "projects"],
+  ["document", "files"],
+];
+
+// React Flow's own chrome (zoom controls, edge labels), re-pointed at the tokens through its
+// --xy-* custom properties: flat, hairlined, no shadow.
+const GRAPH_FLOW_CSS = `
+.graph-flow.react-flow { --xy-background-color: transparent; --xy-edge-stroke: ${colors.borderStrong}; --xy-edge-label-background-color: ${colors.surfaceCard}; --xy-edge-label-color: ${colors.textTertiary}; --xy-controls-box-shadow: none; --xy-controls-button-background-color: ${colors.surfaceCard}; --xy-controls-button-background-color-hover: ${colors.surfaceHover}; --xy-controls-button-color: ${colors.textSecondary}; --xy-controls-button-color-hover: ${colors.textSecondary}; --xy-controls-button-border-color: ${colors.borderSubtle}; }
+.graph-flow .react-flow__controls { border: 1px solid ${colors.borderSubtle}; border-radius: ${radius.md}px; overflow: hidden; }
+.graph-flow .react-flow__controls-button { width: ${control.sm}px; height: ${control.sm}px; padding: 0; transition: background-color ${motion.instant}ms ${motion.ease}; }
+.graph-flow .react-flow__controls-button:active { background: ${colors.surfaceActive}; }
+.graph-flow .react-flow__controls-button svg { max-width: 10px; max-height: 10px; }
+.graph-flow .react-flow__edge-text { font-family: ${font.mono}; }
+`;
 
 export const graphEmptyStyle: CSSProperties = {
   ...fillStyle,
   display: "flex",
   alignItems: "center",
+  flexDirection: "row",
   justifyContent: "center",
-  padding: 48,
+  padding: space.xxl,
 };
 
 export const graphCodeStyle: CSSProperties = {
-  fontFamily: "ui-monospace, monospace",
-  fontSize: 12,
-  background: colors.surfaceCard,
-  padding: "1px 5px",
-  borderRadius: 5,
+  fontFamily: font.mono,
+  fontSize: font.size.xs,
+  background: colors.surfaceCode,
+  border: `1px solid ${colors.borderSubtle}`,
+  padding: "0 4px",
+  borderRadius: radius.xs,
 };
 
 // Icon per node type (the accent color per type is typeColor in graphModel.ts). Ghosts
@@ -222,6 +332,7 @@ const TYPE_ICON: Record<string, IconName> = {
   task: "tasks",
   habit: "dot",
   project: "folder",
+  document: "file",
   canvas: "canvas",
 };
 
@@ -243,6 +354,16 @@ function nodeColor(entityType: string, objectTypeId: string | null, objectColor?
   if (objectColor) return objectColor;
   if (objectTypeId) return OBJECT_TYPE_PALETTE[hashString(objectTypeId) % OBJECT_TYPE_PALETTE.length];
   return typeColor(entityType);
+}
+
+// On web a colour role is a CSS `var(--c-…)` string. That is fine for DOM styles and SVG
+// attributes, but a 2D canvas context can't parse it — so the base layer resolves each role
+// to the literal the active theme currently gives it. Literal colours (archetype swatches)
+// pass straight through. Read per paint, so a theme switch just needs a repaint.
+function resolveCanvasColor(color: string, root: CSSStyleDeclaration): string {
+  const m = /^var\((--[\w-]+)\)$/.exec(color);
+  if (!m) return color;
+  return root.getPropertyValue(m[1]).trim() || "#888";
 }
 
 /** Build the render node set: real nodes plus ghosts synthesized from any edge endpoint
@@ -364,17 +485,20 @@ function toFlowEdges(edges: Graph["edges"], large: boolean): Edge[] {
       id: `e${i}`,
       source: nodeKey(e.sourceType, e.sourceId),
       target: nodeKey(e.targetType, e.targetId),
-      // Animated (marching-ants) edges run a continuous repaint each; kill them on large
-      // graphs. Straight edges + interactionWidth 0 also skip the second, invisible
-      // hit-area path React Flow renders per edge — halving edge DOM.
-      animated: embed && !large,
+      // Embeds are plain solid lines — nothing on the canvas loops or marches. Straight
+      // edges + interactionWidth 0 also skip the second, invisible hit-area path React Flow
+      // renders per edge — halving edge DOM.
       type: large ? "straight" : undefined,
       interactionWidth: large ? 0 : undefined,
       label: propField && !large ? propField : undefined,
-      labelStyle: propField ? { fill: colors.textTertiary, fontSize: 10 } : undefined,
-      labelBgStyle: propField ? { fill: colors.surfaceApp } : undefined,
+      // The field name is machine-generated, so it is 10px mono on the card surface.
+      labelStyle: propField ? { fill: colors.textTertiary, fontSize: font.size["2xs"], fontFamily: font.mono } : undefined,
+      labelBgStyle: propField ? { fill: colors.surfaceCard } : undefined,
+      labelBgPadding: propField ? [3, 1] : undefined,
+      labelBgBorderRadius: propField ? radius.xs : undefined,
       style: {
         stroke: colors.borderStrong,
+        strokeWidth: 1,
         // Solid for embeds, dotted for prop edges, dashed for plain refs.
         strokeDasharray: embed ? undefined : propField ? "1 3" : "4 4",
       },
@@ -506,6 +630,8 @@ function useForceLayout(simNodes: SimNode[], simLinks: SimLink[], large: boolean
 function CircleNode({ id, data }: NodeProps<CircleNode>) {
   const onOpenNode = useContext(GraphOpenContext);
   const onHover = useContext(GraphHoverContext);
+  const { onSelect, selectedKey, coarse } = useContext(GraphSelectContext);
+  const selected = selectedKey === id;
   const [hover, setHover] = useState(false);
   const enter = useCallback(() => {
     setHover(true);
@@ -529,12 +655,31 @@ function CircleNode({ id, data }: NodeProps<CircleNode>) {
     },
     [onOpenNode, navigable, data.entityType, data.entityId],
   );
+  // A tap selects, whatever the node is (canvases, files and ghosts included) — then opens,
+  // for hosts that navigate on tap. A touch host passes only onSelectNode and offers Open
+  // from its own bar.
+  const press = useCallback(
+    (e: ReactMouseEvent) => {
+      if (onSelect) {
+        // Keep the pane's click (which clears the selection) from also seeing this one.
+        e.stopPropagation();
+        onSelect({ key: id, type: data.entityType, id: data.entityId, label: data.label, degree: data.degree, ghost: data.ghost });
+      }
+      open(e);
+    },
+    [onSelect, open, id, data.entityType, data.entityId, data.label, data.degree, data.ghost],
+  );
 
+  // Selected: the accent 2px ring and a 4px soft-accent halo. Focus keeps its wider halo;
+  // hover (pointer only) steps to the active fill.
   const halo = data.focus
     ? `0 0 0 6px ${colors.accentSoft}`
-    : hover
-      ? `0 0 0 4px ${colors.surfaceActive}`
-      : "none";
+    : selected
+      ? `0 0 0 4px ${colors.accentSoft}`
+      : hover
+        ? `0 0 0 4px ${colors.surfaceActive}`
+        : "none";
+  const ring = selected ? colors.accent : accent;
 
   return (
     <div
@@ -556,13 +701,13 @@ function CircleNode({ id, data }: NodeProps<CircleNode>) {
           justifyContent: "center",
           boxSizing: "border-box",
           background: data.ghost ? "transparent" : colors.surfaceCard,
-          border: `${data.focus ? 3 : 2}px ${data.ghost ? "dashed" : "solid"} ${accent}`,
+          border: `${data.focus ? 3 : 2}px ${data.ghost && !selected ? "dashed" : "solid"} ${ring}`,
           opacity: data.ghost ? 0.65 : 1,
           boxShadow: halo,
-          transition: "box-shadow 120ms ease",
-          cursor: navigable ? "pointer" : "default",
+          transition: `box-shadow ${motion.fast}ms ${motion.ease}`,
+          cursor: navigable || onSelect ? "pointer" : "default",
         }}
-        onClick={open}
+        onClick={press}
       >
         <Icon name={iconName} size={iconSize} color={accent} />
       </div>
@@ -571,10 +716,11 @@ function CircleNode({ id, data }: NodeProps<CircleNode>) {
         {truncateLabel(data.label)}
       </div>
 
-      {hover ? (
+      {/* No hover on a phone — a tap would strand the popup, and the host's bar replaces it. */}
+      {hover && !coarse ? (
         <button type="button" style={popupStyle} onClick={open} disabled={!navigable}>
           <span style={popupLabelStyle}>{data.label}</span>
-          {navigable ? <Icon name="chevronRight" size={14} color={colors.textSecondary} /> : null}
+          {navigable ? <Icon name="chevronRight" size={12} color={colors.textQuaternary} /> : null}
         </button>
       ) : null}
     </div>
@@ -596,6 +742,15 @@ export interface GraphViewProps {
    * settings persist per device and apply only to views that show the menu, so the whole-
    * knowledgebase graph can be tuned without disturbing the per-note neighborhoods. */
   menu?: boolean;
+  /** Fires on a tap/click of ANY node (notes, tasks, projects, canvases, files, ghosts), and
+   * with null when the empty pane is tapped. Independent of onOpenNode, which still fires for
+   * navigable nodes — a touch host passes this alone and opens from its own bar. */
+  onSelectNode?: SelectNodeHandler;
+  /** Key (`nodeKey(type, id)`) of the node to draw as selected: accent ring + halo. */
+  selectedKey?: string | null;
+  /** Reports what is actually on screen after the Show filters (ghosts included), whenever
+   * it changes — for a host status line. */
+  onCounts?: (counts: { nodes: number; links: number }) => void;
 }
 
 /** Flow-space rectangle currently visible for a given viewport transform, padded by
@@ -668,22 +823,40 @@ function GraphBaseLayer({
   links,
   frame,
   hoveredId,
+  selectedId,
 }: {
   nodes: SimNode[];
   links: SimLink[];
   frame: number;
   hoveredId: string | null;
+  /** The host's selected node keeps its accent ring in the zoomed-out overview too. */
+  selectedId: string | null;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const transform = useStore((s) => s.transform);
   const width = useStore((s) => s.width);
   const height = useStore((s) => s.height);
+  // The theme is a dependency only so the canvas repaints (and re-resolves its colours)
+  // when it flips; the DOM layers follow the CSS variables on their own.
+  const theme = useTheme();
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !width || !height) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    // A canvas can't take `var(--c-…)`; resolve roles against the live theme, once per
+    // distinct colour per paint.
+    const root = getComputedStyle(document.documentElement);
+    const resolved = new Map<string, string>();
+    const paint = (c: string) => {
+      let v = resolved.get(c);
+      if (v === undefined) {
+        v = resolveCanvasColor(c, root);
+        resolved.set(c, v);
+      }
+      return v;
+    };
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const bw = Math.round(width * dpr);
@@ -700,7 +873,7 @@ function GraphBaseLayer({
     // Edges first, batched into one stroke (all share a color). d3-force resolves each
     // link's source/target to the node object, so read their live centers directly.
     ctx.lineWidth = 1 / zoom;
-    ctx.strokeStyle = colors.borderStrong;
+    ctx.strokeStyle = paint(colors.borderStrong);
     ctx.globalAlpha = 0.45;
     ctx.beginPath();
     for (const e of links) {
@@ -717,7 +890,7 @@ function GraphBaseLayer({
     // edges that touch it, drawn on top of the base edges.
     if (hoveredId) {
       ctx.lineWidth = 2 / zoom;
-      ctx.strokeStyle = colors.accent;
+      ctx.strokeStyle = paint(colors.accent);
       ctx.beginPath();
       for (const e of links) {
         const s = e.source as SimNode;
@@ -730,17 +903,24 @@ function GraphBaseLayer({
       ctx.stroke();
     }
 
-    // Nodes as filled dots, colored by type (ghosts muted).
+    // Nodes as the DOM circles draw them: card fill, a 2px ring in the type's colour (ghosts
+    // muted and unfilled), so the overview and the zoomed-in cards read as one graph.
+    const card = paint(colors.surfaceCard);
+    ctx.lineWidth = 2;
     for (const n of nodes) {
       ctx.beginPath();
-      ctx.arc(n.x ?? 0, n.y ?? 0, n.size / 2, 0, Math.PI * 2);
-      ctx.fillStyle = n.data.ghost ? colors.textTertiary : nodeColor(n.data.entityType, n.data.objectTypeId, n.data.objectColor);
-      ctx.globalAlpha = n.data.ghost ? 0.4 : 0.9;
-      ctx.fill();
+      ctx.arc(n.x ?? 0, n.y ?? 0, n.size / 2 - 1, 0, Math.PI * 2);
+      ctx.globalAlpha = n.data.ghost ? 0.4 : 1;
+      if (!n.data.ghost) {
+        ctx.fillStyle = card;
+        ctx.fill();
+      }
+      ctx.strokeStyle = paint(n.id === selectedId ? colors.accent : n.data.ghost ? colors.textTertiary : nodeColor(n.data.entityType, n.data.objectTypeId, n.data.objectColor));
+      ctx.stroke();
     }
     ctx.globalAlpha = 1;
     // `frame` is a dependency so the canvas repaints as the sim moves nodes.
-  }, [transform, width, height, frame, nodes, links, hoveredId]);
+  }, [transform, width, height, frame, nodes, links, hoveredId, selectedId, theme]);
 
   return (
     <canvas
@@ -754,7 +934,9 @@ function GraphBaseLayer({
  * messaging live in the wrapper screens (GraphScreen, NoteGraph). Wrapped in its own
  * ReactFlowProvider so GraphCanvas can read the live viewport at the same level it
  * configures <ReactFlow>. */
-export function GraphView({ graph, focusKey = null, onOpenNode, menu = false }: GraphViewProps) {
+export function GraphView({ graph, focusKey = null, onOpenNode, menu = false, onSelectNode, selectedKey = null, onCounts }: GraphViewProps) {
+  const coarse = useCoarsePointer();
+  const select = useMemo(() => ({ onSelect: onSelectNode ?? null, selectedKey, coarse }), [onSelectNode, selectedKey, coarse]);
   // Menu settings (physics + filters) are loaded regardless, but only take effect on views
   // that show the menu — a view with no menu has no way to explain or undo them.
   const settings = useGraphSettings();
@@ -778,8 +960,17 @@ export function GraphView({ graph, focusKey = null, onOpenNode, menu = false }: 
     return { simNodes, simLinks, flowEdges: toFlowEdges(shown.edges, large), large };
   }, [shown, focusKey]);
 
+  // Filtered counts for the host; the callback is read through a ref so an inline arrow
+  // doesn't re-fire it every render.
+  const onCountsRef = useRef(onCounts);
+  onCountsRef.current = onCounts;
+  useEffect(() => {
+    onCountsRef.current?.({ nodes: simNodes.length, links: simLinks.length });
+  }, [simNodes, simLinks]);
+
   return (
     <GraphOpenContext.Provider value={onOpenNode ?? noop}>
+      <GraphSelectContext.Provider value={select}>
       <ReactFlowProvider>
         <GraphCanvas
           simNodes={simNodes}
@@ -791,6 +982,7 @@ export function GraphView({ graph, focusKey = null, onOpenNode, menu = false }: 
           overlay={menu ? <GraphMenu graph={graph} {...settings} /> : null}
         />
       </ReactFlowProvider>
+      </GraphSelectContext.Provider>
     </GraphOpenContext.Provider>
   );
 }
@@ -808,10 +1000,13 @@ function GraphCanvas({
   flowEdges: Edge[];
   large: boolean;
   physics: GraphPhysics;
-  /** Chrome layered over the canvas (the settings menu); it positions itself. */
+  /** The settings menu. When present the graph gets its sub-toolbar (counts, fit, the menu's
+   * settings button) and the legend strip; without it the canvas runs edge to edge. */
   overlay?: ReactNode;
 }) {
   const { setViewport } = useReactFlow();
+  const { onSelect, selectedKey } = useContext(GraphSelectContext);
+  const onPaneClick = useCallback(() => onSelect?.(null), [onSelect]);
   const { frame, simRef } = useForceLayout(simNodes, simLinks, large, physics);
 
   // React Flow is controlled here, so it needs the change handlers from these hooks to
@@ -858,6 +1053,8 @@ function GraphCanvas({
   useEffect(() => {
     userMovedRef.current = false;
   }, [simNodes]);
+  // Bumped by the toolbar's Fit button, which hands navigation back to the auto-fit.
+  const [fitVersion, setFitVersion] = useState(0);
   useEffect(() => {
     if (userMovedRef.current || !width || !height) return;
     const b = simContentBounds(simNodes);
@@ -865,7 +1062,11 @@ function GraphCanvas({
     const pad = 0.12;
     const zoom = Math.max(0.05, Math.min(1.4, Math.min(width / (b.width * (1 + pad)), height / (b.height * (1 + pad)))));
     setViewport({ x: width / 2 - (b.x + b.width / 2) * zoom, y: height / 2 - (b.y + b.height / 2) * zoom, zoom });
-  }, [frame, simNodes, width, height, setViewport]);
+  }, [frame, fitVersion, simNodes, width, height, setViewport]);
+  const fit = useCallback(() => {
+    userMovedRef.current = false;
+    setFitVersion((v) => v + 1);
+  }, []);
 
   const onMoveEnd = useCallback((_: unknown, vp: Viewport) => {
     viewportRef.current = vp;
@@ -923,37 +1124,73 @@ function GraphCanvas({
           box so React Flow measures a real height — a plain height:100% collapses to 0 in
           the flex layout and leaves nodes hidden. */}
       <div style={fillStyle}>
-        {/* The full graph (every node + edge) as one canvas behind React Flow. React Flow
-            is stacked above it (zIndex 1) and kept transparent so the canvas shows through
-            everywhere except under the interactive DOM nodes. On a large graph those DOM
-            nodes only exist once zoomed in (selectRender), so the canvas is the sole layer
-            in the zoomed-out overview. */}
-        {large ? <GraphBaseLayer nodes={simNodes} links={simLinks} frame={frame} hoveredId={hoveredId} /> : null}
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onMoveStart={onMoveStart}
-          onMoveEnd={large ? onMoveEnd : undefined}
-          onNodeDragStart={onNodeDragStart}
-          onNodeDrag={onNodeDrag}
-          onNodeDragStop={onNodeDragStop}
-          // The whole-graph framing is done manually on settle (see the fit effect), since
-          // React Flow's fitView can't see the sim nodes that aren't mounted on a large graph.
-          proOptions={{ hideAttribution: true }}
-          minZoom={0.05}
-          nodesConnectable={false}
-          // Cull anything off-screen among the mounted set as you pan/zoom.
-          onlyRenderVisibleElements={large}
-          edgesFocusable={false}
-          style={large ? { background: "transparent", position: "relative", zIndex: 1 } : undefined}
-        >
-          <Background color={colors.borderSubtle} gap={24} />
-          <Controls showInteractive={false} />
-        </ReactFlow>
-        {overlay}
+        <style>{GRAPH_FLOW_CSS + GRAPH_CHROME_CSS}</style>
+        {overlay ? (
+          <div style={toolbarStyle}>
+            <span style={{ ...monoStyle, color: colors.textTertiary }}>
+              {simNodes.length} nodes · {simLinks.length} links
+            </span>
+            <span style={{ flex: 1 }} />
+            <span style={{ ...monoStyle, minWidth: 0, flexShrink: 1, overflow: "hidden", textOverflow: "ellipsis", marginRight: space.xs }}>
+              repel {Math.round(physics.repelForce)} · link {Math.round(physics.linkDistance)}
+            </span>
+            <button type="button" className="graph-iconbtn" onClick={fit} aria-label="Fit" title="Fit">
+              <Icon name="fit" size={13} color="currentColor" />
+            </button>
+            {overlay}
+          </div>
+        ) : null}
+        <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
+          {/* An absolutely-sized box again, so React Flow measures a real height inside the
+              flex column rather than a collapsed percentage. */}
+          <div style={canvasFillStyle}>
+            {/* The full graph (every node + edge) as one canvas behind React Flow. React Flow
+                is stacked above it (zIndex 1) and kept transparent so the canvas shows through
+                everywhere except under the interactive DOM nodes. On a large graph those DOM
+                nodes only exist once zoomed in (selectRender), so the canvas is the sole layer
+                in the zoomed-out overview. */}
+            {large ? <GraphBaseLayer nodes={simNodes} links={simLinks} frame={frame} hoveredId={hoveredId} selectedId={selectedKey} /> : null}
+            <ReactFlow
+              className="graph-flow"
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={nodeTypes}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onMoveStart={onMoveStart}
+              onMoveEnd={large ? onMoveEnd : undefined}
+              onNodeDragStart={onNodeDragStart}
+              onNodeDrag={onNodeDrag}
+              onNodeDragStop={onNodeDragStop}
+              onPaneClick={onSelect ? onPaneClick : undefined}
+              // The whole-graph framing is done manually on settle (see the fit effect), since
+              // React Flow's fitView can't see the sim nodes that aren't mounted on a large graph.
+              proOptions={{ hideAttribution: true }}
+              minZoom={0.05}
+              nodesConnectable={false}
+              // Cull anything off-screen among the mounted set as you pan/zoom.
+              onlyRenderVisibleElements={large}
+              edgesFocusable={false}
+              style={large ? { background: "transparent", position: "relative", zIndex: 1 } : undefined}
+            >
+              {/* The 16px dotted grid, on the card surface. */}
+              <Background color={colors.borderDefault} gap={16} size={1} />
+              <Controls showInteractive={false} showFitView={!overlay} />
+            </ReactFlow>
+          </div>
+        </div>
+        {overlay ? (
+          <div style={legendStyle}>
+            {LEGEND.map(([type, label]) => (
+              <span key={type} style={{ display: "inline-flex", alignItems: "center", gap: space.xs, flexShrink: 0 }}>
+                <span style={{ width: 7, height: 7, boxSizing: "border-box", borderRadius: "50%", border: `2px solid ${typeColor(type)}` }} />
+                <span style={monoStyle}>{label}</span>
+              </span>
+            ))}
+            <span style={{ flex: 1 }} />
+            <span style={{ ...monoStyle, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>dashed = link · dotted = reference prop · solid = embed</span>
+          </div>
+        ) : null}
       </div>
     </GraphHoverContext.Provider>
   );
@@ -965,7 +1202,7 @@ const noop: OpenNodeHandler = () => {};
 export function GraphEmpty({ children }: { children: ReactNode }) {
   return (
     <div style={graphEmptyStyle}>
-      <p style={{ maxWidth: 380, textAlign: "center", lineHeight: 1.5, color: colors.textTertiary }}>{children}</p>
+      <p style={{ maxWidth: 340, margin: 0, textAlign: "center", fontSize: font.size.sm, lineHeight: "18px", color: colors.textTertiary }}>{children}</p>
     </div>
   );
 }

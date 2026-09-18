@@ -8,7 +8,7 @@ import {
   radius,
   space,
   type IconName,
-} from "@companion/design-system";
+} from "../ds";
 import type { CSSProperties, ReactNode } from "react";
 
 // In-browser product mockups shown inside the landing page's "safari window". These mirror

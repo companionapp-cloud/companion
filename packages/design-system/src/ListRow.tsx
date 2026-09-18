@@ -1,29 +1,47 @@
 import type { ReactNode } from "react";
 import { Pressable, StyleSheet, View, type GestureResponderEvent } from "react-native";
+import { useDensity } from "./Density";
 import { Icon } from "./Icon";
-import { type PressState } from "./platform";
+import { transition, type PressState } from "./platform";
 import { Text } from "./Text";
-import { colors, radius, space } from "./tokens";
+import { colors, icon as iconSize, motion, radius, row, space } from "./tokens";
 
 export interface ListRowProps {
   title: string;
   subtitle?: string;
+  /** Leading 12px glyph. Pass it `--text-4` quiet; it should turn accent when selected. */
   icon?: ReactNode;
+  /** Trailing mono metadata (relative time, a count). */
   trailing?: string;
   selected?: boolean;
   hasChildren?: boolean;
+  /** Tree depth; each level indents 12px. */
+  indent?: number;
   onPress?: (e: GestureResponderEvent) => void;
 }
 
-/** Selectable row for navigation lists (folders, notes). Two-line when a subtitle
- * is present; shows a chevron affordance when it drills into children. */
-export function ListRow({ title, subtitle, icon, trailing, selected, hasChildren, onPress }: ListRowProps) {
+/** Selectable row for browse lists (notes, tasks, boards, projects). 24px single-line,
+ * 38px only when a subtitle earns it; touch surfaces never drop below 44px. */
+export function ListRow({ title, subtitle, icon, trailing, selected, hasChildren, indent = 0, onPress }: ListRowProps) {
+  const density = useDensity();
+  const minHeight = density === "touch" ? row.touch : subtitle ? row.twoLine : row.h;
   return (
     <Pressable
       onPress={onPress}
-      style={({ hovered }: PressState) => [
+      style={({ hovered, pressed }: PressState) => [
         styles.row,
-        { backgroundColor: selected ? colors.accentSoft : hovered ? colors.surfaceHover : "transparent" },
+        transition("background-color", motion.fast),
+        {
+          minHeight,
+          paddingLeft: space.sm + indent * 12,
+          backgroundColor: selected
+            ? colors.surfaceSelected
+            : pressed
+              ? colors.surfaceActive
+              : hovered
+                ? colors.surfaceHover
+                : "transparent",
+        },
       ]}
     >
       {icon ? <View style={styles.icon}>{icon}</View> : null}
@@ -38,11 +56,11 @@ export function ListRow({ title, subtitle, icon, trailing, selected, hasChildren
         ) : null}
       </View>
       {trailing ? (
-        <Text variant="mono" tone="tertiary">
+        <Text variant="mono" tone="quaternary" style={styles.trailing}>
           {trailing}
         </Text>
       ) : null}
-      {hasChildren ? <Icon name="chevronRight" size={16} color={colors.textTertiary} /> : null}
+      {hasChildren ? <Icon name="chevronRight" size={iconSize.sm} color={colors.textQuaternary} /> : null}
     </Pressable>
   );
 }
@@ -51,12 +69,11 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: space.md,
-    minHeight: 38,
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
-    borderRadius: radius.md,
+    gap: space.sm,
+    paddingRight: space.sm,
+    borderRadius: radius.sm,
   },
   icon: { flexShrink: 0 },
-  body: { flex: 1, minWidth: 0, justifyContent: "center" },
+  body: { flex: 1, minWidth: 0, justifyContent: "center", gap: 1 },
+  trailing: { flexShrink: 0 },
 });

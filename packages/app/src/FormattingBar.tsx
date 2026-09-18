@@ -1,11 +1,11 @@
-import { Platform, View } from "react-native";
-import { Icon, IconButton, colors, space } from "@companion/design-system";
+import { ScrollView, View } from "react-native";
+import { Divider, Icon, IconButton, Text, colors, layout, row, space, useDensity } from "@companion/design-system";
 import type { IconName } from "@companion/design-system";
 import type { EditorController, FormatName, FormatState } from "@companion/editor";
 import type { RefObject } from "react";
 
-// The formatting actions shown in the web selection bar, in order (mirrors the native
-// keyboard toolbar in @companion/editor). Insert-reference is prepended separately.
+// The formatting toggles, in order (mirrors the native keyboard toolbar in
+// @companion/editor). The insert actions — table, file, reference — follow them.
 const FORMAT_BUTTONS: { name: FormatName; icon: IconName; label: string }[] = [
   { name: "bold", icon: "bold", label: "Bold" },
   { name: "italic", icon: "italic", label: "Italic" },
@@ -17,10 +17,12 @@ const FORMAT_BUTTONS: { name: FormatName; icon: IconName; label: string }[] = [
   { name: "orderedList", icon: "listOrdered", label: "Numbered list" },
 ];
 
-/** Web/desktop: a floating bar of insert + formatting actions anchored to the bottom of the
- * editor, shown while the editor is focused. Drives the editor through its imperative handle.
- * `state` may be null before the first format snapshot arrives (buttons render enabled).
- * Native manages its own keyboard-anchored toolbar, so this is web-only chrome. */
+/** Web/desktop: the formatting bar pinned under the document — a 28px strip with a top
+ * hairline (44px with touch-sized buttons on touch density). It is a normal flex child, so
+ * the host renders it as the last row of a column, below the scrolling document. Drives the
+ * editor through its imperative handle. `state` may be null before the first format snapshot
+ * arrives (buttons render enabled). Native manages its own keyboard-anchored toolbar, so
+ * this is web-only chrome. */
 export function FormattingBar({
   state,
   editorRef,
@@ -31,68 +33,76 @@ export function FormattingBar({
   /** Show the file-embed action (PLAN §6.9) — only when a documentSource is wired. */
   canAttach: boolean;
 }) {
-  return (
-    <View style={styles.formatBar} pointerEvents="box-none">
-      <View style={styles.formatBarInner}>
-        <IconButton label="Insert reference" size="sm" onPress={() => editorRef.current?.insertReference()}>
-          <Icon name="link" size={17} color={colors.textSecondary} />
-        </IconButton>
-        <IconButton label="Insert table" size="sm" onPress={() => editorRef.current?.insertTable()}>
-          <Icon name="table" size={17} color={colors.textSecondary} />
-        </IconButton>
-        {canAttach ? (
-          <IconButton label="Attach file" size="sm" onPress={() => editorRef.current?.insertDocument()}>
-            <Icon name="file" size={17} color={colors.textSecondary} />
+  const touch = useDensity() === "touch";
+  const size = touch ? "lg" : "sm";
+  const glyph = touch ? 17 : 13;
+
+  const buttons = (
+    <>
+      {FORMAT_BUTTONS.map((b) => {
+        const active = !!state?.active[b.name];
+        const disabled = state ? !state.enabled[b.name] : false;
+        return (
+          <IconButton
+            key={b.name}
+            label={b.label}
+            size={size}
+            active={active}
+            disabled={disabled}
+            onPress={() => editorRef.current?.format(b.name)}
+          >
+            <Icon name={b.icon} size={glyph} color={active ? colors.textAccent : colors.textSecondary} />
           </IconButton>
-        ) : null}
-        <View style={styles.formatBarDivider} />
-        {FORMAT_BUTTONS.map((b) => {
-          const active = !!state?.active[b.name];
-          const disabled = state ? !state.enabled[b.name] : false;
-          return (
-            <IconButton
-              key={b.name}
-              label={b.label}
-              size="sm"
-              active={active}
-              disabled={disabled}
-              onPress={() => editorRef.current?.format(b.name)}
-            >
-              <Icon name={b.icon} size={17} color={active ? colors.accentHover : colors.textSecondary} />
-            </IconButton>
-          );
-        })}
+        );
+      })}
+      <Divider vertical style={styles.divider} />
+      <IconButton label="Insert table" size={size} onPress={() => editorRef.current?.insertTable()}>
+        <Icon name="table" size={glyph} color={colors.textSecondary} />
+      </IconButton>
+      {canAttach ? (
+        <IconButton label="Attach image or file" size={size} onPress={() => editorRef.current?.insertDocument()}>
+          <Icon name="image" size={glyph} color={colors.textSecondary} />
+        </IconButton>
+      ) : null}
+      <IconButton label="Insert reference" size={size} onPress={() => editorRef.current?.insertReference()}>
+        <Icon name="link" size={glyph} color={colors.textSecondary} />
+      </IconButton>
+    </>
+  );
+
+  // Touch: the row outgrows a phone's width, so it scrolls sideways.
+  if (touch) {
+    return (
+      <View style={[styles.bar, styles.barTouch]}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.touchContent}>
+          {buttons}
+        </ScrollView>
       </View>
+    );
+  }
+
+  return (
+    <View style={[styles.bar, styles.barPointer]}>
+      {buttons}
+      <View style={{ flex: 1 }} />
+      <Text variant="mono" tone="quaternary" numberOfLines={1}>
+        markdown · ⌘B ⌘I ⌘K
+      </Text>
     </View>
   );
 }
 
 const styles = {
-  // Floating formatting bar, centered along the bottom of the editor (web/desktop).
-  formatBar: {
-    position: "absolute" as const,
-    left: 0,
-    right: 0,
-    bottom: space.lg,
-    alignItems: "center" as const,
-  },
-  formatBarInner: {
+  bar: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    gap: space.xs,
-    paddingHorizontal: space.xs,
-    paddingVertical: space.xs,
-    borderRadius: 12,
-    backgroundColor: colors.surfaceCard,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    // A soft lift so it reads as floating above the document (web only).
-    ...(Platform.OS === "web" ? { boxShadow: "0 6px 22px rgba(0,0,0,0.13)" } : null),
+    flexShrink: 0,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
+    backgroundColor: colors.surfaceApp,
   },
-  formatBarDivider: {
-    width: 1,
-    height: 20,
-    marginHorizontal: space.xs,
-    backgroundColor: colors.borderSubtle,
-  },
+  barPointer: { height: layout.subToolbarH, gap: 1, paddingHorizontal: space.sm },
+  barTouch: { height: row.touch, backgroundColor: colors.surfaceCard },
+  touchContent: { alignItems: "center" as const, gap: space.xxs, paddingHorizontal: space.sm },
+  divider: { alignSelf: "center" as const, height: 12, marginHorizontal: space.xs },
 };

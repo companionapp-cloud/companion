@@ -21,7 +21,7 @@ export function typeColor(type: string): string {
     case "project":
       return colors.accent;
     case "document":
-      return colors.gray300;
+      return colors.textTertiary;
     case "canvas":
       return colors.warning;
     default:

@@ -1,17 +1,36 @@
 import { useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
 import type { AppliesTo, ObjectField, ObjectFieldType, ObjectType } from "@companion/core-bridge";
-import { Button, Icon, Input, Text, colors, radius, space, type IconName, type PressState } from "@companion/design-system";
+import {
+  Button,
+  Divider,
+  Icon,
+  IconButton,
+  Input,
+  ListRow,
+  Text,
+  colors,
+  control,
+  icon as iconSize,
+  motion,
+  radius,
+  space,
+  transition,
+  useDensity,
+  type IconName,
+  type PressState,
+} from "@companion/design-system";
 import { useObjectTypes } from "./ObjectTypesProvider";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { CheckBox, Segmented, SettingsField, SettingsNote, SwatchPicker } from "./settingsUi";
 
 const FIELD_TYPES: ObjectFieldType[] = ["text", "number", "date", "select", "multi_select", "reference", "checkbox", "url"];
 const APPLIES: AppliesTo[] = ["note", "task", "both"];
 const REF_TARGETS = ["note", "task", "habit"];
 
-// The icons and colors an archetype can be marked with (shown in the graph + lists).
+// The icons an archetype can be marked with (shown in the graph + lists); its colour comes
+// from the shared swatches.
 const OBJECT_ICONS: IconName[] = ["file", "notes", "tasks", "calendar", "folder", "bell", "link", "graph", "habits", "chat", "settings", "dot"];
-const OBJECT_COLORS = ["#8b5cf6", "#ec4899", "#f59e0b", "#14b8a6", "#6366f1", "#ef4444", "#10b981", "#eab308", "#3b82f6", "#64748b"];
 
 /** The archetype's marker icon (its chosen icon, or a sensible default). */
 function typeIcon(t: ObjectType): IconName {
@@ -23,6 +42,7 @@ function typeIcon(t: ObjectType): IconName {
  *  single source of validation; this is just an editor. Lives in the AI/Objects settings. */
 export function ObjectTypeSettings() {
   const objectTypes = useObjectTypes();
+  const density = useDensity();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = objectTypes.types.find((t) => t.id === selectedId) ?? null;
 
@@ -35,37 +55,34 @@ export function ObjectTypeSettings() {
     return <TypeEditor key={selected.id} type={selected} onBack={() => setSelectedId(null)} />;
   }
 
+  const touch = density === "touch";
   return (
-    <View style={{ gap: space.md }}>
+    <View style={styles.stack}>
       <View style={styles.headerRow}>
-        <Text variant="caption" tone="tertiary" style={{ fontWeight: "600", flex: 1 }}>
-          Object types
+        <Text variant="eyebrow" tone="quaternary" style={{ flex: 1 }}>
+          Object types · {objectTypes.types.length}
         </Text>
-        <Button label="New type" size="sm" variant="secondary" onPress={() => void createType()} />
+        <Button label="New type" size={touch ? undefined : "sm"} variant="secondary" onPress={() => void createType()} />
       </View>
       {objectTypes.types.length === 0 ? (
-        <Text variant="caption" tone="tertiary">
-          Object types turn notes and tasks into structured objects with schema-validated fields.
-          Create one to get started.
-        </Text>
+        <SettingsNote>
+          Object types turn notes and tasks into structured objects with schema-validated fields. Create one to get
+          started.
+        </SettingsNote>
       ) : (
         <View style={styles.list}>
-          {objectTypes.types.map((t) => (
-            <Pressable
-              key={t.id}
-              onPress={() => setSelectedId(t.id)}
-              style={({ hovered }: PressState) => [styles.row, hovered ? { backgroundColor: colors.surfaceHover } : null]}
-            >
-              <Icon name={typeIcon(t)} size={15} color={t.schemaJson.color || colors.textTertiary} />
-              <Text style={{ flex: 1 }} numberOfLines={1}>
-                {t.name}
-              </Text>
-              <Text variant="caption" tone="tertiary">
-                {t.appliesTo} · {(t.schemaJson.fields ?? []).length} field{(t.schemaJson.fields ?? []).length === 1 ? "" : "s"}
-              </Text>
-              <Icon name="chevronRight" size={15} color={colors.textTertiary} />
-            </Pressable>
-          ))}
+          {objectTypes.types.map((t) => {
+            const count = (t.schemaJson.fields ?? []).length;
+            return (
+              <ListRow
+                key={t.id}
+                icon={<Icon name={typeIcon(t)} size={touch ? iconSize.lg : iconSize.sm} color={t.schemaJson.color || colors.textQuaternary} />}
+                title={t.name}
+                trailing={`${t.appliesTo} · ${count} field${count === 1 ? "" : "s"}`}
+                onPress={() => setSelectedId(t.id)}
+              />
+            );
+          })}
         </View>
       )}
     </View>
@@ -112,31 +129,31 @@ function TypeEditor({ type, onBack }: { type: ObjectType; onBack: () => void }) 
     onBack();
   };
 
+  const touch = useDensity() === "touch";
+  const tile = touch ? 38 : control.md;
   return (
-    <View style={{ gap: space.md }}>
+    <View style={styles.section}>
       <View style={styles.headerRow}>
-        <Pressable onPress={onBack} aria-label="Back" style={styles.backBtn}>
-          <Icon name="chevronLeft" size={16} color={colors.textSecondary} />
-        </Pressable>
-        <Text variant="title" style={{ flex: 1 }}>
-          Edit type
+        <IconButton label="Back to object types" size={touch ? undefined : "sm"} onPress={onBack}>
+          <Icon name="chevronLeft" size={touch ? iconSize.lg : 13} color={colors.textSecondary} />
+        </IconButton>
+        <Text variant="title" numberOfLines={1} style={{ flex: 1 }}>
+          {name.trim() || "Untitled type"}
         </Text>
       </View>
 
-      <Field label="Name">
-        <Input value={name} onChangeText={setName} placeholder="e.g. Book" />
-      </Field>
-
-      <Field label="Applies to">
-        <View style={styles.pillRow}>
-          {APPLIES.map((a) => (
-            <Pill key={a} label={a} active={appliesTo === a} onPress={() => setAppliesTo(a)} />
-          ))}
+      <SettingsField label="Name">
+        <View style={styles.control}>
+          <Input value={name} onChangeText={setName} placeholder="e.g. Book" />
         </View>
-      </Field>
+      </SettingsField>
 
-      <Field label="Icon">
-        <View style={styles.pillRow}>
+      <SettingsField label="Applies to" help="Which documents can take this type.">
+        <Segmented options={APPLIES.map((a) => ({ value: a, label: a }))} value={appliesTo} onChange={setAppliesTo} />
+      </SettingsField>
+
+      <SettingsField label="Icon">
+        <View style={styles.wrapRow}>
           {OBJECT_ICONS.map((name) => {
             const on = icon === name;
             return (
@@ -144,49 +161,47 @@ function TypeEditor({ type, onBack }: { type: ObjectType; onBack: () => void }) 
                 key={name}
                 onPress={() => setIcon(name)}
                 aria-label={name}
-                style={[styles.iconSwatch, on ? { borderColor: color || colors.accent, backgroundColor: colors.accentSoft } : null]}
+                style={({ hovered, pressed }: PressState) => [
+                  styles.iconTile,
+                  transition("background-color", motion.instant),
+                  { width: tile, height: tile },
+                  on ? styles.iconTileOn : pressed ? styles.tilePressed : hovered ? styles.tileHover : null,
+                ]}
               >
-                <Icon name={name} size={17} color={on ? color || colors.accentHover : colors.textSecondary} />
+                <Icon name={name} size={touch ? iconSize.tile : iconSize.md} color={on ? color || colors.textAccent : colors.textSecondary} />
               </Pressable>
             );
           })}
         </View>
-      </Field>
+      </SettingsField>
 
-      <Field label="Color">
-        <View style={styles.pillRow}>
-          {OBJECT_COLORS.map((c) => (
-            <Pressable
-              key={c}
-              onPress={() => setColor((prev) => (prev === c ? undefined : c))}
-              aria-label={c}
-              style={[styles.colorSwatch, { backgroundColor: c }, color === c ? styles.colorSwatchOn : null]}
-            >
-              {color === c ? <Icon name="check" size={13} color={colors.gray0} /> : null}
-            </Pressable>
-          ))}
-        </View>
-      </Field>
+      <SettingsField label="Color" help="Tints the type’s icon in lists and the graph. Press the selected swatch to clear it.">
+        <SwatchPicker value={color} onChange={setColor} clearable />
+      </SettingsField>
 
-      <Field label="Fields">
-        <View style={{ gap: space.sm }}>
-          {fields.map((f, i) => (
-            <FieldEditor
-              key={i}
-              field={f}
-              onChange={(patch) => setField(i, patch)}
-              onRemove={() => removeField(i)}
-            />
-          ))}
-          <Button label="Add field" size="sm" variant="secondary" onPress={addField} />
-        </View>
-      </Field>
+      <Divider />
 
-      {error ? (
-        <Text tone="danger" variant="caption">
-          {error}
+      <View style={styles.stack}>
+        <Text variant="eyebrow" tone="quaternary">
+          Fields · {fields.length}
         </Text>
-      ) : null}
+        {fields.map((f, i) => (
+          <FieldEditor key={i} field={f} onChange={(patch) => setField(i, patch)} onRemove={() => removeField(i)} />
+        ))}
+        <View style={{ flexDirection: "row" }}>
+          <Button
+            label="Add field"
+            size={touch ? undefined : "sm"}
+            variant="secondary"
+            onPress={addField}
+            icon={<Icon name="plus" size={iconSize.sm} color={colors.textSecondary} />}
+          />
+        </View>
+      </View>
+
+      {error ? <SettingsNote tone="danger">{error}</SettingsNote> : null}
+
+      <Divider />
 
       <View style={styles.footer}>
         <Button label={saved ? "Saved" : "Save"} onPress={() => void save()} />
@@ -209,40 +224,32 @@ function FieldEditor({
   const hasOptions = field.type === "select" || field.type === "multi_select";
   const [confirmRemove, setConfirmRemove] = useState(false);
   const fieldName = (field.label || field.key || "").trim();
+  const touch = useDensity() === "touch";
   return (
     <View style={styles.fieldCard}>
       <View style={styles.fieldTopRow}>
         <View style={{ flex: 1 }}>
-          <Input size="sm" value={field.key} placeholder="key" autoCapitalize="none" onChangeText={(t) => onChange({ key: t })} />
+          <Input size={touch ? undefined : "sm"} mono value={field.key} placeholder="key" autoCapitalize="none" onChangeText={(t) => onChange({ key: t })} />
         </View>
         <View style={{ flex: 1 }}>
-          <Input size="sm" value={field.label ?? ""} placeholder="Label" onChangeText={(t) => onChange({ label: t })} />
+          <Input size={touch ? undefined : "sm"} value={field.label ?? ""} placeholder="Label" onChangeText={(t) => onChange({ label: t })} />
         </View>
-        <Pressable onPress={() => setConfirmRemove(true)} aria-label="Remove field" style={styles.removeField}>
-          <Icon name="trash" size={14} color={colors.textTertiary} />
-        </Pressable>
+        <IconButton label="Remove field" size={touch ? undefined : "sm"} onPress={() => setConfirmRemove(true)}>
+          <Icon name="trash" size={touch ? iconSize.lg : 13} color={colors.textTertiary} />
+        </IconButton>
       </View>
 
-      <View style={styles.pillRow}>
+      <View style={styles.wrapRow}>
         {FIELD_TYPES.map((ft) => (
-          <Pill key={ft} label={ft} active={field.type === ft} onPress={() => onChange({ type: ft })} />
+          <Chip key={ft} label={ft} active={field.type === ft} onPress={() => onChange({ type: ft })} />
         ))}
       </View>
 
-      <View style={styles.fieldOptsRow}>
-        <Pressable onPress={() => onChange({ required: !field.required })} style={styles.requiredToggle}>
-          <View style={[styles.miniCheck, field.required ? styles.miniCheckOn : null]}>
-            {field.required ? <Icon name="check" size={11} color={colors.gray0} /> : null}
-          </View>
-          <Text variant="caption" tone="secondary">
-            Required
-          </Text>
-        </Pressable>
-      </View>
+      <CheckBox checked={!!field.required} onPress={() => onChange({ required: !field.required })} label="Required" />
 
       {hasOptions ? (
         <Input
-          size="sm"
+          size={touch ? undefined : "sm"}
           value={(field.options ?? []).join(", ")}
           placeholder="Options, comma-separated"
           onChangeText={(t) => onChange({ options: t.split(",").map((s) => s.trim()).filter(Boolean) })}
@@ -250,12 +257,12 @@ function FieldEditor({
       ) : null}
 
       {field.type === "reference" ? (
-        <View style={styles.pillRow}>
+        <View style={styles.wrapRow}>
           <Text variant="caption" tone="tertiary" style={{ alignSelf: "center", marginRight: space.xs }}>
             Links to
           </Text>
           {REF_TARGETS.map((t) => (
-            <Pill key={t} label={t} active={(field.to ?? "note") === t} onPress={() => onChange({ to: t })} />
+            <Chip key={t} label={t} active={(field.to ?? "note") === t} onPress={() => onChange({ to: t })} />
           ))}
         </View>
       ) : null}
@@ -280,21 +287,22 @@ function FieldEditor({
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+/** A mono value chip — field types and reference targets are machine values, so they read
+ *  as mono. Squared (radius 3); selected takes the soft-accent treatment. */
+function Chip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  const touch = useDensity() === "touch";
   return (
-    <View style={{ gap: space.xs }}>
-      <Text variant="caption" tone="tertiary" style={{ fontWeight: "600" }}>
-        {label}
-      </Text>
-      {children}
-    </View>
-  );
-}
-
-function Pill({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} style={[styles.pill, active ? styles.pillActive : null]}>
-      <Text variant="caption" tone={active ? "accent" : "secondary"}>
+    <Pressable
+      onPress={onPress}
+      aria-label={label}
+      style={({ hovered, pressed }: PressState) => [
+        styles.chip,
+        transition("background-color, border-color", motion.instant),
+        { height: touch ? control.lg : control.xs, paddingHorizontal: touch ? space.ml : space.sm },
+        active ? styles.chipActive : pressed ? styles.tilePressed : hovered ? styles.tileHover : null,
+      ]}
+    >
+      <Text variant="mono" tone={active ? "accent" : "secondary"}>
         {label}
       </Text>
     </Pressable>
@@ -302,66 +310,37 @@ function Pill({ label, active, onPress }: { label: string; active: boolean; onPr
 }
 
 const styles = {
+  section: { gap: space.xl },
+  stack: { gap: space.md },
+  control: { width: "100%" as const, maxWidth: 320 },
   headerRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.sm },
-  backBtn: { padding: space.xs, marginLeft: -space.xs },
-  list: { gap: 2 },
-  row: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: space.sm,
-    paddingHorizontal: space.sm,
-    paddingVertical: space.sm,
-    borderRadius: radius.md,
-  },
-  pillRow: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: space.xs },
-  pill: {
-    paddingHorizontal: space.md,
-    paddingVertical: space.xs,
-    borderRadius: radius.full,
-    borderWidth: 1,
-    borderColor: colors.borderDefault,
-  },
-  pillActive: { backgroundColor: colors.accentSoft, borderColor: colors.accentSoftBorder },
-  iconSwatch: {
-    width: 34,
-    height: 34,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.borderDefault,
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-  },
-  colorSwatch: {
-    width: 28,
-    height: 28,
-    borderRadius: radius.full,
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-    borderWidth: 2,
-    borderColor: "transparent" as const,
-  },
-  colorSwatchOn: { borderColor: colors.textPrimary },
-  fieldCard: {
-    gap: space.sm,
-    padding: space.md,
-    borderRadius: radius.md,
+  list: { gap: 1 },
+  wrapRow: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: space.xs },
+  iconTile: {
+    borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
-    backgroundColor: colors.surfaceApp,
-  },
-  fieldTopRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.sm },
-  removeField: { padding: space.xs },
-  fieldOptsRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.md },
-  requiredToggle: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.xs },
-  miniCheck: {
-    width: 18,
-    height: 18,
-    borderRadius: radius.sm,
-    borderWidth: 2,
-    borderColor: colors.borderStrong,
     alignItems: "center" as const,
     justifyContent: "center" as const,
   },
-  miniCheckOn: { backgroundColor: colors.accent, borderColor: colors.accent },
-  footer: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.md, marginTop: space.sm },
+  iconTileOn: { borderColor: colors.accentSoftBorder, backgroundColor: colors.accentSoft },
+  tileHover: { backgroundColor: colors.surfaceHover },
+  tilePressed: { backgroundColor: colors.surfaceActive },
+  chip: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+  },
+  chipActive: { backgroundColor: colors.accentSoft, borderColor: colors.accentSoftBorder },
+  fieldCard: {
+    gap: space.md,
+    padding: space.md,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+  },
+  fieldTopRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.sm },
+  footer: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.md },
 };

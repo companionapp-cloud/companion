@@ -1,17 +1,20 @@
-import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Pressable } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChatList, useCore } from '@companion/app';
-import { Icon, colors } from '@companion/design-system';
+import { colors } from '@companion/design-system';
 import type { Chat } from '@companion/core-bridge';
 import type { RootStackParamList } from '../MobileShell';
+import { Fab } from '../ui/native';
 
 // The mobile chat list: full-screen list of conversations that pushes to the conversation
 // screen. A working chat shows a spinner here even while its reply generates in the
-// background. "New chat" (header +) creates a chat and opens it.
+// background. The "New chat" FAB creates a chat and opens it.
 export function ChatListScreen() {
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const insets = useSafeAreaInsets();
   const { chats } = useCore();
   const [list, setList] = useState<Chat[]>([]);
 
@@ -36,26 +39,23 @@ export function ChatListScreen() {
     nav.navigate('ChatConversation', { chatId: c.id });
   }, [chats, nav, reload]);
 
-  useLayoutEffect(() => {
-    nav.setOptions({
-      headerRight: () => (
-        <Pressable onPress={newChat} accessibilityLabel="New chat" hitSlop={8}>
-          <Icon name="plus" size={22} color={colors.accent} />
-        </Pressable>
-      ),
-    });
-  }, [nav, newChat]);
-
   return (
-    <ChatList
-      variant="full"
-      chats={list}
-      onSelect={(id) => nav.navigate('ChatConversation', { chatId: id })}
-      onNew={newChat}
-      onDelete={async (id) => {
-        await chats.remove(id);
-        reload();
-      }}
-    />
+    <View style={styles.root}>
+      <ChatList
+        variant="full"
+        chats={list}
+        onSelect={(id) => nav.navigate('ChatConversation', { chatId: id })}
+        onNew={newChat}
+        onDelete={async (id) => {
+          await chats.remove(id);
+          reload();
+        }}
+      />
+      <Fab label="New chat" onPress={() => void newChat()} bottomInset={insets.bottom} />
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.surfaceApp },
+});

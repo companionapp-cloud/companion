@@ -1,4 +1,4 @@
-import { Button, type ButtonSize, type ButtonVariant } from "@companion/design-system";
+import { Button, type ButtonSize, type ButtonVariant } from "../ds";
 
 export interface NavLink {
   label: string;

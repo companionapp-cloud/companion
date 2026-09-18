@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { Pressable, StyleSheet, Text } from "react-native";
-import { noDragRegion, type PressState } from "./platform";
-import { colors, control, font, radius, space } from "./tokens";
+import { useDensity } from "./Density";
+import { noDragRegion, transition, type PressState } from "./platform";
+import { colors, control, font, motion, radius, space } from "./tokens";
 
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 export type ButtonSize = "sm" | "md" | "lg";
@@ -10,16 +11,21 @@ export interface ButtonProps {
   label: string;
   onPress?: () => void;
   variant?: ButtonVariant;
+  /** Defaults to `md` (26px) with a pointer, `lg` (30px) on touch surfaces. */
   size?: ButtonSize;
   icon?: ReactNode;
+  /** Mono shortcut hint after the label (e.g. "⌘⏎"). Shortcuts are documented in the UI. */
+  kbd?: string;
   disabled?: boolean;
+  fullWidth?: boolean;
 }
 
-/** Branded pressable control. Hover/press states use react-native-web's Pressable
- * state (no-op on native, which lacks hover). */
-export function Button({ label, onPress, variant = "primary", size = "md", icon, disabled }: ButtonProps) {
+/** The system's text action. Hover darkens, press darkens further — nothing scales, lifts
+ * or translates. Hover comes from react-native-web's Pressable state (absent on native). */
+export function Button({ label, onPress, variant = "primary", size, icon, kbd, disabled, fullWidth }: ButtonProps) {
+  const density = useDensity();
   const v = variants[variant];
-  const s = sizes[size];
+  const s = sizes[size ?? (density === "touch" ? "lg" : "md")];
   return (
     <Pressable
       onPress={onPress}
@@ -28,22 +34,23 @@ export function Button({ label, onPress, variant = "primary", size = "md", icon,
       style={({ hovered, pressed }: PressState) => [
         styles.base,
         noDragRegion,
+        transition("background-color, border-color", motion.fast),
         {
           height: s.height,
           paddingHorizontal: s.padH,
           borderRadius: s.radius,
-          backgroundColor: pressed ? v.activeBg : hovered ? v.hoverBg : v.bg,
-          borderWidth: 1,
+          backgroundColor: disabled ? v.bg : pressed ? v.activeBg : hovered ? v.hoverBg : v.bg,
           borderColor: v.border,
-          opacity: disabled ? 0.45 : 1,
-          // Always a valid transform array: on the New Architecture, clearing it back
-          // to undefined is sent to native as null, and processTransform(null) crashes.
-          transform: [{ scale: pressed ? 0.98 : 1 }],
+          opacity: disabled ? 0.4 : 1,
         },
+        fullWidth ? styles.fullWidth : null,
       ]}
     >
       {icon}
-      <Text style={[styles.label, { fontSize: s.fontSize, color: v.fg }]}>{label}</Text>
+      <Text numberOfLines={1} style={[styles.label, { fontSize: s.fontSize, color: v.fg }]}>
+        {label}
+      </Text>
+      {kbd ? <Text style={[styles.kbd, { color: v.fg }]}>{kbd}</Text> : null}
     </Pressable>
   );
 }
@@ -60,16 +67,18 @@ const variants: Record<ButtonVariant, VariantStyle> = {
   primary: { bg: colors.accent, hoverBg: colors.accentHover, activeBg: colors.accentActive, fg: colors.onAccent, border: "transparent" },
   secondary: { bg: colors.surfaceCard, hoverBg: colors.surfaceHover, activeBg: colors.surfaceActive, fg: colors.textPrimary, border: colors.borderDefault },
   ghost: { bg: "transparent", hoverBg: colors.surfaceHover, activeBg: colors.surfaceActive, fg: colors.textSecondary, border: "transparent" },
-  danger: { bg: colors.dangerSoft, hoverBg: "#f6dede", activeBg: "#efd0d0", fg: colors.danger, border: "transparent" },
+  danger: { bg: colors.dangerSoft, hoverBg: colors.dangerSoftHover, activeBg: colors.dangerSoftActive, fg: colors.danger, border: "transparent" },
 };
 
 const sizes: Record<ButtonSize, { height: number; padH: number; fontSize: number; radius: number }> = {
-  sm: { height: control.sm, padH: space.lg, fontSize: font.size.sm, radius: radius.md },
-  md: { height: control.md, padH: space.xl, fontSize: font.size.base, radius: radius.lg },
-  lg: { height: control.lg, padH: space.xxl, fontSize: font.size.md, radius: radius.lg },
+  sm: { height: control.sm, padH: space.md, fontSize: font.size.sm, radius: radius.sm },
+  md: { height: control.md, padH: space.ml, fontSize: font.size.base, radius: radius.md },
+  lg: { height: control.lg, padH: 14, fontSize: font.size.md, radius: radius.md },
 };
 
 const styles = StyleSheet.create({
-  base: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: space.md },
+  base: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: space.sm, borderWidth: 1 },
+  fullWidth: { alignSelf: "stretch" },
   label: { fontFamily: font.sans, fontWeight: font.weight.medium, letterSpacing: font.tracking.snug },
+  kbd: { fontFamily: font.mono, fontSize: font.size.xs, opacity: 0.6, marginLeft: space.xxs },
 });

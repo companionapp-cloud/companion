@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import type { List, ListItem, Task } from "@companion/core-bridge";
-import { Button, Center, Icon, IconButton, Input, ListRow, Text, TextField, colors, layout, radius, space } from "@companion/design-system";
+import { Button, Center, Icon, IconButton, Input, ListRow, Text, TextField, colors, icon, layout, radius, space } from "@companion/design-system";
 import { useNav } from "./nav-context";
 import { useTasks } from "./TasksProvider";
 import { useLists, useListItems, useProjectLists } from "./ListsProvider";
@@ -13,8 +13,9 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { AddTasksPicker } from "./AddTasksPicker";
 
 // The Lists section of a project (PLAN §6.6): drag-ordered task lists, each optionally
-// broken into sublists by headings. Lives in the project's list column; the selected list's
-// rows replace the tasks list, and selecting a task opens it in the detail pane. Routes:
+// broken into sublists by headings. Lives in the project's list column (under the section
+// chips); the selected list's rows replace the index, and selecting a task opens it in the
+// detail pane. Same density as the workspace browse lists. Routes:
 //   /project/<id>/lists                 → the lists index (ListsIndex)
 //   /project/<id>/lists/<listId>        → that list's rows (ListRows)
 //   /project/<id>/lists/<listId>/<task> → same, with the task open in the detail pane
@@ -43,25 +44,35 @@ function ListsIndex({ projectId }: { projectId: string }) {
   return (
     <View style={styles.list}>
       <View style={styles.listHeader}>
-        <IconButton label="Back to sections" size="sm" onPress={() => nav.openProject(projectId)}>
-          <Icon name="chevronLeft" size={18} color={colors.textSecondary} />
-        </IconButton>
-        <Text variant="caption" tone="secondary" style={{ flex: 1, fontWeight: "600" }}>
+        <Text variant="label" numberOfLines={1} style={{ flex: 1 }}>
           Lists
         </Text>
-        <IconButton label="New list" size="sm" onPress={() => setDraft((d) => (d === null ? "" : null))}>
-          <Icon name="plus" size={16} color={colors.textSecondary} />
+        <Text variant="mono" tone="quaternary">
+          {lists.length}
+        </Text>
+        <IconButton label="New list" size="sm" active={draft !== null} onPress={() => setDraft((d) => (d === null ? "" : null))}>
+          <Icon name="plus" size={icon.sm} color={colors.textSecondary} />
         </IconButton>
       </View>
       {draft !== null ? (
         <View style={styles.search}>
           {/* Commit on blur (click away), as the sidebar's create inputs do; an empty value just closes. */}
-          <Input size="sm" placeholder="List name, press Enter" value={draft} onChangeText={setDraft} autoFocus onSubmitEditing={() => void submit()} onBlur={() => void submit()} />
+          <Input
+            size="sm"
+            placeholder="List name, press Enter"
+            value={draft}
+            onChangeText={setDraft}
+            autoFocus
+            onSubmitEditing={() => void submit()}
+            onBlur={() => void submit()}
+            leadingIcon={<Icon name="listOrdered" size={icon.sm} color={colors.textQuaternary} />}
+          />
         </View>
       ) : null}
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.md, gap: 2 }}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll}>
         {lists.length ? (
           <SortableList
+            style={styles.rows}
             items={lists}
             keyExtractor={(l) => l.id}
             onReorder={(ids) => void reorderLists(projectId, ids)}
@@ -92,7 +103,7 @@ function ListIndexRow({ list, dragging, onPress }: { list: List; dragging: boole
   return (
     <View ref={ref} style={[dragging ? styles.rowDragging : null, isOver ? styles.rowOver : null]}>
       <ListRow
-        icon={<Icon name="listOrdered" size={17} color={isOver ? colors.accentHover : colors.textTertiary} />}
+        icon={<Icon name="listOrdered" size={icon.sm} color={isOver ? colors.textAccent : colors.textQuaternary} />}
         title={list.name}
         trailing={taskCount ? String(taskCount) : undefined}
         selected={isOver}
@@ -151,7 +162,7 @@ function ListRows({ projectId, listId, selectedTaskId, projectTasks }: { project
     <View style={styles.list}>
       <View style={styles.listHeader}>
         <IconButton label="Back to lists" size="sm" onPress={() => nav.openProjectSection(projectId, "lists")}>
-          <Icon name="chevronLeft" size={18} color={colors.textSecondary} />
+          <Icon name="chevronLeft" size={13} color={colors.textSecondary} />
         </IconButton>
         <View style={{ flex: 1 }}>
           <ListFilterMenu
@@ -161,10 +172,10 @@ function ListRows({ projectId, listId, selectedTaskId, projectTasks }: { project
           />
         </View>
         <IconButton label="Add existing task" size="sm" active={picking} onPress={() => setPicking(true)}>
-          <Icon name="tasks" size={16} color={colors.textSecondary} />
+          <Icon name="tasks" size={13} color={colors.textSecondary} />
         </IconButton>
         <IconButton label="New heading" size="sm" active={headingDraft !== null} onPress={() => setHeadingDraft((d) => (d === null ? "" : null))}>
-          <Icon name="listBullet" size={16} color={colors.textSecondary} />
+          <Icon name="listBullet" size={13} color={colors.textSecondary} />
         </IconButton>
       </View>
       {/* One entry field: the heading field temporarily takes the task field's place. */}
@@ -178,7 +189,7 @@ function ListRows({ projectId, listId, selectedTaskId, projectTasks }: { project
             autoFocus
             onSubmitEditing={() => void addHeadingFromDraft()}
             onBlur={() => void addHeadingFromDraft()}
-            leadingIcon={<Icon name="listBullet" size={15} color={colors.textTertiary} />}
+            leadingIcon={<Icon name="listBullet" size={icon.sm} color={colors.textQuaternary} />}
           />
         ) : (
           <Input
@@ -187,13 +198,14 @@ function ListRows({ projectId, listId, selectedTaskId, projectTasks }: { project
             value={taskDraft}
             onChangeText={setTaskDraft}
             onSubmitEditing={() => void addTaskFromDraft()}
-            leadingIcon={<Icon name="plus" size={15} color={colors.textTertiary} />}
+            leadingIcon={<Icon name="plus" size={icon.sm} color={colors.textQuaternary} />}
           />
         )}
       </View>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.md, gap: 2 }}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll}>
         {rows.length ? (
           <SortableList
+            style={styles.rows}
             items={rows}
             keyExtractor={(r) => r.item.id}
             onReorder={(ids) => void reorderItems(listId, ids)}
@@ -211,7 +223,7 @@ function ListRows({ projectId, listId, selectedTaskId, projectTasks }: { project
                     onToggle={() => void tasksStore.setStatus((r.task as Task).id, r.task?.status === "done" ? "open" : "done")}
                     trailing={
                       <IconButton label="Remove from list" size="sm" onPress={() => void removeItem(r.item.id)}>
-                        <Icon name="close" size={13} color={colors.textTertiary} />
+                        <Icon name="close" size={icon.sm} color={colors.textQuaternary} />
                       </IconButton>
                     }
                   />
@@ -221,7 +233,7 @@ function ListRows({ projectId, listId, selectedTaskId, projectTasks }: { project
           />
         ) : (
           <Text tone="tertiary" variant="caption" style={styles.empty}>
-            This list is empty. Type a task above, or add existing project tasks with the ☰ button. Drag rows to set their priority; add headings to group them.
+            This list is empty. Add a task above, or pull in existing project tasks. Drag rows to set priority; headings group them.
           </Text>
         )}
       </ScrollView>
@@ -256,14 +268,14 @@ function HeadingRow({ item, dragging, onRename, onRemove }: { item: ListItem; dr
         </View>
       ) : (
         <Pressable onPress={() => setEditing(true)} style={{ flex: 1 }} aria-label="Rename heading">
-          <Text variant="caption" tone="tertiary" numberOfLines={1} style={styles.headingLabel}>
-            {item.title.toUpperCase() || "UNTITLED"}
+          <Text variant="eyebrow" tone="quaternary" numberOfLines={1}>
+            {item.title || "Untitled"}
           </Text>
         </Pressable>
       )}
       <View style={{ opacity: hovered ? 1 : 0 }}>
         <IconButton label="Remove heading" size="sm" onPress={onRemove}>
-          <Icon name="close" size={13} color={colors.textTertiary} />
+          <Icon name="close" size={icon.sm} color={colors.textQuaternary} />
         </IconButton>
       </View>
     </View>
@@ -294,16 +306,19 @@ export function ListHome({ projectId, listId }: { projectId: string; listId: str
     <View style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={styles.home}>
         <View style={styles.titleRow}>
-          <Icon name="listOrdered" size={22} color={colors.textTertiary} />
+          <Icon name="listOrdered" size={icon.lg} color={colors.textQuaternary} />
           <TextField variant="title" value={list.name} placeholder="List name" onChangeText={(t) => t.trim() && void renameList(list.id, t.trim())} />
         </View>
-        <Text tone="secondary">
+        <Text variant="mono" tone="quaternary">
+          {done}/{taskItems.length} done{headings ? ` · ${headings} ${headings === 1 ? "sublist" : "sublists"}` : ""}
+        </Text>
+        <Text variant="caption" tone="tertiary" style={{ lineHeight: 18 }}>
           {taskItems.length === 0
             ? "No tasks yet. Add tasks in the column on the left, then drag them into priority order."
-            : `${done} of ${taskItems.length} tasks done${headings ? ` · ${headings} ${headings === 1 ? "sublist" : "sublists"}` : ""}. Select a task on the left to open it.`}
+            : "Select a task on the left to open it."}
         </Text>
         <View style={styles.footer}>
-          <Button label="Delete list" variant="secondary" onPress={() => setConfirmDelete(true)} />
+          <Button label="Delete list" variant="danger" size="sm" onPress={() => setConfirmDelete(true)} />
         </View>
       </ScrollView>
       {confirmDelete ? (
@@ -321,26 +336,37 @@ export function ListHome({ projectId, listId }: { projectId: string; listId: str
   );
 }
 
-const styles = {
+// The dense browse-list metrics, identical to WorkspaceScreen's. Shared with ProjectView so
+// every column under the section chips lines up.
+export const listStyles = {
   list: { flex: 1, minHeight: 0, backgroundColor: colors.surfaceCard },
   listHeader: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    gap: space.xs,
-    minHeight: 28 + space.md * 2 + 1,
-    paddingHorizontal: space.md,
-    paddingVertical: space.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderSubtle,
+    gap: space.sm,
+    minHeight: 32,
+    paddingLeft: space.sm,
+    paddingRight: space.sm,
+    paddingTop: space.sm,
+    paddingBottom: space.xs,
+    // Sit above the search row so the filter dropdown, which overflows the header, paints
+    // over the sibling input instead of behind it.
     zIndex: 2,
   },
-  search: { paddingHorizontal: space.md, paddingTop: space.md, paddingBottom: space.md, zIndex: 1 },
-  empty: { padding: space.xl, lineHeight: 20, textAlign: "center" as const },
-  heading: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.xs, paddingLeft: space.md, paddingRight: 2, paddingTop: space.lg, paddingBottom: space.xs, borderRadius: radius.sm },
-  headingLabel: { fontWeight: "600" as const, letterSpacing: 0.5 },
+  search: { paddingHorizontal: space.sm, paddingBottom: space.sm, zIndex: 1 },
+  scroll: { padding: space.xs, gap: 1 },
+  rows: { gap: 1 },
+  empty: { padding: space.xl, textAlign: "center" as const, lineHeight: 18 },
+  sectionLabel: { paddingHorizontal: space.sm, paddingTop: space.md, paddingBottom: 3 },
+  // A settings-like detail page (project home, list home): prose gutters, 720 max.
+  home: { maxWidth: layout.contentMax, width: "100%" as const, marginHorizontal: "auto" as const, paddingHorizontal: space.xxl, paddingVertical: space.xl2, gap: space.md },
+  titleRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.md },
+  footer: { marginTop: space.lg, alignItems: "flex-start" as const },
+};
+
+const styles = {
+  ...listStyles,
+  heading: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.xs, minHeight: 24, paddingLeft: space.sm, paddingRight: 1, paddingTop: space.sm, borderRadius: radius.sm },
   rowDragging: { backgroundColor: colors.surfaceActive, borderRadius: radius.sm },
   rowOver: { borderRadius: radius.sm, borderWidth: 1, borderColor: colors.accent, margin: -1 },
-  home: { maxWidth: layout.contentMax, width: "100%" as const, marginHorizontal: "auto" as const, padding: space.xxl, gap: space.lg },
-  titleRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.md },
-  footer: { marginTop: space.xl, alignItems: "flex-start" as const },
 };

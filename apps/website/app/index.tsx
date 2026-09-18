@@ -1,4 +1,4 @@
-import { Badge } from "@companion/design-system";
+import { Badge } from "../src/ds";
 import { usePostHog } from "posthog-js/react";
 import { DocsIndex } from "../src/components/DocsIndex";
 import { FeatureShowcase } from "../src/components/FeatureShowcase";

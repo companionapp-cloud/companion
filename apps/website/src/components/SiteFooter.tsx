@@ -1,4 +1,4 @@
-import { BrandMark } from "@companion/design-system";
+import { BrandMark } from "../ds";
 
 interface Props {
   /** sunken = warm gray (pages with white bodies), card = white (pages ending on gray). */

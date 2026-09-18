@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { Pressable, View } from "react-native";
 import type { SidebarArea, SidebarProject } from "@companion/core-bridge";
-import { Icon, IconButton, Input, ProgressRing, Text, colors, radius, space, type PressState } from "@companion/design-system";
+import { Icon, Input, ProgressRing, Text, colors, icon, motion, noDragRegion, radius, space, transition, type IconName, type PressState } from "@companion/design-system";
 import { useProjects } from "./ProjectsProvider";
 import { SortableList } from "./SortableList";
 import { useDropTarget } from "./DndContext";
@@ -27,6 +27,7 @@ export function ProjectsSidebar({
   // Which area's "new project" input is open (areaId), plus its text.
   const [addingProjectFor, setAddingProjectFor] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("");
+  const { collapsed, toggle, expand } = useCollapsedAreas();
 
   const submitArea = async () => {
     const name = areaName.trim();
@@ -44,26 +45,32 @@ export function ProjectsSidebar({
   const isEmpty = sidebar.areas.length === 0 && sidebar.unsorted.length === 0;
 
   const renderArea = (area: SidebarArea, dragHandlers: object) => (
-    <View style={{ marginBottom: space.sm }}>
+    <View style={styles.area}>
       <AreaHeader
         area={area}
+        open={!collapsed.has(area.id)}
+        onToggle={() => toggle(area.id)}
         dragHandlers={dragHandlers}
         onAddProject={() => {
+          // Creating into a collapsed area opens it, so the input (and the result) show.
+          expand(area.id);
           setAddingProjectFor(area.id);
           setProjectName("");
         }}
         onDeleteArea={onDeleteArea}
       />
-      <SortableList
-        items={area.projects}
-        keyExtractor={(p) => p.id}
-        onReorder={(ids) => void reorderProjects(area.id, ids)}
-        renderItem={({ item: p, isActive, drag }) => (
-          <View {...drag}>
-            <ProjectRow project={p} active={p.id === activeProjectId} dragging={isActive} onPress={() => onSelectProject?.(p.id)} />
-          </View>
-        )}
-      />
+      {collapsed.has(area.id) ? null : (
+        <SortableList
+          items={area.projects}
+          keyExtractor={(p) => p.id}
+          onReorder={(ids) => void reorderProjects(area.id, ids)}
+          renderItem={({ item: p, isActive, drag }) => (
+            <View {...drag}>
+              <ProjectRow project={p} active={p.id === activeProjectId} dragging={isActive} onPress={() => onSelectProject?.(p.id)} />
+            </View>
+          )}
+        />
+      )}
       {addingProjectFor === area.id ? (
         <CreateInput
           placeholder="Project name"
@@ -77,14 +84,12 @@ export function ProjectsSidebar({
   );
 
   return (
-    <View style={{ gap: 2 }}>
-      <View style={styles.sectionHeader}>
-        <Text variant="caption" tone="tertiary" style={{ flex: 1, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.5 }}>
+    <View>
+      <View style={[styles.header, styles.area]}>
+        <Text variant="eyebrow" tone="quaternary" numberOfLines={1} style={{ flex: 1 }}>
           Areas
         </Text>
-        <IconButton label="New area" size="sm" onPress={() => setAddingArea((v) => !v)}>
-          <Icon name="plus" size={15} color={colors.textTertiary} />
-        </IconButton>
+        <MiniButton label="New area" icon="plus" onPress={() => setAddingArea((v) => !v)} />
       </View>
 
       <SortableList
@@ -95,9 +100,9 @@ export function ProjectsSidebar({
       />
 
       {sidebar.unsorted.length > 0 ? (
-        <View style={{ marginBottom: space.sm }}>
-          <View style={styles.areaHeader}>
-            <Text variant="caption" tone="tertiary" numberOfLines={1} style={{ flex: 1, fontWeight: "600" }}>
+        <View style={styles.area}>
+          <View style={styles.header}>
+            <Text variant="eyebrow" tone="quaternary" numberOfLines={1} style={{ flex: 1 }}>
               Unsorted
             </Text>
           </View>
@@ -118,7 +123,7 @@ export function ProjectsSidebar({
       ) : null}
 
       {isEmpty && !addingArea ? (
-        <Text tone="tertiary" variant="caption" style={{ paddingHorizontal: space.sm, paddingVertical: space.sm, lineHeight: 18 }}>
+        <Text tone="tertiary" variant="caption" style={styles.empty}>
           Group your work into areas and projects. Add one with ＋.
         </Text>
       ) : null}
@@ -126,41 +131,97 @@ export function ProjectsSidebar({
   );
 }
 
-/** An area heading: a color dot, name, and the always-present "new project" button. An
- *  empty area additionally reveals a delete button on hover — areas are only deletable once
- *  they hold no projects (PLAN §6.6). */
+const COLLAPSED_KEY = "companion.rail.collapsedAreas";
+
+/** Which areas are folded shut. Per-device, mirrored to localStorage (absent on native and
+ *  in some sandboxes, hence the guards) — the tree unmounts whenever the rail collapses, so
+ *  plain state would forget a fold every time the pointer left the rail. */
+function useCollapsedAreas() {
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    try {
+      const raw = globalThis.localStorage?.getItem(COLLAPSED_KEY);
+      const ids: unknown = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : []);
+    } catch {
+      return new Set();
+    }
+  });
+  const update = useCallback((fn: (next: Set<string>) => void) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      fn(next);
+      try {
+        globalThis.localStorage?.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
+      } catch {
+        // Storage is best-effort.
+      }
+      return next;
+    });
+  }, []);
+  const toggle = useCallback((id: string) => update((n) => (n.has(id) ? n.delete(id) : n.add(id))), [update]);
+  const expand = useCallback((id: string) => update((n) => n.delete(id)), [update]);
+  return { collapsed, toggle, expand };
+}
+
+/** A 16px affordance button for the 18px eyebrow headers (an `sm` IconButton is taller than
+ *  the row it would sit in). Fill steps on hover/press like every other control. */
+function MiniButton({ label, icon: name, onPress }: { label: string; icon: IconName; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      aria-label={label}
+      style={({ hovered, pressed }: PressState) => [
+        styles.mini,
+        noDragRegion,
+        { backgroundColor: pressed ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent" },
+      ]}
+    >
+      <Icon name={name} size={icon.sm} color={colors.textQuaternary} />
+    </Pressable>
+  );
+}
+
+/** An area heading: an 18px mono eyebrow with a fold chevron, an optional colour dot, and
+ *  the always-present "new project" button. An empty area additionally reveals a delete
+ *  button on hover — areas are only deletable once they hold no projects (PLAN §6.6). The
+ *  whole header is the area's drag handle; a plain tap folds or unfolds it. */
 function AreaHeader({
   area,
+  open,
+  onToggle,
   dragHandlers,
   onAddProject,
   onDeleteArea,
 }: {
   area: SidebarArea;
+  open: boolean;
+  onToggle: () => void;
   dragHandlers: object;
   onAddProject: () => void;
   onDeleteArea?: (area: SidebarArea) => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const deletable = area.projects.length === 0 && !!onDeleteArea;
+  let trailing: ReactNode = null;
+  if (deletable && hovered) trailing = <MiniButton label={`Delete area ${area.name}`} icon="trash" onPress={() => onDeleteArea?.(area)} />;
   return (
     <View
-      style={styles.areaHeader}
+      style={styles.header}
       {...dragHandlers}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
     >
-      {area.color ? <View style={[styles.areaDot, { backgroundColor: area.color }]} /> : null}
-      <Text variant="caption" tone="secondary" numberOfLines={1} style={{ flex: 1, fontWeight: "600" }}>
-        {area.name}
-      </Text>
-      {deletable && hovered ? (
-        <IconButton label={`Delete area ${area.name}`} size="sm" onPress={() => onDeleteArea?.(area)}>
-          <Icon name="trash" size={13} color={colors.textTertiary} />
-        </IconButton>
-      ) : null}
-      <IconButton label={`New project in ${area.name}`} size="sm" onPress={onAddProject}>
-        <Icon name="plus" size={13} color={colors.textTertiary} />
-      </IconButton>
+      <Pressable onPress={onToggle} aria-label={`${open ? "Collapse" : "Expand"} ${area.name}`} style={styles.headerLabel}>
+        <View style={[{ transform: [{ rotate: open ? "90deg" : "0deg" }] }, transition("transform", motion.fast)]}>
+          <Icon name="chevronRight" size={10} color={colors.textQuaternary} />
+        </View>
+        {area.color ? <View style={[styles.areaDot, { backgroundColor: area.color }]} /> : null}
+        <Text variant="eyebrow" tone="quaternary" numberOfLines={1} style={{ flex: 1 }}>
+          {area.name}
+        </Text>
+      </Pressable>
+      {trailing}
+      <MiniButton label={`New project in ${area.name}`} icon="plus" onPress={onAddProject} />
     </View>
   );
 }
@@ -179,25 +240,28 @@ function ProjectRow({
   const { addMember } = useProjects();
   // A project is a drop target: dropping a dragged note/task adds it to this project.
   const { ref, isOver } = useDropTarget(project.id, (p) => void addMember(project.id, p.kind, p.id));
+  const on = isOver || !!active;
   return (
-    <View ref={ref}>
+    <View ref={ref} style={styles.projectSlot}>
       <Pressable
         onPress={onPress}
-        style={({ hovered }: PressState) => [
+        aria-label={project.name}
+        style={({ hovered, pressed }: PressState) => [
           styles.projectRow,
+          noDragRegion,
+          transition("background-color", motion.fast),
           {
-            backgroundColor: isOver || active ? colors.accentSoft : dragging ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent",
+            backgroundColor: on ? colors.accentSoft : dragging || pressed ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent",
             borderColor: isOver ? colors.accent : "transparent",
           },
         ]}
       >
-        <View style={[styles.projectDot, { backgroundColor: project.color ?? colors.borderStrong }]} />
-        <Text variant="label" tone={active || isOver ? "accent" : "secondary"} numberOfLines={1} style={{ flex: 1 }}>
+        {/* The folder carries the project's swatch; selection overrides it, as everywhere. */}
+        <Icon name="folder" size={icon.md} color={on ? colors.textAccent : (project.color ?? colors.textTertiary)} />
+        <Text variant="label" tone={on ? "accent" : "secondary"} numberOfLines={1} style={{ flex: 1, minWidth: 0 }}>
           {project.name}
         </Text>
-        {project.taskProgress != null ? (
-          <ProgressRing value={project.taskProgress} size={14} stroke={2.5} />
-        ) : null}
+        {project.taskProgress != null ? <ProgressRing value={project.taskProgress} /> : null}
       </Pressable>
     </View>
   );
@@ -218,42 +282,41 @@ function CreateInput({
   // Commit on blur (click away). onSubmit no-ops on an empty value, so blurring an
   // untouched field simply closes it.
   return (
-    <View style={{ paddingHorizontal: space.sm, paddingVertical: space.xs }}>
+    <View style={styles.create}>
       <Input size="sm" autoFocus placeholder={placeholder} value={value} onChangeText={onChangeText} onBlur={onSubmit} />
     </View>
   );
 }
 
 const styles = {
-  sectionHeader: {
+  // One 10px step above the first group and between groups — the rail's own rhythm.
+  area: { marginTop: space.ml },
+  header: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    paddingLeft: space.sm,
+    gap: space.xxs,
+    height: 18,
+    paddingLeft: 7,
     paddingRight: space.xs,
-    height: 28,
-    marginTop: space.xl,
+    // With the 1px above each project row this makes the 2px under a header.
+    marginBottom: 1,
   },
-  areaHeader: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: space.sm,
-    paddingLeft: space.sm,
-    paddingRight: space.xs,
-    height: 26,
-  },
-  areaDot: { width: 7, height: 7, borderRadius: radius.full },
+  headerLabel: { flex: 1, minWidth: 0, flexDirection: "row" as const, alignItems: "center" as const, gap: space.xs, height: 18 },
+  areaDot: { width: 5, height: 5, borderRadius: radius.full, flexShrink: 0 },
+  mini: { width: 16, height: 16, borderRadius: radius.xs, alignItems: "center" as const, justifyContent: "center" as const, flexShrink: 0 },
+  projectSlot: { marginTop: 1 },
+  // Rail-item metrics: 28px, radius 3, 7px padding (6 + the border), 8px gap.
   projectRow: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
     gap: space.md,
-    height: 32,
-    paddingLeft: space.md,
-    paddingRight: space.md,
-    marginLeft: space.sm,
-    borderRadius: radius.md,
+    height: 28,
+    paddingHorizontal: 6,
+    borderRadius: radius.sm,
     // Always a 1px border (transparent by default) so the drop-target highlight can color
     // it without shifting layout.
     borderWidth: 1,
   },
-  projectDot: { width: 8, height: 8, borderRadius: radius.full, flexShrink: 0 },
+  create: { paddingTop: space.xs, paddingBottom: space.xxs },
+  empty: { paddingHorizontal: 7, paddingVertical: space.sm, lineHeight: 18 },
 };

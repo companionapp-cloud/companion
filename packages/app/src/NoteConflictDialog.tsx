@@ -36,15 +36,13 @@ export function NoteConflictDialog({ kind, onDiscard, onSaveAsNew, onRestore }: 
         <Text variant="title">{deleted ? "Note deleted elsewhere" : "Note changed elsewhere"}</Text>
         <Text tone="secondary" style={styles.message}>
           {deleted
-            ? "This note was deleted on another device while you had unsaved changes. What would you like to do with your changes?"
-            : "This note was edited on another device while you had unsaved changes. Keeping both, your changes can become a separate note."}
+            ? "This note was deleted on another device while you had unsaved changes. Restore it, keep your changes as a new note, or discard them — discarding can’t be undone."
+            : "This note was edited on another device while you had unsaved changes. Keep yours as a separate note, or discard them and take the other version — discarding can’t be undone."}
         </Text>
         <View style={styles.actions}>
-          {deleted ? (
-            <Button label="Restore note" variant="primary" disabled={busy} onPress={run(onRestore)} />
-          ) : null}
-          <Button label="Save my changes as a new note" variant={deleted ? "secondary" : "primary"} disabled={busy} onPress={run(onSaveAsNew)} />
           <Button label="Discard my changes" variant="danger" disabled={busy} onPress={run(onDiscard)} />
+          <Button label="Keep as new note" variant={deleted ? "secondary" : "primary"} disabled={busy} onPress={run(onSaveAsNew)} />
+          {deleted ? <Button label="Restore note" variant="primary" disabled={busy} onPress={run(onRestore)} /> : null}
         </View>
       </View>
     </View>
@@ -60,14 +58,14 @@ const styles = {
     bottom: 0,
     alignItems: "center" as const,
     justifyContent: "center" as const,
-    backgroundColor: "rgba(17,17,16,0.28)",
+    backgroundColor: colors.scrim,
     padding: space.xl,
     zIndex: 100,
   },
   card: {
     width: 420,
     maxWidth: "100%" as const,
-    backgroundColor: colors.surfaceCard,
+    backgroundColor: colors.surfaceOverlay,
     borderRadius: radius.xl,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
@@ -75,6 +73,13 @@ const styles = {
     padding: space.xl,
     gap: space.md,
   },
-  message: { lineHeight: 20 },
-  actions: { gap: space.sm, marginTop: space.sm, alignItems: "stretch" as const },
+  message: { lineHeight: 19 },
+  // Right-aligned, primary last; wraps on a narrow phone rather than clipping a label.
+  actions: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    justifyContent: "flex-end" as const,
+    gap: space.sm,
+    marginTop: space.sm,
+  },
 };

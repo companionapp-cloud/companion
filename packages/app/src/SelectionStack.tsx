@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 import { View } from "react-native";
-import { Text, colors, radius, shadow, space } from "@companion/design-system";
+import { Text, colors, radius, space } from "@companion/design-system";
 
 /** The multiselect preview: the first selected item (`children`) rendered on top of a
- *  couple of offset "cards" to suggest a stack, with a count badge. Shown in the detail
- *  pane while ≥2 items are selected (PLAN §3). */
+ *  couple of offset hairline panels to suggest a stack, with a mono count. Flat — the offset
+ *  edges do the work, nothing is shadowed. Shown in the detail pane while ≥2 items are
+ *  selected (PLAN §3). */
 export function SelectionStack({ count, children }: { count: number; children: ReactNode }) {
   return (
     <View style={styles.root}>
@@ -15,7 +16,7 @@ export function SelectionStack({ count, children }: { count: number; children: R
         <View style={[styles.card, styles.top]}>{children}</View>
       </View>
       <View style={styles.badge}>
-        <Text variant="caption" tone="accent" style={{ fontWeight: "600" }}>
+        <Text variant="mono" tone="accent">
           {count} selected
         </Text>
       </View>
@@ -23,10 +24,10 @@ export function SelectionStack({ count, children }: { count: number; children: R
   );
 }
 
-const OFFSET = 10;
+const OFFSET = 6;
 
 const styles = {
-  root: { flex: 1, minHeight: 0, backgroundColor: colors.surfaceApp, padding: space.xl },
+  root: { flex: 1, minHeight: 0, backgroundColor: colors.surfaceSunken, padding: space.lg },
   // Room on the right/bottom for the peeking card edges.
   stage: { flex: 1, minHeight: 0, marginRight: OFFSET * 2, marginBottom: OFFSET * 2 },
   card: {
@@ -36,21 +37,24 @@ const styles = {
     right: 0,
     bottom: 0,
     backgroundColor: colors.surfaceCard,
-    borderRadius: radius.xl,
+    borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
   },
   card1: { transform: [{ translateX: OFFSET }, { translateY: OFFSET }] },
-  card2: { transform: [{ translateX: OFFSET * 2 }, { translateY: OFFSET * 2 }], opacity: 0.6 },
-  // The top card holds the live editor; clip it and lift it above the peeking layers.
-  top: { overflow: "hidden" as const, ...shadow.lg },
+  card2: { transform: [{ translateX: OFFSET * 2 }, { translateY: OFFSET * 2 }] },
+  // The top panel holds the live editor; clip it to the panel radius.
+  top: { overflow: "hidden" as const },
+  // Straddles the top panel's upper hairline, centred, so it never sits on the editor's
+  // own sub-toolbar controls.
   badge: {
     position: "absolute" as const,
-    top: space.xl + space.md,
-    left: space.xl + space.md,
-    paddingHorizontal: space.md,
-    paddingVertical: space.xs,
-    borderRadius: radius.full,
+    top: space.lg - 8,
+    alignSelf: "center" as const,
+    height: 16,
+    justifyContent: "center" as const,
+    paddingHorizontal: 5,
+    borderRadius: radius.sm,
     backgroundColor: colors.accentSoft,
     borderWidth: 1,
     borderColor: colors.accentSoftBorder,

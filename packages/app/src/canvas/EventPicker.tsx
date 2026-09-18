@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import type { CalendarItem } from "@companion/core-bridge";
-import { Icon, IconButton, Input, ListRow, Text, colors, radius, shadow, space } from "@companion/design-system";
+import { Icon, IconButton, Input, ListRow, Text, colors, icon, layout, radius, shadow, space, useDensity } from "@companion/design-system";
 import { useCalendar } from "../CalendarProvider";
 import { formatWhen } from "../CalendarItemInfo";
 
@@ -13,6 +13,9 @@ const FUTURE_DAYS = 180;
  *  merged range query the calendar screens use, narrowed to feed events. */
 export function EventPicker({ onPick, onClose }: { onPick: (item: CalendarItem) => void; onClose: () => void }) {
   const { range, revision } = useCalendar();
+  // Pointer rows stay 24px with the time as mono trailing metadata; touch rows are 44px
+  // anyway, so there the time gets its own line instead of squeezing the title.
+  const touch = useDensity() === "touch";
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<CalendarItem[]>([]);
 
@@ -44,22 +47,28 @@ export function EventPicker({ onPick, onClose }: { onPick: (item: CalendarItem) 
       <Pressable style={styles.scrimFill} onPress={onClose} aria-label="Close" />
       <View style={styles.card}>
         <View style={styles.header}>
-          <Text variant="title">Add an event</Text>
+          <Text variant="label">Add an event</Text>
           <View style={{ flex: 1 }} />
-          <IconButton label="Close" size="sm" onPress={onClose}>
-            <Icon name="close" size={16} color={colors.textSecondary} />
+          <IconButton label="Close" size={touch ? undefined : "sm"} onPress={onClose}>
+            <Icon name="close" size={icon.sm} color={colors.textSecondary} />
           </IconButton>
         </View>
         <View style={styles.search}>
-          <Input size="sm" autoFocus placeholder="Search events" value={query} onChangeText={setQuery} leadingIcon={<Icon name="search" size={15} color={colors.textTertiary} />} />
+          <Input size={touch ? undefined : "sm"} autoFocus placeholder="Search events" value={query} onChangeText={setQuery} leadingIcon={<Icon name="search" size={icon.sm} color={colors.textQuaternary} />} />
         </View>
         <ScrollView contentContainerStyle={styles.body}>
           {filtered.length ? (
             filtered.map((it) => (
-              <ListRow key={it.id} icon={<Icon name="calendar" size={16} color={it.color ?? colors.textTertiary} />} title={it.title || "Untitled event"} subtitle={formatWhen(it)} onPress={() => onPick(it)} />
+              <ListRow
+                key={it.id}
+                icon={<Icon name="calendar" size={icon.sm} color={it.color ?? colors.textQuaternary} />}
+                title={it.title || "Untitled event"}
+                {...(touch ? { subtitle: formatWhen(it) } : { trailing: formatWhen(it).toLowerCase() })}
+                onPress={() => onPick(it)}
+              />
             ))
           ) : (
-            <Text tone="tertiary" variant="caption" style={{ padding: space.lg, textAlign: "center" }}>
+            <Text tone="tertiary" variant="caption" style={styles.empty}>
               {query ? "Nothing matches that." : "No events in the next six months. Subscribe to a calendar in Settings first."}
             </Text>
           )}
@@ -71,9 +80,11 @@ export function EventPicker({ onPick, onClose }: { onPick: (item: CalendarItem) 
 
 const styles = {
   scrim: { position: "absolute" as const, top: 0, right: 0, bottom: 0, left: 0, alignItems: "center" as const, justifyContent: "center" as const, zIndex: 50 },
-  scrimFill: { position: "absolute" as const, top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "rgba(17,17,16,0.25)" },
-  card: { width: 440, maxWidth: "92%" as const, maxHeight: "80%" as const, backgroundColor: colors.surfaceCard, borderRadius: radius.xl, borderWidth: 1, borderColor: colors.borderSubtle, ...shadow.lg, overflow: "hidden" as const },
-  header: { flexDirection: "row" as const, alignItems: "center" as const, paddingHorizontal: space.lg, paddingVertical: space.md, borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
-  search: { padding: space.md },
-  body: { padding: space.sm, gap: 2 },
+  scrimFill: { position: "absolute" as const, top: 0, right: 0, bottom: 0, left: 0, backgroundColor: colors.scrim },
+  // A floating picker, not a dialog: overlay surface, hairline, 6px radius, the menu shadow.
+  card: { width: 440, maxWidth: "92%" as const, maxHeight: "80%" as const, backgroundColor: colors.surfaceOverlay, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.borderSubtle, ...shadow.md, overflow: "hidden" as const },
+  header: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.sm, minHeight: layout.subToolbarH, paddingLeft: space.ml, paddingRight: space.xs, borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
+  search: { padding: space.sm },
+  body: { paddingHorizontal: space.xs, paddingBottom: space.xs, gap: 1 },
+  empty: { padding: space.lg, textAlign: "center" as const, lineHeight: 18 },
 };

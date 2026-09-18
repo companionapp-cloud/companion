@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
-import { Icon, SplitView, Text, colors, layout, radius, space, type PressState } from "@companion/design-system";
+import { ScrollView, View } from "react-native";
+import { Icon, ListRow, SplitView, Text, colors, icon, space } from "@companion/design-system";
 import { visibleSettingsSections, settingsSection, type SettingsSectionId } from "./settingsSections";
 
 /** The settings page (web/desktop): a content-details master-detail rendered in the main
- *  content area — not a modal. The list column is the settings navigation (Sync / AI /
- *  Objects); the detail pane renders the selected section. Mirrors the ProjectView
- *  master-detail so settings reads as a first-class screen (PLAN §3.1 shell). */
+ *  content area — not a modal. A 190px section list (dense rows, hairline on its right)
+ *  beside a 520px-max content column that renders the selected section. Mirrors the
+ *  ProjectView master-detail so settings reads as a first-class screen (PLAN §3.1 shell). */
 export function SettingsScreen() {
   const [selected, setSelected] = useState<SettingsSectionId>("sync");
   const section = settingsSection(selected);
@@ -14,17 +14,17 @@ export function SettingsScreen() {
 
   return (
     <SplitView
-      aside={<SettingsNav selected={selected} onSelect={setSelected} />}
-      storageKey="companion.settings.listWidth"
-      defaultWidth={260}
-      minWidth={220}
-      maxWidth={360}
+      aside={<SettingsNav selected={section.id} onSelect={setSelected} />}
+      storageKey="companion.settings.navWidth"
+      defaultWidth={190}
+      minWidth={160}
+      maxWidth={260}
     >
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.detailScroll}>
+      <ScrollView style={styles.detailScroll} contentContainerStyle={styles.detailContent}>
         <View style={styles.detail}>
           <View style={styles.detailHeader}>
-            <Text variant="title">{section.label}</Text>
-            <Text variant="caption" tone="tertiary">
+            <Text variant="heading">{section.label}</Text>
+            <Text variant="caption" tone="secondary">
               {section.description}
             </Text>
           </View>
@@ -37,57 +37,29 @@ export function SettingsScreen() {
 
 function SettingsNav({ selected, onSelect }: { selected: SettingsSectionId; onSelect: (id: SettingsSectionId) => void }) {
   return (
-    <View style={styles.nav}>
-      <Text variant="title" style={styles.navTitle}>
-        Settings
-      </Text>
-      <View style={{ gap: 2 }}>
-        {visibleSettingsSections().map((s) => {
-          const active = s.id === selected;
-          return (
-            <Pressable
-              key={s.id}
-              onPress={() => onSelect(s.id)}
-              style={({ hovered }: PressState) => [
-                styles.navRow,
-                active ? styles.navRowActive : hovered ? styles.navRowHover : null,
-              ]}
-            >
-              <Icon name={s.icon} size={17} color={active ? colors.accentHover : colors.textSecondary} />
-              <View style={{ flex: 1 }}>
-                <Text tone={active ? "accent" : undefined}>{s.label}</Text>
-              </View>
-            </Pressable>
-          );
-        })}
-      </View>
-    </View>
+    <ScrollView style={styles.nav} contentContainerStyle={styles.navContent}>
+      {visibleSettingsSections().map((s) => {
+        const active = s.id === selected;
+        return (
+          <ListRow
+            key={s.id}
+            icon={<Icon name={s.icon} size={icon.sm} color={active ? colors.textAccent : colors.textQuaternary} />}
+            title={s.label}
+            selected={active}
+            onPress={() => onSelect(s.id)}
+          />
+        );
+      })}
+    </ScrollView>
   );
 }
 
 const styles = {
-  nav: { flex: 1, padding: space.md, gap: space.md },
-  navTitle: { paddingHorizontal: space.sm, paddingTop: space.xs },
-  navRow: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: space.md,
-    paddingHorizontal: space.sm,
-    paddingVertical: space.sm,
-    borderRadius: radius.md,
-  },
-  navRowActive: { backgroundColor: colors.accentSoft },
-  navRowHover: { backgroundColor: colors.surfaceHover },
-  // Center the detail column: the scroll container aligns its child, the child caps its
-  // width. (marginHorizontal:auto on a ScrollView content container doesn't center in RNW.)
-  detailScroll: {
-    alignItems: "center" as const,
-    padding: space.xxl,
-  },
-  detail: {
-    width: "100%" as const,
-    maxWidth: layout.contentMax,
-    gap: space.xl,
-  },
+  nav: { flex: 1, backgroundColor: colors.surfaceCard },
+  navContent: { padding: space.xs, gap: 1 },
+  detailScroll: { flex: 1, backgroundColor: colors.surfaceCard },
+  detailContent: { paddingVertical: space.xl2, paddingHorizontal: space.xxl },
+  // The column hugs the left edge at 520px — a form, not a centred document.
+  detail: { width: "100%" as const, maxWidth: 520, gap: space.xl },
   detailHeader: { gap: space.xs },
 };

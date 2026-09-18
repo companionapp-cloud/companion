@@ -1,10 +1,12 @@
 import { useLayoutEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { TodayCalendar, Agenda, useCalendar, todayISO, formatFullDate } from '@companion/app';
-import { Icon, IconButton, Text, colors, space } from '@companion/design-system';
+import { Icon, IconButton, Spinner, Text, colors, control, space } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
+import { Card } from '../ui/native';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -12,8 +14,11 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 // phone, so this is a stacked day view — a month picker to choose a day, then that day's
 // agenda (merged feed events, due tasks, dated notes). Reuses the shared TodayCalendar +
 // Agenda so the merge logic stays identical across shells ([[mobile-needs-own-shell]]).
+// Chrome: resync is an icon in the nav bar; the month sits in a card, then a mono date
+// label and the day's agenda. Feed events push the read-only event screen.
 export function CalendarScreen() {
   const nav = useNavigation<Nav>();
+  const insets = useSafeAreaInsets();
   const { refresh } = useCalendar();
   const [selected, setSelected] = useState(todayISO);
   const [refreshing, setRefreshing] = useState(false);
@@ -32,47 +37,50 @@ export function CalendarScreen() {
   // A refresh button in the nav header re-fetches the ICS feeds now (PLAN §6.7).
   useLayoutEffect(() => {
     nav.setOptions({
-      headerRight: () => (
-        <IconButton label="Refresh calendars" size="sm" onPress={onRefresh} disabled={refreshing}>
-          {refreshing ? (
-            <ActivityIndicator size="small" color={colors.textSecondary} />
-          ) : (
+      headerRight: () =>
+        refreshing ? (
+          // The spinner takes the button's place while the feeds re-fetch.
+          <View style={styles.refreshing}>
+            <Spinner inline size={14} />
+          </View>
+        ) : (
+          <IconButton label="Refresh calendars" size="lg" onPress={() => void onRefresh()}>
             <Icon name="refresh" size={18} color={colors.textSecondary} />
-          )}
-        </IconButton>
-      ),
+          </IconButton>
+        ),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav, refreshing]);
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-      <View style={styles.calCard}>
-        <TodayCalendar selected={selected} today={today} onSelect={setSelected} allowFuture />
-      </View>
+    <ScrollView style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + space.xxl }]}>
+      <Card>
+        <View style={styles.month}>
+          <TodayCalendar selected={selected} today={today} onSelect={setSelected} allowFuture />
+        </View>
+      </Card>
       <Text variant="mono" tone="tertiary" style={styles.dateLabel}>
         {formatFullDate(selected)}
       </Text>
-      <Agenda
-        date={selected}
-        onOpenItem={(item) => {
-          if (item.kind === 'task') nav.push('TaskEditor', { id: item.sourceId });
-          else if (item.kind === 'note') nav.push('NoteEditor', { id: item.sourceId });
-          else nav.push('CalendarEvent', { item });
-        }}
-      />
+      <View style={styles.agenda}>
+        <Agenda
+          date={selected}
+          onOpenItem={(item) => {
+            if (item.kind === 'task') nav.push('TaskEditor', { id: item.sourceId });
+            else if (item.kind === 'note') nav.push('NoteEditor', { id: item.sourceId });
+            else nav.push('CalendarEvent', { item });
+          }}
+        />
+      </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.surfaceCard },
-  content: { padding: space.lg, paddingBottom: space.xxl },
-  calCard: {
-    paddingBottom: space.lg,
-    marginBottom: space.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderSubtle,
-  },
-  dateLabel: { marginBottom: space.md, fontSize: 12 },
+  root: { flex: 1, backgroundColor: colors.surfaceApp },
+  content: { padding: space.lg },
+  refreshing: { width: control.lg, height: control.lg, alignItems: 'center', justifyContent: 'center' },
+  month: { padding: space.lg },
+  dateLabel: { paddingHorizontal: space.sm, paddingTop: space.lg, paddingBottom: space.sm },
+  agenda: { paddingHorizontal: space.sm },
 });

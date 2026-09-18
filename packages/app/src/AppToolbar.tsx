@@ -1,75 +1,110 @@
 import { ScrollView, View } from "react-native";
-import { Icon, IconButton, Tab, Toolbar, colors, space } from "@companion/design-system";
-import { useNav } from "./nav-context";
+import {
+  Avatar,
+  Button,
+  Divider,
+  Icon,
+  IconButton,
+  Tab,
+  Toolbar,
+  colors,
+  icon,
+  space,
+  themeSwitchable,
+  toggleTheme,
+  useTheme,
+  type IconName,
+} from "@companion/design-system";
+import { docOfRef, useNav, type DocRef, type SurfaceViewId, type TabRef, type WorkspaceSection } from "./nav-context";
 import { useNotes } from "./NotesProvider";
 import { useTasks } from "./TasksProvider";
+import { useProjects } from "./ProjectsProvider";
+import { useSync } from "./SyncProvider";
 import { useCanvases } from "./canvas/CanvasesProvider";
 import { NotificationsBell } from "./NotificationsBell";
 import { Draggable } from "./DndContext";
 
-/** The app's top toolbar: back/forward history, the shared workspace tab strip (notes and
- * tasks together — each tab is a document or empty), a "+" to add a tab, and the
- * section-level New action. Per-tab expand pops the document out to its own window. */
-export function AppToolbar() {
+const VIEW_META: Record<SurfaceViewId, { label: string; icon: IconName }> = {
+  today: { label: "Today", icon: "today" },
+  chat: { label: "Chat", icon: "chat" },
+  calendar: { label: "Calendar", icon: "calendar" },
+  habits: { label: "Habits", icon: "habits" },
+  graph: { label: "Graph", icon: "graph" },
+  trash: { label: "Trash", icon: "trash" },
+  settings: { label: "Settings", icon: "settings" },
+  notifications: { label: "Notifications", icon: "bell" },
+};
+
+const SECTION_META: Record<WorkspaceSection, { label: string; icon: IconName }> = {
+  notes: { label: "Notes", icon: "notes" },
+  tasks: { label: "Tasks", icon: "tasks" },
+  canvases: { label: "Canvases", icon: "canvas" },
+};
+
+const DOC_ICON: Record<DocRef["kind"], IconName> = { note: "file", task: "tasks", canvas: "canvas" };
+
+/** The app's top toolbar: the active tab's back/forward history, the tab strip — every
+ * open surface, document or view — a "+" for an empty tab, then quick capture, the theme
+ * toggle, notifications and the signed-in account. */
+export function AppToolbar({ onCapture }: { onCapture: () => void }) {
   const nav = useNav();
   const notes = useNotes();
   const tasks = useTasks();
   const canvases = useCanvases();
+  const { projects } = useProjects();
+  const sync = useSync();
+  const theme = useTheme();
 
-  const inNotes = nav.current.kind === "notes";
-  const inTasks = nav.current.kind === "tasks";
-  const inCanvases = nav.current.kind === "canvases";
-
-  const labelFor = (kind: "note" | "task" | "canvas", id: string) => {
-    const title = kind === "note" ? notes.byId(id)?.title : kind === "task" ? tasks.byId(id)?.title : canvases.byId(id)?.name;
-    return title || (kind === "canvas" ? "Untitled canvas" : "Untitled");
+  const docLabel = (doc: DocRef) => {
+    const title =
+      doc.kind === "note" ? notes.byId(doc.id)?.title : doc.kind === "task" ? (tasks.byId(doc.id) ?? tasks.seedById(doc.id))?.title : canvases.byId(doc.id)?.name;
+    return title || (doc.kind === "canvas" ? "Untitled canvas" : "Untitled");
   };
 
-  const onCreate = async () => {
-    if (inCanvases) {
-      const c = await canvases.create();
-      nav.openCanvas(c.id);
-    } else if (inTasks) {
-      const task = await tasks.create({ title: "Untitled task" });
-      nav.openTask(task.id);
-    } else {
-      const note = await notes.create();
-      nav.openNote(note.id);
-    }
+  const describe = (ref: TabRef | null): { label: string; icon?: IconName } => {
+    if (!ref) return { label: "Nothing selected" };
+    const doc = docOfRef(ref);
+    if (doc) return { label: docLabel(doc), icon: DOC_ICON[doc.kind] };
+    if (ref.kind === "browse") return SECTION_META[ref.section];
+    if (ref.kind === "view") return VIEW_META[ref.view];
+    if (ref.kind === "project") return { label: projects.find((p) => p.id === ref.projectId)?.name || "Project", icon: "folder" };
+    return { label: "Untitled" };
   };
 
   return (
     <Toolbar>
       <IconButton label="Back" size="sm" disabled={!nav.canBack} onPress={nav.back}>
-        <Icon name="chevronLeft" size={18} color={colors.textSecondary} />
+        <Icon name="chevronLeft" size={icon.md} color={colors.textSecondary} />
       </IconButton>
       <IconButton label="Forward" size="sm" disabled={!nav.canForward} onPress={nav.forward}>
-        <Icon name="chevronRight" size={18} color={colors.textSecondary} />
+        <Icon name="chevronRight" size={icon.md} color={colors.textSecondary} />
       </IconButton>
 
-      <View style={separator} />
+      <Divider vertical style={separator} />
 
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         style={{ flex: 1 }}
-        contentContainerStyle={{ flexGrow: 1, alignItems: "center", gap: space.xs }}
+        contentContainerStyle={{ flexGrow: 1, alignItems: "center", gap: 3 }}
       >
         {nav.tabs.map((tab, i) => {
-          const ref = tab.ref;
+          const { label, icon: glyph } = describe(tab.ref);
+          const doc = docOfRef(tab.ref);
           const el = (
             <Tab
-              label={ref ? labelFor(ref.kind, ref.id) : "Nothing selected"}
+              label={label}
               active={i === nav.activeIndex}
-              icon={ref ? <Icon name={ref.kind === "task" ? "tasks" : ref.kind === "canvas" ? "canvas" : "file"} size={13} color={colors.textTertiary} /> : undefined}
+              icon={glyph ? <Icon name={glyph} size={11} color={colors.textQuaternary} /> : undefined}
               onPress={() => nav.selectTab(i)}
-              onExpand={ref ? () => nav.expandTab(i) : undefined}
+              // Only notes and tasks have a focus window to pop out into.
+              onExpand={doc && doc.kind !== "canvas" ? () => nav.expandTab(i) : undefined}
               onClose={() => nav.closeTab(i)}
             />
           );
           // A tab holding a note/task can be dragged onto a project (or a board) to add it there.
-          return ref && ref.kind !== "canvas" ? (
-            <Draggable key={tab.uid} payload={{ kind: ref.kind, id: ref.id, label: labelFor(ref.kind, ref.id) }}>
+          return doc && doc.kind !== "canvas" ? (
+            <Draggable key={tab.uid} payload={{ kind: doc.kind, id: doc.id, label }}>
               {el}
             </Draggable>
           ) : (
@@ -77,20 +112,29 @@ export function AppToolbar() {
           );
         })}
         <IconButton label="New tab" size="sm" onPress={nav.addTab}>
-          <Icon name="plus" size={15} color={colors.textTertiary} />
+          <Icon name="plus" size={icon.sm} color={colors.textTertiary} />
         </IconButton>
         {/* Fills the remaining toolbar width (also a desktop window drag handle). */}
         <View style={{ flex: 1, alignSelf: "stretch" }} />
       </ScrollView>
 
-      <NotificationsBell />
-      {inNotes || inTasks || inCanvases ? (
-        <IconButton label={inCanvases ? "New canvas" : inTasks ? "New task" : "New note"} onPress={onCreate}>
-          <Icon name="plus" color={colors.textSecondary} />
+      <Button
+        label="Capture"
+        size="sm"
+        variant="ghost"
+        kbd="⌥⇧␣"
+        icon={<Icon name="capture" size={13} color={colors.textSecondary} />}
+        onPress={onCapture}
+      />
+      {themeSwitchable ? (
+        <IconButton label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} size="sm" onPress={toggleTheme}>
+          <Icon name={theme === "dark" ? "sun" : "moon"} size={icon.md} color={colors.textSecondary} />
         </IconButton>
       ) : null}
+      <NotificationsBell />
+      {sync.email ? <Avatar name={sync.email} size="sm" /> : null}
     </Toolbar>
   );
 }
 
-const separator = { width: 1, height: 20, marginHorizontal: space.xs, backgroundColor: colors.borderSubtle };
+const separator = { height: 14, alignSelf: "center" as const, marginHorizontal: space.xxs + 1 };

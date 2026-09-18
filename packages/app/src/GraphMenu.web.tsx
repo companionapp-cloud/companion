@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Icon, colors, font, radius } from "@companion/design-system";
+import { Icon, colors, control, font, motion, radius, row, space } from "@companion/design-system";
 import type { Graph, GraphNode } from "@companion/core-bridge";
 import {
   DEFAULT_FILTERS,
@@ -14,8 +14,8 @@ import {
   type GraphPhysics,
 } from "./graphModel";
 
-// The graph view's settings menu: a gear button in the canvas corner that opens a floating
-// panel with "Forces" sliders (live-tuning the d3 simulation) and "Show" toggles (which node
+// The graph view's settings menu: a settings button in the graph's sub-toolbar that opens a
+// 252px popover with "Forces" sliders (live-tuning the d3 simulation) and "Show" toggles (which node
 // types and projects are in the graph). Plain DOM with inline styles — like GraphView it
 // also runs inside the isolated mobile WebView bundle, which has no providers and no
 // react-native-web layout, so nothing here may depend on the RN design-system components.
@@ -76,133 +76,129 @@ export function useGraphSettings(): GraphSettings {
 }
 
 // ── Styles ───────────────────────────────────────────────────────────────────────────────
-// Declared before the components (see the TDZ note in GraphView.web.tsx).
+// Declared before the components (see the TDZ note in GraphView.web.tsx). Hover/press fills,
+// the range track and the checkbox need pseudo-classes, so those live in one injected
+// stylesheet; everything else is inline. Colour roles are CSS variables here, which is fine
+// in a stylesheet — the only literal is the check glyph, white on accent in both themes.
+const CHECK_GLYPH = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2l2.3 2.3 4.7-5' fill='none' stroke='%23fff' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`;
+const DASH_GLYPH = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 6h6' fill='none' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E")`;
+
+export const GRAPH_CHROME_CSS = `
+.graph-iconbtn { display: inline-flex; align-items: center; justify-content: center; width: ${control.sm}px; height: ${control.sm}px; padding: 0; flex-shrink: 0; border: 0; border-radius: ${radius.sm}px; background: transparent; color: ${colors.textSecondary}; cursor: pointer; transition: background-color ${motion.instant}ms ${motion.ease}; }
+.graph-iconbtn:hover { background: ${colors.surfaceHover}; }
+.graph-iconbtn:active { background: ${colors.surfaceActive}; }
+.graph-iconbtn.on { background: ${colors.accentSoft}; color: ${colors.textAccent}; }
+.graph-ghostbtn { height: ${control.sm}px; padding: 0 ${space.md}px; border: 0; border-radius: ${radius.sm}px; background: transparent; color: ${colors.textSecondary}; font: ${font.weight.medium} ${font.size.sm}px ${font.sans}; cursor: pointer; transition: background-color ${motion.instant}ms ${motion.ease}; }
+.graph-ghostbtn:hover { background: ${colors.surfaceHover}; }
+.graph-ghostbtn:active { background: ${colors.surfaceActive}; }
+.graph-ghostbtn:disabled { opacity: 0.4; cursor: default; background: transparent; }
+.graph-range { display: block; width: 100%; height: 14px; margin: 0; padding: 0; background: transparent; cursor: pointer; -webkit-appearance: none; appearance: none; }
+.graph-range::-webkit-slider-runnable-track { height: 2px; border-radius: 1px; background: linear-gradient(to right, ${colors.accent} var(--fill, 0%), ${colors.borderDefault} var(--fill, 0%)); }
+.graph-range::-moz-range-track { height: 2px; border-radius: 1px; background: ${colors.borderDefault}; }
+.graph-range::-moz-range-progress { height: 2px; border-radius: 1px; background: ${colors.accent}; }
+.graph-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 10px; height: 10px; margin-top: -4px; border: 0; border-radius: 50%; background: ${colors.accent}; }
+.graph-range::-moz-range-thumb { width: 10px; height: 10px; border: 0; border-radius: 50%; background: ${colors.accent}; }
+.graph-range:hover::-webkit-slider-thumb { background: ${colors.accentHover}; }
+.graph-range:hover::-moz-range-thumb { background: ${colors.accentHover}; }
+.graph-range:focus-visible { outline: 2px solid ${colors.focusRing}; outline-offset: 2px; border-radius: ${radius.xs}px; }
+.graph-check { -webkit-appearance: none; appearance: none; box-sizing: border-box; width: 12px; height: 12px; margin: 0; flex-shrink: 0; border: 1px solid ${colors.borderStrong}; border-radius: ${radius.xs}px; background: ${colors.surfaceCard} center / 12px 12px no-repeat; cursor: pointer; transition: background-color ${motion.fast}ms ${motion.ease}, border-color ${motion.fast}ms ${motion.ease}; }
+.graph-check:checked { border-color: ${colors.accent}; background-color: ${colors.accent}; background-image: ${CHECK_GLYPH}; background-position: -1px -1px; }
+.graph-check:indeterminate { border-color: ${colors.accent}; background-color: ${colors.accent}; background-image: ${DASH_GLYPH}; background-position: -1px -1px; }
+.graph-check:focus-visible { outline: 2px solid ${colors.focusRing}; outline-offset: 1px; }
+.graph-checkrow { border-radius: ${radius.sm}px; }
+.graph-checkrow:hover { background: ${colors.surfaceHover}; }
+/* Desktop density never applies to touch: inside the mobile WebView (a coarse pointer) the
+   buttons take the 30px control size and rows the 44px touch height. */
+@media (pointer: coarse) {
+  .graph-iconbtn { width: ${control.lg}px; height: ${control.lg}px; }
+  .graph-ghostbtn { height: ${control.lg}px; font-size: ${font.size.md}px; }
+  .graph-checkrow { min-height: ${row.touch}px !important; }
+  .graph-range { height: ${control.lg}px; }
+  .graph-range::-webkit-slider-thumb { width: 18px; height: 18px; margin-top: -8px; }
+}
+`;
+
 const rootStyle: CSSProperties = {
-  position: "absolute",
-  top: 12,
-  right: 12,
-  bottom: 12,
-  zIndex: 10,
+  position: "relative",
   display: "flex",
-  flexDirection: "column",
-  alignItems: "flex-end",
-  gap: 8,
-  // The column itself must not swallow canvas gestures — only its children are targets.
-  pointerEvents: "none",
+  flexShrink: 0,
   fontFamily: font.sans,
   color: colors.textPrimary,
 };
 
-const toggleStyle: CSSProperties = {
-  pointerEvents: "auto",
-  width: 32,
-  height: 32,
-  padding: 0,
-  borderRadius: radius.md,
-  border: `1px solid ${colors.borderSubtle}`,
-  background: colors.surfaceCard,
-  boxShadow: "0 1px 3px rgba(17,17,16,0.08)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  cursor: "pointer",
-};
-
-const toggleActiveStyle: CSSProperties = {
-  ...toggleStyle,
-  background: colors.surfaceActive,
-  borderColor: colors.borderDefault,
-};
-
+// A popover, so it floats: overlay surface, hairline, 6px radius and the menu shadow.
 const panelStyle: CSSProperties = {
-  pointerEvents: "auto",
+  position: "absolute",
+  top: "100%",
+  right: 0,
+  marginTop: space.xs,
+  zIndex: 40,
   width: 252,
-  minHeight: 0,
+  maxHeight: "min(70vh, 440px)",
   overflowY: "auto",
   boxSizing: "border-box",
-  padding: "10px 12px 12px",
+  padding: `${space.xs}px ${space.ml}px ${space.ml}px`,
   borderRadius: radius.lg,
   border: `1px solid ${colors.borderSubtle}`,
-  background: colors.surfaceCard,
-  boxShadow: "0 6px 20px rgba(17,17,16,0.12)",
-  fontSize: font.size.xs,
-  lineHeight: 1.3,
+  background: colors.surfaceOverlay,
+  boxShadow: "0 4px 12px rgba(17,17,16,0.1)",
+  fontSize: font.size.sm,
+  lineHeight: font.leading.ui,
 };
 
 const sectionHeadStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
-  justifyContent: "space-between",
-  margin: "8px 0 6px",
+  gap: space.xs,
+  padding: `${space.sm}px 0 ${space.xxs}px ${space.xxs}px`,
+};
+
+// The eyebrow: 10px semibold uppercase mono, 0.12em tracking.
+const eyebrowStyle: CSSProperties = {
+  flex: 1,
+  fontFamily: font.mono,
   fontSize: font.size["2xs"],
   fontWeight: font.weight.semibold,
-  letterSpacing: 0.5,
+  letterSpacing: "0.12em",
   textTransform: "uppercase",
   color: colors.textTertiary,
 };
 
-const linkButtonStyle: CSSProperties = {
-  padding: 0,
-  border: "none",
-  background: "none",
-  font: "inherit",
-  fontSize: font.size["2xs"],
-  letterSpacing: 0,
-  textTransform: "none",
-  color: colors.textAccent,
-  cursor: "pointer",
-};
-
-const linkButtonDisabledStyle: CSSProperties = {
-  ...linkButtonStyle,
-  color: colors.textDisabled,
-  cursor: "default",
-};
-
 const sliderRowStyle: CSSProperties = {
   display: "block",
-  margin: "0 0 6px",
+  padding: `${space.xs}px ${space.xxs}px`,
 };
 
 const sliderHeadStyle: CSSProperties = {
   display: "flex",
-  justifyContent: "space-between",
   alignItems: "baseline",
-  marginBottom: 2,
+  gap: space.sm,
+  marginBottom: 3,
+};
+
+const sliderLabelStyle: CSSProperties = {
+  flex: 1,
+  fontSize: font.size.sm,
   color: colors.textSecondary,
 };
 
 const sliderValueStyle: CSSProperties = {
   fontFamily: font.mono,
-  fontSize: font.size["2xs"],
+  fontSize: font.size.xs,
   color: colors.textTertiary,
-};
-
-const sliderInputStyle: CSSProperties = {
-  display: "block",
-  width: "100%",
-  margin: 0,
-  accentColor: colors.accent,
-  cursor: "pointer",
 };
 
 const checkRowStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
-  gap: 8,
-  minHeight: 24,
+  gap: 7,
+  minHeight: row.h,
+  paddingLeft: space.xxs,
+  paddingRight: space.xs,
   cursor: "pointer",
+  fontSize: font.size.base,
   color: colors.textPrimary,
   userSelect: "none",
-};
-
-const checkInputStyle: CSSProperties = {
-  margin: 0,
-  width: 14,
-  height: 14,
-  flexShrink: 0,
-  accentColor: colors.accent,
-  cursor: "pointer",
 };
 
 const swatchStyle: CSSProperties = {
@@ -222,7 +218,7 @@ const checkLabelStyle: CSSProperties = {
 
 const dividerStyle: CSSProperties = {
   height: 1,
-  margin: "8px 0 2px",
+  margin: `${space.md}px 0 0`,
   background: colors.borderSubtle,
 };
 
@@ -231,15 +227,16 @@ const dividerStyle: CSSProperties = {
 function SectionHead({ title, action }: { title: string; action?: ReactNode }) {
   return (
     <div style={sectionHeadStyle}>
-      <span>{title}</span>
+      <span style={eyebrowStyle}>{title}</span>
       {action}
     </div>
   );
 }
 
-function LinkButton({ children, onClick, disabled }: { children: ReactNode; onClick: () => void; disabled?: boolean }) {
+/** The ghost `sm` button, in plain DOM (see the note at the top of this file). */
+function GhostButton({ children, onClick, disabled }: { children: ReactNode; onClick: () => void; disabled?: boolean }) {
   return (
-    <button type="button" style={disabled ? linkButtonDisabledStyle : linkButtonStyle} onClick={onClick} disabled={disabled}>
+    <button type="button" className="graph-ghostbtn" onClick={onClick} disabled={disabled}>
       {children}
     </button>
   );
@@ -263,20 +260,23 @@ function SliderRow({
   step: number;
   onChange: (v: number) => void;
 }) {
+  // WebKit has no ::range-progress, so the filled part of the track is a gradient stop.
+  const fill = max > min ? ((value - min) / (max - min)) * 100 : 0;
   return (
     <label style={sliderRowStyle}>
       <div style={sliderHeadStyle}>
-        <span>{label}</span>
+        <span style={sliderLabelStyle}>{label}</span>
         <span style={sliderValueStyle}>{formatValue(value, step)}</span>
       </div>
       <input
         type="range"
+        className="graph-range"
         min={min}
         max={max}
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.currentTarget.value))}
-        style={sliderInputStyle}
+        style={{ "--fill": `${fill}%` } as CSSProperties}
       />
     </label>
   );
@@ -305,8 +305,8 @@ function CheckRow({
     if (ref.current) ref.current.indeterminate = indeterminate;
   }, [indeterminate]);
   return (
-    <label style={indent ? { ...checkRowStyle, paddingLeft: indent } : checkRowStyle}>
-      <input ref={ref} type="checkbox" checked={checked} onChange={(e) => onChange(e.currentTarget.checked)} style={checkInputStyle} />
+    <label className="graph-checkrow" style={indent ? { ...checkRowStyle, paddingLeft: indent } : checkRowStyle}>
+      <input ref={ref} type="checkbox" className="graph-check" checked={checked} onChange={(e) => onChange(e.currentTarget.checked)} />
       {color ? <span style={{ ...swatchStyle, background: color }} /> : null}
       <span style={checkLabelStyle}>{label}</span>
     </label>
@@ -353,13 +353,13 @@ export function GraphMenu({ graph, physics, filters, setPhysics, setFilters, res
     <div style={rootStyle}>
       <button
         type="button"
-        style={open ? toggleActiveStyle : toggleStyle}
+        className={open ? "graph-iconbtn on" : "graph-iconbtn"}
         onClick={() => setOpen((o) => !o)}
         aria-label="Graph settings"
         aria-expanded={open}
         title="Graph settings"
       >
-        <Icon name="settings" size={16} color={open ? colors.textPrimary : colors.textSecondary} />
+        <Icon name="settings" size={13} color="currentColor" />
       </button>
 
       {open ? (
@@ -367,9 +367,9 @@ export function GraphMenu({ graph, physics, filters, setPhysics, setFilters, res
           <SectionHead
             title="Forces"
             action={
-              <LinkButton onClick={resetPhysics} disabled={!physicsDirty}>
+              <GhostButton onClick={resetPhysics} disabled={!physicsDirty}>
                 Reset
-              </LinkButton>
+              </GhostButton>
             }
           />
           {PHYSICS_SLIDERS.map((s) => (
@@ -389,9 +389,9 @@ export function GraphMenu({ graph, physics, filters, setPhysics, setFilters, res
           <SectionHead
             title="Show"
             action={
-              <LinkButton onClick={resetFilters} disabled={!filtersDirty}>
-                Show all
-              </LinkButton>
+              <GhostButton onClick={resetFilters} disabled={!filtersDirty}>
+                Reset
+              </GhostButton>
             }
           />
           <CheckRow label="Notes" color={typeColor("note")} checked={filters.notes} onChange={(v) => setFilters({ notes: v })} />
@@ -409,19 +409,20 @@ export function GraphMenu({ graph, physics, filters, setPhysics, setFilters, res
 
           {projects.length > 0 ? (
             <>
+              <div style={dividerStyle} />
               <SectionHead
                 title="Projects"
                 action={
-                  <span style={{ display: "flex", gap: 8 }}>
-                    <LinkButton onClick={() => setFilters({ hiddenProjects: [], unassigned: true })} disabled={hidden.size === 0 && filters.unassigned}>
+                  <span style={{ display: "flex", gap: space.xxs }}>
+                    <GhostButton onClick={() => setFilters({ hiddenProjects: [], unassigned: true })} disabled={hidden.size === 0 && filters.unassigned}>
                       All
-                    </LinkButton>
-                    <LinkButton
+                    </GhostButton>
+                    <GhostButton
                       onClick={() => setFilters({ hiddenProjects: projects.map((p) => p.id), unassigned: false })}
                       disabled={hidden.size === projects.length && !filters.unassigned}
                     >
                       None
-                    </LinkButton>
+                    </GhostButton>
                   </span>
                 }
               />

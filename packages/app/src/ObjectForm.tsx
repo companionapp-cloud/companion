@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Pressable, View } from "react-native";
 import type { GraphNode, ObjectField, ObjectProps, ObjectSchema } from "@companion/core-bridge";
-import { Icon, Input, Text, colors, radius, space, type PressState } from "@companion/design-system";
+import { Icon, Input, Text, colors, control, radius, row, space, useDensity, type PressState } from "@companion/design-system";
 import { useCore } from "./CoreContext";
 
 /** The TS form renderer for an archetype's structured metadata (PLAN §6.3). It reads the
@@ -35,9 +35,10 @@ export function ObjectForm({
   return (
     <View style={{ gap: space.md }}>
       {fields.map((f) => (
-        <View key={f.key} style={{ gap: space.xs }}>
-          <Text variant="caption" tone="tertiary" style={{ fontWeight: "600" }}>
-            {f.label || f.key}
+        // A mono field-name label over a `sm` control.
+        <View key={f.key} style={{ gap: space.xxs }}>
+          <Text variant="mono" tone="quaternary">
+            {(f.label || f.key).toLowerCase()}
             {f.required ? " *" : ""}
           </Text>
           <FieldControl field={f} value={props[f.key]} onChange={(v) => setField(f.key, v)} />
@@ -61,6 +62,7 @@ function FieldControl({
       return (
         <Input
           size="sm"
+          mono
           value={value === undefined || value === null ? "" : String(value)}
           placeholder="0"
           onChangeText={(t) => {
@@ -75,6 +77,7 @@ function FieldControl({
       return (
         <Input
           size="sm"
+          mono
           autoCapitalize="none"
           value={typeof value === "string" ? value : ""}
           placeholder="YYYY-MM-DD"
@@ -85,6 +88,7 @@ function FieldControl({
       return (
         <Input
           size="sm"
+          mono
           autoCapitalize="none"
           value={typeof value === "string" ? value : ""}
           placeholder="https://…"
@@ -113,13 +117,16 @@ function FieldControl({
 }
 
 function ToggleField({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  const touch = useDensity() === "touch";
+  const dim = touch ? 22 : 14;
   return (
     <Pressable
       onPress={() => onChange(!value)}
       aria-label={value ? "Checked" : "Unchecked"}
-      style={[styles.checkbox, value ? styles.checkboxOn : null]}
+      hitSlop={touch ? 11 : 4}
+      style={[styles.checkbox, { width: dim, height: dim, borderRadius: touch ? radius.sm : radius.xs }, value ? styles.checkboxOn : null]}
     >
-      {value ? <Icon name="check" size={13} color={colors.gray0} /> : null}
+      {value ? <Icon name="check" size={Math.round(dim * 0.72)} color={colors.onAccent} strokeWidth={2.5} /> : null}
     </Pressable>
   );
 }
@@ -156,6 +163,7 @@ function MultiSelectField({ options, value, onChange }: { options: string[]; val
  *  by the core (§6.3). */
 function ReferenceField({ to, value, onChange }: { to?: string; value: string | null; onChange: (v: string | undefined) => void }) {
   const { graph } = useCore();
+  const touch = useDensity() === "touch";
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<GraphNode[]>([]);
   const [open, setOpen] = useState(false);
@@ -189,13 +197,13 @@ function ReferenceField({ to, value, onChange }: { to?: string; value: string | 
 
   if (value) {
     return (
-      <View style={styles.refChip}>
-        <Icon name="link" size={13} color={colors.textTertiary} />
-        <Text variant="caption" tone="secondary" style={{ flex: 1 }} numberOfLines={1}>
+      <View style={[styles.refChip, touch ? styles.refChipTouch : null]}>
+        <Icon name="link" size={11} color={colors.textQuaternary} />
+        <Text variant="mono" tone="secondary" style={{ flex: 1 }} numberOfLines={1}>
           {resolved?.title || value}
         </Text>
-        <Pressable onPress={() => onChange(undefined)} aria-label="Clear reference" style={styles.refClear}>
-          <Icon name="close" size={11} color={colors.textTertiary} />
+        <Pressable onPress={() => onChange(undefined)} aria-label="Clear reference" hitSlop={touch ? 10 : 3} style={styles.refClear}>
+          <Icon name="close" size={11} color={colors.textQuaternary} />
         </Pressable>
       </View>
     );
@@ -209,7 +217,7 @@ function ReferenceField({ to, value, onChange }: { to?: string; value: string | 
         placeholder={`Search ${to || "note"}s…`}
         autoCapitalize="none"
         onChangeText={runSearch}
-        leadingIcon={<Icon name="search" size={14} color={colors.textTertiary} />}
+        leadingIcon={<Icon name="search" size={12} color={colors.textQuaternary} />}
       />
       {open && results.length > 0 ? (
         <View style={styles.dropdown}>
@@ -222,12 +230,17 @@ function ReferenceField({ to, value, onChange }: { to?: string; value: string | 
                 setResults([]);
                 setOpen(false);
               }}
-              style={({ hovered }: PressState) => [styles.dropdownRow, hovered ? { backgroundColor: colors.surfaceHover } : null]}
+              style={({ hovered, pressed }: PressState) => [
+                styles.dropdownRow,
+                touch ? styles.dropdownRowTouch : null,
+                hovered ? { backgroundColor: colors.surfaceHover } : null,
+                pressed ? { backgroundColor: colors.surfaceActive } : null,
+              ]}
             >
-              <Text variant="caption" numberOfLines={1}>
+              <Text variant="label" numberOfLines={1} style={{ flex: 1, minWidth: 0 }}>
                 {n.title || "Untitled"}
               </Text>
-              <Text variant="caption" tone="tertiary">
+              <Text variant="mono" tone="quaternary">
                 {n.type}
               </Text>
             </Pressable>
@@ -238,9 +251,20 @@ function ReferenceField({ to, value, onChange }: { to?: string; value: string | 
   );
 }
 
+/** A select option: a squared 22px chip (30px on touch) — soft accent when chosen. */
 function Pill({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  const touch = useDensity() === "touch";
   return (
-    <Pressable onPress={onPress} style={[styles.pill, active ? styles.pillActive : null]}>
+    <Pressable
+      onPress={onPress}
+      style={({ hovered, pressed }: PressState) => [
+        styles.pill,
+        touch ? styles.pillTouch : null,
+        hovered ? { backgroundColor: colors.surfaceHover } : null,
+        pressed ? { backgroundColor: colors.surfaceActive } : null,
+        active ? styles.pillActive : null,
+      ]}
+    >
       <Text variant="caption" tone={active ? "accent" : "secondary"}>
         {label}
       </Text>
@@ -251,48 +275,52 @@ function Pill({ label, active, onPress }: { label: string; active: boolean; onPr
 const styles = {
   pillRow: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: space.xs },
   pill: {
+    height: control.sm,
+    justifyContent: "center" as const,
     paddingHorizontal: space.md,
-    paddingVertical: space.xs,
-    borderRadius: radius.full,
+    borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: colors.borderDefault,
   },
+  pillTouch: { height: control.lg, paddingHorizontal: space.ml },
   pillActive: { backgroundColor: colors.accentSoft, borderColor: colors.accentSoftBorder },
+  // Same box as the task checkbox: 1px border-strong, accent fill + white check when on.
   checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: radius.sm,
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: colors.borderStrong,
     alignItems: "center" as const,
     justifyContent: "center" as const,
   },
   checkboxOn: { backgroundColor: colors.accent, borderColor: colors.accent },
+  // A resolved reference reads like the editor's wikilink chip: mono on the sunken fill.
   refChip: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
     gap: space.xs,
-    paddingHorizontal: space.md,
-    paddingVertical: space.xs,
-    borderRadius: radius.md,
+    height: control.sm,
+    paddingHorizontal: space.sm,
+    borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
-    backgroundColor: colors.surfaceApp,
+    backgroundColor: colors.surfaceSunken,
   },
+  refChipTouch: { height: control.lg },
   refClear: { padding: 3, marginVertical: -3, marginRight: -3 },
   dropdown: {
+    padding: space.xs,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     backgroundColor: colors.surfaceCard,
-    overflow: "hidden" as const,
   },
   dropdownRow: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
     justifyContent: "space-between" as const,
-    gap: space.sm,
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
+    gap: space.md,
+    minHeight: row.h,
+    paddingHorizontal: space.sm,
+    borderRadius: radius.sm,
   },
+  dropdownRowTouch: { minHeight: row.touch },
 };

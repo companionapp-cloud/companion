@@ -218,6 +218,9 @@ export function createEditor(
         }),
       ]
     : [];
+  // Formatting toggles for the toolbar and the Mod-b/i/… keymap (full editor only — the
+  // simple schema has no marks, lists, or blocks to toggle).
+  const formatCommands = simple ? null : buildFormatCommands(schema);
   const plugins: Plugin[] = simple
     ? [
         history(),
@@ -257,6 +260,18 @@ export function createEditor(
         ...autocompletePlugins,
         ...emptyLinkPlugins,
         keymap({ "Mod-z": undo, "Mod-y": redo, "Shift-Mod-z": redo }),
+        // Formatting shortcuts — the ones the formatting bar advertises. Mod-k opens the `[[`
+        // reference picker, the editor's notion of a link.
+        keymap({
+          "Mod-b": formatCommands!.bold,
+          "Mod-i": formatCommands!.italic,
+          "Mod-Shift-x": formatCommands!.strike,
+          "Mod-e": formatCommands!.code,
+          "Mod-k": (state, dispatch) => {
+            if (dispatch) dispatch(state.tr.insertText("[["));
+            return true;
+          },
+        }),
         // List + table editing (before baseKeymap so Enter/Tab are intercepted first): Enter
         // splits a list item or leaves the list, but is swallowed inside a table cell (GFM cells
         // are single-line). Tab / Shift-Tab move between cells in a table, else nest list items.
@@ -276,9 +291,6 @@ export function createEditor(
       ];
   const state = EditorState.create({ schema: activeSchema, doc, plugins });
 
-  // Formatting toggles for the toolbar (full editor only — the simple schema has no marks,
-  // lists, or blocks to toggle).
-  const formatCommands = simple ? null : buildFormatCommands(schema);
   const emitFormatState = () => {
     if (formatCommands && options.onFormatStateChange)
       options.onFormatStateChange(computeFormatState(view.state, formatCommands, schema));

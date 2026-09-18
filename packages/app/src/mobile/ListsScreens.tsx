@@ -1,19 +1,20 @@
 import { useMemo, useState } from "react";
-import { FlatList, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import type { List, ListItem, Task } from "@companion/core-bridge";
-import { Icon, IconButton, Input, Text, colors, space } from "@companion/design-system";
+import { Icon, IconButton, Input, Text, colors, row, space } from "@companion/design-system";
 import { useNav } from "../nav-context";
 import { useTasks } from "../TasksProvider";
 import { useLists, useListItems, useProjectLists } from "../ListsProvider";
 import { SortableList } from "../SortableList";
-import { Checkbox } from "../TaskEditor";
 import { AddTasksPicker } from "../AddTasksPicker";
 import { useMemberIds } from "./ListScreens";
-import { CardRow, Fab } from "./ui";
+import { Card, CardRow, Checkbox, EmptyCaption, FAB_CLEARANCE, Fab, NavAction, NavBar, ROW_ICON_INSET, RowIcon, cardStyle } from "./ui";
 
 // Lists for the mobile web shell (PLAN §6.6): a project's Lists tab shows its lists; tapping
 // one drills into its rows (/project/<id>/lists/<listId>), where tasks reorder by dragging
-// the ☰ handle and tapping a task opens the full-screen editor.
+// the ☰ handle and tapping a task opens the full-screen editor. The index renders bare
+// inside the project screen (which owns the nav bar); a list's rows are their own route
+// and bring their own bar — the title renames on tap, and its actions are bar icons.
 
 export function ListsIndexScreen({ projectId }: { projectId: string }) {
   const nav = useNav();
@@ -32,35 +33,36 @@ export function ListsIndexScreen({ projectId }: { projectId: string }) {
   return (
     <View style={styles.container}>
       {draft !== null ? (
-        <View style={styles.search}>
-          <Input size="sm" placeholder="List name, press Enter" value={draft} onChangeText={setDraft} autoFocus onSubmitEditing={() => void submit()} onBlur={() => void submit()} />
+        <View style={styles.entry}>
+          <Input placeholder="Name the list, press Enter" value={draft} onChangeText={setDraft} autoFocus onSubmitEditing={() => void submit()} onBlur={() => void submit()} />
         </View>
       ) : null}
-      <FlatList
-        data={lists}
-        keyExtractor={(l) => l.id}
-        contentContainerStyle={styles.list}
-        ListEmptyComponent={
-          <Text tone="tertiary" style={styles.empty}>
-            No lists yet. Tap + to order this project’s tasks by priority.
-          </Text>
-        }
-        renderItem={({ item }) => <ListCard list={item} onPress={() => nav.openProjectItem(projectId, "lists", item.id)} />}
-      />
+      <ScrollView contentContainerStyle={styles.list}>
+        {lists.length ? (
+          <Card>
+            {lists.map((l, i) => (
+              <ListCard key={l.id} list={l} isLast={i === lists.length - 1} onPress={() => nav.openProjectItem(projectId, "lists", l.id)} />
+            ))}
+          </Card>
+        ) : (
+          <EmptyCaption>No lists yet. Tap + to order this project’s tasks by priority.</EmptyCaption>
+        )}
+      </ScrollView>
       <Fab label="New list" onPress={() => setDraft("")} />
     </View>
   );
 }
 
-function ListCard({ list, onPress }: { list: List; onPress: () => void }) {
+function ListCard({ list, isLast, onPress }: { list: List; isLast: boolean; onPress: () => void }) {
   const items = useListItems(list.id);
   const count = items.filter((i) => i.kind === "task").length;
   return (
     <CardRow
-      leading={<Icon name="listOrdered" size={19} color={colors.textTertiary} />}
+      leading={<RowIcon name="listOrdered" />}
+      separatorInset={ROW_ICON_INSET}
       title={list.name}
       subtitle={count === 1 ? "1 task" : `${count} tasks`}
-      divided={false}
+      isLast={isLast}
       onPress={onPress}
     />
   );
@@ -107,35 +109,38 @@ export function ListRowsScreen({ projectId, listId }: { projectId: string; listI
     if (title) await addHeading(listId, title);
   };
 
+  // Back returns to the project's Lists tab; a deep link has no history, so step up.
+  const back = () => (nav.canBack ? nav.back() : nav.openProjectSection(projectId, "lists"));
+
   return (
     <View style={styles.container}>
-      <View style={styles.titleRow}>
-        <IconButton label="Back to lists" size="sm" onPress={() => nav.openProjectSection(projectId, "lists")}>
-          <Icon name="chevronLeft" size={18} color={colors.textSecondary} />
-        </IconButton>
-        {nameDraft !== null ? (
-          <View style={{ flex: 1 }}>
-            <Input size="sm" value={nameDraft} placeholder="List name" autoFocus onChangeText={setNameDraft} onSubmitEditing={commitName} onBlur={commitName} />
-          </View>
-        ) : (
-          <Pressable style={{ flex: 1, minWidth: 0 }} onPress={() => setNameDraft(list?.name ?? "")} aria-label="Rename list">
-            <Text variant="title" numberOfLines={1}>
-              {list?.name ?? "List"}
-            </Text>
-          </Pressable>
-        )}
-        <IconButton label="Add existing task" size="sm" active={picking} onPress={() => setPicking(true)}>
-          <Icon name="tasks" size={16} color={colors.textSecondary} />
-        </IconButton>
-        <IconButton label="New heading" size="sm" active={headingDraft !== null} onPress={() => setHeadingDraft((d) => (d === null ? "" : null))}>
-          <Icon name="listBullet" size={16} color={colors.textSecondary} />
-        </IconButton>
-      </View>
+      <NavBar
+        title={list?.name ?? "List"}
+        onBack={back}
+        titleSlot={
+          nameDraft !== null ? (
+            <View style={styles.titleSlot}>
+              <Input value={nameDraft} placeholder="Name the list" autoFocus onChangeText={setNameDraft} onSubmitEditing={commitName} onBlur={commitName} />
+            </View>
+          ) : (
+            <Pressable style={styles.titleSlot} onPress={() => setNameDraft(list?.name ?? "")} aria-label="Rename list">
+              <Text variant="title" numberOfLines={1}>
+                {list?.name ?? "List"}
+              </Text>
+            </Pressable>
+          )
+        }
+        right={
+          <>
+            <NavAction icon="tasks" label="Add existing task" active={picking} onPress={() => setPicking(true)} />
+            <NavAction icon="listBullet" label="New heading" active={headingDraft !== null} onPress={() => setHeadingDraft((d) => (d === null ? "" : null))} />
+          </>
+        }
+      />
       {/* One entry field: the heading field temporarily takes the task field's place. */}
-      <View style={styles.search}>
+      <View style={styles.entry}>
         {headingDraft !== null ? (
           <Input
-            size="sm"
             placeholder="Heading, press Enter"
             value={headingDraft}
             onChangeText={setHeadingDraft}
@@ -146,7 +151,6 @@ export function ListRowsScreen({ projectId, listId }: { projectId: string; listI
           />
         ) : (
           <Input
-            size="sm"
             placeholder="Add a task, press Enter"
             value={taskDraft}
             onChangeText={setTaskDraft}
@@ -158,33 +162,32 @@ export function ListRowsScreen({ projectId, listId }: { projectId: string; listI
       {/* activateOnStart claims the ☰ handle's touch before the scroll view can. */}
       <ScrollView contentContainerStyle={styles.list}>
         {rows.length ? (
-            <SortableList
-              items={rows}
-              keyExtractor={(r) => r.item.id}
-              onReorder={(ids) => void reorderItems(listId, ids)}
-              activateOnStart
-              renderItem={({ item: r, drag }) =>
-                r.item.kind === "heading" ? (
-                  <View style={styles.headingRow}>
-                    <View {...drag} style={styles.handle}>
-                      <Icon name="moreH" size={18} color={colors.textTertiary} />
-                    </View>
-                    <Text variant="mono" numberOfLines={1} style={styles.headingLabel}>
-                      {(r.item.title || "Untitled").toUpperCase()}
-                    </Text>
-                    <IconButton label="Remove heading" size="sm" onPress={() => void removeItem(r.item.id)}>
-                      <Icon name="close" size={13} color={colors.textTertiary} />
-                    </IconButton>
+          <SortableList
+            style={cardStyle()}
+            items={rows}
+            keyExtractor={(r) => r.item.id}
+            onReorder={(ids) => void reorderItems(listId, ids)}
+            activateOnStart
+            renderItem={({ item: r, index, drag }) =>
+              r.item.kind === "heading" ? (
+                <View style={[styles.headingRow, index === rows.length - 1 ? null : styles.rowDivider]}>
+                  <View {...drag} style={styles.handle}>
+                    <Icon name="moreH" size={18} color={colors.textTertiary} />
                   </View>
-                ) : (
-                  <TaskCard task={r.task as Task} item={r.item} drag={drag} onRemove={() => void removeItem(r.item.id)} />
-                )
-              }
-            />
+                  <Text variant="eyebrow" tone="tertiary" numberOfLines={1} style={styles.headingLabel}>
+                    {r.item.title || "Untitled"}
+                  </Text>
+                  <IconButton label="Remove heading" onPress={() => void removeItem(r.item.id)}>
+                    <Icon name="close" size={14} color={colors.textTertiary} />
+                  </IconButton>
+                </View>
+              ) : (
+                <TaskCard task={r.task as Task} item={r.item} drag={drag} isLast={index === rows.length - 1} onRemove={() => void removeItem(r.item.id)} />
+              )
+            }
+          />
         ) : (
-          <Text tone="tertiary" style={styles.empty}>
-            This list is empty. Type a task above, then drag ☰ to set priority.
-          </Text>
+          <EmptyCaption>This list is empty. Type a task above, then drag ☰ to set priority.</EmptyCaption>
         )}
       </ScrollView>
       {picking ? <AddTasksPicker candidates={candidates} onAdd={(ids) => addTasks(listId, ids)} onClose={() => setPicking(false)} /> : null}
@@ -192,7 +195,7 @@ export function ListRowsScreen({ projectId, listId }: { projectId: string; listI
   );
 }
 
-function TaskCard({ task, drag, onRemove }: { task: Task; item: ListItem; drag: object; onRemove: () => void }) {
+function TaskCard({ task, drag, isLast, onRemove }: { task: Task; item: ListItem; drag: object; isLast: boolean; onRemove: () => void }) {
   const nav = useNav();
   const store = useTasks();
   return (
@@ -202,17 +205,18 @@ function TaskCard({ task, drag, onRemove }: { task: Task; item: ListItem; drag: 
           <View {...drag} style={styles.handle}>
             <Icon name="moreH" size={18} color={colors.textTertiary} />
           </View>
-          <Checkbox checked={task.status === "done"} onPress={() => void store.setStatus(task.id, task.status === "done" ? "open" : "done")} size={22} />
+          <Checkbox checked={task.status === "done"} onPress={() => void store.setStatus(task.id, task.status === "done" ? "open" : "done")} />
         </View>
       }
+      separatorInset={space.xl}
       title={task.title || "Untitled task"}
       trailing={
-        <IconButton label="Remove from list" size="sm" onPress={onRemove}>
-          <Icon name="close" size={13} color={colors.textTertiary} />
+        <IconButton label="Remove from list" onPress={onRemove}>
+          <Icon name="close" size={14} color={colors.textTertiary} />
         </IconButton>
       }
       showChevron={false}
-      divided={false}
+      isLast={isLast}
       onPress={() => nav.openTask(task.id)}
     />
   );
@@ -220,14 +224,21 @@ function TaskCard({ task, drag, onRemove }: { task: Task; item: ListItem; drag: 
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceApp },
-  titleRow: { flexDirection: "row", alignItems: "center", gap: space.xs, paddingHorizontal: space.sm, paddingTop: space.sm, minHeight: 40 },
-  search: { paddingHorizontal: space.md, paddingTop: space.sm },
-  list: { paddingHorizontal: space.md, paddingVertical: space.sm, gap: 2, flexGrow: 1 },
-  empty: { textAlign: "center", marginTop: space.xxl },
+  titleSlot: { flex: 1, minWidth: 0 },
+  entry: { paddingHorizontal: space.ml, paddingTop: space.ml },
+  list: { paddingHorizontal: space.ml, paddingTop: space.ml, paddingBottom: FAB_CLEARANCE, flexGrow: 1 },
   // Inset so the heading's handle lines up with the task rows' (CardRow pads by space.xl;
   // the task handle sits space.sm back from that via `leading`).
-  headingRow: { flexDirection: "row", alignItems: "center", paddingLeft: space.xl - space.sm, paddingRight: space.xs, paddingTop: space.md },
-  headingLabel: { flex: 1, fontSize: 10, letterSpacing: 1.2, color: colors.textTertiary, paddingHorizontal: space.sm },
+  headingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: row.touch,
+    paddingLeft: space.xl - space.sm,
+    paddingRight: space.lg,
+    backgroundColor: colors.surfaceSunken,
+  },
+  rowDivider: { borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
+  headingLabel: { flex: 1, minWidth: 0, paddingHorizontal: space.sm },
   leading: { flexDirection: "row", alignItems: "center", gap: space.xs, marginLeft: -space.sm },
   handle: { paddingHorizontal: space.sm, paddingVertical: space.sm },
 });

@@ -9,7 +9,7 @@ export type MembershipFilter = "unsorted" | "all";
 
 export interface NotesStore {
   notes: Note[];
-  /** The list the global browse view shows: `notes` narrowed by `filter`. */
+  /** The list the global browse view shows: `notes` narrowed by `filter`, minus daily notes. */
   visible: Note[];
   filter: MembershipFilter;
   setFilter: (f: MembershipFilter) => void;
@@ -125,8 +125,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     [api, syncTrigger],
   );
 
+  // Daily notes (stamped with a `date`) live under Today, not in the browse list — they'd
+  // otherwise flood it with one entry per day. `notes` still carries them for lookups.
   const visible = useMemo(
-    () => (filter === "all" ? notes : notes.filter((n) => !memberIds.has(n.id))),
+    () => notes.filter((n) => !n.date && (filter === "all" || !memberIds.has(n.id))),
     [notes, memberIds, filter],
   );
 

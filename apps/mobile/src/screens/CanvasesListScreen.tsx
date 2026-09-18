@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { FlatList, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { Canvas } from '@companion/core-bridge';
 import { useCore, useCanvases, useProjects, timeAgo } from '@companion/app';
-import { Icon, Spinner, Text, colors, space } from '@companion/design-system';
+import { Spinner, colors, space } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
 import { useProjectScope } from '../ProjectContext';
-import { CardRow } from '../ui/native';
+import { CardRow, EmptyCaption, FAB_CLEARANCE, Fab, GroupedItem, ROW_ICON_INSET, RowIcon } from '../ui/native';
 
 // A list of canvas boards with a create FAB (PLAN-canvases.md). Used globally (all
 // boards) and inside a project's tab bar, where ProjectContext scopes it to that
@@ -17,6 +18,7 @@ export function CanvasesListScreen() {
   const store = useCanvases();
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const projectId = useProjectScope();
+  const insets = useSafeAreaInsets();
   const { core } = useCore();
   const { membershipsForProject, addMember } = useProjects();
 
@@ -61,28 +63,32 @@ export function CanvasesListScreen() {
       <FlatList
         data={canvases}
         keyExtractor={(c) => c.id}
-        contentContainerStyle={styles.list}
+        // Project tabs sit above a tab bar that already clears the home indicator.
+        contentContainerStyle={[styles.list, { paddingBottom: FAB_CLEARANCE + space.xl + (projectId ? 0 : insets.bottom) }]}
         ListEmptyComponent={
-          <Text tone="tertiary" style={styles.empty}>
+          <EmptyCaption>
             {projectId ? 'No canvases in this project yet. Tap + to start a board.' : 'No canvases yet. Tap + to start a board.'}
-          </Text>
+          </EmptyCaption>
         }
-        renderItem={({ item }) => <CanvasRow canvas={item} onPress={() => openCanvas(item.id)} />}
+        renderItem={({ item, index }) => (
+          <GroupedItem index={index} count={canvases.length}>
+            <CanvasRow canvas={item} isLast={index === canvases.length - 1} onPress={() => openCanvas(item.id)} />
+          </GroupedItem>
+        )}
       />
-      <Pressable style={styles.fab} onPress={() => void createCanvas()} aria-label="New canvas">
-        <Icon name="plus" size={24} color={colors.textInverse} />
-      </Pressable>
+      <Fab label="New canvas" onPress={() => void createCanvas()} bottomInset={projectId ? 0 : insets.bottom} />
     </View>
   );
 }
 
-function CanvasRow({ canvas, onPress }: { canvas: Canvas; onPress: () => void }) {
+function CanvasRow({ canvas, isLast, onPress }: { canvas: Canvas; isLast: boolean; onPress: () => void }) {
   return (
     <CardRow
-      leading={<Icon name="canvas" size={19} color={colors.textTertiary} />}
+      leading={<RowIcon name="canvas" />}
+      separatorInset={ROW_ICON_INSET}
       title={canvas.name || 'Untitled canvas'}
       subtitle={`Edited ${timeAgo(canvas.updatedAt)}`}
-      divided={false}
+      isLast={isLast}
       onPress={onPress}
     />
   );
@@ -90,22 +96,5 @@ function CanvasRow({ canvas, onPress }: { canvas: Canvas; onPress: () => void })
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceApp },
-  list: { paddingHorizontal: space.md, paddingVertical: space.sm, gap: 2, flexGrow: 1 },
-  empty: { padding: space.xl, textAlign: 'center', lineHeight: 20 },
-  fab: {
-    position: 'absolute',
-    right: space.xl,
-    bottom: space.xl,
-    width: 56,
-    height: 56,
-    borderRadius: 18,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: colors.accent,
-    shadowOpacity: 0.35,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 6,
-  },
+  list: { paddingHorizontal: space.lg, paddingTop: space.lg, flexGrow: 1 },
 });

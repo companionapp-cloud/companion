@@ -1,12 +1,13 @@
 import { useLayoutEffect } from 'react';
-import { Platform, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useProjects } from '@companion/app';
-import { Icon, IconButton, Text, colors, font, type IconName } from '@companion/design-system';
+import { Icon, Text, colors, font, type IconName } from '@companion/design-system';
 import type { ProjectTabParamList, RootStackParamList } from '../MobileShell';
 import { ProjectContext } from '../ProjectContext';
+import { NavAction } from '../ui/native';
 import { NotesListScreen } from './NotesListScreen';
 import { TasksListScreen } from './TasksListScreen';
 import { CanvasesListScreen } from './CanvasesListScreen';
@@ -21,9 +22,9 @@ const TAB: Record<keyof ProjectTabParamList, { label: string; icon: IconName }> 
   ProjectCalendar: { label: 'Calendar', icon: 'calendar' },
 };
 
-/** A project's scoped view: a bottom tab bar (Notes / Tasks / Calendar) filtered to
- * this project via ProjectContext (PLAN §6.6). The stack header shows the project name;
- * the tab screens themselves render headerless. */
+/** A project's scoped view: a bottom tab bar (Notes / Tasks / Canvases / Calendar) filtered
+ * to this project via ProjectContext (PLAN §6.6). The nav bar shows the project name over
+ * its area in mono; the tab screens themselves render headerless. */
 export function ProjectScreen({ route }: NativeStackScreenProps<RootStackParamList, 'Project'>) {
   const { projectId } = route.params;
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -31,25 +32,23 @@ export function ProjectScreen({ route }: NativeStackScreenProps<RootStackParamLi
   const project = projects.find((p) => p.id === projectId);
   const areaName = project ? areas.find((a) => a.id === project.areaId)?.name : undefined;
 
-  // A two-line header (project name + its area), aligned per platform convention.
+  // A two-line title (project name + its area in mono) and the settings action.
   useLayoutEffect(() => {
     nav.setOptions({
       headerTitle: () => (
-        <View style={{ alignItems: Platform.OS === 'ios' ? 'center' : 'flex-start' }}>
-          <Text style={{ fontSize: 16, fontWeight: font.weight.semibold, color: colors.textPrimary }} numberOfLines={1}>
+        <View>
+          <Text variant="title" numberOfLines={1}>
             {project?.name ?? 'Project'}
           </Text>
           {areaName ? (
-            <Text variant="mono" style={{ fontSize: 11, color: colors.textTertiary }} numberOfLines={1}>
+            <Text variant="mono" tone="tertiary" numberOfLines={1}>
               {areaName}
             </Text>
           ) : null}
         </View>
       ),
       headerRight: () => (
-        <IconButton label="Project settings" size="sm" onPress={() => nav.navigate('ProjectSettings', { projectId })}>
-          <Icon name="settings" size={18} color={colors.textSecondary} />
-        </IconButton>
+        <NavAction icon="settings" label="Project settings" onPress={() => nav.navigate('ProjectSettings', { projectId })} />
       ),
     });
   }, [nav, project?.name, areaName, projectId]);
@@ -59,12 +58,14 @@ export function ProjectScreen({ route }: NativeStackScreenProps<RootStackParamLi
       <Tabs.Navigator
         screenOptions={({ route: tabRoute }) => ({
           headerShown: false,
-          tabBarActiveTintColor: colors.accent,
+          // Selected reads as it does everywhere: accent text and icon, nothing else moves.
+          tabBarActiveTintColor: colors.textAccent,
           tabBarInactiveTintColor: colors.textTertiary,
-          tabBarStyle: { backgroundColor: colors.surfaceApp, borderTopColor: colors.borderSubtle },
+          tabBarStyle: styles.tabBar,
+          tabBarLabelStyle: styles.tabLabel,
           tabBarLabel: TAB[tabRoute.name as keyof ProjectTabParamList].label,
           tabBarIcon: ({ color }) => (
-            <Icon name={TAB[tabRoute.name as keyof ProjectTabParamList].icon} size={22} color={color} />
+            <Icon name={TAB[tabRoute.name as keyof ProjectTabParamList].icon} size={20} color={color} />
           ),
         })}
       >
@@ -76,3 +77,15 @@ export function ProjectScreen({ route }: NativeStackScreenProps<RootStackParamLi
     </ProjectContext.Provider>
   );
 }
+
+const styles = StyleSheet.create({
+  // Flat chrome: a hairline, no shadow.
+  tabBar: {
+    backgroundColor: colors.surfaceApp,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.borderSubtle,
+    elevation: 0,
+    shadowOpacity: 0,
+  },
+  tabLabel: { fontFamily: font.mono, fontSize: font.size['2xs'] },
+});

@@ -1,6 +1,7 @@
-import { colors } from "./tokens";
+import { colors, icon } from "./tokens";
 
-// Lucide-style outline icon paths (24x24 viewBox, 1.75 stroke, rounded caps/joins).
+// Lucide-style outline icon paths (24x24 viewBox, 1.5 stroke, rounded caps/joins). Icons
+// are never filled. Add missing glyphs from Lucide rather than drawing new ones.
 // Shared by the native (Icon.tsx, react-native-svg) and web (Icon.web.tsx, inline
 // <svg>) implementations so the two platforms never drift.
 export const ICON_PATHS = {
@@ -9,7 +10,7 @@ export const ICON_PATHS = {
   calendar: "M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z",
   today: "M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2ZM12 15h.01",
   bell: "M10.3 21a1.9 1.9 0 0 0 3.4 0M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9Z",
-  tasks: "M11 12H3m18-6H3m18 12H3M16 17l2 2 4-4",
+  tasks: "m3 17 2 2 4-4M3 7l2 2 4-4M13 6h8M13 12h8M13 18h8",
   habits: "M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5Z",
   search: "M21 21l-4.35-4.35M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z",
   plus: "M12 5v14M5 12h14",
@@ -47,10 +48,21 @@ export const ICON_PATHS = {
   group: "M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 9h10v6H7z",
   arrow: "M5 12h14M13 6l6 6-6 6",
   image: "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM9 9.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM21 15l-5-5L5 21",
-  undo: "M3 7v6h6M3 13a9 9 0 1 0 3-6.7L3 9",
-  redo: "M21 7v6h-6M21 13a9 9 0 1 1-3-6.7L21 9",
+  undo: "M3 7v6h6M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13",
+  redo: "M21 7v6h-6M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7",
   fit: "M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3",
   palette: "M12 22a10 10 0 1 1 0-20 10 10 0 0 1 8 4 3 3 0 0 1-2 5h-2a2 2 0 0 0-1.5 3.3 2 2 0 0 1-1.5 3.4V22ZM7.5 10.5h.01M12 7h.01M16.5 10h.01",
+  // Quick capture (⌥⇧Space).
+  capture: "M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M8 12h8",
+  chevronDown: "m6 9 6 6 6-6",
+  user: "M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z",
+  tag: "M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42zM7.5 7.5h.01",
+  lock: "M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2ZM7 11V7a5 5 0 0 1 10 0v4",
+  filter: "M22 3H2l8 9.46V19l4 2v-8.54L22 3Z",
+  download: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
+  // Theme toggle.
+  sun: "M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41",
+  moon: "M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z",
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;
@@ -63,3 +75,4 @@ export interface IconProps {
 }
 
 export const ICON_DEFAULT_COLOR = colors.textSecondary;
+export const ICON_STROKE = icon.stroke;

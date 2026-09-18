@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Pressable, View } from "react-native";
-import { Icon, Text, colors, radius, shadow, space, type PressState } from "@companion/design-system";
+import { Icon, Text, colors, control, font, icon, radius, row, shadow, space, transition, motion, useDensity, type PressState } from "@companion/design-system";
 
 export interface FilterOption<T extends string> {
   value: T;
@@ -21,20 +21,24 @@ export function ListFilterMenu<T extends string>({
   onChange: (value: T) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const touch = useDensity() === "touch";
   const current = options.find((o) => o.value === value) ?? options[0];
   return (
     <View style={styles.root}>
       <Pressable
         onPress={() => setOpen((o) => !o)}
         aria-label="Filter list"
-        style={({ hovered }: PressState) => [styles.trigger, hovered ? styles.triggerHover : null]}
+        style={({ hovered, pressed }: PressState) => [
+          styles.trigger,
+          touch ? styles.triggerTouch : null,
+          transition("background-color", motion.instant),
+          { backgroundColor: pressed || open ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent" },
+        ]}
       >
-        <Text variant="caption" tone="secondary" style={styles.triggerLabel}>
+        <Text variant="label" numberOfLines={1} style={{ flexShrink: 1 }}>
           {current.label}
         </Text>
-        <View style={{ transform: [{ rotate: open ? "-90deg" : "90deg" }] }}>
-          <Icon name="chevronRight" size={12} color={colors.textTertiary} />
-        </View>
+        <Icon name="chevronDown" size={11} color={colors.textQuaternary} />
       </Pressable>
       {open ? (
         <>
@@ -48,12 +52,16 @@ export function ListFilterMenu<T extends string>({
                   onChange(o.value);
                   setOpen(false);
                 }}
-                style={({ hovered }: PressState) => [styles.option, hovered ? styles.optionHover : null]}
+                style={({ hovered, pressed }: PressState) => [
+                  styles.option,
+                  touch ? styles.optionTouch : null,
+                  { backgroundColor: pressed ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent" },
+                ]}
               >
-                <Text variant="caption" tone={o.value === value ? "default" : "secondary"}>
+                <Text variant="label" tone={o.value === value ? "default" : "secondary"} numberOfLines={1} style={{ flex: 1 }}>
                   {o.label}
                 </Text>
-                {o.value === value ? <Icon name="check" size={13} color={colors.accent} /> : null}
+                {o.value === value ? <Icon name="check" size={icon.sm} color={colors.textAccent} /> : null}
               </Pressable>
             ))}
           </View>
@@ -74,13 +82,23 @@ export function ListFilterTabs<T extends string>({
   options: FilterOption<T>[];
   onChange: (value: T) => void;
 }) {
+  const touch = useDensity() === "touch";
   return (
-    <View style={tabStyles.row}>
+    <View style={tabStyles.track}>
       {options.map((o) => {
         const active = o.value === value;
         return (
-          <Pressable key={o.value} onPress={() => onChange(o.value)} style={[tabStyles.tab, active ? tabStyles.tabActive : null]}>
-            <Text variant="caption" tone={active ? "default" : "secondary"} style={active ? tabStyles.tabActiveLabel : undefined}>
+          <Pressable
+            key={o.value}
+            onPress={() => onChange(o.value)}
+            aria-label={o.label}
+            style={({ hovered, pressed }: PressState) => [
+              tabStyles.segment,
+              { minHeight: touch ? control.lg : control.md },
+              active ? tabStyles.segmentActive : pressed ? tabStyles.segmentPressed : hovered ? tabStyles.segmentHover : null,
+            ]}
+          >
+            <Text variant="caption" tone={active ? "default" : "secondary"} numberOfLines={1} style={active ? tabStyles.activeLabel : undefined}>
               {o.label}
             </Text>
           </Pressable>
@@ -90,47 +108,72 @@ export function ListFilterTabs<T extends string>({
   );
 }
 
+// A sunken track with hairline; the selected segment is the one raised card in it. Sized by
+// its content (alignSelf) and free to shrink, so it sits inside a mobile nav bar.
 const tabStyles = {
-  row: { flexDirection: "row" as const, gap: space.xs, padding: 3, backgroundColor: colors.gray50, borderRadius: radius.md, alignSelf: "flex-start" as const },
-  tab: { paddingHorizontal: space.md, paddingVertical: space.xs, borderRadius: radius.sm },
-  tabActive: { backgroundColor: colors.surfaceCard, ...shadow.sm },
-  tabActiveLabel: { fontWeight: "600" as const },
-};
-
-const styles = {
-  root: { position: "relative" as const, zIndex: 30 },
-  trigger: {
+  track: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    gap: space.xs,
-    marginLeft: -space.xs,
-    paddingHorizontal: space.xs,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-  },
-  triggerHover: { backgroundColor: colors.surfaceHover },
-  triggerLabel: { fontWeight: "600" as const },
-  scrim: { position: "absolute" as const, top: 0, left: 0, width: 4000, height: 4000, marginLeft: -2000, marginTop: -2000 },
-  menu: {
-    position: "absolute" as const,
-    top: 26,
-    left: -space.xs,
-    minWidth: 176,
-    backgroundColor: colors.surfaceCard,
+    alignSelf: "flex-start" as const,
+    maxWidth: "100%" as const,
+    flexShrink: 1,
+    gap: space.xxs,
+    padding: space.xxs,
+    backgroundColor: colors.surfaceSunken,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
     borderRadius: radius.md,
-    paddingVertical: space.xs,
+  },
+  segment: {
+    flexShrink: 1,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    paddingHorizontal: space.md,
+    borderRadius: radius.sm,
+  },
+  segmentHover: { backgroundColor: colors.surfaceHover },
+  segmentPressed: { backgroundColor: colors.surfaceActive },
+  segmentActive: { backgroundColor: colors.surfaceCard, ...shadow.sm },
+  activeLabel: { fontWeight: font.weight.semibold },
+};
+
+const styles = {
+  root: { position: "relative" as const, zIndex: 30, alignItems: "flex-start" as const },
+  // No pill: the label reads as the list's title; only hover/press gives it a fill.
+  trigger: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 3,
+    maxWidth: "100%" as const,
+    minHeight: control.sm,
+    marginLeft: -space.xs,
+    paddingHorizontal: space.xs,
+    borderRadius: radius.sm,
+  },
+  triggerTouch: { minHeight: control.lg },
+  scrim: { position: "absolute" as const, top: 0, left: 0, width: 4000, height: 4000, marginLeft: -2000, marginTop: -2000 },
+  menu: {
+    position: "absolute" as const,
+    top: "100%" as const,
+    left: -space.xs,
+    marginTop: space.xxs,
+    minWidth: 176,
+    gap: 1,
+    backgroundColor: colors.surfaceOverlay,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.lg,
+    padding: space.xs,
     zIndex: 40,
     ...shadow.md,
   },
   option: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    justifyContent: "space-between" as const,
     gap: space.md,
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
+    minHeight: row.h,
+    paddingHorizontal: space.sm,
+    borderRadius: radius.sm,
   },
-  optionHover: { backgroundColor: colors.surfaceHover },
+  optionTouch: { minHeight: row.touch, paddingHorizontal: space.ml },
 };

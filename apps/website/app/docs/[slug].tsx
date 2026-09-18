@@ -1,4 +1,4 @@
-import { Badge, Icon } from "@companion/design-system";
+import { Badge, Icon } from "../../src/ds";
 import { useLocalSearchParams } from "expo-router";
 import { usePostHog } from "posthog-js/react";
 import { FeedbackRow } from "../../src/components/FeedbackRow";

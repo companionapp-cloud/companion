@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import * as Clipboard from "expo-clipboard";
-import { Icon, type IconName } from "@companion/design-system";
+import { Icon, colors, font, radius, shadow, type IconName } from "@companion/design-system";
 import { EDITOR_JS } from "./editorBundle.generated";
 import { EDITOR_CSS } from "./styles";
 import type { FormatName, FormatState } from "./formatCommands";
@@ -58,7 +58,7 @@ function buildHtml(
   // to it (see the height message) — no min-height, tight padding.
   const bodyCss = opts.simple
     ? "html,body{margin:0;padding:0;background:transparent;}"
-    : "html,body{margin:0;padding:0;min-height:100%;background:#ffffff;}";
+    : `html,body{margin:0;padding:0;min-height:100%;background:${colors.surfaceCard};}`;
   const mountClass = opts.simple ? "pm-compact" : "pm-wrap";
   return `<!DOCTYPE html>
 <html>
@@ -342,7 +342,7 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
                 style={({ pressed }) => [styles.fmtBtn, pressed && styles.fmtBtnPressed]}
                 onPress={() => setPicker({ open: true, fromTrigger: false, embed: false })}
               >
-                <Icon name="link" size={20} color="#3e3e3a" />
+                <Icon name="link" size={18} color={colors.textSecondary} />
               </Pressable>
             ) : null}
             <Pressable
@@ -350,7 +350,7 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
               style={({ pressed }) => [styles.fmtBtn, pressed && styles.fmtBtnPressed]}
               onPress={() => inject(`window.__insertTable && window.__insertTable();`)}
             >
-              <Icon name="table" size={20} color="#3e3e3a" />
+              <Icon name="table" size={18} color={colors.textSecondary} />
             </Pressable>
             {documentSource ? (
               <Pressable
@@ -358,7 +358,7 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
                 style={({ pressed }) => [styles.fmtBtn, pressed && styles.fmtBtnPressed]}
                 onPress={() => void pickDocument()}
               >
-                <Icon name="file" size={20} color="#3e3e3a" />
+                <Icon name="image" size={18} color={colors.textSecondary} />
               </Pressable>
             ) : null}
             {linkSource || documentSource ? <View style={styles.toolbarDivider} /> : null}
@@ -378,7 +378,7 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
                   ]}
                   onPress={() => inject(`window.__format && window.__format(${jsonArg(b.name)});`)}
                 >
-                  <Icon name={b.icon} size={20} color={active ? "#b7500a" : "#3e3e3a"} />
+                  <Icon name={b.icon} size={18} color={active ? colors.textAccent : colors.textSecondary} />
                 </Pressable>
               );
             })}
@@ -547,7 +547,7 @@ function LinkPicker({
           value={query}
           onChangeText={setQuery}
           placeholder="Search links…"
-          placeholderTextColor="#9a9a92"
+          placeholderTextColor={colors.textQuaternary}
           autoCorrect={false}
           autoCapitalize="none"
           returnKeyType="search"
@@ -595,45 +595,48 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   web: { flex: 1, backgroundColor: "transparent" },
 
+  // Keyboard-anchored formatting bar: touch-sized (44px) buttons over a top hairline.
   toolbar: {
     position: "absolute",
     left: 0,
     right: 0,
-    height: 48,
-    backgroundColor: "#f7f7f5",
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#e0e0dc",
+    height: 44,
+    backgroundColor: colors.surfaceCard,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
   },
   toolbarContent: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 8,
+    paddingHorizontal: 6,
     gap: 2,
-    height: 48,
+    height: 44,
   },
   toolbarDivider: {
-    width: StyleSheet.hairlineWidth,
+    width: 1,
     alignSelf: "stretch",
     marginVertical: 10,
     marginHorizontal: 6,
-    backgroundColor: "#d8d8d2",
+    backgroundColor: colors.borderSubtle,
   },
   fmtBtn: {
     width: 38,
     height: 38,
-    borderRadius: 8,
+    borderRadius: radius.sm,
     alignItems: "center",
     justifyContent: "center",
   },
-  fmtBtnActive: { backgroundColor: "#fdece0" },
-  fmtBtnPressed: { backgroundColor: "#ececea" },
+  fmtBtnActive: { backgroundColor: colors.accentSoft },
+  fmtBtnPressed: { backgroundColor: colors.surfaceActive },
   fmtBtnDisabled: { opacity: 0.35 },
 
-  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.25)" },
+  backdrop: { flex: 1, backgroundColor: colors.scrim },
   sheet: {
-    backgroundColor: "#ffffff",
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    backgroundColor: colors.surfaceOverlay,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
     paddingTop: 10,
     // Extra bottom padding so the last result clears the home indicator / screen edge.
     paddingBottom: 32,
@@ -646,73 +649,77 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 8,
   },
-  sheetTitle: { fontSize: 16, fontWeight: "700", color: "#1a1a18" },
-  sheetCancel: { fontSize: 15, color: "#b7500a", fontWeight: "600" },
+  sheetTitle: { fontFamily: font.sans, fontSize: font.size.lg, fontWeight: font.weight.semibold, color: colors.textPrimary },
+  sheetCancel: { fontFamily: font.sans, fontSize: font.size.lg, color: colors.textAccent, fontWeight: font.weight.medium },
   search: {
     marginHorizontal: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 9,
+    paddingHorizontal: 10,
+    height: 44,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: "#e0e0dc",
+    borderColor: colors.borderDefault,
+    fontFamily: font.sans,
+    // 16px keeps iOS from zooming into the focused field.
     fontSize: 16,
-    color: "#1a1a18",
+    color: colors.textPrimary,
   },
   typeRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, paddingHorizontal: 12, paddingVertical: 10 },
   chip: {
-    paddingVertical: 5,
-    paddingHorizontal: 11,
-    borderRadius: 999,
-    backgroundColor: "#f2f2ef",
+    height: 30,
+    justifyContent: "center",
+    paddingHorizontal: 10,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.surfaceSunken,
   },
-  chipActive: { backgroundColor: "#fdece0" },
-  chipText: { fontSize: 13, color: "#595954", fontWeight: "500" },
-  chipTextActive: { color: "#b7500a" },
+  chipActive: { backgroundColor: colors.accentSoft, borderColor: colors.accentSoftBorder },
+  chipText: { fontFamily: font.sans, fontSize: font.size.base, color: colors.textSecondary, fontWeight: font.weight.medium },
+  chipTextActive: { color: colors.textAccent },
   list: { paddingHorizontal: 8 },
-  empty: { padding: 16, color: "#9a9a92" },
+  empty: { padding: 16, fontFamily: font.sans, fontSize: font.size.base, color: colors.textTertiary },
   item: {
     flexDirection: "row",
-    alignItems: "baseline",
+    alignItems: "center",
     gap: 8,
-    paddingVertical: 11,
+    minHeight: 44,
     paddingHorizontal: 10,
-    borderRadius: 8,
+    borderRadius: radius.sm,
   },
-  itemPressed: { backgroundColor: "#fdece0" },
+  itemPressed: { backgroundColor: colors.surfaceActive },
   itemType: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#b7500a",
+    minWidth: 52,
+    fontFamily: font.mono,
+    fontSize: font.size["2xs"],
+    fontWeight: font.weight.semibold,
+    letterSpacing: font.tracking.eyebrow,
+    color: colors.textQuaternary,
     textTransform: "uppercase",
   },
-  itemTitle: { flex: 1, fontSize: 16, color: "#1a1a18" },
+  itemTitle: { flex: 1, fontFamily: font.sans, fontSize: font.size.lg, color: colors.textPrimary },
 
-  // Table cell menu (native card anchored near the tap point).
+  // Table cell menu (native card anchored near the tap point) — it floats, so shadow.md.
   tmBackdrop: { flex: 1, backgroundColor: "transparent" },
   tmCard: {
     position: "absolute",
-    backgroundColor: "#ffffff",
-    borderRadius: 12,
-    paddingVertical: 5,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#e6e6e2",
-    shadowColor: "#000",
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
+    backgroundColor: colors.surfaceOverlay,
+    borderRadius: radius.lg,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    ...shadow.md,
   },
   tmItem: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    paddingVertical: 10,
+    minHeight: 44,
     paddingHorizontal: 12,
   },
-  tmItemPressed: { backgroundColor: "#f2f2ef" },
-  tmCheck: { width: 14, fontSize: 15, color: "#b7500a", textAlign: "center" },
-  tmLabel: { flex: 1, fontSize: 15, color: "#1a1a18" },
-  tmLabelDisabled: { color: "#bcbcb6" },
-  tmArrow: { fontSize: 17, color: "#9a9a92" },
-  tmSep: { height: StyleSheet.hairlineWidth, backgroundColor: "#ececea", marginVertical: 3 },
+  tmItemPressed: { backgroundColor: colors.surfaceActive },
+  tmCheck: { width: 14, fontSize: font.size.base, color: colors.textAccent, textAlign: "center" },
+  tmLabel: { flex: 1, fontFamily: font.sans, fontSize: font.size.lg, color: colors.textPrimary },
+  tmLabelDisabled: { color: colors.textDisabled },
+  tmArrow: { fontSize: font.size.xl, color: colors.textQuaternary },
+  tmSep: { height: 1, backgroundColor: colors.borderSubtle, marginVertical: 4 },
 });

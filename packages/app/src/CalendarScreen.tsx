@@ -1,7 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, PanResponder, Pressable, ScrollView, View, type PanResponderGestureState } from "react-native";
+import { PanResponder, Pressable, ScrollView, View, type PanResponderGestureState } from "react-native";
 import type { CalendarItem, CalendarItemKind } from "@companion/core-bridge";
-import { Button, Icon, IconButton, Text, colors, radius, space } from "@companion/design-system";
+import {
+  Button,
+  Divider,
+  Icon,
+  IconButton,
+  Spinner,
+  Text,
+  colors,
+  control,
+  font,
+  motion,
+  radius,
+  shadow,
+  space,
+  transition,
+  type PressState,
+} from "@companion/design-system";
 import { useCalendar } from "./CalendarProvider";
 import { CalendarItemInfo } from "./CalendarItemInfo";
 import { useTasks } from "./TasksProvider";
@@ -15,10 +31,17 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December",
 ];
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const ROW_H = 48;
-const GUTTER = 52;
+// Dense grid geometry: a 34px hour row, a 40px hour gutter and a 32px toolbar.
+const ROW_H = 34;
+const GUTTER = 40;
+const TOOLBAR_H = 32;
+// The all-day band shows this many chips per day before collapsing the rest into "+N more".
+const ALL_DAY_MAX = 2;
+// The hover detail card.
+const CARD_W = 220;
 // The grid spans the whole day; it scrolls to reveal any hour (00:00–24:00).
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
+const DAY_MIN = 24 * 60;
 // Where the grid scrolls to on open when the week has no earlier event (~7am).
 const DEFAULT_SCROLL_HOUR = 7;
 
@@ -30,11 +53,11 @@ function hourLabel(h: number): string {
   return `${h - 12}p`;
 }
 
-// Per-kind block palette. Events lean dark/neutral (tinted by their feed color on the left
-// bar), tasks read blue, dated notes take the success green — matching the legend and
-// the agenda dot so a note reads the same everywhere.
+// Per-kind block palette. Events are ink (tinted by their feed color on the left bar), tasks
+// read blue, dated notes take the success green — matching the legend and the agenda so a
+// note reads the same everywhere. Roles, not ramp literals, so the blocks survive dark mode.
 const KIND: Record<CalendarItemKind, { bg: string; fg: string; bar: string }> = {
-  event: { bg: colors.gray900, fg: colors.gray0, bar: colors.gray600 },
+  event: { bg: colors.textPrimary, fg: colors.textInverse, bar: colors.textTertiary },
   task: { bg: colors.infoSoft, fg: colors.infoActive, bar: colors.info },
   note: { bg: colors.surfaceApp, fg: colors.textSecondary, bar: colors.success },
 };
@@ -50,6 +73,57 @@ function weekStartOf(d: Date): Date {
   const s = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   s.setDate(s.getDate() - s.getDay());
   return s;
+}
+/** ISO-8601 week number of the week containing `d` (weeks start Monday; week 1 holds the
+ *  year's first Thursday). */
+function isoWeek(d: Date): number {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7)); // that week's Thursday
+  const yearStart = Date.UTC(t.getUTCFullYear(), 0, 1);
+  return Math.ceil(((t.getTime() - yearStart) / 86_400_000 + 1) / 7);
+}
+
+/** A timed item's span inside its day column, in minutes since local midnight. An item with
+ *  no end reads as an hour; nothing draws shorter than half a row or past midnight. */
+function spanOf(item: CalendarItem): { start: number; end: number } {
+  const s = new Date(item.startsAt);
+  const start = s.getHours() * 60 + s.getMinutes();
+  const mins = item.endsAt ? Math.max(30, (new Date(item.endsAt).getTime() - s.getTime()) / 60_000) : 60;
+  return { start, end: Math.max(start + 15, Math.min(DAY_MIN, start + mins)) };
+}
+
+type Lane = { lane: number; lanes: number };
+
+/** Concurrency layout for one day. Sort by start, group into clusters of mutually overlapping
+ *  blocks, give each block the first lane it fits in, and let the cluster's lane count set
+ *  the width every block in it takes. */
+function layoutLanes(items: CalendarItem[]): Map<string, Lane> {
+  const spans = items
+    .map((item) => ({ id: item.id, ...spanOf(item) }))
+    .sort((a, b) => a.start - b.start || b.end - a.end);
+  const out = new Map<string, Lane>();
+  let cluster: typeof spans = [];
+  let clusterEnd = -1;
+  const flush = () => {
+    const laneEnds: number[] = [];
+    const placed: { id: string; lane: number }[] = [];
+    for (const it of cluster) {
+      let lane = laneEnds.findIndex((end) => end <= it.start);
+      if (lane === -1) lane = laneEnds.push(it.end) - 1;
+      else laneEnds[lane] = it.end;
+      placed.push({ id: it.id, lane });
+    }
+    for (const p of placed) out.set(p.id, { lane: p.lane, lanes: laneEnds.length });
+    cluster = [];
+    clusterEnd = -1;
+  };
+  for (const it of spans) {
+    if (cluster.length && it.start >= clusterEnd) flush();
+    cluster.push(it);
+    clusterEnd = Math.max(clusterEnd, it.end);
+  }
+  if (cluster.length) flush();
+  return out;
 }
 
 export function CalendarScreen() {
@@ -68,12 +142,19 @@ export function CalendarScreen() {
   });
   const [items, setItems] = useState<CalendarItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  // The all-day band holds two chips per day; "+N more" opens it up for the visible week.
+  const [expandAllDay, setExpandAllDay] = useState(false);
   // A day column's pixel width, measured via a ref (this RN typing has no onLayout on View,
   // so measure like useDropTarget does) — drag-to-reschedule maps horizontal drag distance to
   // a number of days.
   const [colWidth, setColWidth] = useState(0);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const colRef = useRef<any>(null);
+  const [scrollbarW, setScrollbarW] = useState(0);
+  // The ScrollView ref type differs between the RN and RN-web typings, so keep it loose;
+  // scrollTo exists on both at runtime.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const scrollRef = useRef<any>(null);
   // Which day column is hovered (or being dragged from). react-native-web gives every View
   // `position: relative; z-index: 0`, so each column is its own stacking context: a hover card
   // that spills into the next column can never paint over it from the inside, however high its
@@ -104,7 +185,7 @@ export function CalendarScreen() {
     () => Array.from({ length: 7 }, (_, i) => new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + i)),
     [weekStart],
   );
-  const todayISO = toISODate(new Date());
+  useEffect(() => setExpandAllDay(false), [weekStart]);
 
   // Drag-to-reschedule a task: translate the drop's day/time delta into a new due instant,
   // snap to 15 minutes, update the task (optimistically move the block so it doesn't jump),
@@ -145,9 +226,17 @@ export function CalendarScreen() {
           if (w > 0) setColWidth(w);
         });
       }
+      // A classic (non-overlay) scrollbar narrows the hour grid but not the header rows above
+      // it; pad those by the same amount so the seven columns stay on one set of rules.
+      const scroller = scrollRef.current?.getScrollableNode?.();
+      if (scroller && typeof scroller.offsetWidth === "number" && scroller.offsetWidth > 0) {
+        setScrollbarW(Math.max(0, scroller.offsetWidth - scroller.clientWidth));
+      }
     };
     const id = setTimeout(measure, 0);
-    if (typeof window !== "undefined") {
+    // The resize listener is window-wide, so only the visible tab holds it; a tab coming back
+    // to the front re-measures (a hidden one can report a zero width).
+    if (nav.visible && typeof window !== "undefined" && typeof window.addEventListener === "function") {
       window.addEventListener("resize", measure);
       return () => {
         clearTimeout(id);
@@ -155,15 +244,19 @@ export function CalendarScreen() {
       };
     }
     return () => clearTimeout(id);
-  }, [weekStart]);
+  }, [weekStart, nav.visible]);
 
-  // A ticking clock so the "now" line tracks real time (updated each minute).
+  // A ticking clock so the "now" line tracks real time (updated each minute). Only the
+  // visible tab keeps it; a background tab catches up the moment it's shown.
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
+    if (!nav.visible) return;
+    setNow(new Date());
     const id = setInterval(() => setNow(new Date()), 60_000);
     return () => clearInterval(id);
-  }, []);
-  const nowY = (now.getHours() * 60 + now.getMinutes()) / 60 * ROW_H;
+  }, [nav.visible]);
+  const nowY = ((now.getHours() * 60 + now.getMinutes()) / 60) * ROW_H;
+  const todayISO = toISODate(now);
 
   useEffect(() => {
     let alive = true;
@@ -194,6 +287,13 @@ export function CalendarScreen() {
     return map;
   }, [items, weekDays]);
 
+  // Lanes per day, so concurrent blocks split their column instead of stacking.
+  const lanesByDay = useMemo(() => {
+    const map = new Map<string, Map<string, Lane>>();
+    for (const [iso, bucket] of byDay) map.set(iso, layoutLanes(bucket.timed));
+    return map;
+  }, [byDay]);
+
   const hasAllDay = useMemo(() => weekDays.some((d) => (byDay.get(toISODate(d))?.allDay.length ?? 0) > 0), [byDay, weekDays]);
   const monthLabel = `${MONTHS[weekStart.getMonth()]} ${weekStart.getFullYear()}`;
 
@@ -202,12 +302,11 @@ export function CalendarScreen() {
 
   // On first open, restore the persisted scroll offset; if there is none, scroll the
   // current-time line into view (or the morning if today isn't in the visible week) so the
-  // full 24h grid never strands the user at midnight. Runs once — switching weeks keeps the
-  // user's scroll position rather than jumping. The ScrollView ref type differs between the
-  // RN and RN-web typings, so keep it loose; scrollTo exists on both at runtime.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const scrollRef = useRef<any>(null);
+  // full 24h grid never strands the user at midnight. Runs once, the first time the tab is
+  // actually on screen — switching weeks keeps the user's scroll position rather than jumping.
+  const didScroll = useRef(false);
   useEffect(() => {
+    if (!nav.visible || didScroll.current) return;
     const saved = getViewState().scrollY;
     let y = saved;
     if (!(saved > 0)) {
@@ -217,10 +316,13 @@ export function CalendarScreen() {
       y = Math.max(0, target - 3 * ROW_H);
     }
     // Run a tick after layout so content is measured.
-    const id = setTimeout(() => scrollRef.current?.scrollTo({ y, animated: false }), 0);
+    const id = setTimeout(() => {
+      didScroll.current = true;
+      scrollRef.current?.scrollTo({ y, animated: false });
+    }, 0);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [nav.visible]);
 
   // onScroll / scrollEventThrottle aren't in this stripped RN ScrollView typing, but RNW
   // supports them at runtime; pass them through a loosely-typed spread. Persist the offset so
@@ -233,46 +335,51 @@ export function CalendarScreen() {
 
   return (
     <View style={styles.root}>
-      {/* Toolbar: month, week nav, legend, jump-to-today */}
+      {/* Toolbar: month, week nav, ISO week, legend, refresh, jump-to-today */}
       <View style={styles.toolbar}>
-        <Icon name="calendar" size={18} color={colors.textSecondary} />
-        <Text style={styles.monthTitle}>{monthLabel}</Text>
+        <Icon name="calendar" size={14} color={colors.textSecondary} />
+        <Text variant="title" numberOfLines={1}>
+          {monthLabel}
+        </Text>
         <View style={styles.navGroup}>
           <IconButton label="Previous week" size="sm" onPress={() => stepWeek(-1)}>
-            <Icon name="chevronLeft" size={18} color={colors.textSecondary} />
+            <Icon name="chevronLeft" size={14} color={colors.textSecondary} />
           </IconButton>
           <IconButton label="Next week" size="sm" onPress={() => stepWeek(1)}>
-            <Icon name="chevronRight" size={18} color={colors.textSecondary} />
+            <Icon name="chevronRight" size={14} color={colors.textSecondary} />
           </IconButton>
         </View>
+        <Text variant="mono" tone="quaternary">
+          w{pad(isoWeek(weekDays[4]))}
+        </Text>
+        <Divider vertical style={styles.toolbarDivider} />
         <Legend />
         <View style={{ flex: 1 }} />
-        <IconButton label="Refresh calendars" size="sm" onPress={onRefresh} disabled={refreshing}>
-          {refreshing ? (
-            <ActivityIndicator size="small" color={colors.textSecondary} />
-          ) : (
-            <Icon name="refresh" size={16} color={colors.textSecondary} />
-          )}
-        </IconButton>
+        {refreshing ? (
+          <View style={styles.refreshSlot}>
+            <Spinner inline size={12} />
+          </View>
+        ) : (
+          <IconButton label="Refresh calendars" size="sm" onPress={onRefresh}>
+            <Icon name="refresh" size={13} color={colors.textSecondary} />
+          </IconButton>
+        )}
         <Button variant="ghost" size="sm" label="Today" onPress={() => setAnchor(new Date())} />
       </View>
 
       {/* Day header row */}
-      <View style={styles.headerRow}>
+      <View style={[styles.headerRow, { paddingRight: scrollbarW }]}>
         <View style={{ width: GUTTER }} />
         {weekDays.map((d) => {
           const iso = toISODate(d);
           const isToday = iso === todayISO;
           return (
             <View key={iso} style={styles.headerCell}>
-              <Text
-                variant="mono"
-                style={[styles.dayName, { color: isToday ? colors.accentHover : colors.textTertiary }]}
-              >
+              <Text variant="mono" tone={isToday ? "accent" : "quaternary"} style={styles.dayName}>
                 {DAY_NAMES[d.getDay()]}
               </Text>
               <View style={[styles.datePill, isToday ? { backgroundColor: colors.accent } : null]}>
-                <Text style={{ color: isToday ? colors.onAccent : colors.textPrimary, fontWeight: "600" }}>
+                <Text variant="label" style={isToday ? { color: colors.onAccent } : null}>
                   {d.getDate()}
                 </Text>
               </View>
@@ -281,22 +388,36 @@ export function CalendarScreen() {
         })}
       </View>
 
-      {/* All-day strip */}
+      {/* All-day band */}
       {hasAllDay ? (
-        <View style={styles.allDayRow}>
-          <View style={[styles.gutterCell, { justifyContent: "center" }]}>
-            <Text variant="mono" tone="tertiary" style={styles.allDayLabel}>
+        <View style={[styles.allDayRow, { paddingRight: scrollbarW }]}>
+          <View style={styles.allDayGutter}>
+            <Text variant="mono" tone="quaternary" style={styles.allDayLabel} numberOfLines={1}>
               all-day
             </Text>
           </View>
           {weekDays.map((d, di) => {
             const iso = toISODate(d);
             const all = byDay.get(iso)?.allDay ?? [];
+            const shown = expandAllDay ? all : all.slice(0, ALL_DAY_MAX);
+            const rest = all.length - shown.length;
             return (
-              <View key={iso} style={[styles.allDayCell, hoverDay === di ? styles.columnLifted : null]}>
-                {all.map((it) => (
+              <View
+                key={iso}
+                style={[
+                  styles.allDayCell,
+                  iso === todayISO ? { backgroundColor: colors.accentSoft } : null,
+                  hoverDay === di ? styles.columnLifted : null,
+                ]}
+              >
+                {shown.map((it) => (
                   <AllDayChip key={it.id} item={it} dayIndex={di} onOpen={openItem} onHover={setDayHovered} />
                 ))}
+                {rest > 0 ? (
+                  <BandLink label={`+${rest} more`} onPress={() => setExpandAllDay(true)} />
+                ) : expandAllDay && all.length > ALL_DAY_MAX ? (
+                  <BandLink label="show less" onPress={() => setExpandAllDay(false)} />
+                ) : null}
               </View>
             );
           })}
@@ -311,7 +432,7 @@ export function CalendarScreen() {
           <View style={{ width: GUTTER }}>
             {HOURS.map((h) => (
               <View key={h} style={{ height: ROW_H }}>
-                <Text variant="mono" tone="tertiary" style={styles.hourLabel}>
+                <Text variant="mono" tone="quaternary" style={styles.hourLabel}>
                   {hourLabel(h)}
                 </Text>
               </View>
@@ -322,6 +443,7 @@ export function CalendarScreen() {
             const iso = toISODate(d);
             const isToday = iso === todayISO;
             const timed = byDay.get(iso)?.timed ?? [];
+            const lanes = lanesByDay.get(iso);
             return (
               <View
                 key={iso}
@@ -340,6 +462,7 @@ export function CalendarScreen() {
                     key={it.id}
                     item={it}
                     dayIndex={di}
+                    lane={lanes?.get(it.id)}
                     onOpen={openItem}
                     onReschedule={reschedule}
                     colWidth={colWidth}
@@ -359,10 +482,13 @@ export function CalendarScreen() {
 /** One positioned block inside a day column. Hovering reveals a detail card; clicking a
  *  task/note opens it (feed events aren't linkable). Tasks are draggable — a drag past a
  *  small threshold moves the block and, on release, reschedules the task's due date/time;
- *  a plain tap still opens it. The popover card flips left for the last columns. */
+ *  a plain tap still opens it. Concurrent blocks split the column into lanes; a hovered one
+ *  takes the full width back so its title is readable without opening anything. The popover
+ *  card flips left for the last columns. */
 function TimedBlock({
   item,
   dayIndex,
+  lane,
   onOpen,
   onReschedule,
   colWidth,
@@ -370,6 +496,8 @@ function TimedBlock({
 }: {
   item: CalendarItem;
   dayIndex: number;
+  /** This block's lane within its overlap cluster (see layoutLanes). */
+  lane?: Lane;
   onOpen: (item: CalendarItem) => void;
   onReschedule?: (item: CalendarItem, dayIndex: number, dx: number, dy: number) => void;
   colWidth?: number;
@@ -423,28 +551,39 @@ function TimedBlock({
   );
 
   const start = new Date(item.startsAt);
-  const startHours = start.getHours() + start.getMinutes() / 60;
-  let durationH = 1;
-  if (item.endsAt) {
-    const end = new Date(item.endsAt);
-    durationH = Math.max(0.5, (end.getTime() - start.getTime()) / 3_600_000);
-  }
-  const top = startHours * ROW_H;
-  const height = durationH * ROW_H;
+  const span = spanOf(item);
+  const top = (span.start / 60) * ROW_H;
+  const height = Math.max(ROW_H * 0.5, ((span.end - span.start) / 60) * ROW_H);
   const k = KIND[item.kind];
-  const p = (n: number) => String(n).padStart(2, "0");
   const flipLeft = dayIndex >= 4;
   const dragging = drag !== null;
+
+  const lanes = lane?.lanes ?? 1;
+  const laneIndex = lane?.lane ?? 0;
+  const share = 100 / lanes;
+  // A hovered (or dragged) block in a split column takes the whole column back.
+  const full = lanes > 1 && (hovered || dragging);
+  // Short or narrow blocks run title and time on one line instead of stacking them.
+  const tight = height < 26 || (lanes > 2 && !full);
 
   return (
     <View
       {...(draggable ? pan.panHandlers : {})}
       style={[
         styles.block,
-        { top: top + 2, height: height - 4 },
-        // The lift belongs on this positioned wrapper, not the inner card: the wrapper is the
-        // sibling that later blocks in the column would otherwise paint over, card and all.
-        hovered ? styles.blockLifted : null,
+        transition("left, width", motion.fast),
+        {
+          top: top + 1,
+          height: height - 2,
+          left: full ? ("0%" as const) : (`${laneIndex * share}%` as const),
+          width: full ? ("100%" as const) : (`${share}%` as const),
+          // Lanes keep a 2px channel between neighbours; the last one also clears the rule.
+          paddingRight: full || laneIndex === lanes - 1 ? 2 : 0,
+          // Later lanes sit above earlier ones; the lift for a hovered block belongs on this
+          // positioned wrapper, not the inner card: the wrapper is the sibling that later
+          // blocks in the column would otherwise paint over, card and all.
+          zIndex: hovered ? 30 : 1 + laneIndex,
+        },
         dragging ? { transform: [{ translateX: drag.dx }, { translateY: drag.dy }], zIndex: 60, opacity: 0.92 } : null,
       ]}
     >
@@ -464,18 +603,24 @@ function TimedBlock({
           if (Date.now() - lastDragEnd.current < 350) return;
           onOpen(item);
         }}
-        style={[
-          styles.blockInner,
-          { backgroundColor: k.bg, borderLeftColor: item.color ?? k.bar },
-          hovered || dragging ? styles.blockHovered : null,
-        ]}
+        style={styles.blockPress}
       >
-        <Text style={[styles.blockTitle, { color: k.fg }]} numberOfLines={1}>
-          {item.title || "Untitled"}
-        </Text>
-        <Text style={[styles.blockTime, { color: k.fg }]} numberOfLines={1}>
-          {p(start.getHours())}:{p(start.getMinutes())}
-        </Text>
+        <View
+          style={[
+            styles.blockInner,
+            tight ? styles.blockInnerTight : null,
+            { backgroundColor: k.bg, borderLeftColor: item.color ?? k.bar },
+            // A block only casts a shadow while it is in the air.
+            dragging ? shadow.sm : null,
+          ]}
+        >
+          <Text variant="caption" style={[styles.blockTitle, tight ? styles.blockTitleTight : null, { color: k.fg }]} numberOfLines={1}>
+            {item.title || "Untitled"}
+          </Text>
+          <Text variant="mono" style={[styles.blockTime, { color: k.fg }]} numberOfLines={1}>
+            {pad(start.getHours())}:{pad(start.getMinutes())}
+          </Text>
+        </View>
         {hovered && !dragging ? (
           <CalendarItemInfo
             item={item}
@@ -488,7 +633,7 @@ function TimedBlock({
   );
 }
 
-/** An all-day item (dated note or all-day event) in the strip under the day headers. Like
+/** An all-day item (dated note or all-day event) in the band under the day headers. Like
  *  TimedBlock it reveals a detail card on hover and opens a task/note on click; its left bar
  *  uses the item's own kind/feed color so a note reads green here too. */
 function AllDayChip({
@@ -521,14 +666,17 @@ function AllDayChip({
         setActive(false);
       }}
       onPress={() => openable && onOpen(item)}
-      style={[
+      style={({ pressed }: PressState) => [
         styles.allDayChip,
-        { borderLeftColor: item.color ?? KIND[item.kind].bar },
-        hovered ? styles.blockHovered : null,
-        hovered ? styles.blockLifted : null,
+        transition("background-color", motion.instant),
+        {
+          borderLeftColor: item.color ?? KIND[item.kind].bar,
+          backgroundColor: pressed && openable ? colors.surfaceActive : hovered ? colors.surfaceHover : colors.surfaceApp,
+        },
+        hovered ? styles.chipLifted : null,
       ]}
     >
-      <Text style={styles.allDayChipText} numberOfLines={1}>
+      <Text variant="caption" tone="secondary" style={styles.allDayChipText} numberOfLines={1}>
         {item.title || "Untitled"}
       </Text>
       {hovered ? (
@@ -542,8 +690,26 @@ function AllDayChip({
   );
 }
 
-/** The current-time indicator drawn across today's column: a thin accent line with a dot at
- *  its left edge, positioned at `top` pixels (the minutes-since-midnight offset). */
+/** The mono "+N more" / "show less" toggle at the foot of an all-day cell. */
+function BandLink({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      aria-label={label}
+      style={({ hovered, pressed }: PressState) => [
+        styles.bandLink,
+        { backgroundColor: pressed ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent" },
+      ]}
+    >
+      <Text variant="mono" tone="tertiary" numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+/** The current-time indicator drawn across today's column: a 2px accent rule with a 7px dot
+ *  at its left edge, positioned at `top` pixels (the minutes-since-midnight offset). */
 function NowLine({ top }: { top: number }) {
   return (
     <View style={[styles.nowLine, { top }]} pointerEvents="none">
@@ -556,16 +722,16 @@ function Legend() {
   const dot = (color: string, label: string) => (
     <View style={styles.legendItem} key={label}>
       <View style={[styles.legendDot, { backgroundColor: color }]} />
-      <Text variant="mono" tone="tertiary" style={{ fontSize: 11 }}>
+      <Text variant="mono" tone="tertiary">
         {label}
       </Text>
     </View>
   );
   return (
     <View style={styles.legend}>
-      {dot(colors.gray700, "Events")}
-      {dot(colors.info, "Tasks")}
-      {dot(colors.success, "Notes")}
+      {dot(colors.textPrimary, "events")}
+      {dot(colors.info, "tasks")}
+      {dot(colors.success, "notes")}
     </View>
   );
 }
@@ -577,17 +743,19 @@ const styles = {
     flexDirection: "row" as const,
     alignItems: "center" as const,
     gap: space.md,
-    height: 48,
-    paddingHorizontal: space.lg,
+    height: TOOLBAR_H,
+    paddingHorizontal: space.ml,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
     flexShrink: 0,
   },
-  monthTitle: { fontSize: 15, fontWeight: "600" as const },
-  navGroup: { flexDirection: "row" as const, gap: 2 },
-  legend: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.lg, marginLeft: space.md },
+  navGroup: { flexDirection: "row" as const, gap: 1 },
+  toolbarDivider: { height: 14 },
+  legend: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.ml },
   legendItem: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.xs },
-  legendDot: { width: 8, height: 8, borderRadius: 3 },
+  legendDot: { width: 7, height: 7, borderRadius: radius.sm },
+  // Holds the refresh button's footprint while the spinner stands in for it.
+  refreshSlot: { width: control.sm, height: control.sm, alignItems: "center" as const, justifyContent: "center" as const },
 
   headerRow: {
     flexDirection: "row" as const,
@@ -597,17 +765,20 @@ const styles = {
   },
   headerCell: {
     flex: 1,
+    minWidth: 0,
     alignItems: "center" as const,
-    paddingVertical: space.sm,
+    gap: 1,
+    paddingTop: space.xs,
+    paddingBottom: 5,
     borderLeftWidth: 1,
     borderLeftColor: colors.borderSubtle,
   },
-  dayName: { fontSize: 11, textTransform: "uppercase" as const, letterSpacing: 0.5 },
+  dayName: { fontSize: font.size["2xs"], textTransform: "uppercase" as const, letterSpacing: font.tracking.wide },
+  // A numeral in a count-style pill: fully round, like every other numeric count.
   datePill: {
-    minWidth: 26,
-    height: 26,
-    marginTop: 2,
-    paddingHorizontal: 4,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: space.xs,
     borderRadius: radius.full,
     alignItems: "center" as const,
     justifyContent: "center" as const,
@@ -617,35 +788,39 @@ const styles = {
     flexDirection: "row" as const,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
-    minHeight: 30,
     flexShrink: 0,
-    // Lift the whole strip above the hour grid (a later sibling) so an all-day chip's hover
+    // Lift the whole band above the hour grid (a later sibling) so an all-day chip's hover
     // popover, which drops down into the grid area, isn't painted over by it. A chip's own
-    // popover zIndex only competes within this strip's stacking context.
+    // popover zIndex only competes within this band's stacking context.
     zIndex: 20,
   },
-  gutterCell: { width: GUTTER, alignItems: "flex-end" as const, paddingRight: space.sm },
-  allDayLabel: { fontSize: 10 },
+  allDayGutter: { width: GUTTER, alignItems: "flex-end" as const, paddingRight: space.xxs, paddingTop: 7 },
+  allDayLabel: { fontSize: 9 },
   allDayCell: {
     flex: 1,
+    minWidth: 0,
+    minHeight: 26,
     borderLeftWidth: 1,
     borderLeftColor: colors.borderSubtle,
-    padding: 2,
+    paddingVertical: space.xs,
+    paddingHorizontal: 3,
     gap: 2,
   },
   allDayChip: {
-    backgroundColor: colors.surfaceApp,
+    height: 18,
+    justifyContent: "center" as const,
     borderLeftWidth: 2,
     borderRadius: radius.sm,
     paddingHorizontal: 5,
-    paddingVertical: 2,
   },
-  allDayChipText: { fontSize: 11, color: colors.textSecondary },
+  allDayChipText: { fontWeight: font.weight.medium },
+  bandLink: { height: 14, justifyContent: "center" as const, paddingHorizontal: 5, borderRadius: radius.sm },
 
   gridRow: { flexDirection: "row" as const },
-  hourLabel: { fontSize: 10, textAlign: "right" as const, paddingRight: space.sm, marginTop: -6 },
+  hourLabel: { fontSize: font.size["2xs"], textAlign: "right" as const, paddingRight: space.sm, marginTop: -5 },
   dayColumn: {
     flex: 1,
+    minWidth: 0,
     position: "relative" as const,
     borderLeftWidth: 1,
     borderLeftColor: colors.borderSubtle,
@@ -655,33 +830,32 @@ const styles = {
   // stacking context, so a card that spills sideways only clears the neighbouring columns
   // once the column holding it outranks them.
   columnLifted: { zIndex: 40 },
-  // The positioned outer container (drag transform rides here); the inner holds the visual.
-  block: {
-    position: "absolute" as const,
-    left: 3,
-    right: 3,
-  },
+  // The positioned outer container (lane geometry and the drag transform ride here); the
+  // inner holds the visual.
+  block: { position: "absolute" as const, paddingLeft: 2 },
+  // The hover target. It doesn't clip, so the detail card can hang off its edge.
+  blockPress: { flex: 1 },
   blockInner: {
     flex: 1,
+    overflow: "hidden" as const,
     borderLeftWidth: 2,
-    borderRadius: radius.md,
-    paddingHorizontal: 6,
-    paddingVertical: 4,
+    borderRadius: radius.sm,
+    paddingHorizontal: space.xs,
+    paddingVertical: space.xxs,
   },
-  // The visual lift on the card itself; the stacking lift lives on the wrapper (blockLifted)
-  // and on the day column (columnLifted).
-  blockHovered: { boxShadow: "0 1px 6px rgba(0,0,0,0.18)" },
-  // A hovered block/chip rises above its siblings inside the column so its card isn't covered
-  // by a later block; the column itself rises via columnLifted.
-  blockLifted: { zIndex: 30 },
-  blockTitle: { fontSize: 12, fontWeight: "600" as const },
-  blockTime: { fontSize: 9, opacity: 0.75, marginTop: 1 },
+  blockInnerTight: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.xs, paddingVertical: 0 },
+  blockTitle: { fontWeight: font.weight.semibold },
+  blockTitleTight: { flex: 1, minWidth: 0 },
+  blockTime: { fontSize: 9, lineHeight: 12, opacity: 0.75, flexShrink: 0 },
+  // A hovered chip rises above its siblings inside the cell so its card isn't covered by a
+  // later chip; the cell itself rises via columnLifted.
+  chipLifted: { zIndex: 30 },
 
-  popover: { position: "absolute" as const, top: 0, width: 240, zIndex: 40 },
-  popoverRight: { left: "100%" as const, marginLeft: 8 },
-  popoverLeft: { right: "100%" as const, marginRight: 8 },
-  // All-day chips are in a shallow strip, so their card drops below and anchors to an edge.
-  popoverBelow: { top: "100%" as const, marginTop: 4 },
+  popover: { position: "absolute" as const, top: 0, width: CARD_W, zIndex: 40 },
+  popoverRight: { left: "100%" as const, marginLeft: space.sm },
+  popoverLeft: { right: "100%" as const, marginRight: space.sm },
+  // All-day chips are in a shallow band, so their card drops below and anchors to an edge.
+  popoverBelow: { top: "100%" as const, marginTop: space.xs },
   popoverAnchorLeft: { left: 0 },
   popoverAnchorRight: { right: 0 },
 
@@ -696,10 +870,10 @@ const styles = {
   },
   nowDot: {
     position: "absolute" as const,
-    left: -4,
+    left: -3,
     top: -4,
-    width: 8,
-    height: 8,
+    width: 7,
+    height: 7,
     borderRadius: radius.full,
     backgroundColor: colors.accent,
   },

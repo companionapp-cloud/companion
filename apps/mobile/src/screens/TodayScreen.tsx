@@ -1,19 +1,21 @@
-import { useLayoutEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { DailyNote, TodayCalendar, Agenda, todayISO } from '@companion/app';
 import type { LinkRef } from '@companion/editor';
-import { Icon, IconButton, Text, colors, font, radius, space } from '@companion/design-system';
+import { Button, Icon, IconButton, colors, space } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-// Mobile "Today": the full-height daily-note editor (content is big), with the mini calendar
-// tucked into a collapsible panel above it (the detail is small). A daily note is an ordinary
-// note stamped with today's `date`; it isn't created until the user types. The desktop shell
-// puts the calendar in a side panel — no room for that on a phone, so it toggles from the
-// header instead. Shares DailyNote/TodayCalendar with the desktop screen (PLAN §6.x).
+// Mobile "Today": the full-height daily-note editor (content is big), with the month and
+// the day's agenda tucked into a collapsible panel above it (the detail is small). A daily
+// note is an ordinary note stamped with today's `date`; it isn't created until the user
+// types. The desktop shell puts the calendar in a side panel — no room for that on a
+// phone, so it collapses behind the calendar toggle in an action row under the nav bar,
+// and picking a day hands the screen back to the note. Shares DailyNote/TodayCalendar
+// with the desktop screen (PLAN §6.x).
 export function TodayScreen() {
   const nav = useNavigation<Nav>();
   const [selected, setSelected] = useState(todayISO);
@@ -27,42 +29,32 @@ export function TodayScreen() {
     else if (ref.type === 'note') nav.push('NoteEditor', { id: ref.id });
   };
 
-  useLayoutEffect(() => {
-    nav.setOptions({
-      title: 'Today',
-      headerRight: () => (
-        <View style={styles.headerActions}>
-          {!isToday ? (
-            <Pressable
-              onPress={() => {
-                setToday(todayISO());
-                setSelected(todayISO());
-              }}
-              style={styles.resetBtn}
-              aria-label="Jump to today"
-            >
-              <Text variant="label" style={{ color: colors.accent, fontWeight: font.weight.semibold }}>
-                Today
-              </Text>
-            </Pressable>
-          ) : null}
-          <IconButton
-            label={showCalendar ? 'Hide calendar' : 'Show calendar'}
-            size="sm"
-            active={showCalendar}
-            onPress={() => setShowCalendar((v) => !v)}
-          >
-            <Icon name="calendar" size={18} color={showCalendar ? colors.accent : colors.textSecondary} />
-          </IconButton>
-        </View>
-      ),
-    });
-  }, [nav, isToday, showCalendar]);
-
   return (
     <View style={styles.root}>
+      <View style={styles.actions}>
+        <View style={styles.spacer} />
+        {!isToday ? (
+          <Button
+            label="Today"
+            variant="ghost"
+            onPress={() => {
+              setToday(todayISO());
+              setSelected(todayISO());
+            }}
+          />
+        ) : null}
+        <IconButton
+          label={showCalendar ? 'Hide calendar' : 'Show calendar'}
+          size="lg"
+          active={showCalendar}
+          onPress={() => setShowCalendar((v) => !v)}
+        >
+          <Icon name="calendar" size={18} color={showCalendar ? colors.textAccent : colors.textSecondary} />
+        </IconButton>
+      </View>
       {showCalendar ? (
-        <View style={styles.calCard}>
+        // Capped and scrollable so a busy agenda can't push the note off the screen.
+        <ScrollView style={styles.calPanel} contentContainerStyle={styles.calPanelContent}>
           <TodayCalendar
             selected={selected}
             today={today}
@@ -82,7 +74,7 @@ export function TodayScreen() {
               }}
             />
           </View>
-        </View>
+        </ScrollView>
       ) : null}
       <View style={styles.note}>
         <DailyNote key={selected} date={selected} onOpenRef={onOpenRef} headingPadding={20} />
@@ -92,17 +84,32 @@ export function TodayScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.surfaceCard },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
-  resetBtn: { minHeight: 36, paddingHorizontal: space.sm, justifyContent: 'center' },
-  calCard: {
-    padding: space.lg,
-    borderBottomWidth: 1,
+  root: { flex: 1, backgroundColor: colors.surfaceApp },
+  actions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.borderSubtle,
+  },
+  spacer: { flex: 1 },
+  calPanel: {
+    flexGrow: 0,
+    maxHeight: '62%',
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.borderSubtle,
     backgroundColor: colors.surfaceCard,
   },
-  agenda: { marginTop: space.lg, paddingTop: space.lg, borderTopWidth: 1, borderTopColor: colors.borderSubtle },
-  // Top padding so the date heading breathes under the nav header; the editor body brings
+  calPanelContent: { padding: space.lg },
+  agenda: {
+    marginTop: space.lg,
+    paddingTop: space.lg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.borderSubtle,
+  },
+  // Top padding so the date heading breathes under the action row; the editor body brings
   // its own horizontal inset, so only the vertical gap is added here.
-  note: { flex: 1, paddingTop: space.xl },
+  note: { flex: 1, paddingTop: space.xl, backgroundColor: colors.surfaceCard },
 });

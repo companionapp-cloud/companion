@@ -1,4 +1,4 @@
-import { BrandMark } from "@companion/design-system";
+import { BrandMark } from "../ds";
 import { NavButtons, type NavLink } from "./NavButtons";
 
 interface Props {

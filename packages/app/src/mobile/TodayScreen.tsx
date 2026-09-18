@@ -1,16 +1,17 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import type { LinkRef } from "@companion/editor";
-import { Icon, IconButton, Text, colors, font, space } from "@companion/design-system";
+import { Button, colors, space } from "@companion/design-system";
 import { DailyNote, TodayCalendar, todayISO } from "../TodayScreen";
 import { Agenda } from "../CalendarAgenda";
 import { useNav } from "../nav-context";
 import { useCalendarItemSheet } from "./CalendarScreens";
+import { NavAction, NavBar } from "./ui";
 
 // Mobile web "Today" — a port of the native app's TodayScreen: the full-height daily-note
-// editor with the mini calendar tucked into a collapsible panel above it. The desktop
-// shell puts the calendar in a side panel; no room for that on a phone, so it toggles
-// from an inline action row instead.
+// editor with the month and the day's agenda tucked into a collapsible panel above it.
+// The desktop shell puts the calendar in a side panel; no room for that on a phone, so it
+// toggles from an action row instead, and picking a day hands the screen back to the note.
 export function TodayScreen() {
   const nav = useNav();
   const [selected, setSelected] = useState(todayISO);
@@ -25,30 +26,20 @@ export function TodayScreen() {
 
   return (
     <View style={styles.root}>
+      <NavBar title="Today" />
       <View style={styles.actions}>
         <View style={{ flex: 1 }} />
         {!isToday ? (
-          <Pressable
+          <Button
+            label="Today"
+            variant="ghost"
             onPress={() => {
               setToday(todayISO());
               setSelected(todayISO());
             }}
-            style={styles.resetBtn}
-            aria-label="Jump to today"
-          >
-            <Text variant="label" style={{ color: colors.accent, fontWeight: font.weight.semibold }}>
-              Today
-            </Text>
-          </Pressable>
+          />
         ) : null}
-        <IconButton
-          label={showCalendar ? "Hide calendar" : "Show calendar"}
-          size="sm"
-          active={showCalendar}
-          onPress={() => setShowCalendar((v) => !v)}
-        >
-          <Icon name="calendar" size={18} color={showCalendar ? colors.accent : colors.textSecondary} />
-        </IconButton>
+        <NavAction icon="calendar" label={showCalendar ? "Hide calendar" : "Show calendar"} active={showCalendar} onPress={() => setShowCalendar((v) => !v)} />
       </View>
       {showCalendar ? (
         <View style={styles.calCard}>
@@ -81,9 +72,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: space.xs,
     paddingHorizontal: space.md,
-    paddingTop: space.sm,
+    paddingVertical: space.sm,
   },
-  resetBtn: { minHeight: 36, paddingHorizontal: space.sm, justifyContent: "center" },
   calCard: {
     padding: space.lg,
     borderBottomWidth: 1,
@@ -91,5 +81,5 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceCard,
   },
   agenda: { marginTop: space.lg, paddingTop: space.lg, borderTopWidth: 1, borderTopColor: colors.borderSubtle },
-  note: { flex: 1 },
+  note: { flex: 1, minHeight: 0 },
 });

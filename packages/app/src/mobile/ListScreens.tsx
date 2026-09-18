@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { FlatList, ScrollView, StyleSheet, View } from "react-native";
+import { FlatList, StyleSheet, View } from "react-native";
 import type { Note, Task } from "@companion/core-bridge";
 import { Icon, Input, Spinner, Text, colors, space } from "@companion/design-system";
 import { useNav } from "../nav-context";
@@ -8,13 +8,16 @@ import { useNotes } from "../NotesProvider";
 import { useTasks, filterTasksByDue } from "../TasksProvider";
 import { useProjects } from "../ProjectsProvider";
 import { ListFilterTabs } from "../ListFilterMenu";
-import { Checkbox } from "../TaskEditor";
-import { CardRow, Fab } from "./ui";
+import { CHECKBOX_INSET, CardRow, Checkbox, EmptyCaption, FAB_CLEARANCE, Fab, GroupedItem, NavAction, NavBar, ROW_ICON_INSET, RowIcon } from "./ui";
 
 // Full-screen browse lists for the mobile web shell — ports of the native app's
 // NotesListScreen/TasksListScreen. Used globally (all items) and inside the project
 // screen, where `projectId` scopes the list to the project's members and makes new
 // items members of it (PLAN §6.6). Tapping a row pushes the full-screen editor.
+//
+// Native chrome: the global lists own a nav bar with their segmented filter *in* it and
+// search directly beneath; inside a project the project screen owns the bar, so the list
+// renders bare. Rows are one contiguous grouped card with inset hairlines.
 
 /** Tracks a project's member ids of one entity type, refreshed as memberships change. */
 export function useMemberIds(projectId: string | undefined, entityType: "note" | "task"): Set<string> | null {
@@ -65,27 +68,37 @@ export function NotesListScreen({ projectId }: { projectId?: string }) {
     nav.openNote(note.id);
   };
 
+  const bar = projectId ? null : (
+    <NavBar
+      title="Notes"
+      right={<NavAction icon="plus" label="New note" onPress={() => void createNote()} />}
+      segments={
+        <ListFilterTabs
+          value={store.filter}
+          onChange={store.setFilter}
+          options={[
+            { value: "unsorted", label: "Unsorted" },
+            { value: "all", label: "All" },
+          ]}
+        />
+      }
+    />
+  );
+
   if (store.loading) {
-    return <Spinner label="Loading your notes…" />;
+    return (
+      <View style={styles.container}>
+        {bar}
+        <Spinner label="Loading your notes…" />
+      </View>
+    );
   }
 
   return (
     <View style={styles.container}>
-      {!projectId ? (
-        <View style={styles.filterBar}>
-          <ListFilterTabs
-            value={store.filter}
-            onChange={store.setFilter}
-            options={[
-              { value: "unsorted", label: "Unsorted" },
-              { value: "all", label: "All" },
-            ]}
-          />
-        </View>
-      ) : null}
+      {bar}
       <View style={styles.search}>
         <Input
-          size="sm"
           placeholder="Search notes"
           value={query}
           onChangeText={setQuery}
@@ -97,27 +110,30 @@ export function NotesListScreen({ projectId }: { projectId?: string }) {
         keyExtractor={(n) => n.id}
         contentContainerStyle={styles.list}
         ListEmptyComponent={
-          <Text tone="tertiary" style={styles.empty}>
+          <EmptyCaption>
             {query
               ? "No notes match that."
               : projectId
                 ? "No notes in this project yet. Tap + to add one."
                 : "Nothing here yet. Tap + to start a note."}
-          </Text>
+          </EmptyCaption>
         }
-        renderItem={({ item }) => (
-          <CardRow
-            leading={<Icon name="file" size={19} color={colors.textTertiary} />}
-            title={item.title || "Untitled"}
-            subtitle={notePreview(item)}
-            trailing={
-              <Text variant="mono" tone="tertiary" style={styles.time}>
-                {relTime(item.updatedAt)}
-              </Text>
-            }
-            divided={false}
-            onPress={() => nav.openNote(item.id)}
-          />
+        renderItem={({ item, index }) => (
+          <GroupedItem index={index} count={notes.length}>
+            <CardRow
+              leading={<RowIcon name="file" />}
+              separatorInset={ROW_ICON_INSET}
+              title={item.title || "Untitled"}
+              subtitle={notePreview(item)}
+              trailing={
+                <Text variant="mono" tone="tertiary">
+                  {relTime(item.updatedAt)}
+                </Text>
+              }
+              isLast={index === notes.length - 1}
+              onPress={() => nav.openNote(item.id)}
+            />
+          </GroupedItem>
         )}
       />
       <Fab label="New note" onPress={() => void createNote()} />
@@ -148,42 +164,57 @@ export function TasksListScreen({ projectId }: { projectId?: string }) {
     nav.openTask(task.id);
   };
 
+  const bar = projectId ? (
+    // The project screen's bar holds the section switcher; this list's own due filter
+    // continues that bar as a second segmented row.
+    <View style={styles.subBar}>
+      <ListFilterTabs
+        value={dueFilter}
+        onChange={setDueFilter}
+        options={[
+          { value: "all", label: "All" },
+          { value: "upcoming", label: "Upcoming" },
+          { value: "overdue", label: "Overdue" },
+        ]}
+      />
+    </View>
+  ) : (
+    <NavBar
+      title="Tasks"
+      right={<NavAction icon="plus" label="New task" onPress={() => void createTask()} />}
+      segments={
+        <ListFilterTabs
+          value={store.filter}
+          onChange={store.setFilter}
+          options={[
+            { value: "unsorted", label: "Unsorted" },
+            { value: "all", label: "All" },
+            { value: "upcoming", label: "Upcoming" },
+            { value: "overdue", label: "Overdue" },
+          ]}
+        />
+      }
+    />
+  );
+
   if (store.loading) {
-    return <Spinner label="Loading your tasks…" />;
+    return (
+      <View style={styles.container}>
+        {bar}
+        <Spinner label="Loading your tasks…" />
+      </View>
+    );
   }
 
   return (
     <View style={styles.container}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterBar} contentContainerStyle={styles.filterBarContent}>
-        {!projectId ? (
-          <ListFilterTabs
-            value={store.filter}
-            onChange={store.setFilter}
-            options={[
-              { value: "unsorted", label: "Unsorted" },
-              { value: "all", label: "All" },
-              { value: "upcoming", label: "Upcoming" },
-              { value: "overdue", label: "Overdue" },
-            ]}
-          />
-        ) : (
-          <ListFilterTabs
-            value={dueFilter}
-            onChange={setDueFilter}
-            options={[
-              { value: "all", label: "All" },
-              { value: "upcoming", label: "Upcoming" },
-              { value: "overdue", label: "Overdue" },
-            ]}
-          />
-        )}
-      </ScrollView>
+      {bar}
       <FlatList
         data={tasks}
         keyExtractor={(t) => t.id}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, styles.listTop]}
         ListEmptyComponent={
-          <Text tone="tertiary" style={styles.empty}>
+          <EmptyCaption>
             {projectId
               ? dueFilter === "upcoming"
                 ? "No upcoming tasks in this project."
@@ -191,23 +222,25 @@ export function TasksListScreen({ projectId }: { projectId?: string }) {
                   ? "No overdue tasks in this project."
                   : "No tasks in this project yet. Tap + to add one."
               : "Nothing to do. Tap + to add a task."}
-          </Text>
+          </EmptyCaption>
         }
-        renderItem={({ item }) => (
-          <CardRow
-            leading={
-              <Checkbox
-                checked={item.status === "done"}
-                onPress={() => void store.setStatus(item.id, item.status === "done" ? "open" : "done")}
-                size={22}
-              />
-            }
-            title={item.title || "Untitled task"}
-            subtitle={dueLabel(item)}
-            showChevron={false}
-            divided={false}
-            onPress={() => nav.openTask(item.id)}
-          />
+        renderItem={({ item, index }) => (
+          <GroupedItem index={index} count={tasks.length}>
+            <CardRow
+              leading={
+                <Checkbox
+                  checked={item.status === "done"}
+                  onPress={() => void store.setStatus(item.id, item.status === "done" ? "open" : "done")}
+                />
+              }
+              separatorInset={CHECKBOX_INSET}
+              title={item.title || "Untitled task"}
+              subtitle={dueLabel(item)}
+              showChevron={false}
+              isLast={index === tasks.length - 1}
+              onPress={() => nav.openTask(item.id)}
+            />
+          </GroupedItem>
         )}
       />
       <Fab label="New task" onPress={() => void createTask()} />
@@ -245,10 +278,14 @@ function relTime(iso: string): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceApp },
-  filterBar: { paddingTop: space.sm, flexGrow: 0 },
-  filterBarContent: { paddingHorizontal: space.md },
-  search: { paddingHorizontal: space.md, paddingTop: space.sm },
-  list: { paddingHorizontal: space.md, paddingVertical: space.sm, gap: 2, flexGrow: 1 },
-  time: { fontSize: 11 },
-  empty: { textAlign: "center", marginTop: space.xxl },
+  subBar: {
+    paddingHorizontal: space.md,
+    paddingVertical: space.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+    backgroundColor: colors.surfaceApp,
+  },
+  search: { paddingHorizontal: space.ml, paddingTop: space.ml, paddingBottom: space.md },
+  list: { paddingHorizontal: space.ml, paddingBottom: FAB_CLEARANCE, flexGrow: 1 },
+  listTop: { paddingTop: space.ml },
 });

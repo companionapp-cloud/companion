@@ -1,5 +1,5 @@
 import { View } from "react-native";
-import { Text, colors, radius, space } from "@companion/design-system";
+import { Text, colors, control, radius, space, useDensity } from "@companion/design-system";
 
 export interface DateTimeInputProps {
   value?: string | null;
@@ -11,10 +11,11 @@ export interface DateTimeInputProps {
  *  shape as the web picker. Setting the date is via the natural-language field and presets.
  *  The web build (DateTimeInput.web.tsx) is an editable picker. */
 export function DateTimeInput({ value }: DateTimeInputProps) {
+  const touch = useDensity() === "touch";
   return (
-    <View style={styles.box}>
-      <Text variant="caption" tone={value ? "secondary" : "tertiary"} numberOfLines={1}>
-        {value ? formatWhen(value) : "No date set"}
+    <View style={[styles.box, { height: touch ? control.lg : control.sm }]}>
+      <Text variant="mono" tone={value ? "secondary" : "quaternary"} numberOfLines={1}>
+        {value ? formatWhen(value) : "no date set"}
       </Text>
     </View>
   );
@@ -27,12 +28,13 @@ function formatWhen(iso: string): string {
 }
 
 const styles = {
+  // Reads as a disabled `Input`: sunken fill, default border, mono value.
   box: {
-    height: 28,
     justifyContent: "center" as const,
-    paddingHorizontal: space.md,
+    paddingHorizontal: space.sm,
     borderWidth: 1,
     borderColor: colors.borderDefault,
     borderRadius: radius.md,
+    backgroundColor: colors.surfaceSunken,
   },
 };

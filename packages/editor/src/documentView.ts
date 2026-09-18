@@ -187,8 +187,9 @@ function fileChip(filename: string, url: string | null, mime: string | null, bro
   const span = document.createElement("span");
   span.className = "pm-doc-chip pm-doc-file" + (broken ? " pm-doc-broken" : "");
   const icon = document.createElement("span");
+  // The glyph itself is a CSS mask on .pm-doc-fileicon (styles.ts), so it takes a theme colour.
   icon.className = "pm-doc-fileicon";
-  icon.textContent = "📄";
+  icon.setAttribute("aria-hidden", "true");
   span.appendChild(icon);
   const name = document.createElement("span");
   name.className = "pm-doc-name";

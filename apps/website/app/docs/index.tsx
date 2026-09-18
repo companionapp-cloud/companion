@@ -1,4 +1,4 @@
-import { Icon } from "@companion/design-system";
+import { Icon } from "../../src/ds";
 import { DocsSearch } from "../../src/components/DocsSearch";
 import { NavButtons } from "../../src/components/NavButtons";
 import { Seo } from "../../src/components/Seo";
