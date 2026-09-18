@@ -6,12 +6,90 @@
 // where `frontmatter` is parsed from the leading `--- ... ---` block, `html` is the
 // rendered body, and `toc` lists the `##` headings (each given a slugified id).
 // Everything else is delegated to Expo's upstream Babel transformer unchanged.
+//
+// Docs can also group content into tabs (see content/docs/getting-the-apps.md):
+//   :::: tabs
+//   ::: tab macOS
+//   …markdown…
+//   :::
+//   ::: tab Windows
+//   …markdown…
+//   :::
+//   ::::
 
 const path = require("path");
 const MarkdownIt = require("markdown-it");
 const upstreamTransformer = require("@expo/metro-config/babel-transformer");
 
 const md = new MarkdownIt({ html: true, linkify: true, typographer: true });
+
+function lineAt(state, line) {
+  return state.src.slice(state.bMarks[line] + state.tShift[line], state.eMarks[line]).trimEnd();
+}
+
+// `::: name info` … `:::` block containers, the markdown-it-container convention written
+// out here rather than added as a dependency. A container closes on a bare fence with at
+// least as many colons as opened it, which is how a `:::: tabs` group holds `::: tab` panels.
+function container(name) {
+  const opener = new RegExp(`^(:{3,})\\s*${name}(?:\\s+(.*))?$`);
+  return (state, startLine, endLine, silent) => {
+    if (state.sCount[startLine] - state.blkIndent >= 4) return false;
+    const open = opener.exec(lineAt(state, startLine));
+    if (!open) return false;
+    if (silent) return true;
+
+    let close = startLine + 1;
+    for (; close < endLine; close++) {
+      const fence = /^(:{3,})$/.exec(lineAt(state, close));
+      if (fence && fence[1].length >= open[1].length && state.sCount[close] - state.blkIndent < 4) break;
+    }
+
+    const oldParent = state.parentType;
+    const oldLineMax = state.lineMax;
+    state.parentType = "container";
+    // Keeps a paragraph's lazy continuation from swallowing the closing fence.
+    state.lineMax = close;
+    const token = state.push(`${name}_open`, "div", 1);
+    token.block = true;
+    token.info = (open[2] ?? "").trim();
+    token.map = [startLine, close];
+    state.md.block.tokenize(state, startLine + 1, close);
+    state.push(`${name}_close`, "div", -1).block = true;
+    state.parentType = oldParent;
+    state.lineMax = oldLineMax;
+    // Resume after the fence; an unclosed container runs to the end of its parent.
+    state.line = Math.min(close + 1, endLine);
+    return true;
+  };
+}
+
+for (const name of ["tabs", "tab"]) {
+  md.block.ruler.before("fence", name, container(name), { alt: ["paragraph", "reference", "blockquote", "list"] });
+}
+
+// Tabs render as a radio group because the article body is injected HTML that React never
+// hydrates: each tab is a visually hidden radio, its label and its panel, and global.css
+// lines the labels up as a tab bar and shows the panel after the checked radio. Radios
+// also give keyboard (arrow keys) and screen reader support for free. The first tab starts
+// selected; `name` is unique per group so several groups can share a page.
+md.renderer.rules.tabs_open = (_tokens, _idx, _options, env) => {
+  env.tabGroups = (env.tabGroups ?? 0) + 1;
+  (env.tabStack ??= []).push({ name: `tabs-${env.tabGroups}`, count: 0 });
+  return '<div class="tabs">\n';
+};
+md.renderer.rules.tabs_close = (_tokens, _idx, _options, env) => {
+  env.tabStack.pop();
+  return "</div>\n";
+};
+md.renderer.rules.tab_open = (tokens, idx, _options, env) => {
+  const group = env.tabStack?.at(-1);
+  if (!group) return "<div>\n"; // a stray `::: tab` outside a group is just a block
+  const id = `${group.name}-${++group.count}`;
+  const label = md.utils.escapeHtml(tokens[idx].info || `Tab ${group.count}`);
+  const checked = group.count === 1 ? " checked" : "";
+  return `<input type="radio" name="${group.name}" id="${id}"${checked}><label for="${id}">${label}</label>\n<div class="tab-panel">\n`;
+};
+md.renderer.rules.tab_close = () => "</div>\n";
 
 function slugify(text) {
   return text

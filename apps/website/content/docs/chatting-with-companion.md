@@ -4,40 +4,54 @@ group: Made for AI
 groupIcon: chat
 groupOrder: 4
 order: 1
-excerpt: Connect a model — yours or a hosted one — and let it work inside your notes.
+excerpt: Install an agent — an AI tool on your computer or a cloud API — and let it work inside your notes.
 featured: true
 badge: Made for AI
 readTime: 3 min read
-updated: Jul 2026
-related: [chat-into-tasks, object-types]
+updated: Sep 2026
+related: [chat-into-tasks, getting-the-apps]
 ---
 
-Companion has a chat built in, but no model of its own. You bring one: a local Ollama server, or an OpenAI or Anthropic key. Nothing is inferred on our servers, and there's no AI subscription to buy.
+Companion has a chat built in, but no model of its own. You bring an *agent*: an AI tool already on your computer, like Claude Code, Codex, or Ollama, or a cloud API with your own Anthropic or OpenAI key. Nothing is inferred on our servers, and there's no AI subscription to buy.
 
-## Connect a model
+## Add an agent
 
-Open **Chat** and, until a provider exists, it'll point you at **Settings → AI**.
+Open **Chat** and, until you have an agent, it'll point you at **Settings → AI**. Choose **Add agent**, then pick a tab:
 
-![The AI settings, with Ollama, OpenAI, and Anthropic presets](/docs/ai-settings.png)
+- **On this computer** — in the [desktop app](/docs/getting-the-apps), the AI tools Companion found on your machine: Claude Code, Codex, a running Ollama server, and LM Studio. Choose **Install** and the tool becomes an agent hosted by that computer. There's no URL to type.
+- **Cloud** — Anthropic or OpenAI, with an API key.
+- **Advanced** — any other server that speaks the OpenAI Chat Completions API, by URL: Ollama on another machine, vLLM, OpenRouter.
 
-Pick a preset and give it the one thing it needs:
+In a browser or on a phone, that first tab is **On your computer** instead, and explains the desktop app — those tools can't run there.
 
-- **Ollama** — a **Server URL** (`http://localhost:11434/v1` by default). Runs entirely on your own machine.
-- **OpenAI** or **Anthropic** — an **API key**.
+![Settings → AI → Add agent, on the Cloud tab](/docs/ai-settings.png)
 
-Keys stay on the device — the system keychain natively, browser storage on the web — and are never written to the database or handed to a sync server.
+The *model* isn't chosen here. Each chat has its own picker, filled from whatever that agent currently offers, so you can run something cheap for a quick question and something stronger for real thinking. The first agent you add is the default; **Make default** on another changes that.
 
-The *model* isn't chosen here. Each chat has its own picker, filled from whatever that provider currently offers, so you can run something cheap for a quick question and something stronger for real thinking.
+## Agents on your computer, from anywhere
 
-## What it can see
+An agent installed on your desktop runs there, but it isn't stuck there. Sign in to the same sync account on both devices and you can chat with it from the web app or your phone: your message travels through your sync server to the desktop, the desktop runs the turn, and the answer streams back. On an encrypted account those messages are end-to-end encrypted too, so the server passes them along without reading them.
 
-The chat can read your workspace: it searches notes, lists tasks and projects, follows links and backlinks, reads a note in full, and queries [object types](/docs/object-types) by their fields. It can also write — creating and updating notes and tasks — which is what makes it useful rather than merely conversational.
+It only works while that computer is on with Companion running. If it isn't, the chat tells you the agent's computer is offline rather than holding the message for later.
 
-On an encrypted account, all of that happens on your device against local, decrypted data; the sync server only ever holds ciphertext. What you send to a *hosted* model, though, goes to that provider under their terms. Ollama is the option that keeps everything local.
+## Where API keys live
+
+On an [end-to-end encrypted account](/docs/using-our-cloud), a cloud agent's API key syncs to your other devices, encrypted: enter it once and it works everywhere, and the server stores it without being able to read it. Otherwise the key stays on the device you entered it on, and never syncs.
+
+## What it can see and do
+
+The chat can read your workspace: it searches notes, lists tasks and projects, follows links and backlinks, reads a note in full, and queries [object types](/docs/object-types) by their fields. Claude Code and Codex get the same tools from the desktop app.
+
+Two switches on each agent decide what else it may do:
+
+- **Write tools** — create and edit notes and tasks. On by default; off, the agent can only read and search.
+- **System access** — Claude Code and Codex only: edit files in the agent's own workspace folder and run commands on your computer. Off by default, and worth leaving off unless you need it — when it's on, that includes turns you start from your phone.
+
+On an encrypted account, the agent reads your workspace on the device that runs it, against local, decrypted data; the sync server only ever holds ciphertext. What you send to a model, though, goes to whoever runs that model, under their terms: Anthropic or OpenAI for the cloud APIs, and for Claude Code and Codex as well, since they call their makers' models with your account. Ollama and LM Studio are the options that keep everything on your own hardware.
 
 ## Browsing
 
-On desktop and mobile the AI can also fetch a web page and run a search when a question needs the outside world. The web app can't — a browser tab is blocked from fetching arbitrary sites — so web chat stays inside your workspace.
+Agents can also fetch a web page or run a search when a question needs the outside world. That works on the desktop and on your phone, but not for a cloud agent used from the web app — a browser tab is blocked from fetching arbitrary sites. An agent your desktop hosts can still browse when you chat with it from the web, because the desktop is what runs it.
 
 ## Next steps
 

@@ -9,6 +9,8 @@
 //
 // Requires a Chromium for Playwright once:  npx playwright install chromium
 // Set CAPTURE_BASE_URL to point at an already-running dev server instead of spawning one.
+// Set CAPTURE_OUT_DIR to write somewhere else (e.g. a scratch dir while fixing a broken
+// step) — a run starts by emptying its output directory.
 
 import { spawn } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
@@ -18,7 +20,7 @@ import { chromium } from "playwright";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../..");
-const outDir = path.join(here, "../public/docs");
+const outDir = process.env.CAPTURE_OUT_DIR ? path.resolve(process.env.CAPTURE_OUT_DIR) : path.join(here, "../public/docs");
 
 const BASE_URL = process.env.CAPTURE_BASE_URL ?? "http://localhost:5273";
 const VIEWPORT = { width: 1440, height: 900 };
@@ -166,7 +168,8 @@ async function seed(page) {
       ].join("\n"),
     });
 
-    // --- daily note (an ordinary note stamped with today's date) ---
+    // --- daily note (an ordinary note stamped with today's date). Its link to the plan keeps
+    // it in the graph's one cluster instead of floating off on its own. ---
     await call("notes.create", {
       title: fullDate(now),
       date: isoDate(now),
@@ -175,6 +178,7 @@ async function seed(page) {
         "",
         "- Sat with support on the billing questions",
         "- Priya's draft looks close; one more pass tomorrow",
+        `- Checklist is in [[note:${plan.id}|Launch plan — v1.2]]`,
         "",
       ].join("\n"),
     });
@@ -305,15 +309,19 @@ async function capture(page, seeded) {
   await openFromList(page, "Review pricing page copy");
   await shot(page, "task-editor");
 
-  // Projects — sidebar hierarchy + a project view
+  // Projects — sidebar hierarchy + a project view, with one of its notes open so the view
+  // isn't mostly an empty "Nothing selected" pane
   await pinSidebar(page);
   await page.getByText("v1.2 launch").first().click();
   await page.waitForTimeout(1000);
+  await openFromList(page, "Launch plan — v1.2");
   await shot(page, "project-view");
 
-  // Graph
+  // Graph — let the layout settle, then fit it to the canvas
   await go(page, "/graph");
   await page.waitForTimeout(2500);
+  await page.getByLabel("Fit", { exact: true }).first().click();
+  await page.waitForTimeout(1200);
   await shot(page, "graph");
 
   // Calendar
@@ -333,8 +341,12 @@ async function capture(page, seeded) {
   await page.waitForTimeout(600);
   await shot(page, "object-type");
 
-  // AI providers
+  // AI — the Add agent sheet on its Cloud tab, which shows where an API key is kept. (Its
+  // first tab only explains the desktop app on the web, since a browser can't host agents.)
   await settingsSection("AI").click();
+  await page.waitForTimeout(600);
+  await page.getByLabel("Add agent", { exact: true }).click();
+  await page.getByText("Cloud", { exact: true }).click();
   await page.waitForTimeout(600);
   await shot(page, "ai-settings");
 
@@ -343,7 +355,7 @@ async function capture(page, seeded) {
   await page.waitForTimeout(600);
   await shot(page, "sync-settings");
 
-  // Chat — the empty state until a provider is connected
+  // Chat — the empty state until an agent is installed
   await go(page, "/chat");
   await shot(page, "chat-empty");
 }

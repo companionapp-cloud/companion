@@ -323,6 +323,77 @@ a:hover {
   text-align: right;
 }
 
+/* ---- tabs (docs `:::: tabs` blocks, rendered by metro.transformer.js) ----
+   Markup per tab: a visually hidden radio, its <label>, then its .tab-panel. The labels
+   sort ahead of the panels to form the tab bar, and only the panel after the checked
+   radio shows, wrapping onto its own row — so tabs switch without JavaScript. */
+
+.tabs {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  margin: 8px 0 28px;
+  background: #f5f5f3;
+  border: 1px solid #e0e0dc;
+  border-radius: 14px;
+  overflow: hidden;
+}
+.tabs > input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.tabs > label {
+  padding: 13px 18px 12px;
+  font-size: 15px;
+  font-weight: 500;
+  color: #7b7b75;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: inset 0 -2px 0 transparent;
+  transition: color 0.15s ease, box-shadow 0.15s ease;
+}
+.tabs > label:hover,
+.tabs > input:checked + label {
+  color: #1a1a18;
+}
+.tabs > input:checked + label {
+  box-shadow: inset 0 -2px 0 #f76808;
+}
+.tabs > input:focus-visible + label {
+  outline: 2px solid #f76808;
+  outline-offset: -2px;
+}
+.tabs > .tab-panel {
+  order: 1;
+  display: none;
+  flex: 0 0 100%;
+  min-width: 0;
+  padding: 24px;
+  background: #ffffff;
+  border-top: 1px solid #e0e0dc;
+}
+.tabs > input:checked + label + .tab-panel {
+  display: block;
+}
+.tabs > .tab-panel > :last-child {
+  margin-bottom: 0;
+}
+@media (max-width: 420px) {
+  .tabs > label {
+    padding: 12px 14px 11px;
+  }
+  .tabs > .tab-panel {
+    padding: 20px 18px;
+  }
+}
+
 /* ---- table of contents / breadcrumb / related ---- */
 
 .toc {

@@ -14,19 +14,19 @@ related: [linking-notes, calendar-and-reminders]
 
 **Today** is where Companion opens: a note for the day on the left, and what the day actually holds on the right.
 
-![The Today screen — a daily note, a month strip, and the day's agenda](/docs/today.png)
+![The Today screen — a daily note, a month calendar, and the day's agenda](/docs/today.png)
 
 ## The daily note
 
 Each day gets its own note, stamped with that date. Start typing and it's created; leave it alone and nothing is written at all — empty days don't clutter your notes list.
 
-It's an ordinary note in every other respect. Link to anything with `[[`, drop in a table, attach a file. Yesterday's note is one click away in the month strip, and days that already have a note are marked with a dot.
+It's an ordinary note in every other respect. Link to anything with `[[`, drop in a table, attach a file. Yesterday's note is one click away in the month calendar, and days that already have a note are marked with a dot.
 
 ## The agenda
 
 The right-hand panel shows the selected day: tasks due, notes dated to it, and events from any [calendar feeds](/docs/calendar-and-reminders) you've subscribed to — merged into one list rather than three competing views.
 
-Click a day in the month strip to move the whole screen — note and agenda together — to that day.
+Click a day in the month calendar to move the whole screen — note and agenda together — to that day.
 
 > **Tip:** The **today** chip in the top right brings you back to the current day from wherever you've wandered.
 

@@ -15,7 +15,7 @@ Notes and tasks pile up fast. Projects are how you gather the ones that belong t
 
 ## Areas and projects
 
-In the sidebar, click **＋** beside **Projects** to create an *area*: a broad, long-running part of your life. "Work". "Home". Then click **＋** beside the area to add a *project* inside it — something with an end, like "v1.2 launch".
+In the sidebar, click **＋** beside **Areas** to create an *area*: a broad, long-running part of your life. "Work". "Home". Then click **＋** beside the area to add a *project* inside it — something with an end, like "v1.2 launch".
 
 ![The sidebar with an area and a project, and the project's own view](/docs/project-view.png)
 

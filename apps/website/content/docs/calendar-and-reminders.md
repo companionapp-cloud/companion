@@ -21,7 +21,7 @@ Feeds are read-only. Companion shows your events; it doesn't edit them, and it w
 
 ## The calendar screen
 
-![The calendar week view, with events, tasks, and notes side by side](/docs/calendar.png)
+![The calendar week view, with tasks and a daily note on their days](/docs/calendar.png)
 
 The week view merges three streams, each with its own colour in the legend: **events** from your feeds, **tasks** on their due date, and **notes** dated to the day (your daily notes). Click anything to open it.
 

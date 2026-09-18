@@ -8,6 +8,7 @@ import { SiteFooter } from "../src/components/SiteFooter";
 import { SiteHeader } from "../src/components/SiteHeader";
 
 const GITHUB_URL = "https://github.com/chrisdmacrae/companion";
+const WEB_APP_URL = "https://web.companionapp.cloud";
 const PLATFORMS = ["macOS", "iOS", "Android", "Windows", "Linux"];
 
 export default function Landing() {
@@ -16,8 +17,8 @@ export default function Landing() {
   return (
     <div style={{ background: "#fbfaf9" }}>
       <Seo
-        title="Companion — Your open source home for your life"
-        description="Companion turns your ideas into actionable tasks, connected notes, and repeatable habits — and uses the power of AI to make it a natural conversation."
+        title="Companion — The app for flexible thoughts, for privacy-minded developers"
+        description="Companion is a productivity app with end-to-end encryption, where you work with your own local AI agents to get things done."
         path="/"
       />
       {/* hero */}
@@ -68,11 +69,11 @@ export default function Landing() {
 
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 20 }}>
               <h1 className="hero-title" style={{ margin: 0 }}>
-                Your open source home for your life
+                The app for flexible thoughts, for privacy-minded developers
               </h1>
               <p style={heroSub}>
-                Companion turns your ideas into actionable tasks, connected notes, and repeatable habits — and uses the
-                power of AI to make it a natural conversation.
+                Companion is a productivity app with end-to-end encryption, where you work with your own local AI agents
+                to get things done.
               </p>
             </div>
 
@@ -82,7 +83,7 @@ export default function Landing() {
                 links={[
                   {
                     label: "Get started",
-                    href: "/docs/getting-the-apps",
+                    href: WEB_APP_URL,
                     variant: "primary",
                     size: "lg",
                     onClick: () => posthog.capture("hero_cta_clicked", { label: "Get started" }),

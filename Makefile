@@ -8,7 +8,7 @@ WEB_WASM := apps/web/src/wasm
 MOBILE_MODULE := apps/mobile/modules/companion-core
 
 .PHONY: all test test-go fmt vet desktop desktop-frontend desktop-run desktop-app desktop-app-run core-wasm web-assets \
-        web-run server server-run emails cloud cloud-frontend cloud-run gomobile-init core-android core-ios android-lib \
+        web-run website-run server server-run emails cloud cloud-frontend cloud-run gomobile-init core-android core-ios android-lib \
         mobile-artifacts mobile-run db-up db-down db-logs db-reset clean
 
 all: test
@@ -94,6 +94,11 @@ web-assets: core-wasm
 ## web-run: stage the wasm core, then run the web app (Vite dev server, :5273)
 web-run: web-assets
 	npm run dev -w @companion/web
+
+## website-run: run the marketing + docs site (apps/website) on the Expo dev server
+## (:5274, pinned so it doesn't collide with the mobile app's Metro on :8081)
+website-run:
+	npm run dev -w @companion/website -- --port 5274
 
 ## server: build the sync API server binary
 server:

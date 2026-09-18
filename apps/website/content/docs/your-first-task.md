@@ -17,7 +17,7 @@ Tasks are how intentions become done. They can stand on their own, hang off a no
 
 Open **Tasks** and type into **Add a task, press Enter** at the top of the list. That's the whole ceremony — the task appears, and its editor opens beside the list.
 
-![The task editor with a due date, a reminder, a repeat, and a type](/docs/task-editor.png)
+![The task editor, with its due date, reminder, repeat, and type controls](/docs/task-editor.png)
 
 ## Dates in plain language
 
