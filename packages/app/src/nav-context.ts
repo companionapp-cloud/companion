@@ -130,6 +130,10 @@ export interface Navigator {
   openNote: (id: string) => void;
   /** Set the active tab's document to this task. */
   openTask: (id: string) => void;
+  /** Point the active tab at any surface a tab can hold: a document, a view (Today on a
+   *  given day), or a project drill-down. For callers that first work out where an item
+   *  lives, like the graph (see useOpenGraphNode). */
+  openRef: (ref: TabRef) => void;
   /** Open a document in a new tab and make it active (e.g. following a link chip). */
   openInNewTab: (ref: TabRef) => void;
   /** Open a canvas board in the canvases view (PLAN-canvases.md). */

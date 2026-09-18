@@ -30,6 +30,8 @@ export { AgentsSettings } from "./AgentsSettings";
 export { NoteGraph } from "./NoteGraph";
 export { GraphCanvas } from "./GraphCanvas";
 export type { GraphCanvasProps } from "./GraphCanvas";
+export { useGraphNodeRef } from "./openGraphNode";
+export { docOfRef } from "./nav-context";
 export { CoreProvider, useCore } from "./CoreContext";
 export { NotesProvider, useNotes } from "./NotesProvider";
 export type { MembershipFilter } from "./NotesProvider";

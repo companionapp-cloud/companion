@@ -45,8 +45,9 @@ import type { CalendarItem } from '@companion/core-bridge';
 
 export type RootStackParamList = {
   Home: undefined;
-  // Global (all-items) section screens.
-  Today: undefined;
+  // Global (all-items) section screens. Today may open on a given day (YYYY-MM-DD): a
+  // daily note followed from the graph.
+  Today: { date?: string } | undefined;
   Chat: undefined;
   ChatConversation: { chatId: string };
   Notes: undefined;

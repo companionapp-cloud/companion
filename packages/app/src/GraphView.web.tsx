@@ -41,9 +41,11 @@ import { GRAPH_CHROME_CSS, GraphMenu, useGraphSettings } from "./GraphMenu.web";
 export { nodeKey };
 
 /** How a node open is dispatched. Decoupled from useNav() so the same renderer works in
- * the app (nav.openNote) and inside the mobile graph WebView (postMessage). */
+ * the app (useOpenGraphNode) and inside the mobile graph WebView (postMessage). */
 export type OpenNodeHandler = (type: string, id: string, newTab: boolean) => void;
 const GraphOpenContext = createContext<OpenNodeHandler>(() => {});
+/** Node types with a surface to open. Files and habits have none yet. */
+const OPENABLE_TYPES = new Set(["note", "task", "canvas", "project"]);
 
 /** Report which node the pointer is over (its key, or null on leave) up to GraphCanvas so
  * the edge layers can highlight that node's connections. */
@@ -645,9 +647,9 @@ function CircleNode({ id, data }: NodeProps<CircleNode>) {
   // An archetype's chosen icon marks its nodes; otherwise fall back to the entity-type icon.
   const iconName = ((data.objectIcon as IconName | null) ?? TYPE_ICON[data.entityType] ?? "dot") as IconName;
   const iconSize = Math.round(data.size * 0.5);
-  // Notes, tasks, and projects open; the focus node (you're already on it) and ghosts
-  // (unresolved link targets) don't.
-  const navigable = !data.focus && !data.ghost && (data.entityType === "note" || data.entityType === "task" || data.entityType === "project");
+  // Notes, tasks, canvases, and projects open; the focus node (you're already on it) and
+  // ghosts (unresolved link targets) don't.
+  const navigable = !data.focus && !data.ghost && OPENABLE_TYPES.has(data.entityType);
 
   const open = useCallback(
     (e: ReactMouseEvent) => {
@@ -736,7 +738,7 @@ export interface GraphViewProps {
   /** When set (e.g. "note:<id>"), that node is pinned at the center and the rest settle
    * around it. */
   focusKey?: string | null;
-  /** Invoked when a node is opened (only notes are navigable today). */
+  /** Invoked when a note, task, canvas or project node is opened. */
   onOpenNode?: OpenNodeHandler;
   /** Show the settings menu (force sliders + show/hide filters) in the canvas corner. Its
    * settings persist per device and apply only to views that show the menu, so the whole-

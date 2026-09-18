@@ -15,7 +15,7 @@ export interface GraphCanvasProps {
   graph: Graph;
   /** When set (e.g. "note:<id>"), that node is centered and the rest fan out in rings. */
   focusKey?: string | null;
-  /** Called when a node is opened in the canvas (only notes are navigable today). */
+  /** Called when a note, task, canvas or project node is opened in the canvas. */
   onOpenNode?: (type: string, id: string) => void;
 }
 

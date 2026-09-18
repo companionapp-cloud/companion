@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { DailyNote, TodayCalendar, Agenda, todayISO } from '@companion/app';
 import type { LinkRef } from '@companion/editor';
@@ -18,7 +18,13 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 // with the desktop screen (PLAN §6.x).
 export function TodayScreen() {
   const nav = useNavigation<Nav>();
-  const [selected, setSelected] = useState(todayISO);
+  // Opened on a specific day (a daily note followed from the graph)? Seed the selection
+  // with it and follow it if the route's date changes.
+  const requestedDay = useRoute<RouteProp<RootStackParamList, 'Today'>>().params?.date;
+  const [selected, setSelected] = useState(() => requestedDay ?? todayISO());
+  useEffect(() => {
+    if (requestedDay) setSelected(requestedDay);
+  }, [requestedDay]);
   const [today, setToday] = useState(todayISO);
   const [showCalendar, setShowCalendar] = useState(false);
   const isToday = selected === today;

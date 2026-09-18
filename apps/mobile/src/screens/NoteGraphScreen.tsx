@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useRoute, type RouteProp } from '@react-navigation/native';
 import { GraphCanvas, useCore } from '@companion/app';
 import type { Graph } from '@companion/core-bridge';
 import type { RootStackParamList } from '../MobileShell';
+import { useOpenGraphNode } from '../useOpenGraphNode';
 
 // The per-note neighborhood graph (pushed from the note editor's header). The note sits
-// at the center; tapping another note pushes into it.
+// at the center (not itself tappable); tapping another node pushes into it where it lives.
 export function NoteGraphScreen() {
   const { params } = useRoute<RouteProp<RootStackParamList, 'NoteGraph'>>();
   const noteId = params.id;
   const { core, graph: api } = useCore();
-  const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const openNode = useOpenGraphNode();
   const [graph, setGraph] = useState<Graph>({ nodes: [], edges: [] });
 
   const refresh = useCallback(
@@ -23,16 +23,5 @@ export function NoteGraphScreen() {
     return core.on('data.changed', () => void refresh());
   }, [core, refresh]);
 
-  return (
-    <GraphCanvas
-      graph={graph}
-      focusKey={`note:${noteId}`}
-      onOpenNode={(type, id) => {
-        if (type === 'note' && id !== noteId) nav.push('NoteEditor', { id });
-        else if (type === 'task') nav.push('TaskEditor', { id });
-        else if (type === 'project') nav.push('Project', { projectId: id });
-        else if (type === 'canvas') nav.push('Canvas', { id });
-      }}
-    />
-  );
+  return <GraphCanvas graph={graph} focusKey={`note:${noteId}`} onOpenNode={openNode} />;
 }

@@ -3,7 +3,7 @@ import { StyleSheet, View } from "react-native";
 import type { Graph } from "@companion/core-bridge";
 import { Button, Icon, Text, colors, row, space, type IconName } from "@companion/design-system";
 import { useCore } from "../CoreContext";
-import { useNav } from "../nav-context";
+import { useOpenGraphNode } from "../openGraphNode";
 import { useStyledGraph } from "../useStyledGraph";
 import { typeColor } from "../graphModel";
 // Explicit .web specifier — see the note in ../GraphScreen.web.tsx.
@@ -19,7 +19,8 @@ const TYPE_ICON: Record<string, IconName> = { note: "notes", task: "tasks", proj
 
 export function GraphScreen() {
   const { core, graph: graphApi } = useCore();
-  const nav = useNav();
+  // Opens a node where it lives, e.g. Today for a daily note.
+  const openNode = useOpenGraphNode();
   const [graph, setGraph] = useState<Graph>({ nodes: [], edges: [] });
   const styledGraph = useStyledGraph(graph);
   const [loaded, setLoaded] = useState(false);
@@ -48,11 +49,7 @@ export function GraphScreen() {
   const canOpen = !!selected && !selected.ghost && selected.type !== "document";
 
   const open = () => {
-    if (!selected || !canOpen) return;
-    if (selected.type === "note") nav.openNote(selected.id);
-    else if (selected.type === "task") nav.openTask(selected.id);
-    else if (selected.type === "project") nav.openProject(selected.id);
-    else if (selected.type === "canvas") nav.openCanvas(selected.id);
+    if (selected && canOpen) openNode?.(selected.type, selected.id);
   };
 
   const empty = loaded && graph.nodes.length === 0;

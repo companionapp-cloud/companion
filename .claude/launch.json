@@ -20,6 +20,24 @@
       }
     },
     {
+      "name": "website-verify",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@companion/website",
+        "--",
+        "--port",
+        "5276"
+      ],
+      "port": 5276,
+      "autoPort": false,
+      "env": {
+        "EXPO_NO_TELEMETRY": "1"
+      }
+    },
+    {
       "name": "cloud-frontend",
       "runtimeExecutable": "npm",
       "runtimeArgs": [

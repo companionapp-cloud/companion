@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Graph } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
-import { useNav } from "./nav-context";
+import { useOpenGraphNode } from "./openGraphNode";
 import { useStyledGraph } from "./useStyledGraph";
 // Explicit .web specifier: GraphView is a React Flow (DOM-only) module with no native
 // counterpart, so it is only ever imported by other .web files. The suffix lets tsc and
@@ -12,7 +12,8 @@ import { GraphEmpty, GraphView, graphCodeStyle } from "./GraphView.web";
 // DOM-only, so this is the .web variant; native gets a placeholder (GraphScreen.tsx).
 export function GraphScreen() {
   const { core, graph: graphApi } = useCore();
-  const nav = useNav();
+  // Opens a node where it lives: its project, or Today for a daily note.
+  const openNode = useOpenGraphNode();
   const [graph, setGraph] = useState<Graph>({ nodes: [], edges: [] });
   const styledGraph = useStyledGraph(graph);
   const [loaded, setLoaded] = useState(false);
@@ -38,15 +39,6 @@ export function GraphScreen() {
   }
 
   return (
-    <GraphView
-      graph={styledGraph}
-      menu
-      onOpenNode={(type, id) => {
-        if (type === "note") nav.openNote(id);
-        else if (type === "task") nav.openTask(id);
-        else if (type === "project") nav.openProject(id);
-        else if (type === "canvas") nav.openCanvas(id);
-      }}
-    />
+    <GraphView graph={styledGraph} menu onOpenNode={openNode} />
   );
 }

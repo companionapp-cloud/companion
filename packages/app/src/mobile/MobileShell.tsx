@@ -10,7 +10,7 @@ import {
   type ParamListBase,
 } from "@react-navigation/native";
 import { DensityProvider, colors } from "@companion/design-system";
-import { NavContext, docOfRef, useNav, type NavLocation, type Navigator, type ProjectSection, type Tab, type ViewId } from "../nav-context";
+import { NavContext, useNav, type NavLocation, type Navigator, type ProjectSection, type Tab, type TabRef, type ViewId } from "../nav-context";
 import { useCore } from "../CoreContext";
 import { setReminderActivationHandler } from "../reminderNav";
 import { NotesProvider } from "../NotesProvider";
@@ -193,6 +193,44 @@ function MobileNavBridge({
       if (routeName === "task" && params.id === id) return;
       push("task", { id });
     };
+    const openCanvas = (id: string) => {
+      if (routeName === "canvas" && params.id === id) return;
+      push("canvas", { id });
+    };
+    // A project item opens as a plain full-screen editor (the editor's own project
+    // chrome is the way back into the project on this shell).
+    const openProjectItem = (projectId: string, section: ProjectSection, itemId: string) => {
+      if (section === "notes") openNote(itemId);
+      else if (section === "tasks") openTask(itemId);
+      else if (section === "canvases") push("canvas", { id: itemId });
+      else push("project", { projectId, section, itemId });
+    };
+    // Every surface is a pushed route here, so a tab's contents map onto the route that
+    // shows them. Today opened on a day (a dated note from the calendar or the graph)
+    // navigates there with the date.
+    const openRef = (ref: TabRef) => {
+      switch (ref.kind) {
+        case "view":
+          if (ref.view === "today") navigation.navigate("today", ref.date ? { date: ref.date } : undefined);
+          else if (routeName !== ref.view) navigation.navigate(ref.view);
+          return;
+        case "browse":
+          if (routeName !== ref.section) navigation.navigate(ref.section);
+          return;
+        case "project":
+          // A task inside a list opens as the full-screen task editor on this shell.
+          if (ref.subItemId) openTask(ref.subItemId);
+          else if (ref.section && ref.itemId) openProjectItem(ref.projectId, ref.section, ref.itemId);
+          else push("project", { projectId: ref.projectId, section: ref.section });
+          return;
+        case "note":
+          return openNote(ref.id);
+        case "task":
+          return openTask(ref.id);
+        case "canvas":
+          return openCanvas(ref.id);
+      }
+    };
 
     const current: NavLocation =
       routeName === "project"
@@ -238,24 +276,10 @@ function MobileNavBridge({
       activeTab: EMPTY_TAB,
       openNote,
       openTask,
-      // No tab strip here: "open in new tab" (link chips) pushes the editor route. Today
-      // opened on a day (a dated note from the calendar) navigates there with the date.
-      openInNewTab: (ref) => {
-        if (ref.kind === "view") {
-          if (ref.view === "today") navigation.navigate("today", ref.date ? { date: ref.date } : undefined);
-          else if (routeName !== ref.view) navigation.navigate(ref.view);
-          return;
-        }
-        const doc = docOfRef(ref);
-        if (!doc) return;
-        if (doc.kind === "note") openNote(doc.id);
-        else if (doc.kind === "task") openTask(doc.id);
-        else push("canvas", { id: doc.id });
-      },
-      openCanvas: (id) => {
-        if (routeName === "canvas" && params.id === id) return;
-        push("canvas", { id });
-      },
+      openRef,
+      // No tab strip here: "open in new tab" (link chips, the calendar) opens in place.
+      openInNewTab: openRef,
+      openCanvas,
       addTab: () => {},
       selectTab: () => {},
       closeTab: () => {},
@@ -263,14 +287,7 @@ function MobileNavBridge({
 
       openProject: (projectId) => push("project", { projectId }),
       openProjectSection: (projectId, section) => push("project", { projectId, section }),
-      // A project item opens as a plain full-screen editor (the editor's own project
-      // chrome is the way back into the project on this shell).
-      openProjectItem: (projectId, section, itemId) => {
-        if (section === "notes") openNote(itemId);
-        else if (section === "tasks") openTask(itemId);
-        else if (section === "canvases") push("canvas", { id: itemId });
-        else push("project", { projectId, section, itemId });
-      },
+      openProjectItem,
       // A task inside a list opens as the full-screen task editor on this shell.
       openProjectSubItem: (_projectId, _section, _itemId, subItemId) => openTask(subItemId),
     };

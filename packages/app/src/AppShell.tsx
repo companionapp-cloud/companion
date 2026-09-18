@@ -353,6 +353,7 @@ function NavBridge({
       openNote: (id) => selectRef({ kind: "note", id }),
       openTask: (id) => selectRef({ kind: "task", id }),
       openCanvas: (id) => selectRef({ kind: "canvas", id }),
+      openRef: selectRef,
       openInNewTab: (ref) => {
         // Append a tab already holding the surface and focus it, in one shot.
         setTabs((t) => [...t, freshTab(ref)]);
