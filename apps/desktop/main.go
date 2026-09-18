@@ -37,7 +37,8 @@ import (
 var assets embed.FS
 
 // version is the release this binary was built as, stamped by the release workflow
-// (-ldflags "-X main.version=1.2.3"). Empty in dev builds, which never self-update.
+// (-ldflags "-X main.version=1.2.3"). Empty in dev builds, which never self-update and keep
+// their data apart from the installed release's (see databasePath).
 var version string
 
 func main() {
@@ -46,7 +47,8 @@ func main() {
 	// checks for this too, but only after main has opened the database and the rest; catch it first.
 	updater.HandleHelperMode()
 
-	dbPath, err := databasePath()
+	dev := version == ""
+	dbPath, err := databasePath(dev)
 	if err != nil {
 		log.Fatalf("resolve database path: %v", err)
 	}
@@ -191,7 +193,7 @@ func main() {
 		// *second* process that opens its own window; the lock forwards that launch to the
 		// running instance instead, which just surfaces its window.
 		SingleInstance: &application.SingleInstanceOptions{
-			UniqueID: "com.companion.desktop",
+			UniqueID: instanceID(dev),
 			OnSecondInstanceLaunch: func(application.SecondInstanceData) {
 				if mainWindow != nil {
 					mainWindow.Show()
@@ -321,17 +323,37 @@ func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusW
 	return mux
 }
 
-// databasePath returns the per-user SQLite location, creating the parent directory.
-func databasePath() (string, error) {
+// databasePath returns the per-user SQLite location, creating the parent directory. Everything
+// else the app keeps on disk (blobs, secrets, shortcuts, agent working dirs) sits beside it.
+//
+// A dev build is a separate app from the installed release, with its own folder: running from
+// source would otherwise migrate and write over the release's database, and an unreleased
+// migration recorded there is never re-run when its final version ships. Its single-instance
+// lock is separate too (instanceID), and `make desktop-app` gives dev bundles their own bundle
+// id, which keeps WebKit's localStorage (the sync config) apart as well.
+func databasePath(dev bool) (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	appDir := filepath.Join(dir, "Companion")
+	name := "Companion"
+	if dev {
+		name = "Companion Dev"
+	}
+	appDir := filepath.Join(dir, name)
 	if err := os.MkdirAll(appDir, 0o700); err != nil {
 		return "", err
 	}
 	return filepath.Join(appDir, "companion.db"), nil
+}
+
+// instanceID keys the single-instance lock. A dev build takes its own, so launching one isn't
+// handed off to the release sitting in the menu bar.
+func instanceID(dev bool) string {
+	if dev {
+		return "com.companion.desktop.dev"
+	}
+	return "com.companion.desktop"
 }
 
 // desktopPlatform is the device platform id shown in Settings › Sync and synced to the server.
