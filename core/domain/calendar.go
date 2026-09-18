@@ -6,14 +6,28 @@ import (
 	"time"
 )
 
-// CalendarFeed is a user-authored ICS subscription (PLAN §6.7). The feed row itself is
-// normal user data and syncs like any other entity; the SERVER — never the client — fetches
-// its URL and clones the expanded events into CalendarEvent rows. A feed carries an optional
-// color used to tint its events in the calendar UI.
+// Feed kinds. An ICS feed is a read-only subscription (or an uploaded file); a CalDAV feed is one
+// calendar collection of a CalendarAccount and can be written back to (PLAN-caldav.md).
+const (
+	FeedKindICS    = "ics"
+	FeedKindCalDAV = "caldav"
+)
+
+// CalendarFeed is one calendar (PLAN §6.7): an ICS subscription, an uploaded .ics file, or a
+// CalDAV collection. The row is normal user data and syncs like any other entity; the CLIENT
+// fetches it and derives the CalendarEvent rows (PLAN §E2EE). A feed carries an optional color
+// used to tint its events in the calendar UI.
 type CalendarFeed struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
-	// URL is a subscription the server re-fetches on a schedule. Empty for an uploaded feed.
+	// Kind is FeedKindICS or FeedKindCalDAV. Empty means ICS (rows written before CalDAV existed).
+	Kind string `json:"kind,omitempty"`
+	// AccountID is the owning CalendarAccount of a CalDAV feed; nil for ICS feeds.
+	AccountID *string `json:"accountId,omitempty"`
+	// ReadOnly marks a CalDAV calendar the login may not write to (a shared or holiday calendar).
+	ReadOnly bool `json:"readOnly,omitempty"`
+	// URL is the subscription URL of an ICS feed, or the collection URL of a CalDAV feed. Empty
+	// for an uploaded feed.
 	URL string `json:"url"`
 	// ICSText is the raw contents of an uploaded .ics file. When set, the server parses it
 	// in place (no HTTP fetch) — the file's events sync to every device like a URL feed's do.
@@ -41,11 +55,29 @@ func (f *CalendarFeed) Validate() error {
 	}
 	hasURL := strings.TrimSpace(f.URL) != ""
 	hasText := f.ICSText != nil && strings.TrimSpace(*f.ICSText) != ""
+	if f.IsCalDAV() {
+		if !hasURL {
+			return errors.Join(ErrInvalidCalendarFeed, errors.New("a caldav calendar needs its collection url"))
+		}
+		if f.AccountID == nil || strings.TrimSpace(*f.AccountID) == "" {
+			return errors.Join(ErrInvalidCalendarFeed, errors.New("a caldav calendar needs an account"))
+		}
+		return nil
+	}
+	if f.Kind != "" && f.Kind != FeedKindICS {
+		return errors.Join(ErrInvalidCalendarFeed, errors.New("unknown calendar kind "+f.Kind))
+	}
 	if !hasURL && !hasText {
 		return errors.Join(ErrInvalidCalendarFeed, errors.New("a url or an uploaded .ics file is required"))
 	}
 	return nil
 }
+
+// IsCalDAV reports whether the feed is a CalDAV collection (as opposed to an ICS subscription).
+func (f *CalendarFeed) IsCalDAV() bool { return f.Kind == FeedKindCalDAV }
+
+// Writable reports whether events may be created or edited in this feed.
+func (f *CalendarFeed) Writable() bool { return f.IsCalDAV() && !f.ReadOnly }
 
 // SyncEntity implementation (PLAN §7).
 func (f *CalendarFeed) SyncID() string           { return f.ID }
@@ -117,4 +149,13 @@ type CalendarItem struct {
 	Description *string `json:"description,omitempty"`
 	// Color is the feed color for events; nil for tasks and notes (they use kind palettes).
 	Color *string `json:"color,omitempty"`
+	// FeedID is the calendar an event belongs to; empty for tasks and notes.
+	FeedID string `json:"feedId,omitempty"`
+	// Editable is true for an event in a writable CalDAV calendar (PLAN-caldav.md). ICS
+	// subscriptions, read-only calendars, tasks and notes are never editable from the calendar.
+	Editable bool `json:"editable,omitempty"`
+	// Recurring marks an occurrence of a repeating event, so the UI can ask "this one or all?".
+	Recurring bool `json:"recurring,omitempty"`
+	// Pending is true while a local change has not reached the provider yet.
+	Pending bool `json:"pending,omitempty"`
 }

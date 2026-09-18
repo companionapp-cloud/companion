@@ -69,6 +69,8 @@ func (s *Server) handlers() map[string]*entityHandler {
 			protocol.EntityNotificationRead: notificationReadHandler,
 			protocol.EntityCalendarFeed:     calendarFeedHandler,
 			protocol.EntityCalendarEvent:    calendarEventHandler,
+			protocol.EntityCalendarAccount:  calendarAccountHandler,
+			protocol.EntityCalendarObject:   calendarObjectHandler,
 			protocol.EntityCanvas:           canvasHandler,
 			protocol.EntityCanvasNode:       canvasNodeHandler,
 			protocol.EntityCanvasEdge:       canvasEdgeHandler,

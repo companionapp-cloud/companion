@@ -21,6 +21,7 @@ import (
 	"companion/core/agentrt"
 	"companion/core/blob"
 	"companion/core/bridge"
+	"companion/core/oauth"
 	"companion/core/secrets"
 	"companion/core/store"
 
@@ -37,8 +38,20 @@ import (
 var assets embed.FS
 
 // version is the release this binary was built as, stamped by the release workflow
-// (-ldflags "-X main.version=1.2.3"). Empty in dev builds, which never self-update.
+// (-ldflags "-X main.version=1.2.3"). Empty in dev builds, which never self-update and keep
+// their data apart from the installed release's (see databasePath).
 var version string
+
+// googleClientID / googleClientSecret are this app's Google OAuth client ("Desktop app" type in
+// Google Cloud), stamped at build time like version:
+//
+//	-ldflags "-X main.googleClientID=… -X main.googleClientSecret=…"
+//
+// or taken from COMPANION_GOOGLE_CLIENT_ID / COMPANION_GOOGLE_CLIENT_SECRET in a dev run. Google
+// requires the "secret" of a desktop client in the token exchange, but it is not confidential — it
+// ships in every copy of the app — and PKCE is what actually protects the flow. Left empty,
+// Google sign-in is simply not offered (PLAN-caldav.md §9).
+var googleClientID, googleClientSecret string
 
 func main() {
 	// An update restart re-runs this binary as the Wails updater's helper (updates.go): it waits
@@ -46,7 +59,8 @@ func main() {
 	// checks for this too, but only after main has opened the database and the rest; catch it first.
 	updater.HandleHelperMode()
 
-	dbPath, err := databasePath()
+	dev := version == ""
+	dbPath, err := databasePath(dev)
 	if err != nil {
 		log.Fatalf("resolve database path: %v", err)
 	}
@@ -74,6 +88,11 @@ func main() {
 	// Codex / Ollama / LM Studio and run the CLI ones as child processes, so it injects the
 	// discoverer and runner factory and declares itself able to host. Device identity is what
 	// installed local agents are pinned to (and what other devices route to).
+	if id := firstNonEmpty(os.Getenv("COMPANION_GOOGLE_CLIENT_ID"), googleClientID); id != "" {
+		secret := firstNonEmpty(os.Getenv("COMPANION_GOOGLE_CLIENT_SECRET"), googleClientSecret)
+		// No redirect URI: the desktop receives the sign-in on a loopback port picked per flow.
+		core.SetOAuthProvider(oauth.Google(id, secret, ""))
+	}
 	core.SetDeviceInfo(desktopPlatform(), defaultDeviceName(), true)
 	core.SetAgentDiscoverer(agentrt.NewDiscoverer())
 	core.SetAgentRunners(agentrt.NewFactory(filepath.Dir(dbPath)))
@@ -191,7 +210,7 @@ func main() {
 		// *second* process that opens its own window; the lock forwards that launch to the
 		// running instance instead, which just surfaces its window.
 		SingleInstance: &application.SingleInstanceOptions{
-			UniqueID: "com.companion.desktop",
+			UniqueID: instanceID(dev),
 			OnSecondInstanceLaunch: func(application.SecondInstanceData) {
 				if mainWindow != nil {
 					mainWindow.Show()
@@ -321,17 +340,37 @@ func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusW
 	return mux
 }
 
-// databasePath returns the per-user SQLite location, creating the parent directory.
-func databasePath() (string, error) {
+// databasePath returns the per-user SQLite location, creating the parent directory. Everything
+// else the app keeps on disk (blobs, secrets, shortcuts, agent working dirs) sits beside it.
+//
+// A dev build is a separate app from the installed release, with its own folder: running from
+// source would otherwise migrate and write over the release's database, and an unreleased
+// migration recorded there is never re-run when its final version ships. Its single-instance
+// lock is separate too (instanceID), and `make desktop-app` gives dev bundles their own bundle
+// id, which keeps WebKit's localStorage (the sync config) apart as well.
+func databasePath(dev bool) (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	appDir := filepath.Join(dir, "Companion")
+	name := "Companion"
+	if dev {
+		name = "Companion Dev"
+	}
+	appDir := filepath.Join(dir, name)
 	if err := os.MkdirAll(appDir, 0o700); err != nil {
 		return "", err
 	}
 	return filepath.Join(appDir, "companion.db"), nil
+}
+
+// instanceID keys the single-instance lock. A dev build takes its own, so launching one isn't
+// handed off to the release sitting in the menu bar.
+func instanceID(dev bool) string {
+	if dev {
+		return "com.companion.desktop.dev"
+	}
+	return "com.companion.desktop"
 }
 
 // desktopPlatform is the device platform id shown in Settings › Sync and synced to the server.
@@ -367,4 +406,14 @@ func runningFromBundle() bool {
 		return false
 	}
 	return strings.Contains(exe, ".app/Contents/MacOS/")
+}
+
+// firstNonEmpty returns the first non-blank value.
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }

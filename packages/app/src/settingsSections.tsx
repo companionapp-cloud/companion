@@ -49,7 +49,7 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
   {
     id: "calendar",
     label: "Calendar",
-    description: "Subscribe to ICS calendar feeds",
+    description: "Calendar accounts and ICS subscriptions",
     icon: "calendar",
     Component: CalendarSettings,
   },

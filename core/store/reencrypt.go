@@ -17,8 +17,13 @@ var reencryptTables = []string{
 	"documents",
 	"chats",
 	"chat_messages",
+	// Agents. The table kept its original name when providers became agents; its name, endpoint,
+	// binary path, host name and settings are protected fields (crypto/rows.go).
+	"llm_configs",
 	"calendar_feeds",
 	"calendar_events",
+	"calendar_accounts",
+	"calendar_objects",
 	"canvases",
 	"canvas_nodes",
 	"canvas_edges",

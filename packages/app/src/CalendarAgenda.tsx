@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Platform, Pressable, View } from "react-native";
 import type { CalendarItem, CalendarItemKind } from "@companion/core-bridge";
 import {
@@ -15,6 +15,7 @@ import {
   type IconName,
   type PressState,
 } from "@companion/design-system";
+import { CalendarItemInfo } from "./CalendarItemInfo";
 import { useCalendar } from "./CalendarProvider";
 
 /** The local calendar day ('YYYY-MM-DD') an item falls on. All-day items (dated notes,
@@ -121,8 +122,14 @@ export function Agenda({
   );
 }
 
-/** One agenda line: time · kind · title. Hovering highlights the row and reveals an event's
- *  location inline (web only — native has no hover, it taps through to a subview). Tapping
+// The hover card: how tall it may get, and how much room below a row it needs before it flips
+// above instead (rows at the bottom of the aside would otherwise push it off-screen).
+const CARD_MAX_H = 220;
+const CARD_ROOM = CARD_MAX_H + 12;
+
+/** One agenda line: time · kind · title. With a pointer, hovering highlights the row and floats
+ *  the same detail card the week grid uses — kind, title, when, and an event's location and
+ *  notes — for every kind of item (native has no hover; it taps through to a subview). Tapping
  *  opens the item when the host wired `onOpenItem`. Pointer rows are 24px; touch rows 44px. */
 function AgendaRow({
   item,
@@ -136,16 +143,26 @@ function AgendaRow({
   touch: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
+  // Whether the card opens above the row. Decided on hover from where the row sits in the window.
+  const [above, setAbove] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rowRef = useRef<any>(null);
+  const hoverIn = () => {
+    setHovered(true);
+    if (touch || typeof window === "undefined") return;
+    rowRef.current?.measureInWindow?.((_x: number, y: number, _w: number, h: number) => {
+      setAbove(y + h + CARD_ROOM > window.innerHeight && y > CARD_ROOM);
+    });
+  };
   // Tasks/notes open everywhere. Feed events open to a detail subview on native, but on web
   // they aren't linkable (no local entity) — the hover reveal shows their detail instead.
   const openable = !!onOpenItem && (item.kind !== "event" || Platform.OS !== "web");
   const gap = touch ? space.ml : space.md;
-  const markW = touch ? 7 : icon.sm;
   return (
     <Pressable
       disabled={!openable}
       onPress={() => onOpenItem?.(item)}
-      onHoverIn={() => setHovered(true)}
+      onHoverIn={hoverIn}
       onHoverOut={() => setHovered(false)}
       style={({ pressed }: PressState) => [
         styles.row,
@@ -154,9 +171,14 @@ function AgendaRow({
           minHeight: touch ? row.touch : row.h,
           backgroundColor: pressed && openable ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent",
         },
+        // react-native-web gives every View its own stacking context, so the rows after this one
+        // would paint over the card; lifting the hovered ROW is what raises it above them.
+        hovered && !touch ? styles.rowLifted : null,
       ]}
     >
-      <View style={[styles.rowMain, { gap }]}>
+      {/* The ref lives here: this trimmed RN typing has no ref on Pressable, and the row's main
+          line is the same box for measuring purposes. */}
+      <View ref={rowRef} style={[styles.rowMain, { gap }]}>
         <Text variant="mono" tone="quaternary" style={{ width: timeWidth, flexShrink: 0 }} numberOfLines={1}>
           {timeLabel(item)}
         </Text>
@@ -169,11 +191,8 @@ function AgendaRow({
           {item.title || "Untitled"}
         </Text>
       </View>
-      {hovered && item.location ? (
-        // Indented to line up under the title (past the time column + kind mark + gaps).
-        <Text tone="tertiary" variant="caption" style={{ marginLeft: timeWidth + gap + markW + gap, paddingBottom: 3 }} numberOfLines={1}>
-          {item.location}
-        </Text>
+      {hovered && !touch ? (
+        <CalendarItemInfo item={item} maxHeight={CARD_MAX_H} style={[styles.card, above ? styles.cardAbove : styles.cardBelow]} />
       ) : null}
     </Pressable>
   );
@@ -188,7 +207,12 @@ const styles = {
     paddingHorizontal: space.sm,
     borderRadius: radius.sm,
   },
+  rowLifted: { zIndex: 20 },
   rowMain: { flexDirection: "row" as const, alignItems: "center" as const },
+  // Spans the row's width, so it stays inside the (narrow, clipped) aside the agenda lives in.
+  card: { position: "absolute" as const, left: 0, right: 0, zIndex: 30 },
+  cardBelow: { top: "100%" as const, marginTop: 2 },
+  cardAbove: { bottom: "100%" as const, marginBottom: 2 },
   dot: { width: 7, height: 7, flexShrink: 0, borderRadius: radius.full },
   title: { flex: 1, minWidth: 0 },
 };

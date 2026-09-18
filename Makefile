@@ -55,7 +55,12 @@ desktop: desktop-frontend
 ## UNUserNotificationCenter ("Notifications are not allowed for this application"), so we
 ## sign with the first Apple Development / Developer ID identity in the keychain. Override
 ## with `make desktop-app CODESIGN_ID="Developer ID Application: ..."`. macOS only.
+## Without DESKTOP_VERSION the bundle is "Companion Dev" (com.companion.desktop.dev), a
+## separate app from the installed release: WebKit keys localStorage (the sync config) by
+## bundle id, and dev binaries keep their own data folder and single-instance lock (main.go).
 DESKTOP_APP := $(BUILD_DIR)/Companion.app
+DESKTOP_BUNDLE_ID := $(if $(DESKTOP_VERSION),com.companion.desktop,com.companion.desktop.dev)
+DESKTOP_BUNDLE_NAME := $(if $(DESKTOP_VERSION),Companion,Companion Dev)
 CODESIGN_ID ?= $(shell security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development|Developer ID/ {print $$2; exit}')
 DESKTOP_SIGN := $(if $(CODESIGN_ID),$(CODESIGN_ID),-)
 desktop-app: desktop
@@ -65,17 +70,21 @@ desktop-app: desktop
 	cp apps/desktop/packaging/AppIcon.icns "$(DESKTOP_APP)/Contents/Resources/AppIcon.icns"
 	cp $(BUILD_DIR)/companion-desktop "$(DESKTOP_APP)/Contents/MacOS/companion-desktop"
 	$(if $(DESKTOP_VERSION),plutil -replace CFBundleShortVersionString -string "$(DESKTOP_VERSION)" "$(DESKTOP_APP)/Contents/Info.plist")
+	plutil -replace CFBundleIdentifier -string "$(DESKTOP_BUNDLE_ID)" "$(DESKTOP_APP)/Contents/Info.plist"
+	plutil -replace CFBundleName -string "$(DESKTOP_BUNDLE_NAME)" "$(DESKTOP_APP)/Contents/Info.plist"
+	plutil -replace CFBundleDisplayName -string "$(DESKTOP_BUNDLE_NAME)" "$(DESKTOP_APP)/Contents/Info.plist"
 	@if [ "$(DESKTOP_SIGN)" = "-" ]; then echo "warning: no Developer signing identity found — signing ad-hoc; notifications will be rejected by macOS"; fi
-	codesign --force --sign "$(DESKTOP_SIGN)" --identifier com.companion.desktop "$(DESKTOP_APP)"
-	@echo "Built $(DESKTOP_APP) (signed: $(DESKTOP_SIGN))"
+	codesign --force --sign "$(DESKTOP_SIGN)" --identifier $(DESKTOP_BUNDLE_ID) "$(DESKTOP_APP)"
+	@echo "Built $(DESKTOP_APP) as $(DESKTOP_BUNDLE_ID) (signed: $(DESKTOP_SIGN))"
 
 ## desktop-app-run: package the .app and launch it through LaunchServices (macOS).
 ## MUST go through `open`, not the inner binary directly — UNUserNotificationCenter
 ## rejects directly-exec'd processes with "Notifications are not allowed for this
 ## application". Stdout/stderr are redirected to a log so the notify: lines are visible.
+## Only a copy running from this build dir is restarted; an installed release keeps running.
 DESKTOP_APP_LOG := $(BUILD_DIR)/companion-desktop.log
 desktop-app-run: desktop-app
-	@pkill -x companion-desktop 2>/dev/null || true
+	@pkill -f "$(abspath $(DESKTOP_APP))/Contents/MacOS/companion-desktop" 2>/dev/null || true
 	@sleep 1
 	: > "$(DESKTOP_APP_LOG)"
 	open "$(DESKTOP_APP)" --stdout "$(DESKTOP_APP_LOG)" --stderr "$(DESKTOP_APP_LOG)"

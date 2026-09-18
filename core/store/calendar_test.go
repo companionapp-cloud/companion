@@ -246,3 +246,41 @@ func TestMarkAllForReencryption(t *testing.T) {
 		t.Fatal("live note should be flagged dirty for re-encryption")
 	}
 }
+
+// An account that installed agents before turning on encryption has their names, endpoint URLs,
+// binary paths and host names sitting on the server in plaintext. Agents live in llm_configs, a
+// table name that says nothing about agents — which is how it was once left out of the re-push.
+func TestMarkAllForReencryptionIncludesAgents(t *testing.T) {
+	clk := &fixedClock{t: time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)}
+	s := newTestStore(t, clk)
+
+	live, err := s.Agents.Create(CreateAgentInput{Name: "Work Ollama", Runtime: domain.RuntimeOpenAICompat, BaseURL: "http://nas.local:11434/v1"})
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	gone, err := s.Agents.Create(CreateAgentInput{Name: "Old", Runtime: domain.RuntimeOpenAICompat, BaseURL: "http://old.local/v1"})
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	// Both already synced (clean), then one removed and that removal synced too.
+	s.Agents.MarkPushed(live.ID, 1)
+	s.Agents.MarkPushed(gone.ID, 1)
+	if err := s.Agents.Delete(gone.ID); err != nil {
+		t.Fatalf("delete agent: %v", err)
+	}
+	s.Agents.MarkPushed(gone.ID, 2)
+	if a, _ := s.Agents.Get(live.ID); a.Dirty {
+		t.Fatal("setup: the live agent should be clean before the migration")
+	}
+
+	if _, err := s.MarkAllForReencryption(); err != nil {
+		t.Fatalf("mark: %v", err)
+	}
+	if a, _ := s.Agents.Get(live.ID); !a.Dirty {
+		t.Fatal("a live agent must be flagged dirty so its name and endpoint are re-pushed encrypted")
+	}
+	// A tombstone carries no content to protect; re-pushing it would be pure churn.
+	if a, _ := s.Agents.GetAny(gone.ID); a.Dirty {
+		t.Fatal("a tombstoned agent should be left alone")
+	}
+}

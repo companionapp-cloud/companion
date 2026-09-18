@@ -79,11 +79,17 @@ type Core struct {
 	// touch it concurrently.
 	cryptoMu  sync.Mutex
 	masterKey []byte
+
+	// oauth holds provider configuration, in-flight sign-ins and cached access tokens
+	// (oauth.go). Generic: calendar accounts are its first user, not its owner.
+	oauth *oauthState
 }
 
 // New builds a Core over an already-open store.
 func New(st *store.Store) *Core {
-	return &Core{store: st, working: map[string]context.CancelFunc{}}
+	c := &Core{store: st, working: map[string]context.CancelFunc{}, oauth: newOAuthState()}
+	c.registerPlatformOAuthPurposes()
+	return c
 }
 
 // SetEventHandler registers the sink for events emitted by the core.
@@ -393,6 +399,38 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.calendarRange(payload)
 	case "calendar.refresh":
 		return c.calendarRefresh()
+	case "calendar.push":
+		return c.calendarPush()
+	case "calendar.capabilities":
+		return c.calendarCapabilities()
+	case "oauth.configure":
+		return c.oauthConfigure(payload)
+	case "oauth.providers":
+		return c.oauthProviders()
+	case "oauth.begin":
+		return c.oauthBegin(payload)
+	case "oauth.complete":
+		return c.oauthComplete(payload)
+	case "oauth.cancel":
+		return c.oauthCancel(payload)
+	case "calendar.accounts.list":
+		return c.calendarAccountsList()
+	case "calendar.accounts.add":
+		return c.calendarAccountsAdd(payload)
+	case "calendar.accounts.update":
+		return c.calendarAccountsUpdate(payload)
+	case "calendar.accounts.rescan":
+		return c.calendarAccountsRescan(payload)
+	case "calendar.accounts.remove":
+		return c.calendarAccountsRemove(payload)
+	case "calendar.events.create":
+		return c.calendarEventsCreate(payload)
+	case "calendar.events.get":
+		return c.calendarEventsGet(payload)
+	case "calendar.events.update":
+		return c.calendarEventsUpdate(payload)
+	case "calendar.events.delete":
+		return c.calendarEventsDelete(payload)
 	case "canvases.list":
 		return c.canvasesList()
 	case "canvases.get":

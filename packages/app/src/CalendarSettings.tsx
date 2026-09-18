@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { View } from "react-native";
 import { Button, Divider, Icon, IconButton, Input, Text, colors, icon, radius, row, space, swatches, useDensity } from "@companion/design-system";
+import { CalendarAccountsSettings } from "./CalendarAccountsSettings";
 import { useCalendar } from "./CalendarProvider";
+import { useDialogKeys } from "./ConfirmDialog";
+import { Dialog } from "./Dialog";
 import { Segmented, SettingsField, SettingsNote, SwatchPicker } from "./settingsUi";
 import { canPickIcsFile, pickIcsFile } from "./icsFile";
 
@@ -10,78 +13,36 @@ const DEFAULT_COLOR = swatches[4];
 
 type Source = "url" | "file";
 
-/** Calendar settings (PLAN §6.7): add ICS feeds by subscription URL or by uploading an .ics
- *  file, and remove existing ones. Either way the server clones the events; clients only
- *  manage the feed rows. Self-contained so the same section renders on the desktop settings
- *  page and the mobile settings stack. */
+/** Calendar settings (PLAN §6.7, PLAN-caldav.md): two sections, each a list with one button under
+ *  it that opens its add flow in a dialog.
+ *
+ *   - Accounts: CalDAV logins — two-way, their events can be created and edited.
+ *   - Subscriptions: an ICS URL or an uploaded .ics file — read-only.
+ *
+ *  Either way this device fetches the calendar itself and syncs the events encrypted. Self-contained
+ *  so the same section renders on the desktop settings page and the mobile settings stack. */
 export function CalendarSettings() {
-  const { feeds, createFeed, removeFeed } = useCalendar();
-  const [source, setSource] = useState<Source>("url");
-  const [name, setName] = useState("");
-  const [url, setUrl] = useState("");
-  // For an uploaded file: its raw ICS text plus the picked filename (shown as confirmation).
-  const [icsText, setIcsText] = useState<string | null>(null);
-  const [fileLabel, setFileLabel] = useState<string | null>(null);
-  const [color, setColor] = useState<string>(DEFAULT_COLOR);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const reset = () => {
-    setName("");
-    setUrl("");
-    setIcsText(null);
-    setFileLabel(null);
-  };
-
-  const chooseFile = async () => {
-    setError(null);
-    const file = await pickIcsFile();
-    if (!file) return;
-    setIcsText(file.text);
-    setFileLabel(file.name);
-    // Prefill the feed name from the filename (minus extension) if empty.
-    if (!name.trim()) setName(file.name.replace(/\.ics$/i, ""));
-  };
-
+  const { feeds: allFeeds, removeFeed } = useCalendar();
+  // An account's calendars are listed (and removed) with their account.
+  const feeds = allFeeds.filter((f) => f.kind !== "caldav");
   const touch = useDensity() === "touch";
-
-  const add = async () => {
-    if (!name.trim()) {
-      setError("A name is required.");
-      return;
-    }
-    if (source === "url" && !url.trim()) {
-      setError("Enter the ICS URL.");
-      return;
-    }
-    if (source === "file" && !icsText) {
-      setError("Choose an .ics file to upload.");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      await createFeed({
-        name: name.trim(),
-        url: source === "url" ? url.trim() : "",
-        icsText: source === "file" ? icsText : null,
-        color,
-      });
-      reset();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const [adding, setAdding] = useState(false);
 
   return (
-    <View style={styles.section}>
-      {feeds.length > 0 ? (
-        <View style={styles.stack}>
+    <View style={styles.page}>
+      <CalendarAccountsSettings />
+
+      <Divider />
+
+      <View style={styles.section}>
+        <View style={styles.head}>
           <Text variant="eyebrow" tone="quaternary">
-            Calendars · {feeds.length}
+            Subscriptions{feeds.length > 0 ? ` · ${feeds.length}` : ""}
           </Text>
+          <SettingsNote>Read-only calendars from a link or a file: a shared Google calendar, public holidays, a team schedule.</SettingsNote>
+        </View>
+
+        {feeds.length > 0 ? (
           <View style={styles.list}>
             {feeds.map((f, i) => (
               <View key={f.id} style={[styles.feedRow, { minHeight: touch ? row.touch : 32 }, i === feeds.length - 1 ? null : styles.rowDivider]}>
@@ -98,22 +59,79 @@ export function CalendarSettings() {
               </View>
             ))}
           </View>
+        ) : null}
+
+        <View style={styles.buttonRow}>
+          <Button variant="secondary" label="Add subscription" onPress={() => setAdding(true)} />
         </View>
-      ) : (
-        <SettingsNote>
-          No calendars yet. Subscribe to an ICS URL (Google Calendar, Fastmail, a holidays feed) or upload an .ics file
-          below.
-        </SettingsNote>
-      )}
+      </View>
 
-      <Divider />
+      {adding ? <AddSubscriptionDialog onClose={() => setAdding(false)} /> : null}
+    </View>
+  );
+}
 
-      <Text variant="eyebrow" tone="quaternary">
-        Add a calendar
-      </Text>
-      {/* Source toggle: URL vs uploaded file. */}
+/** The add-subscription flow: a URL to subscribe to, or an .ics file to upload, plus a name and
+ *  a color. */
+function AddSubscriptionDialog({ onClose }: { onClose: () => void }) {
+  const { createFeed } = useCalendar();
+  const [source, setSource] = useState<Source>("url");
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  // For an uploaded file: its raw ICS text plus the picked filename (shown as confirmation).
+  const [icsText, setIcsText] = useState<string | null>(null);
+  const [fileLabel, setFileLabel] = useState<string | null>(null);
+  const [color, setColor] = useState<string>(DEFAULT_COLOR);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const chooseFile = async () => {
+    setError(null);
+    const file = await pickIcsFile();
+    if (!file) return;
+    setIcsText(file.text);
+    setFileLabel(file.name);
+    // Prefill the name from the filename (minus extension) if empty.
+    if (!name.trim()) setName(file.name.replace(/\.ics$/i, ""));
+  };
+
+  const add = async () => {
+    if (busy) return;
+    if (!name.trim()) return setError("A name is required.");
+    if (source === "url" && !url.trim()) return setError("Enter the ICS URL.");
+    if (source === "file" && !icsText) return setError("Choose an .ics file to upload.");
+    setBusy(true);
+    setError(null);
+    try {
+      await createFeed({
+        name: name.trim(),
+        url: source === "url" ? url.trim() : "",
+        icsText: source === "file" ? icsText : null,
+        color,
+      });
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  };
+
+  const hints = useDialogKeys({ onEnter: () => void add(), onEscape: busy ? undefined : onClose });
+
+  return (
+    <Dialog
+      title="Add a subscription"
+      onClose={busy ? undefined : onClose}
+      footer={
+        <>
+          <Button label="Cancel" variant="ghost" kbd={hints ? "esc" : undefined} onPress={onClose} />
+          <Button label={busy ? "Adding…" : "Add subscription"} kbd={hints ? "⏎" : undefined} disabled={busy} onPress={() => void add()} />
+        </>
+      }
+    >
       {canPickIcsFile() ? (
         <Segmented
+          fill
           options={[
             { value: "url", label: "Subscribe by URL" },
             { value: "file", label: "Upload .ics file" },
@@ -123,15 +141,9 @@ export function CalendarSettings() {
         />
       ) : null}
 
-      <SettingsField label="Name">
-        <View style={styles.control}>
-          <Input value={name} onChangeText={setName} placeholder="Work" autoCapitalize="none" />
-        </View>
-      </SettingsField>
-
       {source === "url" ? (
-        <SettingsField label="ICS URL" help="URL feeds refresh every few minutes.">
-          <Input mono value={url} onChangeText={setUrl} placeholder="https://…/basic.ics" autoCapitalize="none" />
+        <SettingsField label="ICS URL" help="webcal:// links work too. Press refresh in the calendar to fetch changes.">
+          <Input autoFocus mono value={url} onChangeText={setUrl} placeholder="https://…/basic.ics" autoCapitalize="none" />
         </SettingsField>
       ) : (
         <SettingsField label="File">
@@ -146,23 +158,25 @@ export function CalendarSettings() {
         </SettingsField>
       )}
 
+      <SettingsField label="Name">
+        <Input value={name} onChangeText={setName} placeholder="Holidays" autoCapitalize="none" />
+      </SettingsField>
+
       <SettingsField label="Color">
         <SwatchPicker value={color} onChange={(c) => setColor(c ?? DEFAULT_COLOR)} />
       </SettingsField>
 
       {error ? <SettingsNote tone="danger">{error}</SettingsNote> : null}
-      <View style={{ flexDirection: "row" }}>
-        <Button label={busy ? "Adding…" : "Add calendar"} onPress={add} disabled={busy} />
-      </View>
-      <SettingsNote>The server parses each calendar and syncs its events to your devices.</SettingsNote>
-    </View>
+      <SettingsNote>The calendar is fetched on this device and its events sync to your others, encrypted.</SettingsNote>
+    </Dialog>
   );
 }
 
 const styles = {
-  section: { gap: space.xl },
-  stack: { gap: space.md },
-  control: { width: "100%" as const, maxWidth: 320 },
+  page: { gap: space.xl },
+  section: { gap: space.lg },
+  head: { gap: space.xs },
+  buttonRow: { flexDirection: "row" as const },
   list: { borderWidth: 1, borderColor: colors.borderSubtle, borderRadius: radius.lg, overflow: "hidden" as const },
   feedRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.md, paddingLeft: space.ml, paddingRight: space.xs },
   rowDivider: { borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },

@@ -1,29 +1,25 @@
 import { useCallback, useEffect, useState } from "react";
 import { View } from "react-native";
 import { Badge, Button, Divider, Input, Text, colors, font, radius, space } from "@companion/design-system";
-import { auth, type Device } from "@companion/core-bridge";
+import { type Device } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
-import { useSync, type AuthMode } from "./SyncProvider";
+import { useSync } from "./SyncProvider";
 import { RecoveryResetScreen } from "./RecoveryResetScreen";
-import { parseResetLink } from "./resetLink";
-import { CodeBlock, SettingsField, SettingsNote } from "./settingsUi";
+import { CLOUD_BASE_URL, SignInDialog } from "./SignInDialog";
+import { SettingsField, SettingsNote } from "./settingsUi";
 
 // Re-exported for the package index and the sections that predate settingsUi.
 export { SettingsField } from "./settingsUi";
 
-/** The hosted cloud server, used as the default when the Server URL field is left blank. */
-const DEFAULT_BASE_URL = "https://portal.companionapp.cloud/api";
-
-/** The sync settings section: connect to a server + account, then see live sync status
- *  (PLAN §7). New accounts are end-to-end encrypted (PLAN §E2EE): registration surfaces a
+/** The sync settings section: sign in to a server (a dialog — Companion Cloud or self-hosted, see
+ *  SignInDialog), then see live sync status (PLAN §7). New accounts are end-to-end encrypted (PLAN §E2EE): registration surfaces a
  *  one-time recovery code, and an encrypted account that has lost its in-memory key (e.g. after a
  *  web reload) prompts to unlock before syncing. Extracted from the old settings modal so it can
  *  render as a settings page section on every platform. */
 export function SyncSettings() {
   const sync = useSync();
   useTicker(10_000);
-  const [baseUrl, setBaseUrl] = useState("");
-  const [email, setEmail] = useState("");
+  const [signingIn, setSigningIn] = useState(false);
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,59 +31,7 @@ export function SyncSettings() {
   const [currentPw, setCurrentPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [changed, setChanged] = useState(false);
-  const [forgot, setForgot] = useState(false);
-  const [linkInput, setLinkInput] = useState("");
-  const [forgotNote, setForgotNote] = useState("");
   const [resetTarget, setResetTarget] = useState<{ baseUrl: string; token: string } | null>(null);
-
-  /** The Server URL to use, falling back to the hosted cloud when the field is left blank. */
-  const resolvedBaseUrl = baseUrl.trim() || DEFAULT_BASE_URL;
-
-  const sendReset = async () => {
-    setBusy(true);
-    setError(null);
-    setForgotNote("");
-    try {
-      await auth.forgotPassword(resolvedBaseUrl, email.trim());
-      setForgotNote("If that email has an account, a reset link is on its way. Paste it below when it arrives.");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const continueWithLink = () => {
-    setError(null);
-    const parsed = parseResetLink(linkInput);
-    if (!parsed) {
-      setError("That doesn't look like a valid reset link.");
-      return;
-    }
-    setResetTarget({ baseUrl: parsed.baseUrl ?? resolvedBaseUrl, token: parsed.token });
-  };
-
-  const exitForgot = () => {
-    setResetTarget(null);
-    setForgot(false);
-    setLinkInput("");
-    setForgotNote("");
-    setError(null);
-  };
-
-  const connect = async (mode: AuthMode) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const { recoveryCode } = await sync.connect(resolvedBaseUrl, email.trim(), password, mode);
-      setPassword("");
-      if (recoveryCode) setRecoveryCode(recoveryCode);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const unlock = async () => {
     setBusy(true);
@@ -150,40 +94,10 @@ export function SyncSettings() {
 
   // Recovery in progress: the user pasted a reset link, so run the recovery flow inline.
   if (resetTarget) {
-    return <RecoveryResetScreen baseUrl={resetTarget.baseUrl} token={resetTarget.token} onDone={exitForgot} />;
+    return <RecoveryResetScreen baseUrl={resetTarget.baseUrl} token={resetTarget.token} onDone={() => setResetTarget(null)} />;
   }
 
   const errorLine = error ? <SettingsNote tone="danger">{error}</SettingsNote> : null;
-
-  // Forgot-password entry point: request a reset email and/or paste a reset link to recover.
-  if (forgot) {
-    return (
-      <View style={styles.section}>
-        <SettingsField
-          label="Forgot your password"
-          help="Enter your email to get a reset link, then paste the link from that email below. For an encrypted account you’ll also need your recovery code."
-        />
-        <SettingsField label="Email">
-          <View style={styles.control}>
-            <Input value={email} onChangeText={setEmail} placeholder="you@example.com" autoCapitalize="none" />
-          </View>
-          <View style={styles.row}>
-            <Button label={busy ? "…" : "Send reset link"} variant="secondary" onPress={sendReset} disabled={busy} />
-          </View>
-          {forgotNote ? <SettingsNote tone="secondary">{forgotNote}</SettingsNote> : null}
-        </SettingsField>
-        <Divider />
-        <SettingsField label="Reset link" help="Paste the link from the reset email.">
-          <Input mono value={linkInput} onChangeText={setLinkInput} placeholder="https://…" autoCapitalize="none" />
-        </SettingsField>
-        {errorLine}
-        <View style={styles.row}>
-          <Button label="Continue" onPress={continueWithLink} disabled={!linkInput.trim()} />
-          <Button label="Back to sign in" variant="ghost" onPress={exitForgot} />
-        </View>
-      </View>
-    );
-  }
 
   // One-time recovery code, shown right after registering an encrypted account. It is the only way
   // to recover data if the password is forgotten — the server holds only ciphertext.
@@ -269,7 +183,7 @@ export function SyncSettings() {
         />
         <SettingsField label="Server">
           <View style={styles.control}>
-            <Input mono disabled value={baseUrlLabel(sync.baseUrl ?? resolvedBaseUrl)} />
+            <Input mono disabled value={baseUrlLabel(sync.baseUrl ?? CLOUD_BASE_URL)} />
           </View>
         </SettingsField>
         <SettingsField label="Account">
@@ -352,7 +266,6 @@ export function SyncSettings() {
             <Button label="Disconnect" variant="danger" onPress={sync.disconnect} />
           </View>
         </SettingsField>
-        <SelfHosting />
       </View>
     );
   }
@@ -365,42 +278,24 @@ export function SyncSettings() {
       </SettingsNote>
       <ThisDevice />
       <Divider />
-      <SettingsField label="Server" help="Leave blank to use Companion Cloud.">
-        <View style={styles.control}>
-          <Input mono value={baseUrl} onChangeText={setBaseUrl} placeholder={DEFAULT_BASE_URL} autoCapitalize="none" />
+      <SettingsField label="Sync" help="Not signed in — everything stays on this device. Use Companion Cloud, or a server you host yourself.">
+        <View style={styles.row}>
+          <Button label="Sign in" onPress={() => setSigningIn(true)} />
         </View>
       </SettingsField>
-      <SettingsField label="Email">
-        <View style={styles.control}>
-          <Input value={email} onChangeText={setEmail} placeholder="you@example.com" autoCapitalize="none" />
-        </View>
-      </SettingsField>
-      <SettingsField label="Password">
-        <View style={styles.control}>
-          <Input
-            value={password}
-            onChangeText={setPassword}
-            onSubmitEditing={() => void connect("login")}
-            placeholder="Password"
-            secureTextEntry
-            autoCapitalize="none"
-          />
-        </View>
-      </SettingsField>
-      {errorLine}
-      <View style={styles.row}>
-        <Button label={busy ? "…" : "Log in"} onPress={() => connect("login")} disabled={busy} />
-        <Button label="Register" variant="secondary" onPress={() => connect("register")} disabled={busy} />
-        <Button
-          label="Forgot password?"
-          variant="ghost"
-          onPress={() => {
-            setError(null);
-            setForgot(true);
+      {signingIn ? (
+        <SignInDialog
+          onClose={() => setSigningIn(false)}
+          onConnected={(code) => {
+            setSigningIn(false);
+            if (code) setRecoveryCode(code);
+          }}
+          onRecover={(target) => {
+            setSigningIn(false);
+            setResetTarget(target);
           }}
         />
-      </View>
-      <SelfHosting />
+      ) : null}
     </View>
   );
 }
@@ -418,27 +313,6 @@ function StatusStrip({ tone, text, action }: { tone: "success" | "warning" | "da
     </View>
   );
 }
-
-/** The self-hosting pointer: the sync server is one container (see the docs' self-hosting page). */
-function SelfHosting() {
-  return (
-    <>
-      <Divider />
-      <View style={styles.stack}>
-        <Text variant="eyebrow" tone="quaternary">
-          Self-hosting
-        </Text>
-        <CodeBlock>{SELF_HOST_SNIPPET}</CodeBlock>
-        <SettingsNote>
-          The sync server is a single container. Run it, then set Server to its address and register an account there.
-        </SettingsNote>
-      </View>
-    </>
-  );
-}
-
-const SELF_HOST_SNIPPET =
-  "docker run -p 8080:8080 \\\n  -e DATABASE_URL=postgres://user:pass@host:5432/companion \\\n  ghcr.io/companionapp-cloud/companion-server:0.5.0";
 
 function baseUrlLabel(url: string): string {
   return url.replace(/^https?:\/\//, "").replace(/\/+$/, "");

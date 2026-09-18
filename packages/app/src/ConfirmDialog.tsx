@@ -1,7 +1,8 @@
-import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { Platform, Pressable, View } from "react-native";
+import { Fragment, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { Modal, Platform, Pressable, View } from "react-native";
 import { Button, Input, Text, colors, radius, shadow, space, useDensity } from "@companion/design-system";
 import { NavContext } from "./nav-context";
+import { Overlay } from "./Overlay";
 
 export interface ConfirmDialogProps {
   title: string;
@@ -18,6 +19,11 @@ export interface ConfirmDialogProps {
   confirmTextPrompt?: ReactNode;
   onConfirm: () => void | Promise<void>;
   onClose: () => void;
+  /** Cover the whole window instead of the container this was rendered in. Needed when that
+   *  container is small — a settings section a few lines tall — or is itself a dialog, where an
+   *  in-place scrim would squeeze this one into it. Portals to the document root on web (see
+   *  Overlay); a transparent native Modal elsewhere, which also stacks above an open Dialog. */
+  portal?: boolean;
 }
 
 /** Wires ⏎ / esc for a dialog while it is open, and reports whether the hints should show.
@@ -50,6 +56,8 @@ export function useDialogKeys({ onEnter, onEscape }: { onEnter?: () => void; onE
       } else if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && handlers.current.onEnter) {
         const active = document.activeElement as HTMLElement | null;
         if (active && (active.tagName === "BUTTON" || active.getAttribute("role") === "button")) return;
+        // In a multi-line field ⏎ is a newline; ⌘⏎ / ctrl⏎ (handled nowhere else) stays free.
+        if (active && active.tagName === "TEXTAREA") return;
         e.preventDefault();
         e.stopPropagation();
         handlers.current.onEnter();
@@ -60,6 +68,16 @@ export function useDialogKeys({ onEnter, onEscape }: { onEnter?: () => void; onE
   }, [enabled, visible]);
 
   return enabled;
+}
+
+/** Native host for a `portal` dialog: a transparent Modal, so it covers the screen and sits above
+ *  whatever (including another Modal) it was rendered inside. */
+function NativeModalHost({ children }: { children?: ReactNode }) {
+  return (
+    <Modal visible transparent animationType="fade">
+      {children}
+    </Modal>
+  );
 }
 
 /** A modal confirmation over the scrim: an overlay panel with the title, the consequence,
@@ -77,6 +95,7 @@ export function ConfirmDialog({
   confirmTextPrompt,
   onConfirm,
   onClose,
+  portal,
 }: ConfirmDialogProps) {
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
@@ -97,46 +116,49 @@ export function ConfirmDialog({
 
   const hints = useDialogKeys({ onEnter: () => void confirm(), onEscape: busy ? undefined : onClose });
 
+  const Host = !portal ? Fragment : Platform.OS === "web" ? Overlay : NativeModalHost;
   return (
-    <View style={styles.scrim}>
-      <Pressable style={styles.scrimFill} onPress={onClose} aria-label={cancelLabel} />
-      <View style={styles.card}>
-        <Text variant="title">{title}</Text>
-        {message != null ? (
-          typeof message === "string" ? (
-            <Text tone="secondary" style={styles.message}>
-              {message}
-            </Text>
-          ) : (
-            message
-          )
-        ) : null}
-        {needsMatch ? (
-          <View style={styles.confirmField}>
-            {confirmTextPrompt != null ? (
-              typeof confirmTextPrompt === "string" ? (
-                <Text variant="caption" tone="tertiary">
-                  {confirmTextPrompt}
-                </Text>
-              ) : (
-                confirmTextPrompt
-              )
-            ) : null}
-            <Input
-              autoFocus
-              autoCapitalize="none"
-              value={typed}
-              onChangeText={setTyped}
-              placeholder={confirmText}
-            />
+    <Host>
+      <View style={[styles.scrim, portal ? styles.scrimPortal : null]}>
+        <Pressable style={styles.scrimFill} onPress={onClose} aria-label={cancelLabel} />
+        <View style={styles.card}>
+          <Text variant="title">{title}</Text>
+          {message != null ? (
+            typeof message === "string" ? (
+              <Text tone="secondary" style={styles.message}>
+                {message}
+              </Text>
+            ) : (
+              message
+            )
+          ) : null}
+          {needsMatch ? (
+            <View style={styles.confirmField}>
+              {confirmTextPrompt != null ? (
+                typeof confirmTextPrompt === "string" ? (
+                  <Text variant="caption" tone="tertiary">
+                    {confirmTextPrompt}
+                  </Text>
+                ) : (
+                  confirmTextPrompt
+                )
+              ) : null}
+              <Input
+                autoFocus
+                autoCapitalize="none"
+                value={typed}
+                onChangeText={setTyped}
+                placeholder={confirmText}
+              />
+            </View>
+          ) : null}
+          <View style={styles.actions}>
+            <Button label={cancelLabel} variant="ghost" kbd={hints ? "esc" : undefined} onPress={onClose} />
+            <Button label={confirmLabel} variant="danger" kbd={hints ? "⏎" : undefined} disabled={!canConfirm} onPress={() => void confirm()} />
           </View>
-        ) : null}
-        <View style={styles.actions}>
-          <Button label={cancelLabel} variant="ghost" kbd={hints ? "esc" : undefined} onPress={onClose} />
-          <Button label={confirmLabel} variant="danger" kbd={hints ? "⏎" : undefined} disabled={!canConfirm} onPress={() => void confirm()} />
         </View>
       </View>
-    </View>
+    </Host>
   );
 }
 
@@ -153,6 +175,8 @@ const styles = {
     padding: space.xl,
     zIndex: 100,
   },
+  // Portaled to document.body on web, so `fixed` pins it to the viewport above every pane.
+  scrimPortal: { position: (Platform.OS === "web" ? "fixed" : "absolute") as "absolute", zIndex: 1000 },
   scrimFill: { position: "absolute" as const, top: 0, left: 0, right: 0, bottom: 0 },
   card: {
     width: 400,

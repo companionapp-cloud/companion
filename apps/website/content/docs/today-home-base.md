@@ -8,8 +8,8 @@ excerpt: A daily note to think in, with the day's tasks and events beside it.
 featured: true
 badge: The basics
 readTime: 3 min read
-updated: Jul 2026
-related: [linking-notes, calendar-and-reminders]
+updated: Sep 2026
+related: [linking-notes, calendars]
 ---
 
 **Today** is where Companion opens: a note for the day on the left, and what the day actually holds on the right.
@@ -24,7 +24,9 @@ It's an ordinary note in every other respect. Link to anything with `[[`, drop i
 
 ## The agenda
 
-The right-hand panel shows the selected day: tasks due, notes dated to it, and events from any [calendar feeds](/docs/calendar-and-reminders) you've subscribed to — merged into one list rather than three competing views.
+The right-hand panel shows the selected day: tasks due, notes dated to it, and events from your [calendars](/docs/calendars) — merged into one list rather than three competing views.
+
+Hover a row to see its details — when it is, and an event's location and notes — without leaving the page.
 
 Click a day in the month calendar to move the whole screen — note and agenda together — to that day.
 
@@ -32,4 +34,4 @@ Click a day in the month calendar to move the whole screen — note and agenda t
 
 ## Next steps
 
-Learn how notes connect in [writing & linking notes](/docs/linking-notes), or bring in your calendar with [calendars & reminders](/docs/calendar-and-reminders).
+Learn how notes connect in [writing & linking notes](/docs/linking-notes), or bring in your calendar with [how calendars work](/docs/calendars).

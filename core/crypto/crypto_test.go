@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"companion/core/domain"
 	"companion/core/sync/protocol"
 )
 
@@ -261,6 +262,59 @@ func TestCalendarEventEncrypted(t *testing.T) {
 	}
 	dec, _ := DecryptRow(mk, protocol.EntityCalendarEvent, enc)
 	assertJSONEqual(t, row, dec)
+}
+
+// A CalDAV account and its calendar objects are the most sensitive rows Companion syncs: a working
+// password for the user's calendar provider, and the full text of every event. Marshal the real
+// domain types (not hand-written JSON) so a renamed field cannot silently fall out of encryption.
+func TestCalDAVRowsLeaveNoSecretsInTheClear(t *testing.T) {
+	mk, _ := NewMasterKey()
+	password, lastErr := "abcd-efgh-ijkl-mnop", "login failed for sam@example.com"
+	account, _ := json.Marshal(&domain.CalendarAccount{
+		ID: "a1", Name: "Personal iCloud", ServerURL: "https://caldav.icloud.com/", Username: "sam@example.com",
+		AuthKind: domain.CalendarAuthBasic, CredentialEnc: &password,
+		HomeSetURL: "https://p42-caldav.icloud.com/1234567/calendars/", LastError: &lastErr,
+	})
+	pushErr := "PUT returned 507 for /1234567/calendars/home/EVT.ics"
+	object, _ := json.Marshal(&domain.CalendarObject{
+		ID: "o1", FeedID: "f1", UID: "EVT-UID-9", Href: "https://p42-caldav.icloud.com/1234567/calendars/home/EVT.ics",
+		ETag: `"etag-77"`, ICS: "BEGIN:VCALENDAR\r\nSUMMARY:Oncology follow-up\r\nATTENDEE:mailto:dr@example.com\r\nEND:VCALENDAR",
+		Recurring: true, PushState: domain.PushPendingUpdate, PushError: &pushErr,
+	})
+
+	for _, tc := range []struct {
+		entity  string
+		row     []byte
+		secrets []string
+		clear   []string
+	}{
+		{protocol.EntityCalendarAccount, account,
+			[]string{password, "icloud", "sam@example.com", "1234567", "Personal", "login failed"},
+			[]string{`"authKind":"basic"`}},
+		{protocol.EntityCalendarObject, object,
+			[]string{"Oncology", "dr@example.com", "EVT-UID-9", "1234567", "etag-77", "507"},
+			[]string{`"feedId":"f1"`, `"pushState":"pending_update"`, `"recurring":true`}},
+	} {
+		enc, err := EncryptRow(mk, tc.entity, tc.row)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, secret := range tc.secrets {
+			if strings.Contains(string(enc), secret) {
+				t.Errorf("%s: %q reached the wire in the clear:\n%s", tc.entity, secret, enc)
+			}
+		}
+		for _, want := range tc.clear {
+			if !strings.Contains(string(enc), want) {
+				t.Errorf("%s: %s must stay plaintext (clients query on it)", tc.entity, want)
+			}
+		}
+		dec, err := DecryptRow(mk, tc.entity, enc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONEqual(t, tc.row, dec)
+	}
 }
 
 // groupForDisplay mimics the UI formatting (groups of 4, hyphen-separated) that

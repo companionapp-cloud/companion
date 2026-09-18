@@ -19,15 +19,15 @@ const dateLayout = "2006-01-02"
 
 // ---- calendar feeds ------------------------------------------------------
 
-// CalendarFeedsRepo is the CRUD + sync repository for ICS feed subscriptions (PLAN §6.7).
-// Feeds are ordinary user data: they sync bidirectionally. The server, not this repo,
-// fetches each URL and produces the CalendarEvent clones.
+// CalendarFeedsRepo is the CRUD + sync repository for calendars (PLAN §6.7): ICS subscriptions,
+// uploaded .ics files, and CalDAV collections (PLAN-caldav.md). Feeds are ordinary user data and
+// sync bidirectionally; the client fetches them and derives the CalendarEvent rows.
 type CalendarFeedsRepo struct {
 	db    Driver
 	clock domain.Clock
 }
 
-const feedColumns = `id, name, url, ics_text, color, created_at, updated_at, deleted_at, version, dirty`
+const feedColumns = `id, name, kind, account_id, read_only, url, ics_text, color, created_at, updated_at, deleted_at, version, dirty`
 
 // CreateFeedInput carries the client-supplied fields for a new feed: a name plus a source,
 // either a subscription URL or the raw text of an uploaded .ics file.
@@ -36,6 +36,11 @@ type CreateFeedInput struct {
 	URL     string  `json:"url"`
 	ICSText *string `json:"icsText,omitempty"`
 	Color   *string `json:"color,omitempty"`
+	// Kind, AccountID and ReadOnly describe a CalDAV calendar. They are set by account discovery,
+	// never by the UI, so they are not part of the JSON input.
+	Kind      string  `json:"-"`
+	AccountID *string `json:"-"`
+	ReadOnly  bool    `json:"-"`
 }
 
 // UpdateFeedInput carries partial updates; nil fields are left unchanged.
@@ -44,6 +49,8 @@ type UpdateFeedInput struct {
 	URL     *string `json:"url,omitempty"`
 	ICSText *string `json:"icsText,omitempty"`
 	Color   *string `json:"color,omitempty"`
+	// ReadOnly is refreshed by a CalDAV rescan when the login's privileges change.
+	ReadOnly *bool `json:"-"`
 }
 
 // Create inserts a new feed (UUIDv7 id, version 0, dirty).
@@ -53,17 +60,22 @@ func (r *CalendarFeedsRepo) Create(in CreateFeedInput) (*domain.CalendarFeed, er
 		return nil, fmt.Errorf("generate uuid: %w", err)
 	}
 	now := r.clock.Now().UTC()
+	kind := in.Kind
+	if kind == "" {
+		kind = domain.FeedKindICS
+	}
 	f := &domain.CalendarFeed{
-		ID: id.String(), Name: in.Name, URL: in.URL, ICSText: in.ICSText, Color: in.Color,
+		ID: id.String(), Name: in.Name, Kind: kind, AccountID: in.AccountID, ReadOnly: in.ReadOnly,
+		URL: in.URL, ICSText: in.ICSText, Color: in.Color,
 		CreatedAt: now, UpdatedAt: now, Version: 0, Dirty: true,
 	}
 	if err := f.Validate(); err != nil {
 		return nil, err
 	}
 	if _, err := r.db.Exec(
-		`INSERT INTO calendar_feeds (id, name, url, ics_text, color, created_at, updated_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-		f.ID, f.Name, f.URL, f.ICSText, f.Color,
+		`INSERT INTO calendar_feeds (id, name, kind, account_id, read_only, url, ics_text, color, created_at, updated_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		f.ID, f.Name, f.Kind, f.AccountID, boolToInt(f.ReadOnly), f.URL, f.ICSText, f.Color,
 		f.CreatedAt.Format(timeFormat), f.UpdatedAt.Format(timeFormat), f.Version, boolToInt(f.Dirty),
 	); err != nil {
 		return nil, fmt.Errorf("insert calendar feed: %w", err)
@@ -112,6 +124,11 @@ func (r *CalendarFeedsRepo) Update(id string, in UpdateFeedInput) (*domain.Calen
 	if err != nil {
 		return nil, err
 	}
+	if f.IsCalDAV() {
+		// A CalDAV calendar's source is its collection URL, owned by account discovery. Only its
+		// name and color are the user's to change.
+		in.URL, in.ICSText = nil, nil
+	}
 	if in.Name != nil {
 		f.Name = *in.Name
 	}
@@ -124,15 +141,18 @@ func (r *CalendarFeedsRepo) Update(id string, in UpdateFeedInput) (*domain.Calen
 	if in.Color != nil {
 		f.Color = in.Color
 	}
+	if in.ReadOnly != nil {
+		f.ReadOnly = *in.ReadOnly
+	}
 	f.UpdatedAt = r.clock.Now().UTC()
 	f.Dirty = true
 	if err := f.Validate(); err != nil {
 		return nil, err
 	}
 	res, err := r.db.Exec(
-		`UPDATE calendar_feeds SET name = ?, url = ?, ics_text = ?, color = ?, updated_at = ?, dirty = 1
+		`UPDATE calendar_feeds SET name = ?, url = ?, ics_text = ?, color = ?, read_only = ?, updated_at = ?, dirty = 1
 		 WHERE id = ? AND deleted_at IS NULL;`,
-		f.Name, f.URL, f.ICSText, f.Color, f.UpdatedAt.Format(timeFormat), id,
+		f.Name, f.URL, f.ICSText, f.Color, boolToInt(f.ReadOnly), f.UpdatedAt.Format(timeFormat), id,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update calendar feed: %w", err)
@@ -165,6 +185,78 @@ func (r *CalendarFeedsRepo) Delete(id string) error {
 		now.Format(timeFormat), now.Format(timeFormat), id,
 	); err != nil {
 		return fmt.Errorf("tombstone feed events: %w", err)
+	}
+	// A CalDAV calendar's objects go with it. This only forgets them locally and on other
+	// devices — nothing is deleted from the provider.
+	if _, err := r.db.Exec(
+		`UPDATE calendar_objects SET deleted_at = ?, updated_at = ?, push_state = 'synced', dirty = 1
+		 WHERE feed_id = ? AND deleted_at IS NULL;`,
+		now.Format(timeFormat), now.Format(timeFormat), id,
+	); err != nil {
+		return fmt.Errorf("tombstone feed objects: %w", err)
+	}
+	if _, err := r.db.Exec(`DELETE FROM caldav_feed_state WHERE feed_id = ?;`, id); err != nil {
+		return fmt.Errorf("clear feed state: %w", err)
+	}
+	return nil
+}
+
+// AdoptCalDAV (re)attaches a feed to a CalDAV account. It repairs calendars orphaned by the
+// stripping described in Apply, and is a no-op for a feed that is already attached correctly.
+func (r *CalendarFeedsRepo) AdoptCalDAV(id, accountID string, readOnly bool) error {
+	now := r.clock.Now().UTC().Format(timeFormat)
+	_, err := r.db.Exec(
+		`UPDATE calendar_feeds SET kind = 'caldav', account_id = ?, read_only = ?, updated_at = ?, dirty = 1
+		 WHERE id = ? AND deleted_at IS NULL AND (kind != 'caldav' OR account_id IS NULL OR account_id != ? OR read_only != ?);`,
+		accountID, boolToInt(readOnly), now, id, accountID, boolToInt(readOnly))
+	if err != nil {
+		return fmt.Errorf("adopt caldav feed: %w", err)
+	}
+	return nil
+}
+
+// ListByAccount returns the live CalDAV calendars of one account.
+func (r *CalendarFeedsRepo) ListByAccount(accountID string) ([]*domain.CalendarFeed, error) {
+	rows, err := r.db.Query(
+		`SELECT `+feedColumns+` FROM calendar_feeds WHERE account_id = ? AND deleted_at IS NULL ORDER BY created_at ASC, id ASC;`, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("query account feeds: %w", err)
+	}
+	defer rows.Close()
+	out := []*domain.CalendarFeed{}
+	for rows.Next() {
+		f, err := scanFeed(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// CTag returns the collection tag this device last pulled for a CalDAV feed ("" if never).
+func (r *CalendarFeedsRepo) CTag(feedID string) (string, error) {
+	rows, err := r.db.Query(`SELECT ctag FROM caldav_feed_state WHERE feed_id = ?;`, feedID)
+	if err != nil {
+		return "", fmt.Errorf("query ctag: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return "", rows.Err()
+	}
+	var ctag string
+	if err := rows.Scan(&ctag); err != nil {
+		return "", fmt.Errorf("scan ctag: %w", err)
+	}
+	return ctag, nil
+}
+
+// SetCTag records the collection tag after a completed pull. Device-local: never synced.
+func (r *CalendarFeedsRepo) SetCTag(feedID, ctag string) error {
+	if _, err := r.db.Exec(
+		`INSERT INTO caldav_feed_state (feed_id, ctag) VALUES (?, ?)
+		 ON CONFLICT(feed_id) DO UPDATE SET ctag = excluded.ctag;`, feedID, ctag); err != nil {
+		return fmt.Errorf("set ctag: %w", err)
 	}
 	return nil
 }
@@ -206,18 +298,29 @@ func (r *CalendarFeedsRepo) GetAny(id string) (*domain.CalendarFeed, error) {
 }
 
 func (r *CalendarFeedsRepo) Apply(f *domain.CalendarFeed) error {
+	// A row with no kind at all came through something that predates CalDAV — an older sync
+	// server has no columns for kind/account/read-only and echoes feeds back without them, and an
+	// older client re-pushes a feed the same way. Taking that at face value turned CalDAV calendars
+	// into orphaned "ics" feeds, and the next rescan then created every calendar again. A current
+	// writer always states the kind, so its absence means "unknown", not "ics": keep what we have.
+	if f.Kind == "" {
+		if local, err := r.GetAny(f.ID); err == nil && local.IsCalDAV() {
+			f.Kind, f.AccountID, f.ReadOnly = local.Kind, local.AccountID, local.ReadOnly
+		}
+	}
 	var deletedAt any
 	if f.DeletedAt != nil {
 		deletedAt = f.DeletedAt.UTC().Format(timeFormat)
 	}
 	_, err := r.db.Exec(
-		`INSERT INTO calendar_feeds (id, name, url, ics_text, color, created_at, updated_at, deleted_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+		`INSERT INTO calendar_feeds (id, name, kind, account_id, read_only, url, ics_text, color, created_at, updated_at, deleted_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 		 ON CONFLICT(id) DO UPDATE SET
-		   name = excluded.name, url = excluded.url, ics_text = excluded.ics_text, color = excluded.color,
+		   name = excluded.name, kind = excluded.kind, account_id = excluded.account_id, read_only = excluded.read_only,
+		   url = excluded.url, ics_text = excluded.ics_text, color = excluded.color,
 		   created_at = excluded.created_at, updated_at = excluded.updated_at,
 		   deleted_at = excluded.deleted_at, version = excluded.version, dirty = 0;`,
-		f.ID, f.Name, f.URL, f.ICSText, f.Color,
+		f.ID, f.Name, feedKind(f), f.AccountID, boolToInt(f.ReadOnly), f.URL, f.ICSText, f.Color,
 		f.CreatedAt.UTC().Format(timeFormat), f.UpdatedAt.UTC().Format(timeFormat), deletedAt, f.Version,
 	)
 	if err != nil {
@@ -235,6 +338,9 @@ func (r *CalendarFeedsRepo) MarkPushed(id string, version int64) error {
 
 func (r *CalendarFeedsRepo) MeaningfulDiff(a, b *domain.CalendarFeed) bool {
 	if a.Name != b.Name || a.URL != b.URL || derefStr(a.ICSText) != derefStr(b.ICSText) || derefStr(a.Color) != derefStr(b.Color) {
+		return true
+	}
+	if feedKind(a) != feedKind(b) || derefStr(a.AccountID) != derefStr(b.AccountID) {
 		return true
 	}
 	return (a.DeletedAt == nil) != (b.DeletedAt == nil)
@@ -261,9 +367,9 @@ func (r *CalendarFeedsRepo) ConflictedCopy(local *domain.CalendarFeed, suffix st
 		name = "Untitled"
 	}
 	_, err = r.db.Exec(
-		`INSERT INTO calendar_feeds (id, name, url, ics_text, color, created_at, updated_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1);`,
-		id.String(), name+" "+suffix, local.URL, local.ICSText, local.Color,
+		`INSERT INTO calendar_feeds (id, name, kind, account_id, read_only, url, ics_text, color, created_at, updated_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1);`,
+		id.String(), name+" "+suffix, feedKind(local), local.AccountID, boolToInt(local.ReadOnly), local.URL, local.ICSText, local.Color,
 		now.Format(timeFormat), now.Format(timeFormat),
 	)
 	if err != nil {
@@ -272,17 +378,30 @@ func (r *CalendarFeedsRepo) ConflictedCopy(local *domain.CalendarFeed, suffix st
 	return nil
 }
 
+// feedKind normalises the kind of a feed for storage: rows that predate CalDAV (or arrive from
+// an older client) carry no kind and are ICS subscriptions.
+func feedKind(f *domain.CalendarFeed) string {
+	if f.Kind == "" {
+		return domain.FeedKindICS
+	}
+	return f.Kind
+}
+
 func scanFeed(rows Rows) (*domain.CalendarFeed, error) {
 	var (
-		f                    domain.CalendarFeed
-		icsText, color       sql.NullString
-		deletedAt            sql.NullString
-		createdAt, updatedAt string
-		dirty                int
+		f                         domain.CalendarFeed
+		accountID, icsText, color sql.NullString
+		deletedAt                 sql.NullString
+		createdAt, updatedAt      string
+		readOnly, dirty           int
 	)
-	if err := rows.Scan(&f.ID, &f.Name, &f.URL, &icsText, &color, &createdAt, &updatedAt, &deletedAt, &f.Version, &dirty); err != nil {
+	if err := rows.Scan(&f.ID, &f.Name, &f.Kind, &accountID, &readOnly, &f.URL, &icsText, &color, &createdAt, &updatedAt, &deletedAt, &f.Version, &dirty); err != nil {
 		return nil, fmt.Errorf("scan calendar feed: %w", err)
 	}
+	if accountID.Valid {
+		f.AccountID = &accountID.String
+	}
+	f.ReadOnly = readOnly != 0
 	if icsText.Valid {
 		f.ICSText = &icsText.String
 	}
@@ -330,6 +449,11 @@ func (r *CalendarEventsRepo) ReconcileFeedEvents(feedID string, fresh []*domain.
 	if err != nil {
 		return 0, err
 	}
+	return r.reconcile(existing, fresh)
+}
+
+// reconcile brings a set of stored occurrences in line with a freshly-expanded set.
+func (r *CalendarEventsRepo) reconcile(existing map[string]*domain.CalendarEvent, fresh []*domain.CalendarEvent) (int, error) {
 	now := r.clock.Now().UTC()
 	written := 0
 	seen := map[string]bool{}
@@ -368,6 +492,58 @@ func (r *CalendarEventsRepo) ReconcileFeedEvents(feedID string, fresh []*domain.
 		written++
 	}
 	return written, nil
+}
+
+// ReconcileObjectEvents is ReconcileFeedEvents scoped to one calendar object (one UID) of a CalDAV
+// feed, so editing a single event re-derives only its own occurrences instead of the whole
+// calendar. Passing no fresh events tombstones every occurrence of the UID (a deleted object).
+func (r *CalendarEventsRepo) ReconcileObjectEvents(feedID, uid string, fresh []*domain.CalendarEvent) (int, error) {
+	rows, err := r.db.Query(`SELECT `+eventColumns+` FROM calendar_events WHERE feed_id = ? AND ics_uid = ? AND deleted_at IS NULL;`, feedID, uid)
+	if err != nil {
+		return 0, fmt.Errorf("query object events: %w", err)
+	}
+	existing := map[string]*domain.CalendarEvent{}
+	for rows.Next() {
+		e, err := scanEvent(rows)
+		if err != nil {
+			rows.Close()
+			return 0, err
+		}
+		existing[e.ID] = e
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+	return r.reconcile(existing, fresh)
+}
+
+// DeriveFromObject re-derives the occurrences of one CalDAV calendar object from its ICS and
+// reconciles them into the store (PLAN-caldav.md §0: events stay derived). An object that is
+// deleted, or waiting to be deleted, has no occurrences — so a delete disappears from the calendar
+// immediately, before any device has reached the provider.
+func (r *CalendarEventsRepo) DeriveFromObject(o *domain.CalendarObject) (int, error) {
+	if o.DeletedAt != nil || o.PushState == domain.PushPendingDelete {
+		return r.ReconcileObjectEvents(o.FeedID, o.UID, nil)
+	}
+	fresh, err := calendar.ExpandObject(o.ICS, o.FeedID, r.clock.Now().UTC())
+	if err != nil {
+		return 0, err
+	}
+	return r.ReconcileObjectEvents(o.FeedID, o.UID, fresh)
+}
+
+// GetLive returns one non-deleted event occurrence by id, or ErrNotFound.
+func (r *CalendarEventsRepo) GetLive(id string) (*domain.CalendarEvent, error) {
+	e, err := r.GetAny(id)
+	if err != nil {
+		return nil, err
+	}
+	if e.DeletedAt != nil {
+		return nil, ErrNotFound
+	}
+	return e, nil
 }
 
 // liveEventsForFeed loads a feed's non-deleted local events keyed by id.
@@ -560,9 +736,11 @@ func (r *CalendarEventsRepo) Range(from, to time.Time) ([]*domain.CalendarItem, 
 	// Feed events: overlap the window. A NULL ends_at is treated as an instantaneous event
 	// (ends == starts). Skip events whose feed was deleted.
 	rows, err := r.db.Query(
-		`SELECT e.id, e.title, e.starts_at, e.ends_at, e.all_day, e.location, e.description, f.color
+		`SELECT e.id, e.title, e.starts_at, e.ends_at, e.all_day, e.location, e.description, f.color,
+		        e.feed_id, f.kind, f.read_only, o.id, COALESCE(o.recurring, 0), COALESCE(o.push_state, 'synced')
 		   FROM calendar_events e
 		   JOIN calendar_feeds f ON f.id = e.feed_id
+		   LEFT JOIN calendar_objects o ON o.feed_id = e.feed_id AND o.uid = e.ics_uid AND o.deleted_at IS NULL
 		  WHERE e.deleted_at IS NULL AND f.deleted_at IS NULL
 		    AND e.starts_at < ? AND COALESCE(e.ends_at, e.starts_at) >= ?
 		  ORDER BY e.starts_at ASC;`, toTS, fromTS)
@@ -575,12 +753,21 @@ func (r *CalendarEventsRepo) Range(from, to time.Time) ([]*domain.CalendarItem, 
 			startsAt                      string
 			endsAt, location, desc, color sql.NullString
 			allDay                        int
+			feedID, kind, pushState       string
+			objectID                      sql.NullString
+			readOnly, recurring           int
 		)
-		if err := rows.Scan(&id, &title, &startsAt, &endsAt, &allDay, &location, &desc, &color); err != nil {
+		if err := rows.Scan(&id, &title, &startsAt, &endsAt, &allDay, &location, &desc, &color,
+			&feedID, &kind, &readOnly, &objectID, &recurring, &pushState); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("scan range event: %w", err)
 		}
-		item := &domain.CalendarItem{ID: "event:" + id, Kind: domain.ItemEvent, Title: title, SourceID: id, AllDay: allDay != 0}
+		item := &domain.CalendarItem{ID: "event:" + id, Kind: domain.ItemEvent, Title: title, SourceID: id, AllDay: allDay != 0, FeedID: feedID}
+		// Editable only once the backing object is here: an occurrence can arrive by sync a moment
+		// before its object does, and there would be nothing to patch.
+		item.Editable = kind == domain.FeedKindCalDAV && readOnly == 0 && objectID.Valid
+		item.Recurring = recurring != 0
+		item.Pending = domain.PushState(pushState).Pending()
 		if item.StartsAt, err = time.Parse(timeFormat, startsAt); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("parse event starts_at: %w", err)

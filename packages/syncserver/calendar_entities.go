@@ -11,7 +11,7 @@ import (
 
 // ---- calendar feeds (user-authored, bidirectional) -----------------------
 
-const feedCols = `id, name, url, ics_text, color, created_at, updated_at, deleted_at, version, server_seq`
+const feedCols = `id, name, kind, account_id, read_only, url, ics_text, color, created_at, updated_at, deleted_at, version, server_seq`
 
 var calendarFeedHandler = &entityHandler{
 	typ:   protocol.EntityCalendarFeed,
@@ -25,14 +25,22 @@ var calendarFeedHandler = &entityHandler{
 		if f.DeletedAt != nil {
 			deletedAt = f.DeletedAt.UTC().Format(timeFormat)
 		}
+		// A client that predates CalDAV pushes feeds with no kind. That means "I don't know about
+		// kinds", not "this is an ICS feed": on update, leave the CalDAV identity of the stored row
+		// alone rather than letting a rename from an old phone orphan the calendar everywhere.
+		identity := `kind = excluded.kind, account_id = excluded.account_id, read_only = excluded.read_only,`
+		if f.Kind == "" {
+			identity = ``
+		}
 		_, err := tx.Exec(s.rebind(
-			`INSERT INTO calendar_feeds (id, user_id, name, url, ics_text, color, created_at, updated_at, deleted_at, version, server_seq)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO calendar_feeds (id, user_id, name, kind, account_id, read_only, url, ics_text, color, created_at, updated_at, deleted_at, version, server_seq)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT (id) DO UPDATE SET
-			   name = excluded.name, url = excluded.url, ics_text = excluded.ics_text, color = excluded.color,
+			   name = excluded.name, `+identity+`
+			   url = excluded.url, ics_text = excluded.ics_text, color = excluded.color,
 			   updated_at = excluded.updated_at, deleted_at = excluded.deleted_at,
 			   version = excluded.version, server_seq = excluded.server_seq;`),
-			f.ID, uid, f.Name, f.URL, nullStr(f.ICSText), f.Color,
+			f.ID, uid, f.Name, feedKind(&f), nullStr(f.AccountID), boolToInt(f.ReadOnly), f.URL, nullStr(f.ICSText), f.Color,
 			f.CreatedAt.UTC().Format(timeFormat), updatedAt.Format(timeFormat), deletedAt, version, seq)
 		return err
 	},
@@ -66,17 +74,30 @@ var calendarFeedHandler = &entityHandler{
 	},
 }
 
+// feedKind defaults a feed pushed by a pre-CalDAV client (no kind on the wire) to an ICS
+// subscription, which is all such a client can create.
+func feedKind(f *domain.CalendarFeed) string {
+	if f.Kind == "" {
+		return domain.FeedKindICS
+	}
+	return f.Kind
+}
+
 func scanServerFeed(sc rowScanner) (*domain.CalendarFeed, int64, error) {
 	var (
-		f                    domain.CalendarFeed
-		icsText, color       sql.NullString
-		deletedAt            sql.NullString
-		createdAt, updatedAt string
-		seq                  int64
+		f                         domain.CalendarFeed
+		accountID, icsText, color sql.NullString
+		deletedAt                 sql.NullString
+		createdAt, updatedAt      string
+		readOnly, seq             int64
 	)
-	if err := sc.Scan(&f.ID, &f.Name, &f.URL, &icsText, &color, &createdAt, &updatedAt, &deletedAt, &f.Version, &seq); err != nil {
+	if err := sc.Scan(&f.ID, &f.Name, &f.Kind, &accountID, &readOnly, &f.URL, &icsText, &color, &createdAt, &updatedAt, &deletedAt, &f.Version, &seq); err != nil {
 		return nil, 0, err
 	}
+	if accountID.Valid {
+		f.AccountID = &accountID.String
+	}
+	f.ReadOnly = readOnly != 0
 	if icsText.Valid {
 		f.ICSText = &icsText.String
 	}

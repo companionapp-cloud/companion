@@ -5,6 +5,10 @@ interface Props {
   tone?: "sunken" | "card";
 }
 
+/** Where every app link goes: the docs page that says how to get Companion on each platform
+ *  (and what to use until a platform's app ships). */
+const GET_APPS_HREF = "/docs/getting-the-apps";
+
 const PRODUCTS = [
   "Companion for Mac",
   "Companion for iPhone",
@@ -33,7 +37,7 @@ export function SiteFooter({ tone = "sunken" }: Props) {
         <div className="col">
           <div className="col-title">Products</div>
           {PRODUCTS.map((label) => (
-            <a key={label} href="/">
+            <a key={label} href={GET_APPS_HREF}>
               {label}
             </a>
           ))}

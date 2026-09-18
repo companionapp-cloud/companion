@@ -28,7 +28,8 @@ apps/desktop/frontend  (Vite + react-native-web)
   codegen/npm-runtime step.)
 - The core runs **natively** in the Go process (modernc SQLite) — no wasm on
   desktop. SQLite lives at `<user-config-dir>/Companion/companion.db`
-  (macOS: `~/Library/Application Support/Companion/companion.db`).
+  (macOS: `~/Library/Application Support/Companion/companion.db`), or under
+  `Companion Dev/` for a dev build (see below).
 
 ## Run it
 
@@ -41,6 +42,19 @@ WebKit/WebView window) and the platform webview toolchain that Wails needs.
 
 `make desktop-run`/`make desktop` build the react-native-web frontend into
 `frontend/dist` first; the Go binary embeds it. Re-run after changing UI code.
+
+A dev build (anything built without `DESKTOP_VERSION`) is a separate app from an
+installed release, so it can run next to your real Companion without touching it:
+
+- The database and everything beside it (blobs, secrets, shortcuts, agent working
+  dirs) live in `Companion Dev/` instead of `Companion/`, starting empty. Migrations
+  from a branch never land in the release's database.
+- It takes its own single-instance lock, so launching it isn't handed off to the
+  release sitting in the menu bar.
+- `make desktop-app` bundles it as "Companion Dev" (`com.companion.desktop.dev`).
+  WebKit keys localStorage (the sync config) by bundle id, so that's separate too,
+  as are its notification permission and login item. `make desktop-run` runs
+  unbundled, which WebKit already keys by executable name.
 
 ## Install a release (Homebrew)
 
@@ -85,9 +99,10 @@ Only stable releases install. Tags like `v1.2.3-rc1` are published as prerelease
 and the updater skips them. The release workflow stamps the version into the binary
 (`-ldflags "-X main.version=<tag>"`); dev builds have none and never update.
 
-To watch it work, build an app that thinks it's old. Quit any running Companion first,
-or the single-instance lock hands the launch to that one. The app replaces itself with
-the latest release:
+To watch it work, build an app that thinks it's old. With a version stamped it's a
+release build, so it opens your real `Companion/` data (and runs this branch's
+migrations on it). Quit any running Companion first, or the single-instance lock hands
+the launch to that one. The app replaces itself with the latest release:
 
 ```bash
 make desktop-app DESKTOP_VERSION=0.0.1

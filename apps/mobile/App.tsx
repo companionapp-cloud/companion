@@ -47,7 +47,9 @@ function Root() {
       // Shared with the background reminder task; don't close on unmount (the OS reclaims
       // the core on process teardown, and closing would break a task running in this
       // process).
-      setBridge(openCore());
+      const core = openCore();
+      configureGoogleSignIn(core);
+      setBridge(core);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -122,6 +124,20 @@ function Root() {
       </SyncProvider>
     </CoreProvider>
   );
+}
+
+// Google sign-in (PLAN-caldav.md §9). The client id is this platform's own — Google issues a
+// separate one for iOS and for Android — and is inlined at build time from EXPO_PUBLIC_* env. iOS
+// and Android clients have no secret, and cannot use a loopback redirect: Google sends the user
+// back to the app's reversed-client-id scheme (com.googleusercontent.apps.<id>:/oauth2redirect),
+// which therefore has to be registered under `scheme` in app.json, followed by an `expo prebuild`.
+// The redirect then reaches the shared flow (packages/app/src/oauthFlow.ts) as a deep link. Unset,
+// Google is simply not offered. Best effort: a failure here must never stop the app starting.
+function configureGoogleSignIn(core: { invoke: (method: string, payload?: unknown) => Promise<unknown> }) {
+  const clientId = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID;
+  const redirectUri = process.env.EXPO_PUBLIC_GOOGLE_REDIRECT_URI;
+  if (!clientId || !redirectUri) return;
+  void core.invoke('oauth.configure', { provider: 'google', clientId, redirectUri }).catch(() => undefined);
 }
 
 // parseResetUrl extracts a reset deep link's token + server API base from an opened URL, or null.

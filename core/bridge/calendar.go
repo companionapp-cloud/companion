@@ -16,6 +16,10 @@ import (
 // subscribes to both (PLAN §6.7).
 const calendarChangedEvent = "calendar.changed"
 
+// calendarConflictEvent reports edits the provider refused because the event had changed there
+// (PLAN-caldav.md §0). The provider's copy has already been adopted; the UI just says so.
+const calendarConflictEvent = "calendar.conflict"
+
 func (c *Core) emitCalendarChanged(id string) {
 	c.emit(calendarChangedEvent, nil)
 	c.emitDataChanged("calendar_feed", id)
@@ -82,6 +86,11 @@ func (c *Core) calendarRefresh() ([]byte, error) {
 	if err := c.fetchFeeds(); err != nil {
 		return nil, err
 	}
+	// CalDAV accounts: push what is pending, pull what changed (native only; a no-op on web,
+	// which relies on a native client to do it and receives the result through sync).
+	if _, err := c.syncCalDAV(false); err != nil {
+		return nil, err
+	}
 	if c.sync.baseURL == "" {
 		c.emitCalendarChanged("")
 		return json.Marshal(map[string]bool{"ok": true, "synced": false})
@@ -105,6 +114,9 @@ func (c *Core) fetchFeeds() error {
 	}
 	now := time.Now().UTC()
 	for _, f := range feeds {
+		if f.IsCalDAV() {
+			continue // synced by the CalDAV engine, not fetched as a feed body
+		}
 		var body []byte
 		switch {
 		case f.ICSText != nil && strings.TrimSpace(*f.ICSText) != "":

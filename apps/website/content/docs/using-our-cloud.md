@@ -2,7 +2,7 @@
 title: Using our cloud
 group: Companion Cloud & sync
 groupIcon: refresh
-groupOrder: 3
+groupOrder: 4
 order: 1
 excerpt: Create an account, sync every device, and keep your notes unreadable to us.
 featured: true

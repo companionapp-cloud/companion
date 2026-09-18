@@ -31,11 +31,16 @@ const (
 	EntityAgent = "agent"
 	// A read receipt for one in-app notification fire (PLAN §6.4).
 	EntityNotificationRead = "notification_read"
-	// A user-authored ICS subscription (PLAN §6.7). Feeds sync bidirectionally.
+	// One calendar (PLAN §6.7): an ICS subscription or a CalDAV collection. Syncs bidirectionally.
 	EntityCalendarFeed = "calendar_feed"
-	// A server-cloned event occurrence (PLAN §6.7). Server-owned: clients only ever
-	// pull these; they are never pushed.
+	// One expanded event occurrence (PLAN §6.7, §E2EE). Derived on-device from ICS and pushed
+	// encrypted like any entity.
 	EntityCalendarEvent = "calendar_event"
+	// A CalDAV login, and one calendar object resource of a CalDAV calendar (PLAN-caldav.md).
+	// Both sync so any native device can write changes back to the provider; the server stores
+	// them as opaque bodies and never contacts the provider itself.
+	EntityCalendarAccount = "calendar_account"
+	EntityCalendarObject  = "calendar_object"
 	// A canvas board, its nodes, and its edges (PLAN-canvases.md). Three row types so two
 	// devices editing different nodes of one board merge per row instead of forking.
 	EntityCanvas     = "canvas"

@@ -37,6 +37,10 @@ type Store struct {
 	// read-only clones of their expanded occurrences (PLAN §6.7).
 	CalendarFeeds  *CalendarFeedsRepo
 	CalendarEvents *CalendarEventsRepo
+	// CalendarAccounts are CalDAV logins; CalendarObjects are the verbatim event resources of
+	// their calendars and double as the write-back queue (PLAN-caldav.md).
+	CalendarAccounts *CalendarAccountsRepo
+	CalendarObjects  *CalendarObjectsRepo
 	// Canvases are 2D boards (PLAN-canvases.md): the board row, its nodes, and its edges.
 	Canvases    *CanvasesRepo
 	CanvasNodes *CanvasNodesRepo
@@ -94,6 +98,8 @@ func New(d Driver, clock domain.Clock) (*Store, error) {
 	// events repo also serves the merged Range view every calendar UI reads (PLAN §6.7).
 	s.CalendarFeeds = &CalendarFeedsRepo{db: d, clock: clock}
 	s.CalendarEvents = &CalendarEventsRepo{db: d, clock: clock}
+	s.CalendarAccounts = &CalendarAccountsRepo{db: d, clock: clock}
+	s.CalendarObjects = &CalendarObjectsRepo{db: d, clock: clock}
 	// Canvases: nodes that embed a note/task/document mirror 'canvas' edges into the link index.
 	s.Canvases = &CanvasesRepo{db: d, clock: clock, links: s.Links}
 	s.CanvasNodes = &CanvasNodesRepo{db: d, clock: clock, links: s.Links}

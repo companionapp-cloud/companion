@@ -2,10 +2,17 @@
 // resize handlers that act on elements marked `--wails-draggable: drag` (our rail
 // and toolbar). No-ops outside the Wails webview.
 import "@wailsio/runtime";
-import { Window } from "@wailsio/runtime";
+import { Browser, Window } from "@wailsio/runtime";
 import { Fragment, createElement } from "react";
 import { AppRegistry } from "react-native";
-import { App, setFocusWindowOpener, setCaptureWindowCloser, setTableMenuPresenter, setShortcutStore } from "@companion/app";
+import {
+  App,
+  setExternalUrlOpener,
+  setFocusWindowOpener,
+  setCaptureWindowCloser,
+  setTableMenuPresenter,
+  setShortcutStore,
+} from "@companion/app";
 import type { ShortcutBinding, ShortcutId, WindowControls } from "@companion/app";
 import { createHttpBridge, documentsApi } from "@companion/core-bridge";
 import type { CoreBridge } from "@companion/core-bridge";
@@ -24,6 +31,12 @@ if (typeof window !== "undefined" && (window as unknown as { _wails?: unknown })
     if (getComputedStyle(el).getPropertyValue("--wails-draggable").trim() !== "drag") return;
     void Window.ToggleMaximise();
   });
+}
+
+// OAuth sign-in (Google) has to open in the system browser, not this webview; inside Wails that
+// is the runtime's job. Outside it (a plain browser hitting the dev server) keep the default.
+if (typeof window !== "undefined" && (window as unknown as { _wails?: unknown })._wails) {
+  setExternalUrlOpener((url) => Browser.OpenURL(url).then(() => undefined));
 }
 
 // Quick-capture window (main.go opens /?capture=1 in a frameless, transparent window on the

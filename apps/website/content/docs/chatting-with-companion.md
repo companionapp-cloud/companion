@@ -2,7 +2,7 @@
 title: Chatting with Companion
 group: Made for AI
 groupIcon: chat
-groupOrder: 4
+groupOrder: 5
 order: 1
 excerpt: Install an agent — an AI tool on your computer or a cloud API — and let it work inside your notes.
 featured: true

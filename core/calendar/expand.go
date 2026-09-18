@@ -44,13 +44,35 @@ func ParseAndExpand(r io.Reader, feedID string, now time.Time) ([]*domain.Calend
 	windowStart := now.Add(-Window)
 	windowEnd := now.Add(Window)
 
+	// A RECURRENCE-ID override replaces one occurrence of its series. Collect the instants each
+	// UID overrides so the master skips them — otherwise a moved meeting shows up twice, once where
+	// it was and once where it went.
+	events := cal.Events()
+	overridden := map[string][]time.Time{}
+	for i := range events {
+		if rid, ok := recurrenceID(&events[i]); ok {
+			uid := propText(&events[i], ical.PropUID)
+			overridden[uid] = append(overridden[uid], rid)
+		}
+	}
+
 	var out []*domain.CalendarEvent
-	for _, ev := range cal.Events() {
+	for _, ev := range events {
 		base, allDay, dur, rrl, err := parseEvent(&ev)
 		if err != nil {
 			continue
 		}
-		starts := expandStarts(base, rrl, exDates(&ev), windowStart, windowEnd)
+		excluded := exDates(&ev)
+		if _, isOverride := recurrenceID(&ev); isOverride {
+			// An override is a single concrete occurrence; a cancelled one is just a hole.
+			if status, _ := ev.Status(); status == ical.EventCancelled {
+				continue
+			}
+			rrl = ""
+		} else {
+			excluded = append(excluded, overridden[propText(&ev, ical.PropUID)]...)
+		}
+		starts := expandStarts(base, rrl, excluded, windowStart, windowEnd)
 		for _, st := range starts {
 			out = append(out, buildOccurrence(feedID, &ev, st, dur, allDay))
 		}

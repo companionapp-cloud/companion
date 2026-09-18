@@ -24,7 +24,9 @@ import {
   type DiscoveredAgent,
   type InstallAgentInput,
 } from "@companion/core-bridge";
+import { useDialogKeys } from "./ConfirmDialog";
 import { useCore } from "./CoreContext";
+import { Dialog } from "./Dialog";
 import { CheckBox, Segmented, SettingsField, SettingsNote } from "./settingsUi";
 
 // Settings › AI (PLAN-agents.md §6.1). Agents are installed, not configured: local tools found
@@ -40,7 +42,7 @@ type CloudKind = "anthropic-api" | "openai-api";
 const WEBSITE_URL = "https://companionapp.cloud";
 const GET_APPS_URL = `${WEBSITE_URL}/docs/getting-the-apps`;
 
-/** AgentsSettings lists the installed agents and hosts the Add-agent flow. */
+/** AgentsSettings lists the installed agents; "Add agent" opens the add flow in a dialog. */
 export function AgentsSettings() {
   const { agents } = useCore();
   const [list, setList] = useState<Agent[] | null>(null);
@@ -82,6 +84,14 @@ export function AgentsSettings() {
 
       <Divider />
 
+      <View style={{ flexDirection: "row" }}>
+        <Button
+          label="Add agent"
+          onPress={() => setAdding(true)}
+          icon={<Icon name="plus" size={icon.sm} color={colors.onAccent} />}
+        />
+      </View>
+
       {adding ? (
         <AddAgent
           onDone={() => {
@@ -91,15 +101,7 @@ export function AgentsSettings() {
           onCancel={() => setAdding(false)}
           installedCount={list?.length ?? 0}
         />
-      ) : (
-        <View style={{ flexDirection: "row" }}>
-          <Button
-            label="Add agent"
-            onPress={() => setAdding(true)}
-            icon={<Icon name="plus" size={icon.sm} color={colors.onAccent} />}
-          />
-        </View>
-      )}
+      ) : null}
     </View>
   );
 }
@@ -293,36 +295,40 @@ function AddAgent({ onDone, onCancel, installedCount }: { onDone: () => void; on
     }
   };
 
-  if (tab === null) {
-    return (
-      <View style={styles.inline}>
-        <Spinner inline size={12} />
-        <SettingsNote>Looking for AI tools on this computer…</SettingsNote>
-      </View>
-    );
-  }
+  // esc closes. ⏎ is left alone: each tab has its own submit (or, for found tools, one Install
+  // button per row), so there is no single thing for it to mean here.
+  const hints = useDialogKeys({ onEscape: onCancel });
 
+  // A dialog (PLAN-agents.md §6.1): the flow is three tabs deep and taller than the page that
+  // opens it, and it is a detour from the list, not part of it. The body scrolls; Cancel stays put.
   return (
-    <View style={styles.stack}>
-      <View style={styles.inline}>
-        <Text variant="eyebrow" tone="quaternary">
-          Add an agent
-        </Text>
-        <View style={{ flex: 1 }} />
-        <Button label="Cancel" variant="ghost" size="sm" onPress={onCancel} />
-      </View>
-      <Segmented options={tabs} value={tab} onChange={setTab} />
-      {tab === "local" && !canHost ? (
-        <DesktopNeededTab installedCount={installedCount} />
-      ) : tab === "local" ? (
-        <LocalTab found={found ?? []} scanning={scanning} onRescan={scan} onInstall={install} />
-      ) : tab === "cloud" ? (
-        <CloudTab onInstall={install} />
+    <Dialog
+      title="Add an agent"
+      width={520}
+      onClose={onCancel}
+      footer={<Button label="Cancel" variant="ghost" kbd={hints ? "esc" : undefined} onPress={onCancel} />}
+    >
+      {tab === null ? (
+        <View style={styles.inline}>
+          <Spinner inline size={12} />
+          <SettingsNote>Looking for AI tools on this computer…</SettingsNote>
+        </View>
       ) : (
-        <AdvancedTab onInstall={install} />
+        <>
+          <Segmented fill options={tabs} value={tab} onChange={setTab} />
+          {tab === "local" && !canHost ? (
+            <DesktopNeededTab installedCount={installedCount} />
+          ) : tab === "local" ? (
+            <LocalTab found={found ?? []} scanning={scanning} onRescan={scan} onInstall={install} />
+          ) : tab === "cloud" ? (
+            <CloudTab onInstall={install} />
+          ) : (
+            <AdvancedTab onInstall={install} />
+          )}
+          {error ? <SettingsNote tone="danger">{error}</SettingsNote> : null}
+        </>
       )}
-      {error ? <SettingsNote tone="danger">{error}</SettingsNote> : null}
-    </View>
+    </Dialog>
   );
 }
 

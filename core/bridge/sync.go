@@ -108,6 +108,9 @@ func (c *Core) syncRun() ([]byte, error) {
 		payload, _ := json.Marshal(noteConflictInfo(pc))
 		c.emit(notesConflictEvent, payload)
 	}
+	// Calendar changes made where the provider is unreachable (web) arrive here as pending rows;
+	// a native client pushes them on (PLAN-caldav.md §0). No-op on web and when nothing is pending.
+	c.pushCalDAVAfterSync()
 	// Presence piggybacks on the sync cadence: who is online decides which hosted agents the
 	// composer lets you pick. Best effort and off the critical path.
 	if c.relay != nil {
