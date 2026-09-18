@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"companion/core/agents"
 	"companion/core/blob"
@@ -72,6 +73,11 @@ type Core struct {
 	// stop a runaway CLI; guarded by chatMu.
 	chatMu  sync.Mutex
 	working map[string]context.CancelFunc
+
+	// calPushTimer debounces the provider push after the assistant edits calendar events
+	// (aitools.go); guarded by calPushMu.
+	calPushMu    sync.Mutex
+	calPushTimer *time.Timer
 
 	// masterKey is the unlocked end-to-end encryption key (PLAN §E2EE): non-nil means the store
 	// is unlocked and sync transparently encrypts/decrypts; nil means locked or a plaintext

@@ -400,3 +400,43 @@ func TestRescanAdoptsOrphansAndCollapsesDuplicates(t *testing.T) {
 		t.Fatalf("a second rescan changed things: %+v", again)
 	}
 }
+
+// A project that held a copy the rescan collapses keeps the calendar: its membership moves to
+// the copy that survives (PLAN §6.6), and the project's calendar still shows the events once.
+func TestRescanKeepsACollapsedCopyInItsProjects(t *testing.T) {
+	s := caldavtest.New("sam", "pw")
+	defer s.Close()
+	cal := s.AddCalendar("work", "Work", "", false)
+	s.PutObject(cal, "a.ics", eventICS("a", "Planning", soon(24)))
+	d := newDevice(t, s)
+	d.sync()
+	acct, _ := d.st.CalendarAccounts.List()
+
+	// A second copy of the same calendar, filed in a project; the rescan keeps the original.
+	dup, err := d.st.CalendarFeeds.Create(store.CreateFeedInput{Name: "Work", URL: cal, Kind: domain.FeedKindCalDAV, AccountID: &acct[0].ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const project = "project-1"
+	if _, err := d.st.ProjectMembers.Add(project, domain.MemberCalendar, dup.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := d.engine.SyncCalendars(ctx, d.client, acct[0]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.st.CalendarFeeds.Get(dup.ID); err == nil {
+		t.Fatalf("setup: the rescan should have dropped the duplicate")
+	}
+	members, _ := d.st.ProjectMembers.ListForProject(project)
+	if len(members) != 1 || members[0].EntityID != d.feed.ID {
+		t.Fatalf("the project should hold the surviving copy, got %+v", members)
+	}
+	items, err := d.st.CalendarEvents.RangeForProject(time.Now().AddDate(0, -1, 0), time.Now().AddDate(0, 1, 0), project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Title != "Planning" {
+		t.Fatalf("the project's calendar should show the event once, got %+v", items)
+	}
+}

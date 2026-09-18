@@ -236,9 +236,26 @@ type memberArgs struct {
 	EntityID   string `json:"entityId"`
 }
 
+// checkMemberTarget refuses to file a calendar, or a calendar account, that isn't here (a picker
+// left open while it was removed on another device). Content members are not checked: a dangling
+// one is tolerated like any dangling reference (PLAN §6.6).
+func (c *Core) checkMemberTarget(entityType, entityID string) error {
+	var err error
+	switch entityType {
+	case domain.MemberCalendar:
+		_, err = c.store.CalendarFeeds.Get(entityID)
+	case domain.MemberCalendarAccount:
+		_, err = c.store.CalendarAccounts.Get(entityID)
+	}
+	return mapStoreErr(err)
+}
+
 func (c *Core) projectsAddMember(payload []byte) ([]byte, error) {
 	var args memberArgs
 	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	if err := c.checkMemberTarget(args.EntityType, args.EntityID); err != nil {
 		return nil, err
 	}
 	m, err := c.store.ProjectMembers.Add(args.ProjectID, args.EntityType, args.EntityID)
@@ -260,6 +277,11 @@ func (c *Core) projectsAddMembers(payload []byte) ([]byte, error) {
 	}
 	if err := unmarshal(payload, &args); err != nil {
 		return nil, err
+	}
+	for _, id := range args.EntityIDs {
+		if err := c.checkMemberTarget(args.EntityType, id); err != nil {
+			return nil, err
+		}
 	}
 	members, err := c.store.ProjectMembers.AddMany(args.ProjectID, args.EntityType, args.EntityIDs)
 	if err != nil {

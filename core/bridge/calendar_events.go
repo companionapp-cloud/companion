@@ -112,26 +112,37 @@ func (c *Core) calendarEventsCreate(payload []byte) ([]byte, error) {
 	if err := unmarshal(payload, &args); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(args.Title) == "" {
-		return nil, errors.New("a title is required")
-	}
-	feed, err := c.writableFeed(args.FeedID)
+	eventID, err := c.createEvent(args.FeedID, args.EventFields)
 	if err != nil {
 		return nil, err
+	}
+	return json.Marshal(map[string]any{"ok": true, "eventId": eventID})
+}
+
+// createEvent adds an event to a writable calendar as a pending object whose occurrences show at
+// once, and returns the id of its first occurrence. The calendar UI and the assistant's
+// create_event both come through here.
+func (c *Core) createEvent(feedID string, f calendar.EventFields) (string, error) {
+	if strings.TrimSpace(f.Title) == "" {
+		return "", errors.New("a title is required")
+	}
+	feed, err := c.writableFeed(feedID)
+	if err != nil {
+		return "", err
 	}
 	uid := calendar.NewUID()
-	ics, err := calendar.NewObject(uid, args.EventFields, time.Now())
+	ics, err := calendar.NewObject(uid, f, time.Now())
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	o := &domain.CalendarObject{
 		ID: calendar.ObjectID(feed.ID, uid), FeedID: feed.ID, UID: uid, ICS: ics,
 		PushState: domain.PushPendingCreate,
 	}
 	if err := c.saveObject(o); err != nil {
-		return nil, err
+		return "", err
 	}
-	return json.Marshal(map[string]any{"ok": true, "eventId": calendar.EventID(feed.ID, uid, args.StartsAt)})
+	return calendar.EventID(feed.ID, uid, f.StartsAt), nil
 }
 
 // objectForEvent resolves an occurrence id to its (writable) calendar object.
@@ -153,8 +164,10 @@ func (c *Core) objectForEvent(eventID string) (*domain.CalendarEvent, *domain.Ca
 	return ev, o, nil
 }
 
-// calendarEventsGet returns what the editor needs beyond what calendar.range already gave it: the
-// event's repeat rule. Works for read-only events too (the detail view can show "repeats weekly").
+// calendarEventsGet returns what the editor needs beyond what calendar.range already gave it — the
+// event's repeat rule — and, for surfaces that start from nothing but an id (a chat preview), the
+// event itself as calendar.range shows it plus its calendar's name. Works for read-only events too
+// (the detail view can show "repeats weekly").
 func (c *Core) calendarEventsGet(payload []byte) ([]byte, error) {
 	var args struct {
 		ID string `json:"id"`
@@ -172,6 +185,12 @@ func (c *Core) calendarEventsGet(payload []byte) ([]byte, error) {
 			out["repeat"] = info.Repeat
 		}
 	}
+	if item, err := c.store.CalendarEvents.Item(ev.ID); err == nil {
+		out["item"] = item
+		if feed, err := c.store.CalendarFeeds.Get(item.FeedID); err == nil {
+			out["calendarName"] = feed.Name
+		}
+	}
 	return json.Marshal(out)
 }
 
@@ -183,19 +202,29 @@ func (c *Core) calendarEventsUpdate(payload []byte) ([]byte, error) {
 	if err := unmarshal(payload, &args); err != nil {
 		return nil, err
 	}
-	if args.Title != nil && strings.TrimSpace(*args.Title) == "" {
-		return nil, errors.New("a title is required")
-	}
-	ev, o, err := c.objectForEvent(args.ID)
-	if err != nil {
+	if _, err := c.updateEvent(args.ID, args.EventPatch); err != nil {
 		return nil, err
+	}
+	return json.Marshal(map[string]bool{"ok": true})
+}
+
+// updateEvent applies a patch to the event an occurrence belongs to and returns the edited
+// occurrence's id — a new one when the patch moved it, since occurrence ids are derived from their
+// start. The calendar UI and the assistant's update_event both come through here.
+func (c *Core) updateEvent(eventID string, p calendar.EventPatch) (string, error) {
+	if p.Title != nil && strings.TrimSpace(*p.Title) == "" {
+		return "", errors.New("a title is required")
+	}
+	ev, o, err := c.objectForEvent(eventID)
+	if err != nil {
+		return "", err
 	}
 	// The UI edits the occurrence it shows; for a repeating event the core turns that into a
 	// change to the whole series, and needs to know which occurrence it was.
-	args.EventPatch.OccurrenceStart = &ev.StartsAt
-	ics, err := calendar.ApplyEdit(o.ICS, args.EventPatch, time.Now())
+	p.OccurrenceStart = &ev.StartsAt
+	ics, err := calendar.ApplyEdit(o.ICS, p, time.Now())
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	o.ICS = ics
 	// An object the provider has never seen is still a create, however often it is edited.
@@ -203,9 +232,19 @@ func (c *Core) calendarEventsUpdate(payload []byte) ([]byte, error) {
 		o.PushState = domain.PushPendingUpdate
 	}
 	if err := c.saveObject(o); err != nil {
-		return nil, err
+		return "", err
 	}
-	return json.Marshal(map[string]bool{"ok": true})
+	if p.StartsAt != nil {
+		if moved := calendar.EventID(ev.FeedID, ev.ICSUID, *p.StartsAt); moved != ev.ID {
+			if _, err := c.store.CalendarEvents.GetLive(moved); err == nil {
+				return moved, nil
+			}
+		}
+	}
+	if _, err := c.store.CalendarEvents.GetLive(ev.ID); err == nil {
+		return ev.ID, nil
+	}
+	return "", nil // moved somewhere its id can't be predicted; callers look it up again
 }
 
 // calendarEventsDelete removes an event. For a repeating event scope decides between this one

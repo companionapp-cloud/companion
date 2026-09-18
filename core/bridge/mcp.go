@@ -2,7 +2,6 @@ package bridge
 
 import (
 	"companion/core/domain"
-	"companion/core/llm"
 	"companion/core/mcp"
 
 	"companion/core/agents"
@@ -17,7 +16,7 @@ func (c *Core) mcpEndpointFor(agent *domain.Agent) *agents.MCPEndpoint {
 	c.chatMu.Lock()
 	defer c.chatMu.Unlock()
 	if c.mcp == nil {
-		srv := mcp.New(llm.NewStoreRegistry(c.store), nil)
+		srv := mcp.New(c.toolRegistry(), nil)
 		// A write through MCP is a write like any other: refresh open views.
 		srv.SetWriteHook(func(string) { c.emitDataChanged("", "") })
 		if _, err := srv.Start(); err != nil {

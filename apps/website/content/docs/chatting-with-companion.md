@@ -40,11 +40,13 @@ On an [end-to-end encrypted account](/docs/using-our-cloud), a cloud agent's API
 
 ## What it can see and do
 
-The chat can read your workspace: it searches notes, lists tasks and projects, follows links and backlinks, reads a note in full, and queries [object types](/docs/object-types) by their fields. Claude Code and Codex get the same tools from the desktop app.
+The chat can read your workspace: it searches notes, lists tasks and projects, follows links and backlinks, reads a note in full, and queries [object types](/docs/object-types) by their fields. It reads your calendar too — events, plus the tasks due and daily notes on each day — and your canvases, card by card, with the groups and arrows between them. Claude Code and Codex get the same tools from the desktop app.
+
+When it points you to something, it shows it right in the chat instead of pasting it: a note, a task you can tick off there, an event, a miniature of a canvas, or a graph of everything linked to a note or task. Click one to open it.
 
 Two switches on each agent decide what else it may do:
 
-- **Write tools** — create and edit notes and tasks. On by default; off, the agent can only read and search.
+- **Write tools** — create and edit notes, tasks and calendar events. On by default; off, the agent can only read and search. Events can go in any calendar of an account you've connected — Google, iCloud or another CalDAV server — but not in subscriptions, which are read-only. A change shows on your calendar at once and reaches your provider moments later.
 - **System access** — Claude Code and Codex only: edit files in the agent's own workspace folder and run commands on your computer. Off by default, and worth leaving off unless you need it — when it's on, that includes turns you start from your phone.
 
 On an encrypted account, the agent reads your workspace on the device that runs it, against local, decrypted data; the sync server only ever holds ciphertext. What you send to a model, though, goes to whoever runs that model, under their terms: Anthropic or OpenAI for the cloud APIs, and for Claude Code and Codex as well, since they call their makers' models with your account. Ollama and LM Studio are the options that keep everything on your own hardware.

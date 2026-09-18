@@ -5,16 +5,22 @@ import { Icon, IconButton, Input, Text, colors, icon, radius, row, shadow, space
 import { useProjects } from "./ProjectsProvider";
 import { Overlay } from "./Overlay";
 
-/** A popover to add/remove an entity (a note today; tasks/habits later) to/from
+/** A popover to add/remove an entity (a note, task or canvas — or a calendar) to/from
  * projects — the "membership edited from either end" picker (PLAN §6.6). Reflects the
  * entity's current memberships as toggles over every project, grouped by area. */
 export function MembershipPicker({
   entityType,
   entityId,
+  subtitle,
+  portal,
   onClose,
 }: {
   entityType: MemberEntityType;
   entityId: string;
+  /** A line under the title saying what filing this entity does. */
+  subtitle?: string;
+  /** Lift the picker to the viewport (web), for hosts inside a scrolling page. */
+  portal?: boolean;
   onClose: () => void;
 }) {
   const { projects, areas, addMember, removeMember, membershipsFor } = useProjects();
@@ -65,7 +71,7 @@ export function MembershipPicker({
   const shown = filterProjects(projects, query);
 
   return (
-    <PickerShell title="Add to projects" onClose={onClose}>
+    <PickerShell title="Add to projects" subtitle={subtitle} portal={portal} onClose={onClose}>
       {projects.length > SEARCH_THRESHOLD ? <PickerSearch placeholder="Search projects" value={query} onChangeText={setQuery} /> : null}
       <ScrollView contentContainerStyle={pickerStyles.body}>
         {projects.length === 0 ? (

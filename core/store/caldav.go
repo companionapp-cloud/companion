@@ -164,6 +164,14 @@ func (r *CalendarAccountsRepo) Delete(id string) error {
 	if _, err := r.db.Exec(`DELETE FROM caldav_feed_state WHERE feed_id IN `+feedsOf+`;`, id); err != nil {
 		return fmt.Errorf("clear account feed state: %w", err)
 	}
+	// The account, and each of its calendars, leave every project they were in (PLAN §6.6).
+	if _, err := r.db.Exec(
+		`UPDATE project_members SET deleted_at = ?, updated_at = ?, dirty = 1
+		 WHERE deleted_at IS NULL
+		   AND ((entity_type = ? AND entity_id = ?) OR (entity_type = ? AND entity_id IN `+feedsOf+`));`,
+		now, now, domain.MemberCalendarAccount, id, domain.MemberCalendar, id); err != nil {
+		return fmt.Errorf("remove account from projects: %w", err)
+	}
 	if _, err := r.db.Exec(
 		`UPDATE calendar_feeds SET deleted_at = ?, updated_at = ?, dirty = 1 WHERE account_id = ? AND deleted_at IS NULL;`, now, now, id); err != nil {
 		return fmt.Errorf("tombstone account feeds: %w", err)

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, Text as RNText, View } from "react-native";
 import {
   Avatar,
@@ -10,7 +10,6 @@ import {
   Icon,
   icon as iconSize,
   IconButton,
-  Input,
   Kbd,
   layout,
   motion,
@@ -26,22 +25,18 @@ import {
   type PressState,
 } from "@companion/design-system";
 import { Editor, type LinkRef, type LinkSource } from "@companion/editor";
-import { runtimeLabel, type Agent, type Chat, type StoredChatMessage } from "@companion/core-bridge";
+import { runtimeLabel, type Agent, type CalendarItem, type Chat, type StoredChatMessage } from "@companion/core-bridge";
+import { itemDay } from "./CalendarAgenda";
+import { useCalendar } from "./CalendarProvider";
+import { OpenEntityContext, OpenEventContext, ThreadLayoutContext } from "./chat/context";
+import { ChatPreview } from "./chat/previews";
+import { previewOf, type Preview } from "./chat/renderTools";
+import { WikiText } from "./chat/WikiText";
 import { useCore } from "./CoreContext";
 import { useLinkSource } from "./useLinkSource";
 import { useNav } from "./nav-context";
 import { timeAgo } from "./NotificationRow";
 import { useSync } from "./SyncProvider";
-
-/** OpenEntityContext lets wikilink chips navigate without threading the shell's navigator
- *  through every component; each shell supplies its own handler. */
-const OpenEntityContext = createContext<((type: string, id: string) => void) | undefined>(undefined);
-
-/** How messages are drawn. "transcript" is the desktop thread — a 640px column of avatar +
- *  mono speaker label + prose, no bubbles. "bubbles" is the touch layout the floating
- *  composer pairs with. */
-type ThreadLayout = "transcript" | "bubbles";
-const ThreadLayoutContext = createContext<ThreadLayout>("transcript");
 
 // ===========================================================================
 // ChatView — the shell-agnostic conversation pane, bound to one persisted chat.
@@ -55,12 +50,16 @@ const ThreadLayoutContext = createContext<ThreadLayout>("transcript");
 export function ChatView({
   chatId,
   onOpenEntity,
+  onOpenEvent,
   onConfigure,
   composer = "bar",
   bottomInset = 0,
 }: {
   chatId: string;
+  /** Opens a note, task, canvas or project from a link chip or an inline preview. */
   onOpenEntity?: (type: string, id: string) => void;
+  /** Opens a calendar event from its inline preview; without it the card shows but doesn't open. */
+  onOpenEvent?: (event: CalendarItem) => void;
   /** Called from the empty state's "Set up in Settings" button; each shell routes to its own
    *  Settings → AI screen. When omitted, the empty state shows guidance only. */
   onConfigure?: () => void;
@@ -74,9 +73,11 @@ export function ChatView({
   const [live, setLive] = useState<{ text: string; actions: ToolAction[] } | null>(null);
   const [configs, setConfigs] = useState<Agent[] | null>(null);
   const [configId, setConfigId] = useState<string | null>(null);
-  // The model is chosen per chat from the agent's live list (fetched when configId changes).
+  // The model is chosen per chat from the agent's live list (fetched below).
   const [model, setModel] = useState<string | null>(null);
   const [models, setModels] = useState<string[] | null>(null);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [modelsTick, setModelsTick] = useState(0);
   // The composer editor is uncontrolled; `draft` mirrors it (for the send button's enabled
   // state) while `draftRef` holds the freshest content for the button's send. Bumping
   // `sendTick` empties the editor after a send.
@@ -118,7 +119,12 @@ export function ChatView({
     setConfigId((cur) => (cur && configs.some((c) => c.id === cur) ? cur : (configs.find((c) => c.isDefault) ?? configs[0]).id));
   }, [configs]);
 
-  // Fetch the chosen agent's live model list whenever it changes.
+  // Fetch the chosen agent's model list when the agent changes, comes online, is edited (a
+  // fixed API key) or the user retries. Coming online matters on a phone: it learns its desktop
+  // host's presence a moment after launch, and until then the host lists nothing.
+  const currentAgent = configs?.find((c) => c.id === configId) ?? null;
+  const agentOnline = currentAgent?.online ?? false;
+  const agentUpdatedAt = currentAgent?.updatedAt;
   useEffect(() => {
     if (!configId) {
       setModels(null);
@@ -126,14 +132,19 @@ export function ChatView({
     }
     let alive = true;
     setModels(null);
+    setModelsError(null);
     agentsApi
       .models(configId)
       .then((m) => alive && setModels(m))
-      .catch(() => alive && setModels([]));
+      .catch((e) => {
+        if (!alive) return;
+        setModels([]);
+        setModelsError(String(e));
+      });
     return () => {
       alive = false;
     };
-  }, [configId, agentsApi]);
+  }, [configId, agentOnline, agentUpdatedAt, modelsTick, agentsApi]);
 
   // Default the model to the first one offered, but keep an already-chosen model even if it's
   // not in the live list (e.g. a config restored from a chat, or an Ollama model not pulled here).
@@ -164,7 +175,10 @@ export function ChatView({
     });
     const offTool = llm.onTool((e) => {
       if (e.chatId !== chatId) return;
-      setLive((cur) => ({ text: cur?.text ?? "", actions: [...(cur?.actions ?? []), { name: e.call.name, isError: !!e.result.isError }] }));
+      setLive((cur) => ({
+        text: cur?.text ?? "",
+        actions: [...(cur?.actions ?? []), { name: e.call.name, isError: !!e.result.isError, args: e.call.args }],
+      }));
     });
     const offError = llm.onError((e) => {
       if (e.chatId === chatId) setError(e.error);
@@ -179,7 +193,6 @@ export function ChatView({
   }, [chats, llm, chatId, reload]);
 
   const hasProvider = (configs?.length ?? 0) > 0;
-  const currentAgent = configs?.find((c) => c.id === configId) ?? null;
   // A local agent hosted by another device is only usable while that host is reachable.
   const hostOffline = !!currentAgent && !!currentAgent.hostDeviceId && !currentAgent.online;
   const canSend = hasProvider && !!model && !hostOffline;
@@ -225,7 +238,8 @@ export function ChatView({
   const threadRows: ReactNode[] = [];
   items.forEach((it, i) => threadRows.push(<ChatItem key={`m${i}`} item={it} />));
   if (live || working) {
-    (live?.actions ?? []).forEach((a, i) => threadRows.push(<ActionLine key={`la${i}`} action={a} />));
+    // Tools the run has used so far — a render tool's preview shows as soon as it's called.
+    (live?.actions ?? []).forEach((a, i) => threadRows.push(<ChatItem key={`la${i}`} item={toolItem(a)} />));
     threadRows.push(
       <Message key="live" role="assistant" working>
         {live?.text ? <WikiText value={live.text} /> : <RNText style={styles.thinking}>Thinking…</RNText>}
@@ -243,11 +257,15 @@ export function ChatView({
       models={models}
       model={model}
       onPickModel={setModel}
+      modelsFailed={modelsError !== null}
+      hostOffline={hostOffline}
+      onRetryModels={() => setModelsTick((t) => t + 1)}
     />
   );
 
   return (
     <OpenEntityContext.Provider value={onOpenEntity}>
+      <OpenEventContext.Provider value={onOpenEvent}>
       <ThreadLayoutContext.Provider value={floating ? "bubbles" : "transcript"}>
         <View style={styles.root}>
           {/* Desktop thread header: the chat title and the mono model line, which is also
@@ -290,6 +308,10 @@ export function ChatView({
           ) : hostOffline && currentAgent ? (
             <Text variant="caption" tone="tertiary" style={styles.error}>
               {currentAgent.hostName || "The computer hosting this agent"} is offline. {currentAgent.name} will be available when it’s back.
+            </Text>
+          ) : modelsError ? (
+            <Text variant="caption" tone="danger" style={styles.error}>
+              {modelsError}
             </Text>
           ) : null}
 
@@ -342,6 +364,7 @@ export function ChatView({
             ))}
         </View>
       </ThreadLayoutContext.Provider>
+      </OpenEventContext.Provider>
     </OpenEntityContext.Provider>
   );
 }
@@ -561,7 +584,19 @@ export function ChatsScreen() {
   );
 
   const noProvider = configs !== null && configs.length === 0;
-  const onOpen = (type: string, id: string) => (type === "task" ? nav.openTask(id) : nav.openNote(id));
+  const onOpen = (type: string, id: string) => {
+    if (type === "task") nav.openTask(id);
+    else if (type === "canvas") nav.openCanvas(id);
+    else if (type === "project") nav.openProject(id);
+    else nav.openNote(id);
+  };
+  // An event opens the calendar on its week: the grid starts from the view state's anchor.
+  const { setViewState: setCalendarView } = useCalendar();
+  const openEvent = (event: CalendarItem) => {
+    const [y, m, d] = itemDay(event).split("-").map(Number);
+    setCalendarView({ anchorMs: new Date(y, m - 1, d).getTime() });
+    nav.goView("calendar");
+  };
   const openSettings = () => nav.goView("settings");
 
   // Rendered directly (no Frame) — the AppShell already wraps every screen in a Frame card,
@@ -578,7 +613,7 @@ export function ChatsScreen() {
     >
       <View style={styles.detail}>
         {selectedId ? (
-          <ChatView chatId={selectedId} onOpenEntity={onOpen} onConfigure={openSettings} />
+          <ChatView chatId={selectedId} onOpenEntity={onOpen} onOpenEvent={openEvent} onConfigure={openSettings} />
         ) : (
           <View style={styles.center}>
             <Text variant="caption" tone="tertiary" style={styles.hint}>
@@ -593,19 +628,27 @@ export function ChatsScreen() {
 
 // --- display model ---------------------------------------------------------
 
-type ToolAction = { name: string; isError: boolean };
+type ToolAction = { name: string; isError: boolean; args?: unknown };
 type DisplayItem =
   | { type: "user"; text: string }
   | { type: "assistant"; text: string }
   | { type: "action"; name: string; isError: boolean }
-  | { type: "note"; noteId: string };
+  | { type: "preview"; preview: Preview };
 
 function asArray<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
 }
 
+/** A tool call as the thread shows it: the inline preview a render tool asked for, or else a
+ *  quiet action line (a render tool that failed included — its preview would have nothing to
+ *  show). */
+function toolItem(action: ToolAction): DisplayItem {
+  const preview = action.isError ? null : previewOf(action.name, action.args);
+  return preview ? { type: "preview", preview } : { type: "action", name: action.name, isError: action.isError };
+}
+
 /** flatten turns the stored transcript into a render list: user/assistant bubbles plus one
- *  action line per tool call (paired with its result for error state). */
+ *  action line or inline preview per tool call (paired with its result for error state). */
 function flatten(messages: StoredChatMessage[]): DisplayItem[] {
   const resultErr: Record<string, boolean> = {};
   for (const m of messages) {
@@ -617,12 +660,8 @@ function flatten(messages: StoredChatMessage[]): DisplayItem[] {
   for (const m of messages) {
     if (m.role === "user" && m.text) items.push({ type: "user", text: m.text });
     if (m.role === "assistant") {
-      for (const tc of asArray<{ id?: string; name?: string; args?: { id?: string } }>(m.toolCalls)) {
-        if (tc.name === "render_note" && tc.args?.id) {
-          items.push({ type: "note", noteId: tc.args.id });
-        } else {
-          items.push({ type: "action", name: tc.name ?? "", isError: tc.id ? !!resultErr[tc.id] : false });
-        }
+      for (const tc of asArray<{ id?: string; name?: string; args?: unknown }>(m.toolCalls)) {
+        items.push(toolItem({ name: tc.name ?? "", isError: tc.id ? !!resultErr[tc.id] : false, args: tc.args }));
       }
       if (m.text) items.push({ type: "assistant", text: m.text });
     }
@@ -632,89 +671,12 @@ function flatten(messages: StoredChatMessage[]): DisplayItem[] {
 
 function ChatItem({ item }: { item: DisplayItem }) {
   if (item.type === "action") return <ActionLine action={item} />;
-  if (item.type === "note") return <NotePreview id={item.noteId} />;
+  if (item.type === "preview") return <ChatPreview preview={item.preview} />;
   return (
     <Message role={item.type}>
       <WikiText value={item.text} />
     </Message>
   );
-}
-
-/** NotePreview renders the inline, clickable note card the render_note tool asks for — the
- *  assistant shows a note this way instead of pasting its Markdown. Loads the live note body
- *  and renders a lightweight Markdown preview; clicking opens the full note. */
-function NotePreview({ id }: { id: string }) {
-  const { notes } = useCore();
-  const openEntity = useContext(OpenEntityContext);
-  const threadLayout = useContext(ThreadLayoutContext);
-  const [note, setNote] = useState<{ title: string; contentMd: string } | null>(null);
-  const [missing, setMissing] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    notes
-      .get(id)
-      .then((n) => {
-        if (alive) setNote({ title: n.title, contentMd: n.contentMd });
-      })
-      .catch(() => {
-        if (alive) setMissing(true);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [notes, id]);
-  if (missing) return null;
-  return (
-    <View style={[styles.notePreviewWrap, threadLayout === "transcript" ? styles.actionRowTranscript : null]}>
-      <Pressable style={styles.notePreview} onPress={() => openEntity?.("note", id)} aria-label={note?.title ?? "Note"}>
-        <View style={styles.notePreviewHead}>
-          <Icon name="file" size={iconSize.sm} color={colors.textQuaternary} />
-          <Text variant="label" numberOfLines={1} style={{ flex: 1 }}>
-            {note?.title || "Untitled"}
-          </Text>
-          <Icon name="external" size={11} color={colors.textQuaternary} />
-        </View>
-        {note && <View style={styles.notePreviewBody}>{renderNotePreview(note.contentMd)}</View>}
-      </Pressable>
-    </View>
-  );
-}
-
-/** renderNotePreview is a minimal Markdown renderer for the inline card: headings, bullets,
- *  blockquotes, and paragraphs, with wikilinks made clickable. Capped to keep previews short. */
-function renderNotePreview(md: string): ReactNode {
-  const lines = md.split("\n");
-  const shown = lines.slice(0, 16);
-  const out: ReactNode[] = [];
-  shown.forEach((raw, i) => {
-    const line = raw.replace(/\s+$/, "");
-    if (/^##\s/.test(line)) {
-      out.push(<RNText key={i} style={styles.mdH2}>{line.replace(/^##\s+/, "")}</RNText>);
-    } else if (/^#\s/.test(line)) {
-      out.push(<RNText key={i} style={styles.mdH1}>{line.replace(/^#\s+/, "")}</RNText>);
-    } else if (/^[-*]\s+/.test(line)) {
-      out.push(
-        <View key={i} style={styles.mdLi}>
-          <RNText style={styles.mdBullet}>•</RNText>
-          <View style={{ flex: 1 }}>
-            <WikiText value={line.replace(/^[-*]\s+/, "")} />
-          </View>
-        </View>,
-      );
-    } else if (/^>\s+/.test(line)) {
-      out.push(
-        <View key={i} style={styles.mdQuote}>
-          <WikiText value={line.replace(/^>\s+/, "")} />
-        </View>,
-      );
-    } else if (line.trim() === "") {
-      out.push(<View key={i} style={{ height: space.xs }} />);
-    } else {
-      out.push(<WikiText key={i} value={line} />);
-    }
-  });
-  if (lines.length > shown.length) out.push(<RNText key="more" style={styles.mdMore}>…</RNText>);
-  return out;
 }
 
 /** One turn. Desktop: an 18px avatar (you) or brand mark (companion), a mono speaker label,
@@ -776,13 +738,26 @@ function humanizeTool(name: string): string {
     list_project_items: "looked inside a project",
     get_neighborhood: "looked at what's connected",
     get_backlinks: "found linked mentions",
+    query_objects: "looked through your objects",
+    list_object_types: "checked your object types",
+    list_calendars: "checked your calendars",
+    list_events: "checked your calendar",
+    get_event: "read an event",
+    list_canvases: "checked your canvases",
+    get_canvas: "read a canvas",
     read_from_internet: "read a web page",
     read_from_google: "searched the web",
     render_note: "showed a note",
+    render_task: "showed a task",
+    render_event: "showed an event",
+    render_canvas: "showed a canvas",
+    render_graph: "showed a graph",
     create_note: "created a note",
     update_note: "updated a note",
     create_task: "created a task",
     update_task: "updated a task",
+    create_event: "added an event",
+    update_event: "updated an event",
     // CLI agents (Claude Code / Codex) report their own tools.
     Read: "read a file",
     Glob: "listed files",
@@ -798,49 +773,6 @@ function humanizeTool(name: string): string {
     Task: "delegated to a subagent",
   };
   return map[name] ?? name.replace(/_/g, " ");
-}
-
-// --- wikilink rendering ----------------------------------------------------
-
-const WIKILINK = /!?\[\[(note|task|habit|project):([^\]|]+)(?:\|[^\]]+)?\]\]/g;
-
-function WikiText({ value }: { value: string }) {
-  const threadLayout = useContext(ThreadLayoutContext);
-  const parts: ReactNode[] = [];
-  let last = 0;
-  let m: RegExpExecArray | null;
-  WIKILINK.lastIndex = 0;
-  let key = 0;
-  while ((m = WIKILINK.exec(value)) !== null) {
-    if (m.index > last) parts.push(<RNText key={key++}>{value.slice(last, m.index)}</RNText>);
-    parts.push(<LinkChip key={key++} type={m[1]} id={m[2]} />);
-    last = m.index + m[0].length;
-  }
-  if (last < value.length) parts.push(<RNText key={key++}>{value.slice(last)}</RNText>);
-  return <RNText style={[styles.body, threadLayout === "bubbles" ? styles.bodyBubble : null]}>{parts}</RNText>;
-}
-
-function LinkChip({ type, id }: { type: string; id: string }) {
-  const { graph } = useCore();
-  const openEntity = useContext(OpenEntityContext);
-  const [title, setTitle] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    graph
-      .lookup(id)
-      .then((n) => {
-        if (alive) setTitle(n?.title ?? null);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [graph, id]);
-  return (
-    <RNText style={styles.chip} onPress={() => openEntity?.(type, id)}>
-      {title ?? type}
-    </RNText>
-  );
 }
 
 // --- composer --------------------------------------------------------------
@@ -905,6 +837,9 @@ function SelectorBar({
   models,
   model,
   onPickModel,
+  modelsFailed,
+  hostOffline,
+  onRetryModels,
 }: {
   placement: "header" | "below";
   configs: Agent[];
@@ -913,6 +848,9 @@ function SelectorBar({
   models: string[] | null;
   model: string | null;
   onPickModel: (m: string) => void;
+  modelsFailed: boolean;
+  hostOffline: boolean;
+  onRetryModels: () => void;
 }) {
   if (configs.length === 0) return null;
   const current = configs.find((c) => c.id === configId) ?? configs[0];
@@ -932,7 +870,17 @@ function SelectorBar({
         {current.name}
       </Text>
     );
-  const modelPicker = <ModelSelector models={models} model={model} onPickModel={onPickModel} opens={opens} />;
+  const modelPicker = (
+    <ModelSelector
+      models={models}
+      model={model}
+      onPickModel={onPickModel}
+      failed={modelsFailed}
+      offline={hostOffline}
+      onRetry={onRetryModels}
+      opens={opens}
+    />
+  );
   return placement === "header" ? (
     <View style={styles.selectorHeader}>
       {modelPicker}
@@ -954,15 +902,20 @@ function ModelSelector({
   models,
   model,
   onPickModel,
+  failed,
+  offline,
+  onRetry,
   opens,
 }: {
   models: string[] | null;
   model: string | null;
   onPickModel: (m: string) => void;
+  failed: boolean;
+  offline: boolean;
+  onRetry: () => void;
   opens: "up" | "down";
 }) {
-  // Loading (models === null) or the endpoint returned none / failed (empty): let the user
-  // type a model name so a running-but-unlisted server (or a fresh Ollama pull) still works.
+  const touch = useDensity() === "touch";
   if (models === null) {
     return (
       <Text variant="mono" tone="quaternary">
@@ -970,11 +923,35 @@ function ModelSelector({
       </Text>
     );
   }
-  if (models.length === 0) {
+  // Keep the model this chat already uses even when the list lacks it (a chat restored from
+  // another device, an Ollama model not pulled here, or a list that failed to load).
+  const options = model && !models.includes(model) ? [model, ...models] : models;
+  if (options.length === 0) {
+    // Nothing to pick: say why. An offline host lists nothing and can't run a turn anyway;
+    // otherwise the list failed or came back empty, and a retry may fix it.
+    if (offline) {
+      return (
+        <Text variant="mono" tone="quaternary">
+          offline
+        </Text>
+      );
+    }
     return (
-      <View style={styles.modelInputWrap}>
-        <Input mono size={opens === "down" ? "sm" : undefined} value={model ?? ""} onChangeText={onPickModel} placeholder="Model name" autoCapitalize="none" />
-      </View>
+      <Pressable
+        onPress={onRetry}
+        aria-label="Retry loading models"
+        hitSlop={touch ? 12 : undefined}
+        style={({ hovered, pressed }: PressState) => [
+          styles.selectorTrigger,
+          transition("background-color", motion.instant),
+          pressed ? styles.rowPressed : hovered ? styles.rowHover : null,
+        ]}
+      >
+        <Text variant="mono" tone="quaternary" numberOfLines={1} style={styles.selectorLabel}>
+          {failed ? "couldn’t load models" : "no models"}
+        </Text>
+        <Icon name="refresh" size={10} color={colors.textQuaternary} />
+      </Pressable>
     );
   }
   return (
@@ -982,7 +959,7 @@ function ModelSelector({
       label={model ?? "choose a model"}
       ariaLabel="Choose a model"
       opens={opens}
-      options={models.map((m) => ({ value: m, label: m }))}
+      options={options.map((m) => ({ value: m, label: m }))}
       value={model}
       onSelect={onPickModel}
     />
@@ -1134,32 +1111,10 @@ const styles = StyleSheet.create({
   bubble: { maxWidth: "84%", paddingVertical: space.md, paddingHorizontal: space.lg, borderRadius: radius.xl, borderWidth: 1 },
   userBubble: { backgroundColor: colors.accentSoft, borderColor: colors.accentSoftBorder },
   assistantBubble: { backgroundColor: colors.surfaceSunken, borderColor: colors.borderSubtle },
-  body: { fontFamily: font.sans, fontSize: font.size.md, lineHeight: 21, color: colors.textPrimary },
-  bodyBubble: { lineHeight: 20 },
   thinking: { fontFamily: font.sans, fontSize: font.size.md, lineHeight: 21, color: colors.textTertiary, fontStyle: "italic" },
-  chip: { color: colors.textAccent, fontWeight: font.weight.medium, textDecorationLine: "underline", textDecorationColor: colors.accentSoftBorder },
   actionRow: { flexDirection: "row", alignItems: "center", gap: space.sm, paddingLeft: space.xxs },
-  // In the transcript, tool lines and note cards sit in the prose column (past the 18px mark).
+  // In the transcript, tool lines sit in the prose column (past the 18px mark), as previews do.
   actionRowTranscript: { maxWidth: 640, width: "100%", alignSelf: "center", paddingLeft: 18 + space.md },
-  notePreviewWrap: { width: "100%" },
-  notePreview: { alignSelf: "flex-start", maxWidth: "92%", backgroundColor: colors.surfaceCard, borderWidth: 1, borderColor: colors.borderSubtle, borderRadius: radius.lg, overflow: "hidden" },
-  notePreviewHead: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: space.sm,
-    height: layout.subToolbarH,
-    paddingHorizontal: space.ml,
-    backgroundColor: colors.surfaceSunken,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderSubtle,
-  },
-  notePreviewBody: { padding: space.ml, gap: 3, maxHeight: 280, overflow: "hidden" },
-  mdH1: { fontFamily: font.sans, fontSize: font.size.md, fontWeight: font.weight.semibold, color: colors.textPrimary, marginBottom: 2 },
-  mdH2: { fontFamily: font.sans, fontSize: font.size.base, fontWeight: font.weight.semibold, color: colors.textPrimary, marginTop: space.xs },
-  mdLi: { flexDirection: "row", gap: space.sm, alignItems: "flex-start" },
-  mdBullet: { color: colors.textQuaternary, fontSize: font.size.md, lineHeight: 21 },
-  mdQuote: { borderLeftWidth: 2, borderLeftColor: colors.borderDefault, paddingLeft: space.md },
-  mdMore: { color: colors.textQuaternary, fontSize: font.size.md },
   error: { paddingHorizontal: space.xl, paddingVertical: space.sm, textAlign: "center" },
   // --- desktop composer
   composer: { flexDirection: "row", alignItems: "flex-end", gap: space.sm, padding: space.md, borderTopWidth: 1, borderTopColor: colors.borderSubtle, flexShrink: 0 },
@@ -1203,7 +1158,6 @@ const styles = StyleSheet.create({
   selectorBelow: { flexDirection: "row", alignItems: "center", gap: space.xs, paddingTop: space.md, paddingLeft: space.xs },
   selectorOpen: { zIndex: 20 },
   selectorScrim: { position: "absolute", top: 0, left: 0, width: 4000, height: 4000, marginLeft: -2000, marginTop: -2000 },
-  modelInputWrap: { width: 180 },
   selectorTrigger: { flexDirection: "row", alignItems: "center", gap: space.xs, height: control.xs, paddingHorizontal: space.xs, borderRadius: radius.sm, maxWidth: 260 },
   selectorLabel: { flexShrink: 1 },
   selectorMenu: {

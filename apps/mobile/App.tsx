@@ -9,8 +9,6 @@ import { createNativeSyncNotifier, type CoreBridge, type SyncNotifier } from '@c
 import { DensityProvider, Spinner, Text, colors, space } from '@companion/design-system';
 import { MobileShell } from './src/MobileShell';
 import { openCore } from './src/core';
-import { createMobileNotificationScheduler, REMINDER_HORIZON_DAYS } from './src/notifications';
-import { registerReminderRefresh } from './src/backgroundReminders';
 import { nativeSyncStorage } from './src/syncStorage';
 import { nativeToolsStorage } from './src/toolsStorage';
 import { registerIcsFilePicker } from './src/icsFilePicker';
@@ -37,10 +35,11 @@ function Root() {
 
   // Reminder scheduling (PLAN §6.4): expo-notifications local notifications, injected so the
   // shared RemindersProvider stays react-native-free. Taps deep-link inside MobileShell.
-  const notificationScheduler = useMemo<NotificationScheduler>(
-    () => createMobileNotificationScheduler(),
-    [],
-  );
+  // TODO: re-enable when we figure out a signing strategy
+  // const notificationScheduler = useMemo<NotificationScheduler>(
+  //   () => createMobileNotificationScheduler(),
+  //   [],
+  // );
 
   useEffect(() => {
     try {
@@ -53,12 +52,6 @@ function Root() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, []);
-
-  // Register the periodic background refresh that keeps reminders (incl. ones created on
-  // other devices) armed while the app is closed (PLAN §6.4, Option B). Best-effort.
-  useEffect(() => {
-    void registerReminderRefresh();
   }, []);
 
   // Forgot-password recovery deep link. expo-linking's useURL() yields the URL the app was opened
@@ -101,7 +94,7 @@ function Root() {
       <SyncProvider storage={nativeSyncStorage} notifier={notifier}>
         <NotesProvider>
           <TasksProvider>
-            <RemindersProvider scheduler={notificationScheduler} horizonDays={REMINDER_HORIZON_DAYS}>
+            <RemindersProvider scheduler={null} horizonDays={0}>
               <NotificationsProvider>
                 <ProjectsProvider>
                   <ObjectTypesProvider>

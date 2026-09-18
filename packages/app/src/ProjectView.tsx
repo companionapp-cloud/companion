@@ -43,6 +43,8 @@ import { useProjectLists } from "./ListsProvider";
 import { useCanvases } from "./canvas/CanvasesProvider";
 import { CanvasesList } from "./canvas/CanvasesList";
 import { CanvasPane } from "./canvas/CanvasPane";
+import { CalendarScreen } from "./CalendarScreen";
+import { ProjectCalendarsColumn } from "./ProjectCalendars";
 
 const SECTIONS: { id: ProjectSection; label: string; tool: ToolId }[] = [
   { id: "notes", label: "Notes", tool: "notes" },
@@ -115,6 +117,11 @@ export function ProjectView() {
   );
 
   const projectLists = useProjectLists(projectId);
+  // Calendars filed in the project: single calendars and whole accounts.
+  const calendarCount = useMemo(
+    () => members.filter((m) => m.entityType === "calendar" || m.entityType === "calendar_account").length,
+    [members],
+  );
 
   // Navigating anywhere inside the project (a chip, a row, another project) leaves settings.
   const locSection = loc.kind === "project" ? loc.section : undefined;
@@ -141,6 +148,7 @@ export function ProjectView() {
     tasks: tasks.length - doneCount,
     lists: projectLists.length,
     canvases: canvases.length,
+    calendars: calendarCount,
   };
 
   return (
@@ -272,6 +280,10 @@ function ListColumn({ section, notes, tasks, seeds, canvases }: { section: Proje
   // The lists section has its own column (index of lists → one list's rows).
   if (section === "lists") {
     return <ListsColumn projectId={projectId} listId={itemId} selectedTaskId={subItemId} projectTasks={tasks} />;
+  }
+  // Calendars: the ones the project holds; the grid beside them is the project's calendar.
+  if (section === "calendars") {
+    return <ProjectCalendarsColumn projectId={projectId} />;
   }
   // Canvases: the project's member boards (PLAN-canvases.md); a new board joins the project.
   if (section === "canvases") {
@@ -576,7 +588,11 @@ function DetailPane({ section }: { section: ProjectSection }) {
     return <CanvasPane key={itemId} canvasId={itemId} onDeleted={() => nav.openProjectSection(loc.projectId, "canvases")} />;
   }
 
-  if (section === "calendars" || section === "habits") {
+  // The project's calendar: the events of the calendars it holds, and its own tasks and notes.
+  if (section === "calendars") {
+    return <CalendarScreen key={loc.projectId} projectId={loc.projectId} />;
+  }
+  if (section === "habits") {
     return (
       <Center>
         <Text variant="caption" tone="tertiary">

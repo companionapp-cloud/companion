@@ -473,7 +473,7 @@ func (c *Core) followRemoteTurn(ctx context.Context, chatID, requestID string) {
 // requestModels asks the host for an agent's model list.
 func (c *Core) remoteModels(agent *domain.Agent) ([]byte, error) {
 	if c.relay == nil || !c.deviceOnline(*agent.HostDeviceID) {
-		// Offline host: the composer falls back to a free-text model field.
+		// Offline host: nothing to list; the composer shows the agent as offline.
 		return json.Marshal([]string{})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

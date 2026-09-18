@@ -29,7 +29,7 @@ export function RemindersProvider({
   horizonDays = 1,
   children,
 }: {
-  scheduler?: NotificationScheduler;
+  scheduler?: NotificationScheduler | null;
   horizonDays?: number;
   children: ReactNode;
 }) {

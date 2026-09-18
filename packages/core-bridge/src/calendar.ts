@@ -79,8 +79,11 @@ export function calendarApi(core: CoreBridge) {
       remove: (id: string) => core.invoke<{ ok: boolean }>("calendar.feeds.delete", { id }),
     },
     /** The merged, read-only calendar for a half-open window: feed events, due tasks, and
-     *  dated notes, sorted by start. `from`/`to` are ISO instants (the visible day/week). */
-    range: (from: string, to: string) => core.invoke<CalendarItem[]>("calendar.range", { from, to }),
+     *  dated notes, sorted by start. `from`/`to` are ISO instants (the visible day/week). With
+     *  `projectId` it is that project's calendar: events from the calendars it holds, and its own
+     *  tasks and notes. */
+    range: (from: string, to: string, opts?: { projectId?: string }) =>
+      core.invoke<CalendarItem[]>("calendar.range", { from, to, ...(opts?.projectId ? { projectId: opts.projectId } : {}) }),
     /** Force the server to re-fetch this account's ICS feeds now, then pull the results
      *  (the calendar view's manual refresh). `synced` is false when running local-only. */
     refresh: () => core.invoke<{ ok: boolean; synced: boolean }>("calendar.refresh"),
@@ -105,8 +108,14 @@ export function calendarApi(core: CoreBridge) {
     events: {
       create: (input: CreateEventInput) =>
         core.invoke<{ ok: boolean; eventId: string }>("calendar.events.create", input),
-      /** What the editor needs beyond `range`: the event's repeat rule (null for a one-off). */
-      get: (id: string) => core.invoke<{ id: string; repeat: CalendarRepeat | null }>("calendar.events.get", { id }),
+      /** What the editor needs beyond `range` — the event's repeat rule (null for a one-off) — and,
+       *  for a surface that starts from nothing but an id (a chat preview), the event as `range`
+       *  shows it plus its calendar's name. `item` is absent once the event's calendar is gone. */
+      get: (id: string) =>
+        core.invoke<{ id: string; repeat: CalendarRepeat | null; item?: CalendarItem; calendarName?: string }>(
+          "calendar.events.get",
+          { id },
+        ),
       /** `id` is the occurrence's `sourceId`. Edits to a repeating event apply to the series. */
       update: (id: string, fields: UpdateEventInput) =>
         core.invoke<{ ok: boolean }>("calendar.events.update", { id, ...fields }),

@@ -343,7 +343,7 @@ func (c *Core) buildEngine(a *domain.Agent, model string) (*llm.Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	registry := llm.NewStoreRegistry(c.store)
+	registry := c.toolRegistry()
 	if !a.AllowWrite {
 		registry = registry.ReadOnly()
 	}

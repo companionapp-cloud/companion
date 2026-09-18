@@ -3,9 +3,7 @@ import { View } from 'react-native';
 import { SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import * as Notifications from 'expo-notifications';
 import { colors } from '@companion/design-system';
-import { taskIdFromResponse } from './notifications';
 import { SyncHealthBanner, useSync } from '@companion/app';
 import { stackHeader } from './ui/native';
 import { HomeScreen } from './screens/HomeScreen';
@@ -104,24 +102,26 @@ export function MobileShell() {
   );
 
   // Warm taps (app already running/backgrounded).
-  useEffect(() => {
-    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
-      const taskId = taskIdFromResponse(response);
-      if (taskId) openTask(taskId);
-    });
-    return () => sub.remove();
-  }, [openTask]);
+  // TODO: re-enable when we figure out signing strategy
+  // useEffect(() => {
+  //   const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+  //     const taskId = taskIdFromResponse(response);
+  //     if (taskId) openTask(taskId);
+  //   });
+  //   return () => sub.remove();
+  // }, [openTask]);
 
-  // Cold start: app launched by tapping a reminder. Checked on container ready so navigate()
-  // lands on the mounted navigator.
-  const handleReady = useCallback(() => {
-    Notifications.getLastNotificationResponseAsync()
-      .then((response) => {
-        const taskId = taskIdFromResponse(response);
-        if (taskId) openTask(taskId);
-      })
-      .catch(() => {});
-  }, [openTask]);
+  // // Cold start: app launched by tapping a reminder. Checked on container ready so navigate()
+  // // lands on the mounted navigator.
+  // TODO: re-enable when we figure out signing strategy
+  // const handleReady = useCallback(() => {
+  //   Notifications.getLastNotificationResponseAsync()
+  //     .then((response) => {
+  //       const taskId = taskIdFromResponse(response);
+  //       if (taskId) openTask(taskId);
+  //     })
+  //     .catch(() => {});
+  // }, [openTask]);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surfaceApp }}>
@@ -129,7 +129,7 @@ export function MobileShell() {
           carries the top safe-area inset so it clears the status bar when visible (§7). */}
       <SyncHealthBanner onOpenSettings={() => navigationRef.navigate('Settings')} topInset={insets.top} />
       <SafeAreaInsetsContext.Provider value={navInsets}>
-        <NavigationContainer ref={navigationRef} onReady={handleReady}>
+        <NavigationContainer ref={navigationRef} onReady={() => void 0}>
           <RootStack.Navigator
             screenOptions={{
               header: stackHeader,

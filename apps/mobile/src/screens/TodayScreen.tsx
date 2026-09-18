@@ -6,16 +6,17 @@ import { DailyNote, TodayCalendar, Agenda, todayISO } from '@companion/app';
 import type { LinkRef } from '@companion/editor';
 import { Button, Icon, IconButton, colors, space } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
+import { loadShowAgenda, saveShowAgenda } from '../todayStorage';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 // Mobile "Today": the full-height daily-note editor (content is big), with the month and
-// the day's agenda tucked into a collapsible panel above it (the detail is small). A daily
-// note is an ordinary note stamped with today's `date`; it isn't created until the user
-// types. The desktop shell puts the calendar in a side panel — no room for that on a
-// phone, so it collapses behind the calendar toggle in an action row under the nav bar,
-// and picking a day hands the screen back to the note. Shares DailyNote/TodayCalendar
-// with the desktop screen (PLAN §6.x).
+// the day's agenda in a panel above it (the detail is small). A daily note is an ordinary
+// note stamped with today's `date`; it isn't created until the user types. The desktop
+// shell puts both in a side panel — no room for that on a phone, so each has its own
+// toggle in an action row under the nav bar. The agenda toggle is remembered across
+// launches; the month is a day picker, so it collapses once a day is picked. Shares
+// DailyNote/TodayCalendar/Agenda with the desktop screen (PLAN §6.x).
 export function TodayScreen() {
   const nav = useNavigation<Nav>();
   // Opened on a specific day (a daily note followed from the graph)? Seed the selection
@@ -27,7 +28,14 @@ export function TodayScreen() {
   }, [requestedDay]);
   const [today, setToday] = useState(todayISO);
   const [showCalendar, setShowCalendar] = useState(false);
+  const [showAgenda, setShowAgenda] = useState(loadShowAgenda);
   const isToday = selected === today;
+
+  const toggleAgenda = () => {
+    const next = !showAgenda;
+    setShowAgenda(next);
+    saveShowAgenda(next);
+  };
 
   // Clicking a chip in the note pushes its target onto the stack (matches NoteEditorScreen).
   const onOpenRef = (ref: LinkRef) => {
@@ -49,6 +57,9 @@ export function TodayScreen() {
             }}
           />
         ) : null}
+        <IconButton label={showAgenda ? 'Hide agenda' : 'Show agenda'} size="lg" active={showAgenda} onPress={toggleAgenda}>
+          <Icon name="listBullet" size={18} color={showAgenda ? colors.textAccent : colors.textSecondary} />
+        </IconButton>
         <IconButton
           label={showCalendar ? 'Hide calendar' : 'Show calendar'}
           size="lg"
@@ -58,28 +69,32 @@ export function TodayScreen() {
           <Icon name="calendar" size={18} color={showCalendar ? colors.textAccent : colors.textSecondary} />
         </IconButton>
       </View>
-      {showCalendar ? (
+      {showCalendar || showAgenda ? (
         // Capped and scrollable so a busy agenda can't push the note off the screen.
-        <ScrollView style={styles.calPanel} contentContainerStyle={styles.calPanelContent}>
-          <TodayCalendar
-            selected={selected}
-            today={today}
-            onSelect={(date) => {
-              setSelected(date);
-              // Collapse to hand the screen back to the note once a day is picked.
-              setShowCalendar(false);
-            }}
-          />
-          <View style={styles.agenda}>
-            <Agenda
-              date={selected}
-              onOpenItem={(item) => {
-                if (item.kind === 'task') nav.push('TaskEditor', { id: item.sourceId });
-                else if (item.kind === 'note') nav.push('NoteEditor', { id: item.sourceId });
-                else nav.push('CalendarEvent', { item });
+        <ScrollView style={styles.panel} contentContainerStyle={styles.panelContent}>
+          {showCalendar ? (
+            <TodayCalendar
+              selected={selected}
+              today={today}
+              onSelect={(date) => {
+                setSelected(date);
+                // Collapse to hand the screen back to the note once a day is picked.
+                setShowCalendar(false);
               }}
             />
-          </View>
+          ) : null}
+          {showAgenda ? (
+            <View style={showCalendar ? styles.agendaBelowMonth : null}>
+              <Agenda
+                date={selected}
+                onOpenItem={(item) => {
+                  if (item.kind === 'task') nav.push('TaskEditor', { id: item.sourceId });
+                  else if (item.kind === 'note') nav.push('NoteEditor', { id: item.sourceId });
+                  else nav.push('CalendarEvent', { item });
+                }}
+              />
+            </View>
+          ) : null}
         </ScrollView>
       ) : null}
       <View style={styles.note}>
@@ -101,15 +116,15 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.borderSubtle,
   },
   spacer: { flex: 1 },
-  calPanel: {
+  panel: {
     flexGrow: 0,
     maxHeight: '62%',
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.borderSubtle,
     backgroundColor: colors.surfaceCard,
   },
-  calPanelContent: { padding: space.lg },
-  agenda: {
+  panelContent: { padding: space.lg },
+  agendaBelowMonth: {
     marginTop: space.lg,
     paddingTop: space.lg,
     borderTopWidth: StyleSheet.hairlineWidth,
