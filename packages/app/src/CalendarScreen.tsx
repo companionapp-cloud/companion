@@ -21,6 +21,7 @@ import {
 import { useCalendar } from "./CalendarProvider";
 import { itemDay } from "./CalendarAgenda";
 import { CalendarItemInfo } from "./CalendarItemInfo";
+import { EventEditorDialog, type EventEditorTarget } from "./EventEditorDialog";
 import { useTasks } from "./TasksProvider";
 import { useNav } from "./nav-context";
 
@@ -128,15 +129,28 @@ function layoutLanes(items: CalendarItem[]): Map<string, Lane> {
 }
 
 export function CalendarScreen() {
-  const { range, revision, refresh, getViewState, setViewState } = useCalendar();
+  const { range, revision, refresh, getViewState, setViewState, writableFeeds, updateEvent, conflicts, dismissConflicts } =
+    useCalendar();
+  // The event being created or edited (PLAN-caldav.md §6); null when the dialog is closed.
+  const [editor, setEditor] = useState<EventEditorTarget | null>(null);
   const tasks = useTasks();
   const nav = useNav();
   // Tasks open in a new workspace tab. A dated note is a daily note, so it opens the Today
-  // tool on that day rather than the notes browse list. Feed events aren't linkable
-  // (read-only, no local entity) — they surface their detail via the hover card instead.
+  // tool on that day rather than the notes browse list. An event in a CalDAV calendar opens
+  // the editor; subscription events are read-only and only surface their hover card.
   const openItem = (item: CalendarItem) => {
     if (item.kind === "task") nav.openInNewTab({ kind: "task", id: item.sourceId });
     else if (item.kind === "note") nav.openInNewTab({ kind: "view", view: "today", date: itemDay(item) });
+    else if (item.editable) setEditor({ mode: "edit", item });
+  };
+  // "New event" starts at the next full hour — today if this week is showing, else on the
+  // first day of the visible week.
+  const newEvent = () => {
+    const today = new Date();
+    const inWeek = weekDays.some((d) => toISODate(d) === toISODate(today));
+    const day = inWeek ? today : weekDays[0];
+    const hour = inWeek ? Math.min(23, today.getHours() + 1) : 9;
+    setEditor({ mode: "create", startsAt: new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, 0) });
   };
   // Restore the last visible week (persisted on the provider so it survives navigating away).
   const [anchor, setAnchor] = useState(() => {
@@ -192,8 +206,9 @@ export function CalendarScreen() {
 
   // Drag-to-reschedule a task: translate the drop's day/time delta into a new due instant,
   // snap to 15 minutes, update the task (optimistically move the block so it doesn't jump),
-  // and let the follow-up sync re-query reconcile it (PLAN §6.4/§6.7). Only tasks are
-  // draggable — events are read-only clones and notes are date-only markers.
+  // and let the follow-up sync re-query reconcile it (PLAN §6.4/§6.7). Tasks are draggable,
+  // and so are one-off events in a CalDAV calendar; subscription events are read-only, a
+  // repeating event can't be moved from here yet, and notes are date-only markers.
   const reschedule = useCallback(
     (item: CalendarItem, dayIndex: number, dx: number, dy: number) => {
       if (!colWidth) return;
@@ -214,9 +229,35 @@ export function CalendarScreen() {
             : it,
         ),
       );
+      if (item.kind === "event") {
+        const endsAt = new Date(newStart.getTime() + (durationMs || 60 * 60_000)).toISOString();
+        // A refused move (the core says why) snaps back on the re-query.
+        void updateEvent(item.sourceId, { startsAt: iso, endsAt, allDay: false }).catch(() => setItems((prev) => [...prev]));
+        return;
+      }
       void tasks.update(item.sourceId, { dueAt: iso });
     },
-    [colWidth, weekDays, tasks],
+    [colWidth, weekDays, tasks, updateEvent],
+  );
+
+  // Drag an event's bottom edge to change when it ends (15-minute steps, at least 15 minutes,
+  // never past midnight — the grid is one day tall). Same optimistic pattern as reschedule.
+  // One-off events in a writable calendar only: on a repeating event this would silently
+  // lengthen every occurrence, which belongs in the editor where that is spelled out.
+  const resize = useCallback(
+    (item: CalendarItem, dy: number) => {
+      const start = new Date(item.startsAt);
+      const startMin = start.getHours() * 60 + start.getMinutes();
+      const curEnd = item.endsAt ? new Date(item.endsAt) : new Date(start.getTime() + 60 * 60_000);
+      const curLen = Math.round((curEnd.getTime() - start.getTime()) / 60_000);
+      let len = Math.round((curLen + (dy / ROW_H) * 60) / 15) * 15;
+      len = Math.min(DAY_MIN - startMin, Math.max(15, len));
+      if (len === curLen) return;
+      const endsAt = new Date(start.getTime() + len * 60_000).toISOString();
+      setItems((prev) => prev.map((it) => (it.id === item.id ? { ...it, endsAt } : it)));
+      void updateEvent(item.sourceId, { endsAt }).catch(() => setItems((prev) => [...prev]));
+    },
+    [updateEvent],
   );
 
   // Measure the day-column width for drag math, and re-measure when the week changes or the
@@ -368,7 +409,24 @@ export function CalendarScreen() {
           </IconButton>
         )}
         <Button variant="ghost" size="sm" label="Today" onPress={() => setAnchor(new Date())} />
+        {writableFeeds.length > 0 ? (
+          <IconButton label="New event" size="sm" onPress={newEvent}>
+            <Icon name="plus" size={14} color={colors.textSecondary} />
+          </IconButton>
+        ) : null}
       </View>
+
+      {/* An edit the provider refused because the event changed there first: its copy was kept. */}
+      {conflicts.length > 0 ? (
+        <View style={styles.notice}>
+          <Text variant="caption" tone="secondary" style={{ flex: 1 }}>
+            {conflicts.length === 1
+              ? `“${conflicts[0].title}” was changed in another app before your edit arrived, so that version was kept.`
+              : `${conflicts.length} events were changed in another app before your edits arrived, so those versions were kept.`}
+          </Text>
+          <Button variant="ghost" size="sm" label="Dismiss" onPress={dismissConflicts} />
+        </View>
+      ) : null}
 
       {/* Day header row */}
       <View style={[styles.headerRow, { paddingRight: scrollbarW }]}>
@@ -468,6 +526,7 @@ export function CalendarScreen() {
                     lane={lanes?.get(it.id)}
                     onOpen={openItem}
                     onReschedule={reschedule}
+                    onResize={resize}
                     colWidth={colWidth}
                     onHover={setDayHovered}
                   />
@@ -478,6 +537,7 @@ export function CalendarScreen() {
           })}
         </View>
       </ScrollView>
+      {editor ? <EventEditorDialog target={editor} onClose={() => setEditor(null)} /> : null}
     </View>
   );
 }
@@ -494,6 +554,7 @@ function TimedBlock({
   lane,
   onOpen,
   onReschedule,
+  onResize,
   colWidth,
   onHover,
 }: {
@@ -503,6 +564,8 @@ function TimedBlock({
   lane?: Lane;
   onOpen: (item: CalendarItem) => void;
   onReschedule?: (item: CalendarItem, dayIndex: number, dx: number, dy: number) => void;
+  /** Called with the vertical drag distance when the bottom edge is released. */
+  onResize?: (item: CalendarItem, dy: number) => void;
   colWidth?: number;
   /** Tells the grid this block's column is active, so the column can lift above its
    *  neighbours while the hover card (or a drag) spills outside it. */
@@ -510,12 +573,16 @@ function TimedBlock({
 }) {
   const [hovered, setHovered] = useState(false);
   const [drag, setDrag] = useState<{ dx: number; dy: number } | null>(null);
-  const draggable = item.kind === "task" && !!onReschedule && !!colWidth;
+  const movable = item.kind === "task" || (item.kind === "event" && !!item.editable && !item.recurring);
+  const draggable = movable && !!onReschedule && !!colWidth;
+  // Only events have a length to change (a task is a point in time).
+  const resizable = movable && item.kind === "event" && !!onResize;
+  const [resizeDy, setResizeDy] = useState<number | null>(null);
 
   // A stable PanResponder that reads fresh props through a ref (mirrors useDraggable): claim
   // the gesture only once the pointer moves, so a tap still reaches the inner Pressable.
-  const latest = useRef({ item, dayIndex, onReschedule, onHover });
-  latest.current = { item, dayIndex, onReschedule, onHover };
+  const latest = useRef({ item, dayIndex, onReschedule, onResize, onHover });
+  latest.current = { item, dayIndex, onReschedule, onResize, onHover };
   // Keep the column lift in sync with this block's own hover/drag state, and always release it
   // on unmount (stepping to another week while hovered would otherwise strand a lifted column).
   const setActive = useCallback((on: boolean) => latest.current.onHover?.(latest.current.dayIndex, on), []);
@@ -553,13 +620,48 @@ function TimedBlock({
     [setActive],
   );
 
+  // The resize handle is a separate responder on the block's bottom edge. It claims the gesture
+  // at touch-down (the block's own move responder only claims after 6px of movement) and refuses
+  // to give it up, so grabbing the edge never turns into dragging the whole block.
+  const resizePan = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onPanResponderGrant: () => {
+          setResizeDy(0);
+          setActive(true);
+        },
+        onPanResponderMove: (_e, g: PanResponderGestureState) => setResizeDy(g.dy),
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderRelease: (_e, g: PanResponderGestureState) => {
+          setResizeDy(null);
+          setActive(hoveredRef.current);
+          lastDragEnd.current = Date.now();
+          latest.current.onResize?.(latest.current.item, g.dy);
+        },
+        onPanResponderTerminate: () => {
+          setResizeDy(null);
+          setActive(hoveredRef.current);
+          lastDragEnd.current = Date.now();
+        },
+      }),
+    [setActive],
+  );
+
   const start = new Date(item.startsAt);
   const span = spanOf(item);
   const top = (span.start / 60) * ROW_H;
-  const height = Math.max(ROW_H * 0.5, ((span.end - span.start) / 60) * ROW_H);
+  const baseHeight = Math.max(ROW_H * 0.5, ((span.end - span.start) / 60) * ROW_H);
+  // While the edge is held the block follows the pointer in the same 15-minute steps the drop
+  // will land on, so what you see is what you get.
+  const step = ROW_H / 4;
+  const height =
+    resizeDy === null
+      ? baseHeight
+      : Math.min(DAY_MIN / 60 * ROW_H - top, Math.max(step, Math.round((baseHeight + resizeDy) / step) * step));
   const k = KIND[item.kind];
   const flipLeft = dayIndex >= 4;
-  const dragging = drag !== null;
+  const dragging = drag !== null || resizeDy !== null;
 
   const lanes = lane?.lanes ?? 1;
   const laneIndex = lane?.lane ?? 0;
@@ -587,7 +689,10 @@ function TimedBlock({
           // blocks in the column would otherwise paint over, card and all.
           zIndex: hovered ? 30 : 1 + laneIndex,
         },
-        dragging ? { transform: [{ translateX: drag.dx }, { translateY: drag.dy }], zIndex: 60, opacity: 0.92 } : null,
+        // A change still on its way to the calendar provider reads as not-quite-settled.
+        item.pending ? { opacity: 0.6 } : null,
+        drag ? { transform: [{ translateX: drag.dx }, { translateY: drag.dy }], zIndex: 60, opacity: 0.92 } : null,
+        resizeDy !== null ? { zIndex: 60 } : null,
       ]}
     >
       <Pressable
@@ -632,6 +737,8 @@ function TimedBlock({
           />
         ) : null}
       </Pressable>
+      {/* Outside the Pressable, so the click that trails a resize can't open the editor. */}
+      {resizable ? <View {...resizePan.panHandlers} aria-label="Drag to change the end time" style={styles.resizeHandle} /> : null}
     </View>
   );
 }
@@ -652,7 +759,7 @@ function AllDayChip({
   onHover?: (dayIndex: number, on: boolean) => void;
 }) {
   const [hovered, setHovered] = useState(false);
-  const openable = item.kind === "task" || item.kind === "note";
+  const openable = item.kind === "task" || item.kind === "note" || !!item.editable;
   const flipRight = dayIndex >= 4;
   const latest = useRef({ dayIndex, onHover });
   latest.current = { dayIndex, onHover };
@@ -758,6 +865,27 @@ const styles = {
   legendItem: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.xs },
   legendDot: { width: 7, height: 7, borderRadius: radius.sm },
   // Holds the refresh button's footprint while the spinner stands in for it.
+  // The bottom 6px of an editable event. Invisible: the ns-resize cursor is the affordance, as
+  // in every desktop calendar.
+  resizeHandle: {
+    position: "absolute" as const,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 6,
+    zIndex: 2,
+    cursor: "ns-resize",
+  } as Record<string, unknown>,
+  notice: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: space.md,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.xs,
+    backgroundColor: colors.surfaceSunken,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+  },
   refreshSlot: { width: control.sm, height: control.sm, alignItems: "center" as const, justifyContent: "center" as const },
 
   headerRow: {

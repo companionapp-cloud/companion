@@ -31,6 +31,9 @@ export type {
   ObjectFieldType,
   AppliesTo,
   CalendarFeed,
+  CalendarFeedKind,
+  CalendarAccount,
+  CalendarConflict,
   CalendarEvent,
   CalendarItem,
   CalendarItemKind,
@@ -52,7 +55,17 @@ export type { NotesApi, CreateNoteInput, UpdateNoteInput, NoteConflict, NoteConf
 export { tasksApi } from "./tasks";
 export type { TasksApi, CreateTaskInput, UpdateTaskInput } from "./tasks";
 export { calendarApi } from "./calendar";
-export type { CalendarApi, CreateFeedInput, UpdateFeedInput } from "./calendar";
+export { oauthApi } from "./oauth";
+export type { OAuthApi, OAuthBeginResult, OAuthDone, OAuthProviderId, OAuthPurpose } from "./oauth";
+export type {
+  CalendarApi,
+  CreateFeedInput,
+  UpdateFeedInput,
+  AddCalendarAccountInput,
+  CalendarRepeat,
+  CreateEventInput,
+  UpdateEventInput,
+} from "./calendar";
 export { documentsApi } from "./documents";
 export type { DocumentsApi, CreateDocumentInput, EnsureLocalResult, LocalPathResult, DataUrlResult } from "./documents";
 export { notifyApi } from "./notify";

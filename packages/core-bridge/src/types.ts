@@ -207,12 +207,22 @@ export interface Area {
   dirty: boolean;
 }
 
-/** A user-authored ICS subscription (PLAN §6.7). Syncs bidirectionally. Under end-to-end
- *  encryption (PLAN §E2EE) the client — not the server — fetches its URL and expands the events, so
- *  the URL and event content stay opaque to the server. */
+/** How a calendar is sourced: a read-only ICS subscription/upload, or a two-way CalDAV
+ *  collection belonging to a CalendarAccount (PLAN-caldav.md). */
+export type CalendarFeedKind = "ics" | "caldav";
+
+/** One calendar (PLAN §6.7): an ICS subscription, an uploaded file, or a CalDAV collection. Syncs
+ *  bidirectionally. Under end-to-end encryption (PLAN §E2EE) the client — not the server — fetches
+ *  it and expands the events, so the URL and event content stay opaque to the server. */
 export interface CalendarFeed {
   id: string;
   name: string;
+  /** Absent on rows written before CalDAV existed; treat as "ics". */
+  kind?: CalendarFeedKind;
+  /** The owning CalendarAccount of a CalDAV calendar. */
+  accountId?: string | null;
+  /** A CalDAV calendar the login may not write to (shared, holidays). */
+  readOnly?: boolean;
   /** Subscription URL the client fetches (directly, or via the server's blind proxy on web);
    *  empty for an uploaded feed. */
   url: string;
@@ -265,6 +275,39 @@ export interface CalendarItem {
   description?: string | null;
   /** Feed color for events; null for tasks and notes. */
   color?: string | null;
+  /** The calendar an event belongs to; absent for tasks and notes. */
+  feedId?: string;
+  /** True for an event in a writable CalDAV calendar: it can be edited and deleted here. */
+  editable?: boolean;
+  /** True for an occurrence of a repeating event — deleting asks "this one or all?", and its
+   *  time cannot be changed from Companion yet. */
+  recurring?: boolean;
+  /** True while a local change has not reached the calendar provider yet. */
+  pending?: boolean;
+}
+
+/** A CalDAV login as the UI sees it (PLAN-caldav.md). The credential never leaves the core. */
+export interface CalendarAccount {
+  id: string;
+  name: string;
+  serverUrl: string;
+  username: string;
+  /** "basic" (a password) or "oauth-google" (a Google sign-in, which is reconnected rather than
+   *  given a new password). */
+  authKind: "basic" | "oauth-google";
+  /** False on a device that holds no password for the account (an unencrypted Companion
+   *  account keeps it only where it was typed), or — for a Google account — one whose build uses
+   *  a different OAuth client id than the grant. Either way this device cannot sync it itself. */
+  hasCredential: boolean;
+  /** The most recent sync failure, or null when healthy. */
+  lastError?: string | null;
+  calendars: CalendarFeed[];
+}
+
+/** An edit the provider refused because the event changed there first; its copy was kept. */
+export interface CalendarConflict {
+  feedId: string;
+  title: string;
 }
 
 /** A project — belongs to exactly one area (mirrors core/domain.Project). */

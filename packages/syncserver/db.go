@@ -316,6 +316,9 @@ CREATE TABLE IF NOT EXISTS calendar_feeds (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL,
   name       TEXT NOT NULL,
+  kind       TEXT NOT NULL DEFAULT 'ics',   -- 'ics' subscription or 'caldav' collection (PLAN-caldav.md)
+  account_id TEXT,                          -- owning calendar_accounts row of a caldav feed
+  read_only  BIGINT NOT NULL DEFAULT 0,
   url        TEXT NOT NULL DEFAULT '',
   ics_text   TEXT,                          -- raw uploaded .ics (parsed in place); NULL for URL feeds
   color      TEXT,
@@ -349,6 +352,34 @@ CREATE TABLE IF NOT EXISTS calendar_events (
 );
 CREATE INDEX IF NOT EXISTS idx_calendar_events_user_seq ON calendar_events (user_id, server_seq);
 CREATE INDEX IF NOT EXISTS idx_calendar_events_feed ON calendar_events (feed_id);
+
+-- CalDAV (PLAN-caldav.md): a login, and the verbatim ICS of each event resource. The server
+-- never contacts a calendar provider — only native clients do — so it needs nothing from these
+-- rows but their sync metadata. The body is kept whole in row_json; on encrypted accounts every
+-- content field inside it (server URL, username, credential, href, ICS) is an enc$v1$ envelope.
+CREATE TABLE IF NOT EXISTS calendar_accounts (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  row_json   TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  version    BIGINT NOT NULL DEFAULT 0,
+  server_seq BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_calendar_accounts_user_seq ON calendar_accounts (user_id, server_seq);
+
+CREATE TABLE IF NOT EXISTS calendar_objects (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  row_json   TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  version    BIGINT NOT NULL DEFAULT 0,
+  server_seq BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_calendar_objects_user_seq ON calendar_objects (user_id, server_seq);
 
 CREATE TABLE IF NOT EXISTS user_secrets (
   user_id    TEXT NOT NULL,
@@ -473,6 +504,10 @@ func migrate(db *sql.DB, dialect string) error {
 		// Forgot-password token (rotated per request), retrofitted onto older DBs.
 		`ALTER TABLE users ADD COLUMN password_reset_token TEXT`,
 		`ALTER TABLE users ADD COLUMN password_reset_expires_at TEXT`,
+		// CalDAV calendars (PLAN-caldav.md), retrofitted onto pre-CalDAV DBs.
+		`ALTER TABLE calendar_feeds ADD COLUMN kind TEXT NOT NULL DEFAULT 'ics'`,
+		`ALTER TABLE calendar_feeds ADD COLUMN account_id TEXT`,
+		`ALTER TABLE calendar_feeds ADD COLUMN read_only BIGINT NOT NULL DEFAULT 0`,
 		// Canvas edge line style (PLAN-canvases.md), retrofitted onto pre-style dev DBs.
 		`ALTER TABLE canvas_edges ADD COLUMN style TEXT NOT NULL DEFAULT 'curved'`,
 	}

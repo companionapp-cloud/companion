@@ -3,6 +3,7 @@ import {
   agentsApi,
   devicesApi,
   calendarApi,
+  oauthApi,
   canvasesApi,
   chatsApi,
   datesApi,
@@ -18,6 +19,7 @@ import {
   type AgentsApi,
   type DevicesApi,
   type CalendarApi,
+  type OAuthApi,
   type CanvasesApi,
   type ChatsApi,
   type CoreBridge,
@@ -49,6 +51,8 @@ interface CoreValue {
   devices: DevicesApi;
   chats: ChatsApi;
   calendar: CalendarApi;
+  /** OAuth sign-in flows (Google). Generic: calendar accounts today, app login later. */
+  oauth: OAuthApi;
   canvases: CanvasesApi;
 }
 
@@ -73,6 +77,7 @@ export function CoreProvider({ core, children }: { core: CoreBridge; children: R
       devices: devicesApi(core),
       chats: chatsApi(core),
       calendar: calendarApi(core),
+      oauth: oauthApi(core),
       canvases: canvasesApi(core),
     }),
     [core],

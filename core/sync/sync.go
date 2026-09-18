@@ -259,6 +259,10 @@ func New(st *store.Store, t Transport, clock domain.Clock) *Engine {
 	// applies server rows on pull.
 	e.register(newRepoSyncer[*domain.CalendarFeed](st.CalendarFeeds, clock))
 	e.register(newRepoSyncer[*domain.CalendarEvent](st.CalendarEvents, clock))
+	// CalDAV (PLAN-caldav.md): accounts before objects so a pulled object's calendar and login
+	// are already there. Both are opaque to the server; only native clients reach the provider.
+	e.register(newRepoSyncer[*domain.CalendarAccount](st.CalendarAccounts, clock))
+	e.register(newRepoSyncer[*domain.CalendarObject](st.CalendarObjects, clock))
 	// Canvases (PLAN-canvases.md): the board first so its nodes/edges find it; a node or edge
 	// arriving before its board is a tolerated dangle.
 	e.register(newRepoSyncer[*domain.Canvas](st.Canvases, clock))

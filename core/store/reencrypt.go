@@ -19,6 +19,8 @@ var reencryptTables = []string{
 	"chat_messages",
 	"calendar_feeds",
 	"calendar_events",
+	"calendar_accounts",
+	"calendar_objects",
 	"canvases",
 	"canvas_nodes",
 	"canvas_edges",

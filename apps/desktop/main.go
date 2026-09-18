@@ -21,6 +21,7 @@ import (
 	"companion/core/agentrt"
 	"companion/core/blob"
 	"companion/core/bridge"
+	"companion/core/oauth"
 	"companion/core/secrets"
 	"companion/core/store"
 
@@ -40,6 +41,17 @@ var assets embed.FS
 // (-ldflags "-X main.version=1.2.3"). Empty in dev builds, which never self-update and keep
 // their data apart from the installed release's (see databasePath).
 var version string
+
+// googleClientID / googleClientSecret are this app's Google OAuth client ("Desktop app" type in
+// Google Cloud), stamped at build time like version:
+//
+//	-ldflags "-X main.googleClientID=… -X main.googleClientSecret=…"
+//
+// or taken from COMPANION_GOOGLE_CLIENT_ID / COMPANION_GOOGLE_CLIENT_SECRET in a dev run. Google
+// requires the "secret" of a desktop client in the token exchange, but it is not confidential — it
+// ships in every copy of the app — and PKCE is what actually protects the flow. Left empty,
+// Google sign-in is simply not offered (PLAN-caldav.md §9).
+var googleClientID, googleClientSecret string
 
 func main() {
 	// An update restart re-runs this binary as the Wails updater's helper (updates.go): it waits
@@ -76,6 +88,11 @@ func main() {
 	// Codex / Ollama / LM Studio and run the CLI ones as child processes, so it injects the
 	// discoverer and runner factory and declares itself able to host. Device identity is what
 	// installed local agents are pinned to (and what other devices route to).
+	if id := firstNonEmpty(os.Getenv("COMPANION_GOOGLE_CLIENT_ID"), googleClientID); id != "" {
+		secret := firstNonEmpty(os.Getenv("COMPANION_GOOGLE_CLIENT_SECRET"), googleClientSecret)
+		// No redirect URI: the desktop receives the sign-in on a loopback port picked per flow.
+		core.SetOAuthProvider(oauth.Google(id, secret, ""))
+	}
 	core.SetDeviceInfo(desktopPlatform(), defaultDeviceName(), true)
 	core.SetAgentDiscoverer(agentrt.NewDiscoverer())
 	core.SetAgentRunners(agentrt.NewFactory(filepath.Dir(dbPath)))
@@ -389,4 +406,14 @@ func runningFromBundle() bool {
 		return false
 	}
 	return strings.Contains(exe, ".app/Contents/MacOS/")
+}
+
+// firstNonEmpty returns the first non-blank value.
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }

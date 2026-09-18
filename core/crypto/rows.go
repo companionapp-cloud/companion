@@ -31,6 +31,11 @@ var protectedFields = map[string][]string{
 	protocol.EntityAgent:         {"name", "baseUrl", "apiKeyEnc", "binaryPath", "hostName", "settingsJson"},
 	protocol.EntityCalendarFeed:  {"name", "url", "icsText"},
 	protocol.EntityCalendarEvent: {"title", "location", "description", "icsUid"},
+	// CalDAV (PLAN-caldav.md §1.2): where the account lives, who logs in and with what, and the
+	// full ICS of every event are content. Kind, push state and the recurring flag stay plaintext —
+	// they say nothing about what is on the calendar and the client queries on them.
+	protocol.EntityCalendarAccount: {"name", "serverUrl", "username", "credentialEnc", "homeSetUrl", "lastError"},
+	protocol.EntityCalendarObject:  {"uid", "href", "etag", "ics", "pushError"},
 	// Canvas content: the board name, each node's kind-specific payload (sticky text, group label,
 	// link preview), and edge labels. Geometry, kinds, colors and entity refs stay plaintext.
 	protocol.EntityCanvas:     {"name"},
