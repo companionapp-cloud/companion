@@ -25,7 +25,12 @@ cask "companion" do
     strategy :github_latest
   end
 
-  # The build is not notarized; Homebrew's auto-update check would see nothing.
+  # The app updates itself (apps/desktop/updates.go in the main repo), but this stays false
+  # for now: `auto_updates true` would make a plain `brew upgrade` skip the cask, stranding
+  # installs from before the updater existed (0.6.1 and earlier), which can only get it
+  # through Homebrew. The cost of false is small: after the app updates itself, the next
+  # `brew upgrade` reinstalls that same version, because Homebrew's record lags. Flip it
+  # once those old installs have moved on.
   auto_updates false
   depends_on :macos
 

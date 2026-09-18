@@ -39,10 +39,15 @@ vet:
 desktop-frontend:
 	npm run build -w @companion/desktop-frontend
 
-## desktop: build the Wails desktop binary (frontend is built + embedded)
+## desktop: build the Wails desktop binary (frontend is built + embedded).
+## DESKTOP_VERSION=x.y.z stamps a release version into the binary (and, for desktop-app,
+## the Info.plist) the way the release workflow does, so the build self-updates like a
+## release (apps/desktop/updates.go): DESKTOP_VERSION=0.0.1 updates itself to the latest
+## release on launch. Unset (the default) is a dev build, which never self-updates.
+DESKTOP_VERSION ?=
 desktop: desktop-frontend
 	mkdir -p $(BUILD_DIR)
-	cd apps/desktop && $(GO) build -o ../../$(BUILD_DIR)/companion-desktop .
+	cd apps/desktop && $(GO) build $(if $(DESKTOP_VERSION),-ldflags "-X main.version=$(DESKTOP_VERSION)") -o ../../$(BUILD_DIR)/companion-desktop .
 
 ## desktop-app: package the binary into build/Companion.app (macOS). The bundle +
 ## identifier + a real code signature are what make notifications and launch-at-login work
@@ -59,6 +64,7 @@ desktop-app: desktop
 	cp apps/desktop/packaging/Info.plist "$(DESKTOP_APP)/Contents/Info.plist"
 	cp apps/desktop/packaging/AppIcon.icns "$(DESKTOP_APP)/Contents/Resources/AppIcon.icns"
 	cp $(BUILD_DIR)/companion-desktop "$(DESKTOP_APP)/Contents/MacOS/companion-desktop"
+	$(if $(DESKTOP_VERSION),plutil -replace CFBundleShortVersionString -string "$(DESKTOP_VERSION)" "$(DESKTOP_APP)/Contents/Info.plist")
 	@if [ "$(DESKTOP_SIGN)" = "-" ]; then echo "warning: no Developer signing identity found — signing ad-hoc; notifications will be rejected by macOS"; fi
 	codesign --force --sign "$(DESKTOP_SIGN)" --identifier com.companion.desktop "$(DESKTOP_APP)"
 	@echo "Built $(DESKTOP_APP) (signed: $(DESKTOP_SIGN))"

@@ -21,7 +21,9 @@ var trayIconTemplate []byte
 // Launch-at-login uses Wails' Autostart manager (SMAppService on macOS 13+ from a
 // bundled .app, a LaunchAgent plist otherwise). Like notifications, it is a no-op from
 // an unbundled dev build.
-func installMenuBar(app *application.App, mainWindow application.Window) {
+//
+// checkForUpdates, when non-nil (release builds, see updates.go), adds "Check for Updates…".
+func installMenuBar(app *application.App, mainWindow application.Window, checkForUpdates func()) {
 	tray := app.SystemTray.New()
 	// Just the icon in the menu bar — a template image, no text label. macOS auto-sizes
 	// it to the menu-bar thickness and recolours it for light/dark appearance.
@@ -36,6 +38,9 @@ func installMenuBar(app *application.App, mainWindow application.Window) {
 
 	menu := app.NewMenu()
 	menu.Add("Open Companion").OnClick(func(*application.Context) { openWindow() })
+	if checkForUpdates != nil {
+		menu.Add("Check for Updates…").OnClick(func(*application.Context) { checkForUpdates() })
+	}
 	menu.AddSeparator()
 
 	// Reflect the current registration on first paint; toggling flips it and updates the

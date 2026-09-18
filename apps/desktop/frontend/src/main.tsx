@@ -3,7 +3,7 @@
 // and toolbar). No-ops outside the Wails webview.
 import "@wailsio/runtime";
 import { Window } from "@wailsio/runtime";
-import { createElement } from "react";
+import { Fragment, createElement } from "react";
 import { AppRegistry } from "react-native";
 import { App, setFocusWindowOpener, setCaptureWindowCloser, setTableMenuPresenter, setShortcutStore } from "@companion/app";
 import type { ShortcutBinding, ShortcutId, WindowControls } from "@companion/app";
@@ -12,6 +12,7 @@ import type { CoreBridge } from "@companion/core-bridge";
 import type { DocumentSource } from "@companion/editor";
 import { desktopNotificationScheduler } from "./notifications";
 import { desktopTableMenuPresenter } from "./tableMenu";
+import { UpdateGate } from "./updates";
 
 // Double-clicking the window chrome (any `--wails-draggable: drag` region, e.g. the
 // toolbar or rail) zooms the window, matching native macOS titlebar behaviour. The
@@ -29,7 +30,8 @@ if (typeof window !== "undefined" && (window as unknown as { _wails?: unknown })
 // global Option/Alt+Space shortcut). The page's default body/#root background (index.html)
 // is opaque; clear it so the window is see-through and CaptureView's rounded card + shadow
 // read against it. Harmless on the main window, which never carries ?capture.
-if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("capture")) {
+const isCaptureWindow = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("capture");
+if (isCaptureWindow) {
   document.documentElement.style.background = "transparent";
   document.body.style.background = "transparent";
 }
@@ -120,9 +122,15 @@ void fetchWindowControls().then((windowControls) => {
   AppRegistry.registerComponent(
     "Companion",
     // shell: "desktop" — the desktop app never renders the mobile shell, however narrow
-    // its window gets.
+    // its window gets. Forced updates cover every window while they install (./updates.tsx),
+    // except the small capture panel, which closes with the rest when Companion restarts.
     () => () =>
-      createElement(App, { core, shell: "desktop", topInset, windowControls, notificationScheduler, documentSource }),
+      createElement(
+        Fragment,
+        null,
+        createElement(App, { core, shell: "desktop", topInset, windowControls, notificationScheduler, documentSource }),
+        isCaptureWindow ? null : createElement(UpdateGate),
+      ),
   );
   AppRegistry.runApplication("Companion", { rootTag });
 });

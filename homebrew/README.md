@@ -23,11 +23,18 @@ The desktop app is ad-hoc signed and not notarized. Homebrew quarantines every
 cask download and Gatekeeper refuses to open a quarantined unsigned app, so the
 cask's `postflight_steps` run `xattr -dr com.apple.quarantine` on the installed bundle.
 That is the only thing it does beyond a normal cask install, and it's why the
-cask lives in this tap rather than in homebrew-cask. Upgrades go through the same
-postflight:
+cask lives in this tap rather than in homebrew-cask.
+
+## Updates
+
+Companion updates itself. Within an hour of a new release, the running app
+downloads it, blocks its window while it installs, and restarts into it.
+
+Versions 0.6.1 and earlier predate the updater. Upgrade those once through
+Homebrew. That also works any time the app can't replace itself:
 
 ```bash
-brew upgrade --cask companion
+brew upgrade --cask companionapp-cloud/tap/companion
 ```
 
 ## Uninstall

@@ -27,6 +27,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
+	"github.com/wailsapp/wails/v3/pkg/updater"
 )
 
 // The Vite build output. Run `make desktop-frontend` (or `make desktop`) to
@@ -35,7 +36,16 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+// version is the release this binary was built as, stamped by the release workflow
+// (-ldflags "-X main.version=1.2.3"). Empty in dev builds, which never self-update.
+var version string
+
 func main() {
+	// An update restart re-runs this binary as the Wails updater's helper (updates.go): it waits
+	// for the running app to exit, swaps the new bundle in, relaunches it and exits. application.New
+	// checks for this too, but only after main has opened the database and the rest; catch it first.
+	updater.HandleHelperMode()
+
 	dbPath, err := databasePath()
 	if err != nil {
 		log.Fatalf("resolve database path: %v", err)
@@ -165,6 +175,13 @@ func main() {
 		log.Printf("notify: not running from an app bundle; OS notifications disabled (use make desktop-app-run)")
 	}
 
+	// Forced updates (updates.go): release builds running from an .app bundle only. Built
+	// before the app so the asset handler can serve its state; attached once the app exists.
+	updates := newUpdateService(version, runningBundle())
+	updates.markerPath = relaunchMarkerPath(dbPath)
+	// An update restart while the main window was closed to the menu bar comes back hidden.
+	startHidden := consumeRelaunchMarker(updates.markerPath)
+
 	app = application.New(application.Options{
 		Name:        "Companion",
 		Description: "Offline-first notes, tasks, habits, and calendar.",
@@ -185,7 +202,7 @@ func main() {
 		Assets: application.AssetOptions{
 			Handler: rootHandler(handler, notifHandler, openFocusWindow, func(w http.ResponseWriter, r *http.Request) {
 				tableCtxMenu.handleOpen(w, r)
-			}, shortcuts.handleShortcuts, windowChromeHandler(func() *application.WebviewWindow { return mainWindow })),
+			}, shortcuts.handleShortcuts, windowChromeHandler(func() *application.WebviewWindow { return mainWindow }), updates.handleState),
 		},
 	})
 
@@ -201,6 +218,7 @@ func main() {
 		MinHeight:        400,
 		BackgroundColour: application.NewRGB(245, 245, 243),
 		URL:              "/",
+		Hidden:           startHidden,
 		Mac: application.MacWindow{
 			TitleBar: application.MacTitleBarHiddenInset,
 		},
@@ -237,7 +255,17 @@ func main() {
 		handler.OnEvent("notify.activate", payload)
 	})
 
-	installMenuBar(app, mainWindow)
+	// Check on launch, hourly and on wake; the tray also offers a manual check.
+	var checkForUpdates func()
+	if updates.enabled() {
+		if err := updates.attach(app, mainWindow); err != nil {
+			log.Printf("update: disabled: %v", err)
+		} else {
+			checkForUpdates = updates.checkNow
+		}
+	}
+
+	installMenuBar(app, mainWindow, checkForUpdates)
 
 	// Register the native table context menu now that the app + window exist. The /table-menu
 	// route (set up above, capturing tableCtxMenu by reference) drives it.
@@ -259,7 +287,7 @@ func main() {
 // (/invoke, /events) to the bridge handler. /window spawns a focus-mode window for a
 // document (the workspace's expand/pop-out action) — browser window.open can't create a
 // real app window in the Wails webview, so the frontend asks the Go side here.
-func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusWindow func(url string), openTableMenu http.HandlerFunc, shortcuts http.HandlerFunc, chrome http.HandlerFunc) http.Handler {
+func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusWindow func(url string), openTableMenu http.HandlerFunc, shortcuts http.HandlerFunc, chrome http.HandlerFunc, updates http.HandlerFunc) http.Handler {
 	frontend, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {
 		log.Fatalf("mount frontend assets: %v", err)
@@ -287,6 +315,8 @@ func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusW
 	mux.HandleFunc("/shortcuts", shortcuts)
 	// Where the native window buttons sit over the page (macOS), so the UI can clear them.
 	mux.HandleFunc("/chrome", chrome)
+	// The forced-update state, for a window that opens mid-update (updates.go).
+	mux.HandleFunc("/update", updates)
 	mux.Handle("/", files)
 	return mux
 }

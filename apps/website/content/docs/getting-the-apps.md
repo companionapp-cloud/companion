@@ -26,7 +26,7 @@ brew install --cask companionapp-cloud/tap/companion
 
 That adds the Companion tap and puts **Companion** in your Applications folder. Open it from Launchpad or Spotlight.
 
-The app doesn't update itself yet, so upgrade it through Homebrew:
+Companion keeps itself up to date. When a new version comes out, it downloads it, installs it and restarts. Versions 0.6.1 and earlier don't, so if you have one of those, upgrade once through Homebrew:
 
 ```bash
 brew upgrade --cask companion

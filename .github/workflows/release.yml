@@ -15,6 +15,11 @@ name: Release
 # `brew tap companionapp-cloud/tap` clones. That folder is the tap's only source;
 # the tap repo is never edited by hand.
 #
+# Installed apps update themselves from here too (apps/desktop/updates.go): once a
+# stable release carries the macOS zip, every running copy older than it installs it
+# within the hour. Tags with a suffix (v1.2.3-rc1) are published as prereleases, which
+# the updater, like Homebrew, never installs.
+#
 # One-time setup for the tap:
 #   - Create the (public) repo companionapp-cloud/homebrew-tap. It can be empty.
 #   - Generate a key pair:  ssh-keygen -t ed25519 -N "" -f tap-deploy-key -C "companion release -> homebrew-tap"
@@ -91,6 +96,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          # Whichever job attaches first creates the release; each sets the same flag.
+          prerelease: ${{ contains(github.event.inputs.tag || github.ref_name, '-') }}
           files: dist/companion-server-*
 
   # ---------------------------------------------------------------------------
@@ -149,6 +156,7 @@ jobs:
   # (Go passes the right -arch to clang for darwin/amd64) and lipo joins them into
   # one universal binary. The bundle is ad-hoc signed: CI has no Apple signing
   # identity, so the cask's postflight_steps strip quarantine (see homebrew/README.md).
+  # The in-app updater downloads this same zip without quarantining it.
   # ---------------------------------------------------------------------------
   desktop-macos:
     name: desktop (macOS universal)
@@ -181,10 +189,14 @@ jobs:
           CGO_ENABLED: "1"
           # Matches LSMinimumSystemVersion in apps/desktop/packaging/Info.plist.
           MACOSX_DEPLOYMENT_TARGET: "11.0"
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
+          # main.version is what the in-app updater compares with the latest release
+          # (apps/desktop/updates.go); builds without it never update themselves.
+          ldflags="-s -w -X main.version=${TAG#v}"
           mkdir -p build
-          GOARCH=arm64 go build -C apps/desktop -trimpath -ldflags="-s -w" -o "$(pwd)/build/companion-desktop-arm64" .
-          GOARCH=amd64 go build -C apps/desktop -trimpath -ldflags="-s -w" -o "$(pwd)/build/companion-desktop-amd64" .
+          GOARCH=arm64 go build -C apps/desktop -trimpath -ldflags="$ldflags" -o "$(pwd)/build/companion-desktop-arm64" .
+          GOARCH=amd64 go build -C apps/desktop -trimpath -ldflags="$ldflags" -o "$(pwd)/build/companion-desktop-amd64" .
           lipo -create -output build/companion-desktop build/companion-desktop-arm64 build/companion-desktop-amd64
           lipo -info build/companion-desktop
 
@@ -208,7 +220,21 @@ jobs:
 
           asset="Companion-${version}-macos-universal.zip"
           # ditto (not zip) keeps the bundle layout, symlinks and signature intact.
-          ditto -c -k --keepParent "$app" "build/$asset"
+          # --norsrc --noextattr: plain files only. Otherwise any extended attribute on
+          # the build (e.g. com.apple.provenance) is stored as an AppleDouble ._ entry,
+          # which the in-app updater unpacks as a real file inside the bundle, breaking
+          # its seal.
+          ditto -c -k --norsrc --noextattr --keepParent "$app" "build/$asset"
+          # The in-app updater wants exactly one top-level Companion.app and refuses a
+          # broken seal; fail here rather than ship a zip installed apps can't take.
+          if zipinfo -1 "build/$asset" | grep -E '(^|/)\._|^__MACOSX/'; then
+            echo "::error::$asset contains AppleDouble entries"
+            exit 1
+          fi
+          if [ "$(zipinfo -1 "build/$asset" | cut -d/ -f1 | sort -u)" != "Companion.app" ]; then
+            echo "::error::$asset must contain only Companion.app at the top level"
+            exit 1
+          fi
           sha="$(shasum -a 256 "build/$asset" | cut -d' ' -f1)"
           echo "asset=$asset" >> "$GITHUB_OUTPUT"
           echo "sha256=$sha" >> "$GITHUB_OUTPUT"
@@ -219,6 +245,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          prerelease: ${{ contains(github.event.inputs.tag || github.ref_name, '-') }}
           files: build/Companion-*-macos-universal.zip
 
   # ---------------------------------------------------------------------------
@@ -325,6 +352,7 @@ jobs:
           The bundle is ad-hoc signed; the cask strips the quarantine attribute after
           install. If you download \`Companion-${version}-macos-universal.zip\` above
           instead, run \`xattr -dr com.apple.quarantine Companion.app\` after unzipping.
+          Either way, Companion keeps itself up to date from then on.
 
           ### Docker images
 
