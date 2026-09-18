@@ -103,7 +103,17 @@ export function FeatureShowcase() {
                 <path d="M6 10V8a6 6 0 1 1 12 0v2" stroke="#a7a7a1" strokeWidth="2" strokeLinecap="round" />
                 <rect x="4" y="10" width="16" height="10" rx="2" fill="#a7a7a1" />
               </svg>
-              <span style={{ fontFamily: "'Geist', sans-serif", fontSize: 13, color: "#595954" }}>
+              <span
+                style={{
+                  fontFamily: "'Geist', sans-serif",
+                  fontSize: 13,
+                  color: "#595954",
+                  minWidth: 0,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 web.companionapp.cloud/{feature}
               </span>
             </div>

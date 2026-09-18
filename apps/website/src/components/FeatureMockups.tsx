@@ -825,10 +825,10 @@ const GRAPH_NODES: GraphNode[] = [
   { id: "plan", x: 430, y: 160, label: "Launch plan — v1.2", type: "note", degree: 6 },
   { id: "project", x: 560, y: 215, label: "v1.2 launch", type: "project", degree: 6 },
   { id: "positioning", x: 540, y: 75, label: "Pricing page positioning", type: "note", degree: 2 },
-  { id: "review", x: 680, y: 110, label: "Review pricing page copy", type: "task", degree: 2 },
+  { id: "review", x: 720, y: 105, label: "Review pricing page copy", type: "task", degree: 2 },
   { id: "draft", x: 470, y: 285, label: "Draft the launch announcement", type: "task", degree: 2 },
-  { id: "investor", x: 720, y: 235, label: "Send the investor update", type: "task", degree: 1 },
-  { id: "weekly", x: 600, y: 300, label: "Weekly team sync", type: "task", degree: 1 },
+  { id: "investor", x: 760, y: 205, label: "Send the investor update", type: "task", degree: 1 },
+  { id: "weekly", x: 680, y: 300, label: "Weekly team sync", type: "task", degree: 1 },
   { id: "sync", x: 300, y: 90, label: "Launch sync — Monday", type: "meeting", degree: 1 },
   { id: "daily", x: 280, y: 225, label: "September 18, 2026", type: "note", degree: 1 },
 ];
