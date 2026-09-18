@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, View } from "react-native";
 import type { AppliesTo, ObjectField, ObjectFieldType, ObjectType } from "@companion/core-bridge";
 import {
@@ -7,13 +7,13 @@ import {
   Icon,
   IconButton,
   Input,
-  ListRow,
   Text,
   colors,
   control,
   icon as iconSize,
   motion,
   radius,
+  row,
   space,
   transition,
   useDensity,
@@ -21,7 +21,8 @@ import {
   type PressState,
 } from "@companion/design-system";
 import { useObjectTypes } from "./ObjectTypesProvider";
-import { ConfirmDialog } from "./ConfirmDialog";
+import { ConfirmDialog, useDialogKeys } from "./ConfirmDialog";
+import { Dialog } from "./Dialog";
 import { CheckBox, Segmented, SettingsField, SettingsNote, SwatchPicker } from "./settingsUi";
 
 const FIELD_TYPES: ObjectFieldType[] = ["text", "number", "date", "select", "multi_select", "reference", "checkbox", "url"];
@@ -37,115 +38,174 @@ function typeIcon(t: ObjectType): IconName {
   return (t.schemaJson.icon as IconName) || "file";
 }
 
-/** Object-type (archetype) management (PLAN §6.3): create types and author their schemas —
- *  the flat field list of {key, type, label, required, options?, to?}. The Go core is the
- *  single source of validation; this is just an editor. Lives in the AI/Objects settings. */
+/** Object-type (archetype) management (PLAN §6.3): the list of types, each opening an editor
+ *  dialog, with its delete on the row behind a confirmation. "New type" opens the same dialog
+ *  empty — nothing is created until it is saved. The Go core is the single source of validation;
+ *  this is just an editor. */
 export function ObjectTypeSettings() {
   const objectTypes = useObjectTypes();
-  const density = useDensity();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const selected = objectTypes.types.find((t) => t.id === selectedId) ?? null;
+  const touch = useDensity() === "touch";
+  // The editor dialog: a type being edited, "new" for the add flow, or closed.
+  const [editing, setEditing] = useState<string | "new" | null>(null);
+  const [deleting, setDeleting] = useState<ObjectType | null>(null);
+  const editingType = editing && editing !== "new" ? (objectTypes.types.find((t) => t.id === editing) ?? null) : null;
 
-  const createType = async () => {
-    const ot = await objectTypes.create({ name: "New type", appliesTo: "both", schemaJson: { fields: [] } });
-    setSelectedId(ot.id);
-  };
-
-  if (selected) {
-    return <TypeEditor key={selected.id} type={selected} onBack={() => setSelectedId(null)} />;
-  }
-
-  const touch = density === "touch";
   return (
     <View style={styles.stack}>
-      <View style={styles.headerRow}>
-        <Text variant="eyebrow" tone="quaternary" style={{ flex: 1 }}>
-          Object types · {objectTypes.types.length}
-        </Text>
-        <Button label="New type" size={touch ? undefined : "sm"} variant="secondary" onPress={() => void createType()} />
-      </View>
-      {objectTypes.types.length === 0 ? (
-        <SettingsNote>
-          Object types turn notes and tasks into structured objects with schema-validated fields. Create one to get
-          started.
-        </SettingsNote>
-      ) : (
+      <Text variant="eyebrow" tone="quaternary">
+        Object types{objectTypes.types.length > 0 ? ` · ${objectTypes.types.length}` : ""}
+      </Text>
+      <SettingsNote>Object types turn notes and tasks into structured objects — a Book, a Person, a Meeting — with their own fields.</SettingsNote>
+
+      {objectTypes.types.length > 0 ? (
         <View style={styles.list}>
-          {objectTypes.types.map((t) => {
+          {objectTypes.types.map((t, i) => {
             const count = (t.schemaJson.fields ?? []).length;
             return (
-              <ListRow
-                key={t.id}
-                icon={<Icon name={typeIcon(t)} size={touch ? iconSize.lg : iconSize.sm} color={t.schemaJson.color || colors.textQuaternary} />}
-                title={t.name}
-                trailing={`${t.appliesTo} · ${count} field${count === 1 ? "" : "s"}`}
-                onPress={() => setSelectedId(t.id)}
-              />
+              <View key={t.id} style={[styles.typeRow, i === objectTypes.types.length - 1 ? null : styles.rowDivider]}>
+                {/* The row opens the editor; the delete button is its sibling, not its child, so
+                    pressing it can never also open the editor. */}
+                <Pressable
+                  onPress={() => setEditing(t.id)}
+                  aria-label={`Edit ${t.name}`}
+                  style={({ hovered, pressed }: PressState) => [
+                    styles.typeMain,
+                    transition("background-color", motion.instant),
+                    { minHeight: touch ? row.touch : 32, backgroundColor: pressed ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent" },
+                  ]}
+                >
+                  <Icon name={typeIcon(t)} size={touch ? iconSize.lg : iconSize.sm} color={t.schemaJson.color || colors.textQuaternary} />
+                  <Text variant="label" numberOfLines={1} style={{ flex: 1 }}>
+                    {t.name}
+                  </Text>
+                  <Text variant="mono" tone="quaternary" numberOfLines={1}>
+                    {t.appliesTo} · {count} field{count === 1 ? "" : "s"}
+                  </Text>
+                </Pressable>
+                <IconButton label={`Delete ${t.name}`} size={touch ? undefined : "sm"} onPress={() => setDeleting(t)}>
+                  <Icon name="trash" size={touch ? iconSize.lg : 13} color={colors.textTertiary} />
+                </IconButton>
+              </View>
             );
           })}
         </View>
-      )}
+      ) : null}
+
+      <View style={{ flexDirection: "row" }}>
+        <Button label="New type" variant="secondary" onPress={() => setEditing("new")} />
+      </View>
+
+      {editing === "new" || editingType ? (
+        <TypeEditor key={editing} type={editingType} onClose={() => setEditing(null)} />
+      ) : null}
+      {deleting ? (
+        <ConfirmDialog
+          portal
+          title={`Delete “${deleting.name}”?`}
+          message="Notes and tasks that use this type keep their content and their field values, but stop showing as this type."
+          confirmLabel="Delete type"
+          onClose={() => setDeleting(null)}
+          onConfirm={async () => {
+            await objectTypes.remove(deleting.id);
+            setDeleting(null);
+          }}
+        />
+      ) : null}
     </View>
   );
 }
 
-function TypeEditor({ type, onBack }: { type: ObjectType; onBack: () => void }) {
-  const objectTypes = useObjectTypes();
-  const [name, setName] = useState(type.name);
-  const [appliesTo, setAppliesTo] = useState<AppliesTo>(type.appliesTo);
-  const [fields, setFields] = useState<ObjectField[]>(type.schemaJson.fields ?? []);
-  const [icon, setIcon] = useState<string>(type.schemaJson.icon ?? "file");
-  const [color, setColor] = useState<string | undefined>(type.schemaJson.color);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+/** What the form edits, and what "unchanged" is measured against. */
+function formOf(type: ObjectType | null) {
+  return {
+    name: type?.name ?? "",
+    appliesTo: (type?.appliesTo ?? "both") as AppliesTo,
+    fields: type?.schemaJson.fields ?? [],
+    icon: type?.schemaJson.icon ?? "file",
+    color: type?.schemaJson.color,
+  };
+}
 
-  // Re-seed when a synced edit lands on this type.
+/** The add/edit dialog. `type` null is the add flow: the same form, empty, and the type only
+ *  comes into being on Create — cancelling leaves nothing behind. */
+function TypeEditor({ type, onClose }: { type: ObjectType | null; onClose: () => void }) {
+  const objectTypes = useObjectTypes();
+  const initial = formOf(type);
+  const [name, setName] = useState(initial.name);
+  const [appliesTo, setAppliesTo] = useState<AppliesTo>(initial.appliesTo);
+  const [fields, setFields] = useState<ObjectField[]>(initial.fields);
+  const [icon, setIcon] = useState<string>(initial.icon);
+  const [color, setColor] = useState<string | undefined>(initial.color);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // The field whose removal is being confirmed (the confirmation is a dialog above this one).
+  const [removing, setRemoving] = useState<number | null>(null);
+
+  const dirty = JSON.stringify({ name, appliesTo, fields, icon, color }) !== JSON.stringify(initial);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+
+  // Re-seed when a synced edit lands on this type — but never over the user's own unsaved
+  // changes: the provider hands out a fresh object on every reload, not only on real edits.
   useEffect(() => {
-    setName(type.name);
-    setAppliesTo(type.appliesTo);
-    setFields(type.schemaJson.fields ?? []);
-    setIcon(type.schemaJson.icon ?? "file");
-    setColor(type.schemaJson.color);
+    if (dirtyRef.current) return;
+    const next = formOf(type);
+    setName(next.name);
+    setAppliesTo(next.appliesTo);
+    setFields(next.fields);
+    setIcon(next.icon);
+    setColor(next.color);
   }, [type]);
 
   const setField = (i: number, patch: Partial<ObjectField>) =>
     setFields((prev) => prev.map((f, idx) => (idx === i ? { ...f, ...patch } : f)));
   const addField = () => setFields((prev) => [...prev, { key: "", type: "text", label: "" }]);
   const removeField = (i: number) => setFields((prev) => prev.filter((_, idx) => idx !== i));
+  // A field nobody has filled in yet goes without ceremony; one with a name asks first.
+  const requestRemoveField = (i: number) => {
+    const f = fields[i];
+    if (f && !(f.key || "").trim() && !(f.label || "").trim()) removeField(i);
+    else setRemoving(i);
+  };
 
   const save = async () => {
+    if (busy) return;
+    if (!name.trim()) return setError("Give the type a name.");
+    setBusy(true);
     setError(null);
     try {
-      await objectTypes.update(type.id, { name, appliesTo, schemaJson: { fields, icon, color } });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 1500);
+      const body = { name: name.trim(), appliesTo, schemaJson: { fields, icon, color } };
+      if (type) await objectTypes.update(type.id, body);
+      else await objectTypes.create(body);
+      onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
     }
   };
 
-  const remove = async () => {
-    await objectTypes.remove(type.id);
-    onBack();
-  };
+  // esc cancels — unless the remove-field confirmation is up, which then owns the keyboard. ⏎ is
+  // left alone: in a form this long it is far likelier to be a slip than a decision to save.
+  const hints = useDialogKeys({ onEscape: removing !== null || busy ? undefined : onClose });
 
   const touch = useDensity() === "touch";
   const tile = touch ? 38 : control.md;
+  const removingName = removing !== null ? (fields[removing]?.label || fields[removing]?.key || "").trim() : "";
   return (
-    <View style={styles.section}>
-      <View style={styles.headerRow}>
-        <IconButton label="Back to object types" size={touch ? undefined : "sm"} onPress={onBack}>
-          <Icon name="chevronLeft" size={touch ? iconSize.lg : 13} color={colors.textSecondary} />
-        </IconButton>
-        <Text variant="title" numberOfLines={1} style={{ flex: 1 }}>
-          {name.trim() || "Untitled type"}
-        </Text>
-      </View>
-
+    <Dialog
+      title={type ? "Edit object type" : "New object type"}
+      width={520}
+      // With unsaved changes a stray click outside must not throw the work away; Cancel still does.
+      onClose={dirty || busy ? undefined : onClose}
+      footer={
+        <>
+          <Button label="Cancel" variant="ghost" kbd={hints ? "esc" : undefined} onPress={onClose} />
+          <Button label={busy ? "…" : type ? "Save" : "Create type"} disabled={busy} onPress={() => void save()} />
+        </>
+      }
+    >
       <SettingsField label="Name">
-        <View style={styles.control}>
-          <Input value={name} onChangeText={setName} placeholder="e.g. Book" />
-        </View>
+        <Input autoFocus={!type} value={name} onChangeText={setName} placeholder="e.g. Book" />
       </SettingsField>
 
       <SettingsField label="Applies to" help="Which documents can take this type.">
@@ -186,7 +246,7 @@ function TypeEditor({ type, onBack }: { type: ObjectType; onBack: () => void }) 
           Fields · {fields.length}
         </Text>
         {fields.map((f, i) => (
-          <FieldEditor key={i} field={f} onChange={(patch) => setField(i, patch)} onRemove={() => removeField(i)} />
+          <FieldEditor key={i} field={f} onChange={(patch) => setField(i, patch)} onRemove={() => requestRemoveField(i)} />
         ))}
         <View style={{ flexDirection: "row" }}>
           <Button
@@ -201,14 +261,26 @@ function TypeEditor({ type, onBack }: { type: ObjectType; onBack: () => void }) 
 
       {error ? <SettingsNote tone="danger">{error}</SettingsNote> : null}
 
-      <Divider />
-
-      <View style={styles.footer}>
-        <Button label={saved ? "Saved" : "Save"} onPress={() => void save()} />
-        <View style={{ flex: 1 }} />
-        <Button label="Delete type" variant="danger" onPress={() => void remove()} />
-      </View>
-    </View>
+      {/* Rendered inside the dialog's tree so that on native it stacks above it, and portaled so
+          it is not squeezed into it. */}
+      {removing !== null ? (
+        <ConfirmDialog
+          portal
+          title="Remove field?"
+          message={
+            removingName
+              ? `Remove the “${removingName}” field from this type? Existing values for it are kept but no longer shown.`
+              : "Remove this field from this type? Existing values for it are kept but no longer shown."
+          }
+          confirmLabel="Remove field"
+          onConfirm={() => {
+            removeField(removing);
+            setRemoving(null);
+          }}
+          onClose={() => setRemoving(null)}
+        />
+      ) : null}
+    </Dialog>
   );
 }
 
@@ -222,8 +294,6 @@ function FieldEditor({
   onRemove: () => void;
 }) {
   const hasOptions = field.type === "select" || field.type === "multi_select";
-  const [confirmRemove, setConfirmRemove] = useState(false);
-  const fieldName = (field.label || field.key || "").trim();
   const touch = useDensity() === "touch";
   return (
     <View style={styles.fieldCard}>
@@ -234,7 +304,7 @@ function FieldEditor({
         <View style={{ flex: 1 }}>
           <Input size={touch ? undefined : "sm"} value={field.label ?? ""} placeholder="Label" onChangeText={(t) => onChange({ label: t })} />
         </View>
-        <IconButton label="Remove field" size={touch ? undefined : "sm"} onPress={() => setConfirmRemove(true)}>
+        <IconButton label="Remove field" size={touch ? undefined : "sm"} onPress={onRemove}>
           <Icon name="trash" size={touch ? iconSize.lg : 13} color={colors.textTertiary} />
         </IconButton>
       </View>
@@ -267,22 +337,6 @@ function FieldEditor({
         </View>
       ) : null}
 
-      {confirmRemove ? (
-        <ConfirmDialog
-          title="Remove field?"
-          message={
-            fieldName
-              ? `Remove the “${fieldName}” field from this type? Existing values for it are kept but no longer shown.`
-              : "Remove this field from this type? Existing values for it are kept but no longer shown."
-          }
-          confirmLabel="Remove field"
-          onConfirm={() => {
-            setConfirmRemove(false);
-            onRemove();
-          }}
-          onClose={() => setConfirmRemove(false)}
-        />
-      ) : null}
     </View>
   );
 }
@@ -310,11 +364,11 @@ function Chip({ label, active, onPress }: { label: string; active: boolean; onPr
 }
 
 const styles = {
-  section: { gap: space.xl },
   stack: { gap: space.md },
-  control: { width: "100%" as const, maxWidth: 320 },
-  headerRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.sm },
-  list: { gap: 1 },
+  list: { borderWidth: 1, borderColor: colors.borderSubtle, borderRadius: radius.lg, overflow: "hidden" as const },
+  typeRow: { flexDirection: "row" as const, alignItems: "center" as const, paddingRight: space.xs },
+  typeMain: { flex: 1, minWidth: 0, flexDirection: "row" as const, alignItems: "center" as const, gap: space.md, paddingHorizontal: space.ml },
+  rowDivider: { borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
   wrapRow: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: space.xs },
   iconTile: {
     borderRadius: radius.sm,
@@ -342,5 +396,4 @@ const styles = {
     borderColor: colors.borderSubtle,
   },
   fieldTopRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.sm },
-  footer: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.md },
 };
