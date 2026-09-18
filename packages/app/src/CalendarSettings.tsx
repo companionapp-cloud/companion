@@ -142,7 +142,7 @@ function AddSubscriptionDialog({ onClose }: { onClose: () => void }) {
       ) : null}
 
       {source === "url" ? (
-        <SettingsField label="ICS URL" help="Re-fetched every few minutes. webcal:// links work too.">
+        <SettingsField label="ICS URL" help="webcal:// links work too. Press refresh in the calendar to fetch changes.">
           <Input autoFocus mono value={url} onChangeText={setUrl} placeholder="https://…/basic.ics" autoCapitalize="none" />
         </SettingsField>
       ) : (
