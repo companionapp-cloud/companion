@@ -148,7 +148,7 @@ jobs:
   # cross-compiled from Linux like the server. The arm64 runner builds both slices
   # (Go passes the right -arch to clang for darwin/amd64) and lipo joins them into
   # one universal binary. The bundle is ad-hoc signed: CI has no Apple signing
-  # identity, so users install with `--no-quarantine` (see homebrew/README.md).
+  # identity, so the cask's postflight_steps strip quarantine (see homebrew/README.md).
   # ---------------------------------------------------------------------------
   desktop-macos:
     name: desktop (macOS universal)
@@ -319,12 +319,12 @@ jobs:
           ### macOS desktop (Homebrew)
 
           \`\`\`bash
-          brew install --cask --no-quarantine companionapp-cloud/tap/companion
+          brew install --cask companionapp-cloud/tap/companion
           \`\`\`
 
-          The bundle is ad-hoc signed, so \`--no-quarantine\` is required. Or download
-          \`Companion-${version}-macos-universal.zip\` above and run
-          \`xattr -dr com.apple.quarantine Companion.app\` after unzipping.
+          The bundle is ad-hoc signed; the cask strips the quarantine attribute after
+          install. If you download \`Companion-${version}-macos-universal.zip\` above
+          instead, run \`xattr -dr com.apple.quarantine Companion.app\` after unzipping.
 
           ### Docker images
 

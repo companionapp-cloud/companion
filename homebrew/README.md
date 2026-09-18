@@ -8,23 +8,26 @@ Homebrew tap for [Companion](https://github.com/companionapp-cloud/companion).
 
 ## Install
 
-The desktop app is ad-hoc signed and not notarized, so tell Homebrew not to
-quarantine the download. Without `--no-quarantine`, Gatekeeper refuses to open it.
-
 ```bash
-brew install --cask --no-quarantine companionapp-cloud/tap/companion
+brew install --cask companionapp-cloud/tap/companion
 ```
 
-Upgrades need the same flag:
+Homebrew 7 asks you to trust a third-party cask the first time you install it.
+Answer yes at the prompt, or trust it up front:
 
 ```bash
-brew upgrade --cask --no-quarantine companion
+brew trust --cask companionapp-cloud/tap/companion
 ```
 
-Or set it once in your shell profile so every cask command picks it up:
+The desktop app is ad-hoc signed and not notarized. Homebrew quarantines every
+cask download and Gatekeeper refuses to open a quarantined unsigned app, so the
+cask's `postflight_steps` run `xattr -dr com.apple.quarantine` on the installed bundle.
+That is the only thing it does beyond a normal cask install, and it's why the
+cask lives in this tap rather than in homebrew-cask. Upgrades go through the same
+postflight:
 
 ```bash
-export HOMEBREW_CASK_OPTS="--no-quarantine"
+brew upgrade --cask companion
 ```
 
 ## Uninstall

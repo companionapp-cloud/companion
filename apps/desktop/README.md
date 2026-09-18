@@ -45,12 +45,15 @@ WebKit/WebView window) and the platform webview toolchain that Wails needs.
 ## Install a release (Homebrew)
 
 Tagged releases build a universal `Companion.app` on a macOS runner and publish it
-through our own tap. The bundle is ad-hoc signed (CI has no Apple signing identity),
-so Homebrew must be told not to quarantine the download:
+through our own tap:
 
 ```bash
-brew install --cask --no-quarantine companionapp-cloud/tap/companion
+brew install --cask companionapp-cloud/tap/companion
 ```
+
+The bundle is ad-hoc signed (CI has no Apple signing identity) and Homebrew always
+quarantines cask downloads, so the cask's `postflight_steps` strip the quarantine
+attribute after install. That's why it's in our tap and not homebrew-cask.
 
 The cask lives in [`homebrew/Casks/companion.rb`](../../homebrew/Casks/companion.rb)
 in this repo; the Release workflow stamps the version + sha256 and pushes the whole
