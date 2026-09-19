@@ -277,6 +277,30 @@ function NavBridge({
     [active],
   );
 
+  // Point the active tab at a surface *in place of* what it holds: the outgoing surface is
+  // not remembered, and any earlier visit to it is dropped from this tab's history. How a
+  // deleted document is left behind — the tab falls back to its browse list, and Back never
+  // returns to the tombstone.
+  const replaceRef = useCallback(
+    (ref: TabRef) => {
+      setTabs((ts) =>
+        ts.map((tab, i) => {
+          if (i !== active) return tab;
+          const gone = keyOfRef(tab.ref);
+          const without = (stack: TabRef[]) => stack.filter((r) => keyOfRef(r) !== gone);
+          const back = without(tab.back);
+          const fwd = without(tab.fwd);
+          // Landing on the surface this tab came from (the list the deleted note was picked
+          // from) is a step back, not a new one: consume that entry instead of leaving a
+          // Back button that goes nowhere.
+          if (back.length && keyOfRef(back[back.length - 1]) === keyOfRef(ref)) back.pop();
+          return { ...tab, ref, back, fwd };
+        }),
+      );
+    },
+    [active],
+  );
+
   // Restore a surface from the active tab's Back (dir -1) or Forward (dir +1) stack.
   const stepTab = useCallback(
     (dir: -1 | 1) => {
@@ -355,6 +379,7 @@ function NavBridge({
       openTask: (id) => selectRef({ kind: "task", id }),
       openCanvas: (id) => selectRef({ kind: "canvas", id }),
       openRef: selectRef,
+      replaceRef,
       openInNewTab: (ref) => {
         // Append a tab already holding the surface and focus it, in one shot.
         setTabs((t) => [...t, freshTab(ref)]);
@@ -383,7 +408,7 @@ function NavBridge({
       openProjectSubItem: (projectId, section, itemId, subItemId) =>
         selectRef({ kind: "project", projectId, section, itemId, subItemId }),
     };
-  }, [tabs, active, activeTab, activeRef, selectRef, stepTab]);
+  }, [tabs, active, activeTab, activeRef, selectRef, replaceRef, stepTab]);
 
   return (
     <NavContext.Provider value={nav}>

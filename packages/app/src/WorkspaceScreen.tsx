@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ScrollView, View, type GestureResponderEvent } from "react-native";
 import { Center, Icon, IconButton, Input, Kbd, ListRow, Row, SplitView, Spinner, Text, colors, icon, layout, space } from "@companion/design-system";
-import { docOfRef, useNav } from "./nav-context";
+import { docOfRef, SECTION_OF, useNav, type DocRef } from "./nav-context";
 import { useNotes } from "./NotesProvider";
 import { useTasks } from "./TasksProvider";
 import { NoteEditor } from "./NoteEditor";
@@ -49,17 +49,21 @@ function TabContent() {
   if (ms.active && nav.visible) return <SelectionStackBody />;
 
   const doc = docOfRef(nav.activeTab.ref);
-  const close = () => nav.closeTab(nav.tabs.indexOf(nav.activeTab));
+  // Deleting the open document leaves the tab on the list it came from — the notes, tasks
+  // or canvases page with nothing selected — the same way the project pane drops back to
+  // its section. Closing the tab instead would strand the last tab on the shell's empty
+  // state, nowhere near the list the user was working in.
+  const backToList = (kind: DocRef["kind"]) => nav.replaceRef({ kind: "browse", section: SECTION_OF[kind] });
   return (
     <View style={styles.detail}>
       {!doc ? (
         <EmptyDetail kind={nav.current.kind === "tasks" ? "task" : nav.current.kind === "canvases" ? "canvas" : "note"} />
       ) : doc.kind === "note" ? (
-        <NoteTabBody id={doc.id} onDelete={close} />
+        <NoteTabBody id={doc.id} onDelete={() => backToList("note")} />
       ) : doc.kind === "task" ? (
-        <TaskTabBody id={doc.id} onDelete={close} />
+        <TaskTabBody id={doc.id} onDelete={() => backToList("task")} />
       ) : (
-        <CanvasPane key={doc.id} canvasId={doc.id} onDeleted={close} />
+        <CanvasPane key={doc.id} canvasId={doc.id} onDeleted={() => backToList("canvas")} />
       )}
     </View>
   );

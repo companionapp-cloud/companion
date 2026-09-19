@@ -134,6 +134,11 @@ export interface Navigator {
    *  given day), or a project drill-down. For callers that first work out where an item
    *  lives, like the graph (see useOpenGraphNode). */
   openRef: (ref: TabRef) => void;
+  /** Like `openRef`, but the surface being left behind is not remembered: it is not pushed
+   *  onto the tab's Back stack, and any earlier visit to it is dropped from that history.
+   *  For a surface that has ceased to exist — deleting the open document returns the tab to
+   *  its browse list, and Back never lands on the tombstone. */
+  replaceRef: (ref: TabRef) => void;
   /** Open a document in a new tab and make it active (e.g. following a link chip). */
   openInNewTab: (ref: TabRef) => void;
   /** Open a canvas board in the canvases view (PLAN-canvases.md). */

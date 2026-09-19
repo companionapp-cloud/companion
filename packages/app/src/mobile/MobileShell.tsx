@@ -278,6 +278,10 @@ function MobileNavBridge({
       openNote,
       openTask,
       openRef,
+      // No per-tab history on this shell: `openRef` already navigates (rather than pushes)
+      // to a browse list, popping back to it when it is in the stack — which is what
+      // replacing the current surface amounts to here.
+      replaceRef: openRef,
       // No tab strip here: "open in new tab" (link chips, the calendar) opens in place.
       openInNewTab: openRef,
       openCanvas,
