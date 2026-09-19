@@ -43,11 +43,13 @@ desktop-frontend:
 ## DESKTOP_VERSION=x.y.z stamps a release version into the binary (and, for desktop-app,
 ## the Info.plist) the way the release workflow does, so the build self-updates like a
 ## release (apps/desktop/updates.go): DESKTOP_VERSION=0.0.1 updates itself to the latest
-## release on launch. Unset (the default) is a dev build, which never self-updates.
+## release on launch. Like a release it is built with -tags production (Wails' release
+## mode), which leaves out the Web Inspector. Unset (the default) is a dev build, which
+## never self-updates and keeps the inspector.
 DESKTOP_VERSION ?=
 desktop: desktop-frontend
 	mkdir -p $(BUILD_DIR)
-	cd apps/desktop && $(GO) build $(if $(DESKTOP_VERSION),-ldflags "-X main.version=$(DESKTOP_VERSION)") -o ../../$(BUILD_DIR)/companion-desktop .
+	cd apps/desktop && $(GO) build $(if $(DESKTOP_VERSION),-tags production -ldflags "-X main.version=$(DESKTOP_VERSION)") -o ../../$(BUILD_DIR)/companion-desktop .
 
 ## desktop-app: package the binary into build/Companion.app (macOS). The bundle +
 ## identifier + a real code signature are what make notifications and launch-at-login work

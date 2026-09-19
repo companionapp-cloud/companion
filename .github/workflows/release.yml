@@ -207,10 +207,18 @@ jobs:
             echo "::warning::GOOGLE_CLIENT_ID is not set; this build will not offer Google Calendar sign-in."
           fi
           mkdir -p build
-          GOARCH=arm64 go build -C apps/desktop -trimpath -ldflags="$ldflags" -o "$(pwd)/build/companion-desktop-arm64" .
-          GOARCH=amd64 go build -C apps/desktop -trimpath -ldflags="$ldflags" -o "$(pwd)/build/companion-desktop-amd64" .
+          # -tags production is Wails' release mode. Without it every window has WebKit's Web
+          # Inspector (right-click › Inspect Element, View › Open Developer Tools).
+          GOARCH=arm64 go build -C apps/desktop -trimpath -tags production -ldflags="$ldflags" -o "$(pwd)/build/companion-desktop-arm64" .
+          GOARCH=amd64 go build -C apps/desktop -trimpath -tags production -ldflags="$ldflags" -o "$(pwd)/build/companion-desktop-amd64" .
           lipo -create -output build/companion-desktop build/companion-desktop-arm64 build/companion-desktop-amd64
           lipo -info build/companion-desktop
+          # Prove the inspector was left out (a misspelled tag is silently ignored): Wails'
+          # development-mode window code is what switches on this WebKit preference.
+          if grep -aqF developerExtrasEnabled build/companion-desktop; then
+            echo "::error::The desktop binary has the Web Inspector compiled in (build it with -tags production)."
+            exit 1
+          fi
           # Prove the client id actually landed in the binary (a typo in -X is silently ignored by
           # the linker). Prints a yes/no only, never the value.
           if [ -n "$GOOGLE_CLIENT_ID" ]; then

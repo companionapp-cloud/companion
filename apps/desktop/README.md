@@ -55,6 +55,10 @@ installed release, so it can run next to your real Companion without touching it
   WebKit keys localStorage (the sync config) by bundle id, so that's separate too,
   as are its notification permission and login item. `make desktop-run` runs
   unbundled, which WebKit already keys by executable name.
+- It has WebKit's Web Inspector (right-click › Inspect Element, or View › Open
+  Developer Tools). Releases, and `DESKTOP_VERSION` builds, are compiled with
+  `-tags production`, Wails' release mode, which leaves it out and hides the
+  browser's right-click menu outside text fields, editable text and selections.
 
 ## Install a release (Homebrew)
 
