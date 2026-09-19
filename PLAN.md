@@ -284,8 +284,9 @@ CREATE TABLE tasks (
   title          TEXT NOT NULL,
   notes_md       TEXT NOT NULL DEFAULT '',
   status         TEXT NOT NULL DEFAULT 'open',   -- open | done | cancelled
-  due_at         TEXT,
-  remind_at      TEXT,                           -- reminder -> local notification
+  start_at       TEXT,                           -- when the task starts
+  due_at         TEXT,                           -- the deadline (keeps its "due" name)
+  reminders_json TEXT NOT NULL DEFAULT '[]',     -- [{"at":…} | {"before":"P1D"}] -> local notifications
   completed_at   TEXT,
   repeat_rule    TEXT,           -- RFC5545 RRULE; set ONLY on seed tasks
   repeat_seed_id TEXT,           -- occurrences point at their seed; NULL on seeds/one-offs
@@ -696,12 +697,25 @@ backed by the real task row, not text.
 
 ### 6.4 Tasks, reminders, repeating tasks
 
-- **Kinds** collapse into columns, not subtypes: a one-off task has neither `due_at`
-  nor `repeat_rule`; a scheduled task has `due_at`; a reminder has `remind_at`; any
-  task may be archetyped via `object_type_id`.
-- **Reminders**: `remind_at` on a task. `core/notify` computes the *notification plan*
-  (upcoming `{task_id, fire_at, title, body}` for the next N days). After every sync
-  or mutation, the platform shell reconciles:
+- **Kinds** collapse into columns, not subtypes: a one-off task has no dates and no
+  `repeat_rule`; a scheduled task has a `start_at` (when it starts) and/or a `due_at`
+  (its **deadline** — the column keeps its original name, the UI says "Deadline"); a
+  reminder has `reminders_json`; any task may be archetyped via `object_type_id`.
+- **Reminders**: a task carries a list (`reminders_json`, at most 10), each either an
+  absolute instant (`{"at": RFC3339}`) or a **lead** counted back from the deadline
+  (`{"before": "P1D"}` — a single-unit ISO-8601 duration: `PT0M` at the deadline, `PT1H`,
+  `P1D`, `P3D`, `P1W`, `P2W`, `P1M`). A lead is derived, never stored as an instant, so it
+  follows the deadline when it moves or repeats; on a task with no deadline it is kept but
+  never fires. Leads resolve in `core/domain` (`Reminder.FireAt`, `Task.ReminderFires`) with
+  UTC calendar arithmetic — a month back clamps to the shorter month — so every device and
+  the server agree on each instant (across a DST change a day-or-longer lead can land an hour
+  off the deadline's clock time). Typed reminders ("a few days before", "tomorrow 9am") parse
+  in Go too (`domain.ParseReminderPhrase`, exposed with the date parser as
+  `tasks.parseReminder`); the editor offers the leads as one-tap toggles. Each reminder fires
+  on its own; a task with a deadline and **no** reminders fires once, at the deadline — adding
+  reminders replaces that implicit fire (the `PT0M` lead restores it). `core/notify` computes
+  the *notification plan* (upcoming `{task_id, fire_at, title, body}` for the next N days).
+  After every sync or mutation, the platform shell reconciles:
   - Desktop: Wails v3 notifications API (app or its tray process must be running —
     ship a "launch at login / run in menu bar" option).
   - Mobile: `expo-notifications` scheduled local notifications (cancel-and-reschedule
@@ -709,26 +723,31 @@ backed by the real task row, not text.
   - Web: best-effort `Notification` API while a tab is open.
 - **Repeating tasks**: the user creates a **seed task** with `repeat_rule` (RRULE,
   parsed with `teambition/rrule-go` — the same package used by core for "next
-  occurrence" previews). The seed's `due_at` is the schedule anchor (DTSTART); a seed
-  with no due date falls back to its `created_at`. **Only the server generates
+  occurrence" previews). The seed's deadline (`due_at`) is the schedule anchor (DTSTART);
+  a seed with no deadline anchors on its `start_at` — a **start-anchored** repeat, whose
+  occurrences get a start and no deadline and are identified by that start — and one with
+  neither falls back to its `created_at` (`domain.RepeatAnchor`). **Only the server generates
   occurrences, and it does so *just in time* — never ahead of time.** A minute-cadence
   sweep (plus an immediate check on every seed write) asks each live seed, via
   `core/domain.LatestOccurrence`, "what is the most recent occurrence at or before *now*?"
   and creates that occurrence row (`repeat_seed_id = seed.id`) if it doesn't exist yet.
   Consequences, all deliberate:
-  - **Created just in time — at the reminder, not the whole schedule.** An occurrence is
-    generated the moment it becomes *relevant*: its own **reminder time** when the seed has
-    a lead-time reminder (so that reminder can still fire), else its due time. A task due at
-    9:00 with an 8:00 reminder materializes at ~8:00 (reminder = now); a task with no
-    reminder materializes at its due time. A seed whose first notification is still in the
-    future generates nothing yet — the user sees only the seed's next-occurrence *preview*.
-  - **Occurrences copy the seed, dates shifted forward.** Each occurrence carries the
+  - **Created just in time — when it becomes relevant, not the whole schedule.** An
+    occurrence is generated the moment it becomes *relevant*: when it **starts** or its
+    **earliest reminder** fires, if either precedes its occurrence instant (so it is there
+    to start, and that reminder can still fire), else at the instant itself. A task due at
+    9:00 with an 8:00 reminder materializes at ~8:00; one due Friday that starts Monday
+    materializes Monday; a "month before" lead counts as 31 days here, so such an occurrence
+    may appear a few days early, never late. A seed whose first occurrence isn't relevant yet
+    generates nothing — the user sees only the seed's next-occurrence *preview*.
+  - **Occurrences copy the seed, dates moved forward.** Each occurrence carries the
     seed's title/notes/archetype+props, its **project memberships** (so a repeating task in
-    a project generates member occurrences), and its **due and reminder shifted** to the
-    occurrence's date (reminder keeps the same lead: `remind = due + (seed.remind −
-    seed.due)`). It has no `repeat_rule` of its own and points back at its seed. The **seed
-    then advances** its own displayed due/reminder to the last generated occurrence, so it
-    tracks the schedule. The schedule anchor stays pinned to the *first* occurrence's date,
+    a project generates member occurrences), and its **dates moved** to the occurrence: the
+    occurrence instant becomes its deadline (its start, when start-anchored), and the start
+    and any absolute reminders shift by the same delta, keeping their distance; leads are
+    copied as-is and follow the new deadline. It has no `repeat_rule` of its own and points
+    back at its seed. The **seed then advances** its own displayed dates to the last
+    generated occurrence, so it tracks the schedule. The schedule anchor stays pinned to the *first* occurrence's date,
     so advancing the seed's display never shifts the cadence or resets a COUNT/UNTIL bound.
   - **At most one occurrence per seed per sweep**, so no window and no cap are needed — a
     sub-daily cadence ("every 5 minutes") simply produces one row per sweep as its time
@@ -892,7 +911,7 @@ a list's rows — and selecting a task opens it in the detail pane
   `calendar_events` (server-owned, read-only on clients, delivered via normal sync).
   Clients never fetch ICS — one fetcher, no CORS problems, consistent clone.
 - The calendar UI is a query in core: `calendar.range(from, to)` merges
-  `calendar_events` + tasks with `due_at`/`remind_at` + notes with `date` + habit
+  `calendar_events` + tasks with a deadline (`due_at`) + notes with `date` + habit
   cadence occurrences — one shared implementation, every client gets the same view.
 
 ### 6.8 LLM

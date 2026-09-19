@@ -140,13 +140,13 @@ export function CaptureFields({ c }: { c: CaptureController }) {
           leadingIcon={leading("calendar")}
         />
       </Field>
-      <Field label="Do you want me to remind you?" hint={c.remindResolved} error={c.remindFailed ? "Couldn’t read a time — try “tomorrow 9am”." : null}>
+      <Field label="Do you want me to remind you?" hint={c.remindResolved} error={c.remindFailed ? "Couldn’t read that — try “tomorrow 9am” or “a day before”." : null}>
         <Input
           value={c.remind}
           onChangeText={(t) => c.setRemind(t)}
           onSubmitEditing={() => void c.previewRemind()}
           onBlur={() => void c.previewRemind()}
-          placeholder="Natural language, e.g. in 2 hours"
+          placeholder="e.g. in 2 hours, or a day before"
           leadingIcon={leading("bell")}
         />
       </Field>

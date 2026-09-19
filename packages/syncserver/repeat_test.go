@@ -9,7 +9,8 @@ import (
 )
 
 // countOccurrences returns how many live occurrence rows of seedID a client holds, asserting
-// each is well-formed (points at the seed, carries no rule of its own, has a due date).
+// each is well-formed (points at the seed, carries no rule of its own, has a deadline — or a
+// start, for a start-anchored seed).
 func countOccurrences(t *testing.T, c *client, seedID string) int {
 	t.Helper()
 	list, err := c.store.Tasks.List()
@@ -25,8 +26,8 @@ func countOccurrences(t *testing.T, c *client, seedID string) int {
 		if task.RepeatRule != nil {
 			t.Errorf("occurrence %s should not carry its own repeat rule", task.ID)
 		}
-		if task.DueAt == nil {
-			t.Errorf("occurrence %s should have a due date", task.ID)
+		if task.DueAt == nil && task.StartAt == nil {
+			t.Errorf("occurrence %s should have a deadline or a start", task.ID)
 		}
 	}
 	return n
@@ -202,9 +203,9 @@ func TestRepeatSeedTrashStopsGeneration(t *testing.T) {
 	}
 }
 
-// An occurrence copies the seed's project membership and its reminder (time-shifted to the
-// occurrence's date); generation is timed to the reminder so it can still fire; and the seed
-// advances its displayed due/reminder to the generated occurrence (PLAN §6.4/§6.6).
+// An occurrence copies the seed's project membership and its exact-time reminder (shifted to
+// the occurrence's date); generation is timed to the reminder so it can still fire; and the
+// seed advances its displayed deadline/reminders to the generated occurrence (PLAN §6.4/§6.6).
 func TestRepeatCopiesReminderAndProject(t *testing.T) {
 	ts, srv := newServerAPI(t)
 	t0 := time.Date(2026, 7, 6, 8, 0, 0, 0, time.UTC) // the reminder instant (1h before due)
@@ -220,7 +221,8 @@ func TestRepeatCopiesReminderAndProject(t *testing.T) {
 	due := t0.Add(time.Hour) // due 09:00
 	remind := t0             // remind 08:00 (an hour before)
 	rule := "FREQ=DAILY"
-	seed, err := a.store.Tasks.Create(store.CreateTaskInput{Title: "Water plants", DueAt: &due, RemindAt: &remind, RepeatRule: &rule})
+	seed, err := a.store.Tasks.Create(store.CreateTaskInput{Title: "Water plants", DueAt: &due,
+		Reminders: []domain.Reminder{{At: &remind}}, RepeatRule: &rule})
 	if err != nil {
 		t.Fatalf("create seed: %v", err)
 	}
@@ -235,8 +237,8 @@ func TestRepeatCopiesReminderAndProject(t *testing.T) {
 	if occ.DueAt == nil || !occ.DueAt.Equal(due) {
 		t.Errorf("occurrence due = %v, want %v", occ.DueAt, due)
 	}
-	if occ.RemindAt == nil || !occ.RemindAt.Equal(remind) {
-		t.Errorf("occurrence remind = %v, want %v", occ.RemindAt, remind)
+	if len(occ.Reminders) != 1 || occ.Reminders[0].At == nil || !occ.Reminders[0].At.Equal(remind) {
+		t.Errorf("occurrence reminders = %+v, want one at %v", occ.Reminders, remind)
 	}
 	// It inherits the seed's project membership.
 	members, _ := b.store.ProjectMembers.ListForEntity("task", occ.ID)
@@ -248,8 +250,168 @@ func TestRepeatCopiesReminderAndProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get seed: %v", err)
 	}
-	if seedB.DueAt == nil || !seedB.DueAt.Equal(due) || seedB.RemindAt == nil || !seedB.RemindAt.Equal(remind) {
-		t.Errorf("seed dates = due %v remind %v, want %v / %v", seedB.DueAt, seedB.RemindAt, due, remind)
+	if seedB.DueAt == nil || !seedB.DueAt.Equal(due) || len(seedB.Reminders) != 1 || !seedB.Reminders[0].At.Equal(remind) {
+		t.Errorf("seed dates = due %v reminders %+v, want %v / %v", seedB.DueAt, seedB.Reminders, due, remind)
+	}
+}
+
+// A lead reminder ("the day before") times generation: each occurrence appears when its
+// earliest reminder is due — a day before its deadline — carries the lead unchanged (it
+// follows the new deadline), and never earlier than that.
+func TestRepeatLeadReminderTimesGeneration(t *testing.T) {
+	ts, srv := newServerAPI(t)
+	t0 := time.Date(2026, 7, 9, 17, 0, 0, 0, time.UTC) // Thursday 17:00: the first reminder
+	clk := &testClock{t: t0}
+	srv.clock = clk
+
+	token := registerAt(t, srv, clk, ts.URL, "lead@b.co", "password", t0.AddDate(1, 0, 0))
+	a := newClient(t, ts.URL, token, "devA")
+
+	due := t0.AddDate(0, 0, 1) // Friday 17:00
+	rule := "FREQ=WEEKLY"
+	seed, err := a.store.Tasks.Create(store.CreateTaskInput{Title: "Timesheet", DueAt: &due,
+		Reminders: []domain.Reminder{{Before: "P1D"}}, RepeatRule: &rule})
+	if err != nil {
+		t.Fatalf("create seed: %v", err)
+	}
+	a.engine.Sync()
+
+	occ := onlyOccurrence(t, a, seed.ID)
+	if occ.DueAt == nil || !occ.DueAt.Equal(due) {
+		t.Errorf("occurrence deadline = %v, want %v", occ.DueAt, due)
+	}
+	if len(occ.Reminders) != 1 || occ.Reminders[0].Before != "P1D" {
+		t.Errorf("occurrence reminders = %+v, want the P1D lead", occ.Reminders)
+	}
+	if fires := occ.ReminderFires(); len(fires) != 1 || !fires[0].Equal(t0) {
+		t.Errorf("occurrence fires at %v, want %v", fires, t0)
+	}
+
+	// Next week's occurrence waits for its own reminder: not a minute before next Thursday 17:00.
+	clk.t = t0.AddDate(0, 0, 7).Add(-time.Minute)
+	if _, err := srv.MaterializeAllRepeats(); err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	a.engine.Sync()
+	if got := countOccurrences(t, a, seed.ID); got != 1 {
+		t.Fatalf("occurrences just before next reminder = %d, want 1", got)
+	}
+	clk.t = t0.AddDate(0, 0, 7)
+	if _, err := srv.MaterializeAllRepeats(); err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	a.engine.Sync()
+	if got := countOccurrences(t, a, seed.ID); got != 2 {
+		t.Errorf("occurrences at next reminder = %d, want 2", got)
+	}
+}
+
+// A repeat with a start and no deadline stays start-only: each occurrence gets its start (the
+// occurrence instant) and no deadline, is identified by that start (repeat sweeps never
+// duplicate it), and appears when it starts.
+func TestRepeatStartAnchored(t *testing.T) {
+	ts, srv := newServerAPI(t)
+	t0 := time.Date(2026, 7, 6, 9, 0, 0, 0, time.UTC) // Monday 09:00
+	clk := &testClock{t: t0}
+	srv.clock = clk
+
+	token := registerAt(t, srv, clk, ts.URL, "start@b.co", "password", t0.AddDate(1, 0, 0))
+	a := newClient(t, ts.URL, token, "devA")
+
+	rule := "FREQ=WEEKLY"
+	seed, err := a.store.Tasks.Create(store.CreateTaskInput{Title: "Plan the week", StartAt: &t0, RepeatRule: &rule})
+	if err != nil {
+		t.Fatalf("create seed: %v", err)
+	}
+	a.engine.Sync()
+
+	occ := onlyOccurrence(t, a, seed.ID)
+	if occ.StartAt == nil || !occ.StartAt.Equal(t0) || occ.DueAt != nil {
+		t.Errorf("occurrence start %v deadline %v, want start %v and no deadline", occ.StartAt, occ.DueAt, t0)
+	}
+
+	// Sweeping again at the same instant finds the start-keyed occurrence and adds nothing.
+	for i := 0; i < 2; i++ {
+		if _, err := srv.MaterializeAllRepeats(); err != nil {
+			t.Fatalf("materialize: %v", err)
+		}
+	}
+	a.engine.Sync()
+	if got := countOccurrences(t, a, seed.ID); got != 1 {
+		t.Fatalf("occurrences after repeat sweeps = %d, want 1", got)
+	}
+
+	// A week later the next one starts; the seed advanced its start and still has no deadline.
+	clk.t = t0.AddDate(0, 0, 7)
+	if _, err := srv.MaterializeAllRepeats(); err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	a.engine.Sync()
+	if got := countOccurrences(t, a, seed.ID); got != 2 {
+		t.Errorf("occurrences a week later = %d, want 2", got)
+	}
+	seedA, err := a.store.Tasks.GetAny(seed.ID)
+	if err != nil {
+		t.Fatalf("get seed: %v", err)
+	}
+	if seedA.StartAt == nil || !seedA.StartAt.Equal(clk.t) || seedA.DueAt != nil {
+		t.Errorf("seed start %v deadline %v, want start %v and no deadline", seedA.StartAt, seedA.DueAt, clk.t)
+	}
+}
+
+// With both dates, the deadline anchors the schedule and the start moves with it (keeping its
+// distance), and the occurrence appears when it starts — before its deadline or reminders.
+func TestRepeatStartMovesWithDeadline(t *testing.T) {
+	ts, srv := newServerAPI(t)
+	t0 := time.Date(2026, 7, 6, 9, 0, 0, 0, time.UTC) // Monday 09:00: the first start
+	clk := &testClock{t: t0}
+	srv.clock = clk
+
+	token := registerAt(t, srv, clk, ts.URL, "window@b.co", "password", t0.AddDate(1, 0, 0))
+	a := newClient(t, ts.URL, token, "devA")
+
+	due := time.Date(2026, 7, 10, 17, 0, 0, 0, time.UTC) // Friday 17:00
+	remind := due.Add(-time.Hour)
+	rule := "FREQ=WEEKLY"
+	seed, err := a.store.Tasks.Create(store.CreateTaskInput{Title: "Weekly review", StartAt: &t0, DueAt: &due,
+		Reminders: []domain.Reminder{{At: &remind}, {Before: "P1D"}}, RepeatRule: &rule})
+	if err != nil {
+		t.Fatalf("create seed: %v", err)
+	}
+	a.engine.Sync()
+
+	// It exists from its start on Monday, four days before its deadline.
+	occ := onlyOccurrence(t, a, seed.ID)
+	if occ.StartAt == nil || !occ.StartAt.Equal(t0) || occ.DueAt == nil || !occ.DueAt.Equal(due) {
+		t.Errorf("first occurrence start %v deadline %v, want %v / %v", occ.StartAt, occ.DueAt, t0, due)
+	}
+
+	// Next Monday brings the next one: start, deadline and the exact reminder all a week on.
+	clk.t = t0.AddDate(0, 0, 7)
+	if _, err := srv.MaterializeAllRepeats(); err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	a.engine.Sync()
+	if got := countOccurrences(t, a, seed.ID); got != 2 {
+		t.Fatalf("occurrences next Monday = %d, want 2", got)
+	}
+	list, _ := a.store.Tasks.List()
+	var next *domain.Task
+	for _, task := range list {
+		if task.RepeatSeedID != nil && *task.RepeatSeedID == seed.ID && task.DueAt != nil && task.DueAt.After(due) {
+			next = task
+		}
+	}
+	if next == nil {
+		t.Fatal("second occurrence not found")
+	}
+	wantDue, wantStart, wantRemind := due.AddDate(0, 0, 7), t0.AddDate(0, 0, 7), remind.AddDate(0, 0, 7)
+	if !next.DueAt.Equal(wantDue) || next.StartAt == nil || !next.StartAt.Equal(wantStart) {
+		t.Errorf("second occurrence start %v deadline %v, want %v / %v", next.StartAt, next.DueAt, wantStart, wantDue)
+	}
+	fires := next.ReminderFires()
+	if len(fires) != 2 || !fires[0].Equal(wantDue.AddDate(0, 0, -1)) || !fires[1].Equal(wantRemind) {
+		t.Errorf("second occurrence fires %v, want [%v %v]", fires, wantDue.AddDate(0, 0, -1), wantRemind)
 	}
 }
 

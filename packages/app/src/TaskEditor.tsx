@@ -1,6 +1,6 @@
 import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Platform, Pressable, ScrollView, TextInput, View, type GestureResponderEvent } from "react-native";
-import type { Task, UpdateTaskInput } from "@companion/core-bridge";
+import type { Task, TaskReminder, UpdateTaskInput } from "@companion/core-bridge";
 import {
   Badge,
   Button,
@@ -27,6 +27,7 @@ import { useCore } from "./CoreContext";
 import { useTasks } from "./TasksProvider";
 import { useSync } from "./SyncProvider";
 import { REPEAT_PRESETS, repeatLabel } from "./repeat";
+import { MAX_REMINDERS, REMINDER_LEAD_PRESETS, reminderLabel, remindersSummary, sameReminder } from "./reminders";
 import { useLinkSource } from "./useLinkSource";
 import { useQuickCreateLink } from "./useQuickCreateLink";
 import { DateTimeInput } from "./DateTimeInput";
@@ -57,9 +58,9 @@ export interface TaskEditorProps {
   onConnectSync?: () => void;
 }
 
-/** The detail editor for a single task (PLAN §6.4): a status checkbox, title, quick due /
- *  reminder presets, freeform notes (markdown — scanned for wikilinks), and project
- *  membership. Keyed by task id upstream so each task gets a fresh instance. */
+/** The detail editor for a single task (PLAN §6.4): a status checkbox, title, its start,
+ *  deadline, reminders and repeat, freeform notes (markdown — scanned for wikilinks), and
+ *  project membership. Keyed by task id upstream so each task gets a fresh instance. */
 export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true, onOpenRef, onConnectSync }: TaskEditorProps) {
   const tasks = useTasks();
   const linkSource = useLinkSource();
@@ -75,7 +76,8 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
   const [showMeta, setShowMeta] = useState(false);
   // Which metadata field has its full editor expanded (Reminders-style: the chips are the
   // resting state; tapping one reveals the natural-language / preset / picker controls).
-  const [expanded, setExpanded] = useState<null | "due" | "reminder" | "repeat">(null);
+  const [expanded, setExpanded] = useState<null | "start" | "deadline" | "reminders" | "repeat">(null);
+  const toggle = (field: NonNullable<typeof expanded>) => setExpanded((e) => (e === field ? null : field));
   const done = task.status === "done";
   // Touch density (the mobile shells) keeps 44px chrome, `lg` controls and a 22px checkbox.
   const touch = useDensity() === "touch";
@@ -161,27 +163,35 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
         <View style={[styles.metaRow, indent]}>
           <MetaChip
             icon="calendar"
-            label="Add due date"
-            display={task.dueAt ? formatDue(task.dueAt) : null}
+            label="Add start"
+            display={task.startAt ? `starts ${formatWhen(task.startAt)}` : null}
+            active={expanded === "start"}
+            onPress={() => toggle("start")}
+            onClear={task.startAt ? () => save(task.id, { clearStartAt: true }) : undefined}
+          />
+          <MetaChip
+            icon="flag"
+            label="Add deadline"
+            display={task.dueAt ? formatWhen(task.dueAt) : null}
             tone={overdue(task) ? "danger" : dueToday(task) ? "accent" : "default"}
-            active={expanded === "due"}
-            onPress={() => setExpanded((e) => (e === "due" ? null : "due"))}
+            active={expanded === "deadline"}
+            onPress={() => toggle("deadline")}
             onClear={task.dueAt ? () => save(task.id, { clearDueAt: true }) : undefined}
           />
           <MetaChip
             icon="bell"
             label="Add reminder"
-            display={task.remindAt ? formatReminder(task.remindAt) : null}
-            active={expanded === "reminder"}
-            onPress={() => setExpanded((e) => (e === "reminder" ? null : "reminder"))}
-            onClear={task.remindAt ? () => save(task.id, { clearRemindAt: true }) : undefined}
+            display={remindersSummary(task.reminders)}
+            active={expanded === "reminders"}
+            onPress={() => toggle("reminders")}
+            onClear={task.reminders?.length ? () => save(task.id, { reminders: [] }) : undefined}
           />
           <MetaChip
             icon="repeat"
             label="Repeat"
             display={repeatLabel(task.repeatRule)}
             active={expanded === "repeat"}
-            onPress={() => setExpanded((e) => (e === "repeat" ? null : "repeat"))}
+            onPress={() => toggle("repeat")}
             onClear={task.repeatRule ? () => save(task.id, { clearRepeatRule: true }) : undefined}
           />
           {/* The archetype type is set/cleared inline; its fields live in the metadata panel. */}
@@ -193,26 +203,36 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
           />
         </View>
 
-        {expanded === "due" ? (
+        {expanded === "start" ? (
+          <View style={[styles.metaEditor, indent, touch ? null : styles.narrow]}>
+            <DateRow
+              value={task.startAt}
+              onSet={(iso) => save(task.id, { startAt: iso })}
+              onClear={() => save(task.id, { clearStartAt: true })}
+              presets={startPresets()}
+              nlPlaceholder="Type a start, e.g. monday 9am"
+            />
+          </View>
+        ) : null}
+
+        {expanded === "deadline" ? (
           <View style={[styles.metaEditor, indent, touch ? null : styles.narrow]}>
             <DateRow
               value={task.dueAt}
               onSet={(iso) => save(task.id, { dueAt: iso })}
               onClear={() => save(task.id, { clearDueAt: true })}
-              presets={duePresets()}
-              nlPlaceholder="Type a date, e.g. next friday"
+              presets={deadlinePresets()}
+              nlPlaceholder="Type a deadline, e.g. next friday"
             />
           </View>
         ) : null}
 
-        {expanded === "reminder" ? (
+        {expanded === "reminders" ? (
           <View style={[styles.metaEditor, indent, touch ? null : styles.narrow]}>
-            <DateRow
-              value={task.remindAt}
-              onSet={(iso) => save(task.id, { remindAt: iso })}
-              onClear={() => save(task.id, { clearRemindAt: true })}
-              presets={reminderPresets()}
-              nlPlaceholder="Type a time, e.g. tomorrow at 9am"
+            <RemindersRow
+              task={task}
+              onChange={(reminders) => save(task.id, { reminders })}
+              onAddDeadline={() => setExpanded("deadline")}
             />
           </View>
         ) : null}
@@ -239,7 +259,7 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
           </View>
         ) : null}
 
-        {/* Notes read as a rounded input, left-aligned with the due / reminder fields above. */}
+        {/* Notes read as a rounded input, left-aligned with the date / reminder fields above. */}
         <View style={[styles.notesField, indent, touch ? null : styles.narrow]}>
           <Editor
             ref={editorRef}
@@ -441,6 +461,10 @@ export function TaskRow({
             <Text variant="mono" tone={overdue(task) ? "danger" : dueToday(task) ? "accent" : "quaternary"}>
               {dueToday(task) ? "today" : formatDueShort(task.dueAt)}
             </Text>
+          ) : startsLater(task) ? (
+            <Text variant="mono" tone="quaternary">
+              starts {formatDueShort(task.startAt!)}
+            </Text>
           ) : null}
           {trailing ? <View style={{ opacity: hovered || !canHover ? 1 : 0 }}>{trailing}</View> : null}
         </>
@@ -462,6 +486,12 @@ function dueToday(task: Task): boolean {
   const d = new Date(task.dueAt);
   const now = new Date();
   return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate() && d.getTime() >= now.getTime();
+}
+
+/** Not yet started: a start in the future (and not done). Rows show it only when the task has
+ *  no deadline to show instead. */
+function startsLater(task: Task): boolean {
+  return task.status !== "done" && !!task.startAt && new Date(task.startAt).getTime() > Date.now();
 }
 
 function formatDueShort(iso: string): string {
@@ -488,10 +518,13 @@ function formatEcho(iso: string): string {
   return `${day} · ${d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
 }
 
-/** Chip label for a reminder — the due date plus a time ("Jul 5, 9:00 AM"). */
-function formatReminder(iso: string): string {
+/** Chip label for a start or deadline — "Jul 5, 5:00 PM", or just "Jul 5" at midnight (a
+ *  date typed without a time). Relative reminders count back from the deadline's time, so
+ *  the chip shows it. */
+function formatWhen(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
+  if (d.getHours() === 0 && d.getMinutes() === 0) return formatDue(iso);
   return `${formatDue(iso)}, ${d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
 }
 
@@ -602,8 +635,166 @@ function PresetChip({ label, active, onPress }: { label: string; active: boolean
   );
 }
 
+/** The reminders control (PLAN §6.4): the task's reminders as removable chips; one-tap leads
+ *  counted back from the deadline ("Day before" … "Month before", toggled on and off); a field
+ *  that reads either kind in core ("2 days before", "tomorrow 9am"); and exact-time presets
+ *  plus a picker. Every change saves the whole list, which core normalizes. */
+function RemindersRow({
+  task,
+  onChange,
+  onAddDeadline,
+}: {
+  task: Task;
+  onChange: (next: TaskReminder[]) => void;
+  onAddDeadline: () => void;
+}) {
+  const { tasks: api } = useCore();
+  const touch = useDensity() === "touch";
+  const [nl, setNl] = useState("");
+  const [failed, setFailed] = useState(false);
+  // What the last typed phrase became, echoed back as mono `→ 2 days before`.
+  const [echo, setEcho] = useState<string | null>(null);
+  // An exact moment being picked; added on "Add" (the picker fires on every segment edit).
+  const [exact, setExact] = useState<string | null>(null);
+  const reminders = task.reminders ?? [];
+  const full = reminders.length >= MAX_REMINDERS;
+
+  const has = (r: TaskReminder) => reminders.some((x) => sameReminder(x, r));
+  const add = (r: TaskReminder) => {
+    if (!has(r) && !full) onChange([...reminders, r]);
+  };
+  const remove = (r: TaskReminder) => onChange(reminders.filter((x) => !sameReminder(x, r)));
+
+  const submitNl = async () => {
+    const text = nl.trim();
+    if (!text) return;
+    const { reminder } = await api.parseReminder(text);
+    if (reminder) {
+      add(reminder);
+      setNl("");
+      setFailed(false);
+      setEcho(reminderLabel(reminder));
+    } else {
+      setFailed(true);
+      setEcho(null);
+    }
+  };
+
+  return (
+    <View style={{ gap: space.sm }}>
+      {reminders.length ? (
+        <View style={styles.presets}>
+          {reminders.map((r) => (
+            <ReminderChip key={r.at ?? r.before} reminder={r} inert={!r.at && !task.dueAt} onRemove={() => remove(r)} />
+          ))}
+        </View>
+      ) : null}
+
+      <Input
+        size="sm"
+        placeholder="Type a reminder, e.g. 2 days before or tomorrow 9am"
+        value={nl}
+        onChangeText={(t) => {
+          setNl(t);
+          setFailed(false);
+          if (t) setEcho(null);
+        }}
+        onSubmitEditing={() => void submitNl()}
+        leadingIcon={<Icon name="bell" size={12} color={colors.textQuaternary} />}
+      />
+      {echo ? (
+        <Text variant="mono" tone="quaternary">
+          → {echo}
+        </Text>
+      ) : null}
+      {failed ? (
+        <Text variant="caption" tone="tertiary">
+          Couldn’t read a reminder from that — try “3 days before” or “tomorrow 9am”.
+        </Text>
+      ) : null}
+
+      <Text variant="caption" tone="tertiary">
+        Before the deadline
+      </Text>
+      {task.dueAt ? (
+        <View style={styles.presets}>
+          {REMINDER_LEAD_PRESETS.map((p) => {
+            const on = has({ before: p.before });
+            return (
+              <PresetChip
+                key={p.before}
+                label={p.label}
+                active={on}
+                onPress={() => (on ? remove({ before: p.before }) : add({ before: p.before }))}
+              />
+            );
+          })}
+        </View>
+      ) : (
+        <View style={styles.inputRow}>
+          <Text variant="caption" tone="quaternary" style={{ flex: 1 }}>
+            Set a deadline to be reminded a day, a week or a month before it.
+          </Text>
+          <Button label="Add deadline" variant="secondary" size="sm" onPress={onAddDeadline} />
+        </View>
+      )}
+
+      <Text variant="caption" tone="tertiary">
+        At a set time
+      </Text>
+      {/* The exact-time picker is web-only; native sets exact times by typing or presets. */}
+      {Platform.OS === "web" ? (
+        <View style={styles.inputRow}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <DateTimeInput value={exact} onSet={setExact} />
+          </View>
+          <Button
+            label="Add"
+            variant="secondary"
+            size={touch ? undefined : "sm"}
+            disabled={!exact || full}
+            onPress={() => {
+              if (!exact) return;
+              add({ at: exact });
+              setExact(null);
+            }}
+          />
+        </View>
+      ) : null}
+      <View style={styles.presets}>
+        {reminderPresets().map((p) => (
+          <PresetChip key={p.label} label={p.label} active={false} onPress={() => add({ at: p.at().toISOString() })} />
+        ))}
+      </View>
+      {full ? (
+        <Text variant="caption" tone="tertiary">
+          That’s the most reminders a task can have ({MAX_REMINDERS}).
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/** A set reminder in the reminders editor: its label with a remove (✕). A lead on a task with
+ *  no deadline reads muted — it's kept, but won't fire until a deadline is set. */
+function ReminderChip({ reminder, inert, onRemove }: { reminder: TaskReminder; inert: boolean; onRemove: () => void }) {
+  const touch = useDensity() === "touch";
+  return (
+    <View style={[styles.chip, touch ? styles.chipTouch : null, styles.reminderChip, inert ? styles.reminderChipInert : null]}>
+      <Icon name="bell" size={11} color={inert ? colors.textQuaternary : colors.textSecondary} />
+      <Text variant="mono" tone={inert ? "quaternary" : "secondary"}>
+        {reminderLabel(reminder)}
+      </Text>
+      <Pressable onPress={onRemove} aria-label="Remove reminder" hitSlop={touch ? 10 : 3} style={styles.metaChipClear}>
+        <Icon name="close" size={11} color={colors.textQuaternary} />
+      </Pressable>
+    </View>
+  );
+}
+
 /** The repeat control: preset cadences plus a live preview of the next few occurrences
- *  (computed in core from the chosen rule and the task's due date as anchor, PLAN §6.4).
+ *  (computed in core from the chosen rule and the task's deadline — else its start — as
+ *  anchor, PLAN §6.4).
  *  Choosing a repeat turns the task into a seed; the server materializes its occurrences. */
 function RepeatRow({ task, onSet, onConnectSync }: { task: Task; onSet: (rule: string) => void; onConnectSync?: () => void }) {
   const { tasks: api } = useCore();
@@ -620,13 +811,14 @@ function RepeatRow({ task, onSet, onConnectSync }: { task: Task; onSet: (rule: s
       setPreview(null);
       return;
     }
-    void api.repeatPreview(task.repeatRule ?? "", task.dueAt ?? undefined, 3).then((res) => {
+    // The schedule's anchor: the deadline, else the start (core/domain.RepeatAnchor).
+    void api.repeatPreview(task.repeatRule ?? "", task.dueAt ?? task.startAt ?? undefined, 3).then((res) => {
       if (live) setPreview(res.valid ? (res.occurrences ?? []) : null);
     });
     return () => {
       live = false;
     };
-  }, [api, task.repeatRule, task.dueAt, current]);
+  }, [api, task.repeatRule, task.dueAt, task.startAt, current]);
 
   // Parse a typed cadence ("every monday", "the third wednesday of the month") in core.
   const submitNl = async () => {
@@ -713,7 +905,14 @@ function atDaysFrom(days: number, hour: number): Date {
   return d;
 }
 
-function duePresets() {
+function startPresets() {
+  return [
+    { label: "Today", at: () => atToday(9) },
+    { label: "Tomorrow", at: () => atDaysFrom(1, 9) },
+    { label: "In a week", at: () => atDaysFrom(7, 9) },
+  ];
+}
+function deadlinePresets() {
   return [
     { label: "Today", at: () => atToday(17) },
     { label: "Tomorrow", at: () => atDaysFrom(1, 17) },
@@ -805,6 +1004,9 @@ const styles = {
   },
   chipTouch: { height: control.lg, paddingHorizontal: space.ml },
   chipActive: { backgroundColor: colors.accentSoft, borderColor: colors.accentSoftBorder },
+  // A set reminder: the preset chip's shape, laid out like a metadata chip (icon, value, ✕).
+  reminderChip: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.xs, backgroundColor: colors.surfaceSunken },
+  reminderChipInert: { borderStyle: "dashed" as const, backgroundColor: "transparent" as const },
   repeatCta: {
     flexDirection: "row" as const,
     alignItems: "center" as const,

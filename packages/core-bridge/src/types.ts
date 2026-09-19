@@ -77,8 +77,12 @@ export interface Task {
   title: string;
   notesMd: string;
   status: TaskStatus;
+  /** When the task starts: the moment it becomes something to work on (ISO timestamp). */
+  startAt?: string | null;
+  /** The task's deadline (ISO timestamp). Keeps its original "due" name on the wire. */
   dueAt?: string | null;
-  remindAt?: string | null;
+  /** The task's reminders, normalized by core: leads (longest first), then instants. */
+  reminders: TaskReminder[];
   completedAt?: string | null;
   repeatRule?: string | null;
   repeatSeedId?: string | null;
@@ -90,6 +94,15 @@ export interface Task {
   deletedAt?: string | null;
   version: number;
   dirty: boolean;
+}
+
+/** One task reminder (mirrors core/domain.Reminder, PLAN §6.4): exactly one of `at` (an
+ *  absolute ISO instant) or `before` (a lead counted back from the deadline, as a single-unit
+ *  ISO-8601 duration: "PT0M" at the deadline, "PT1H", "P1D", "P3D", "P1W", "P2W", "P1M"). A
+ *  lead on a task with no deadline never fires until one is set. */
+export interface TaskReminder {
+  at?: string;
+  before?: string;
 }
 
 /** A repeating-task definition (seed) paired with its next computed occurrence (mirrors

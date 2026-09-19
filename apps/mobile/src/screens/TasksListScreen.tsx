@@ -145,12 +145,13 @@ export function TasksListScreen() {
   );
 }
 
+// The row subtitle: the deadline, else a start still ahead, else nothing to show.
 function dueLabel(task: Task): string {
   if (task.status === 'done') return 'Completed';
-  if (!task.dueAt) return 'No due date';
-  const d = new Date(task.dueAt);
-  if (Number.isNaN(d.getTime())) return 'No due date';
-  return 'Due ' + d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const short = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  if (task.dueAt && !Number.isNaN(new Date(task.dueAt).getTime())) return 'Due ' + short(task.dueAt);
+  if (task.startAt && new Date(task.startAt).getTime() > Date.now()) return 'Starts ' + short(task.startAt);
+  return 'No deadline';
 }
 
 const styles = StyleSheet.create({

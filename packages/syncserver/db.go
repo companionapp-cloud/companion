@@ -81,8 +81,10 @@ CREATE TABLE IF NOT EXISTS tasks (
   title          TEXT NOT NULL DEFAULT '',
   notes_md       TEXT NOT NULL DEFAULT '',
   status         TEXT NOT NULL DEFAULT 'open',
-  due_at         TEXT,
-  remind_at      TEXT,
+  start_at       TEXT,
+  due_at         TEXT,                          -- the deadline (PLAN §6.4)
+  reminders_json TEXT NOT NULL DEFAULT '[]',    -- [{"at":…}|{"before":lead}] (PLAN §6.4)
+  remind_at      TEXT,                          -- legacy single reminder: moved into reminders_json by migrate, never written
   completed_at   TEXT,
   repeat_rule    TEXT,
   repeat_seed_id TEXT,
@@ -510,12 +512,31 @@ func migrate(db *sql.DB, dialect string) error {
 		`ALTER TABLE calendar_feeds ADD COLUMN read_only BIGINT NOT NULL DEFAULT 0`,
 		// Canvas edge line style (PLAN-canvases.md), retrofitted onto pre-style dev DBs.
 		`ALTER TABLE canvas_edges ADD COLUMN style TEXT NOT NULL DEFAULT 'curved'`,
+		// Task start + reminder lists (PLAN §6.4), retrofitted onto pre-reminders DBs.
+		`ALTER TABLE tasks ADD COLUMN start_at TEXT`,
+		`ALTER TABLE tasks ADD COLUMN reminders_json TEXT NOT NULL DEFAULT '[]'`,
 	}
 	for _, alter := range alters {
 		if dialect == "postgres" {
 			alter = strings.Replace(alter, "ADD COLUMN", "ADD COLUMN IF NOT EXISTS", 1)
 		}
 		if _, err := db.Exec(alter); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return err
+		}
+	}
+	// Steps that need the columns above; each is idempotent, so they rerun safely on every boot.
+	steps := []string{
+		// A task's single pre-reminders remind_at becomes the first entry of its list and is
+		// cleared, so a rerun finds nothing to move and a later "no reminders" edit is never
+		// undone from the stale column. Clients move their copies the same way (core/store
+		// 0024_task_start_reminders.sql), so both sides agree without a re-sync.
+		`UPDATE tasks SET reminders_json = '[{"at":"' || remind_at || '"}]', remind_at = NULL WHERE remind_at IS NOT NULL`,
+		// One occurrence per (seed, start) for a start-anchored repeat, whose occurrences carry
+		// no deadline; idx_tasks_occurrence already covers the deadline-anchored ones.
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_occurrence_start ON tasks (repeat_seed_id, start_at) WHERE due_at IS NULL`,
+	}
+	for _, step := range steps {
+		if _, err := db.Exec(step); err != nil {
 			return err
 		}
 	}

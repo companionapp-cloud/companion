@@ -117,7 +117,7 @@ func scanServerNote(sc rowScanner) (*domain.Note, int64, error) {
 
 // ---- tasks ---------------------------------------------------------------
 
-const taskCols = `id, title, notes_md, status, due_at, remind_at, completed_at, repeat_rule, repeat_seed_id, object_type_id, props_json, created_at, updated_at, deleting_at, deleted_at, version, server_seq`
+const taskCols = `id, title, notes_md, status, start_at, due_at, reminders_json, completed_at, repeat_rule, repeat_seed_id, object_type_id, props_json, created_at, updated_at, deleting_at, deleted_at, version, server_seq`
 
 var taskHandler = &entityHandler{
 	typ:   protocol.EntityTask,
@@ -130,18 +130,25 @@ var taskHandler = &entityHandler{
 		if err := s.validateEntityProps(tx, uid, t.ObjectTypeID, t.Props); err != nil {
 			return err
 		}
-		_, err := tx.Exec(s.rebind(
-			`INSERT INTO tasks (id, user_id, title, notes_md, status, due_at, remind_at, completed_at, repeat_rule, repeat_seed_id, object_type_id, props_json, created_at, updated_at, deleting_at, deleted_at, version, server_seq)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		// Reminders are scheduling metadata the materializer reads (PLAN §6.4): validated with the
+		// same rules every client writes by, so a bad lead can't wedge a repeat sweep.
+		reminders, err := domain.NormalizeReminders(t.Reminders)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(s.rebind(
+			`INSERT INTO tasks (id, user_id, title, notes_md, status, start_at, due_at, reminders_json, completed_at, repeat_rule, repeat_seed_id, object_type_id, props_json, created_at, updated_at, deleting_at, deleted_at, version, server_seq)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT (id) DO UPDATE SET
 			   title = excluded.title, notes_md = excluded.notes_md, status = excluded.status,
-			   due_at = excluded.due_at, remind_at = excluded.remind_at, completed_at = excluded.completed_at,
+			   start_at = excluded.start_at, due_at = excluded.due_at, reminders_json = excluded.reminders_json,
+			   completed_at = excluded.completed_at,
 			   repeat_rule = excluded.repeat_rule, repeat_seed_id = excluded.repeat_seed_id,
 			   object_type_id = excluded.object_type_id, props_json = excluded.props_json,
 			   updated_at = excluded.updated_at, deleting_at = excluded.deleting_at,
 			   deleted_at = excluded.deleted_at, version = excluded.version, server_seq = excluded.server_seq;`),
 			t.ID, uid, t.Title, t.NotesMD, t.Status,
-			fmtTime(t.DueAt), fmtTime(t.RemindAt), fmtTime(t.CompletedAt), t.RepeatRule, t.RepeatSeedID,
+			fmtTime(t.StartAt), fmtTime(t.DueAt), remindersJSON(reminders), fmtTime(t.CompletedAt), t.RepeatRule, t.RepeatSeedID,
 			t.ObjectTypeID, propsOrDefault(t.Props),
 			t.CreatedAt.UTC().Format(timeFormat), updatedAt.Format(timeFormat),
 			fmtTime(t.DeletingAt), fmtTime(t.DeletedAt), version, seq)
@@ -179,19 +186,20 @@ var taskHandler = &entityHandler{
 
 func scanServerTask(sc rowScanner) (*domain.Task, int64, error) {
 	var (
-		t                                                 domain.Task
-		notesMD                                           sql.NullString
-		dueAt, remindAt, completedAt, deletingAt, deleted sql.NullString
-		repeatRule, repeatSeedID                          sql.NullString
-		objectTypeID, propsJSON                           sql.NullString
-		createdAt, updatedAt                              string
-		seq                                               int64
+		t                                                domain.Task
+		notesMD, remindersRaw                            sql.NullString
+		startAt, dueAt, completedAt, deletingAt, deleted sql.NullString
+		repeatRule, repeatSeedID                         sql.NullString
+		objectTypeID, propsJSON                          sql.NullString
+		createdAt, updatedAt                             string
+		seq                                              int64
 	)
-	if err := sc.Scan(&t.ID, &t.Title, &notesMD, &t.Status, &dueAt, &remindAt, &completedAt,
+	if err := sc.Scan(&t.ID, &t.Title, &notesMD, &t.Status, &startAt, &dueAt, &remindersRaw, &completedAt,
 		&repeatRule, &repeatSeedID, &objectTypeID, &propsJSON, &createdAt, &updatedAt, &deletingAt, &deleted, &t.Version, &seq); err != nil {
 		return nil, 0, err
 	}
 	t.NotesMD = notesMD.String
+	t.Reminders = parseReminders(remindersRaw.String)
 	if objectTypeID.Valid {
 		t.ObjectTypeID = &objectTypeID.String
 	}
@@ -205,10 +213,10 @@ func scanServerTask(sc rowScanner) (*domain.Task, int64, error) {
 	if t.UpdatedAt, err = time.Parse(timeFormat, updatedAt); err != nil {
 		return nil, 0, err
 	}
-	if t.DueAt, err = parseServerTime(dueAt); err != nil {
+	if t.StartAt, err = parseServerTime(startAt); err != nil {
 		return nil, 0, err
 	}
-	if t.RemindAt, err = parseServerTime(remindAt); err != nil {
+	if t.DueAt, err = parseServerTime(dueAt); err != nil {
 		return nil, 0, err
 	}
 	if t.CompletedAt, err = parseServerTime(completedAt); err != nil {
@@ -227,6 +235,28 @@ func scanServerTask(sc rowScanner) (*domain.Task, int64, error) {
 		t.RepeatSeedID = &repeatSeedID.String
 	}
 	return &t, seq, nil
+}
+
+// remindersJSON serializes a reminder list for the reminders_json column: always an array.
+// parseReminders is its inverse, reading a malformed value as no reminders rather than
+// failing the pull or the repeat sweep.
+func remindersJSON(rs []domain.Reminder) string {
+	if len(rs) == 0 {
+		return "[]"
+	}
+	b, err := json.Marshal(rs)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
+}
+
+func parseReminders(s string) []domain.Reminder {
+	out := []domain.Reminder{}
+	if json.Unmarshal([]byte(s), &out) != nil || out == nil {
+		return []domain.Reminder{}
+	}
+	return out
 }
 
 // fmtTime binds a nullable timestamp (or NULL). parseServerTime is its inverse.

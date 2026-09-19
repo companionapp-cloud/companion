@@ -75,7 +75,7 @@ export function NoteEditorScreen() {
         const base = { type: n.type, id: n.id, title: n.title };
         if (n.type === 'task') {
           const t = tasksRef.current.byId(id);
-          if (t) return { ...base, status: t.status, dueAt: t.dueAt, remindAt: t.remindAt };
+          if (t) return { ...base, status: t.status, dueAt: t.dueAt, reminders: t.reminders };
           return { ...base, status: n.status ?? null };
         }
         return base;

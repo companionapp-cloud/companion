@@ -58,11 +58,15 @@ func ValidateRepeatRule(rule *string) error {
 	return err
 }
 
-// RepeatAnchor is the DTSTART for a seed's schedule: its due date when set (so occurrences
-// keep the same time-of-day), else its creation instant as a fallback.
+// RepeatAnchor is the DTSTART for a seed's schedule: its deadline when set (so occurrences
+// keep the same time-of-day), else its start (a start-only repeat stays start-only: its
+// occurrences get a start and no deadline), else its creation instant as a fallback.
 func RepeatAnchor(seed *Task) time.Time {
 	if seed.DueAt != nil {
 		return *seed.DueAt
+	}
+	if seed.StartAt != nil {
+		return *seed.StartAt
 	}
 	return seed.CreatedAt
 }

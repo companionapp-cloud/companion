@@ -19,6 +19,7 @@ import {
 import { formatWhen } from "../CalendarItemInfo";
 import { useCore } from "../CoreContext";
 import { nodeKey } from "../graphModel";
+import { reminderLabel } from "../reminders";
 import { repeatLabel } from "../repeat";
 import { Checkbox } from "../TaskEditor";
 import { useTasks } from "../TasksProvider";
@@ -140,8 +141,15 @@ function TaskPreview({ id }: { id: string }) {
   const due = task.dueAt ? new Date(task.dueAt) : null;
   const overdue = !!due && !done && !cancelled && due.getTime() < Date.now();
   const meta: { icon: IconName; text: string; danger?: boolean }[] = [];
-  if (due) meta.push({ icon: "calendar", text: `due ${dateTime(due)}`, danger: overdue });
-  if (task.remindAt) meta.push({ icon: "bell", text: `remind ${dateTime(new Date(task.remindAt))}` });
+  if (task.startAt) meta.push({ icon: "calendar", text: `starts ${dateTime(new Date(task.startAt))}` });
+  if (due) meta.push({ icon: "flag", text: `deadline ${dateTime(due)}`, danger: overdue });
+  const reminders = task.reminders ?? [];
+  if (reminders.length === 1) {
+    const [r] = reminders;
+    meta.push({ icon: "bell", text: r.at ? `remind ${dateTime(new Date(r.at))}` : `remind ${reminderLabel(r).toLowerCase()}` });
+  } else if (reminders.length > 1) {
+    meta.push({ icon: "bell", text: `${reminders.length} reminders` });
+  }
   const repeat = repeatLabel(task.repeatRule);
   if (repeat) meta.push({ icon: "repeat", text: repeat.toLowerCase() });
   const notes = task.notesMd.trim();

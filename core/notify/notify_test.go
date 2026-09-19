@@ -7,16 +7,79 @@ import (
 	"companion/core/domain"
 )
 
+// remind builds a single absolute reminder, the shape every task had before reminder lists.
+func remind(at *time.Time) []domain.Reminder { return []domain.Reminder{{At: at}} }
+
+func TestPlanTasksMultipleReminders(t *testing.T) {
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	deadline := time.Date(2026, 10, 10, 21, 0, 0, 0, time.UTC)
+	extra := time.Date(2026, 10, 2, 13, 0, 0, 0, time.UTC)
+	task := &domain.Task{ID: "report", Title: "Quarterly report", Status: domain.TaskOpen, DueAt: &deadline,
+		Reminders: []domain.Reminder{
+			{Before: "P1M"},  // Sep 10: already past, never planned
+			{Before: "P1W"},  // Oct 3
+			{Before: "P3D"},  // Oct 7
+			{Before: "P1D"},  // Oct 9
+			{Before: "PT0M"}, // at the deadline
+			{At: &extra},     // Oct 2, absolute
+		}}
+
+	got := PlanTasks([]*domain.Task{task}, now, 30*24*time.Hour)
+	want := []time.Time{
+		extra,
+		time.Date(2026, 10, 3, 21, 0, 0, 0, time.UTC),
+		time.Date(2026, 10, 7, 21, 0, 0, 0, time.UTC),
+		time.Date(2026, 10, 9, 21, 0, 0, 0, time.UTC),
+		deadline,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("plan has %d fires, want %d: %+v", len(got), len(want), got)
+	}
+	for i, n := range got {
+		if !n.FireAt.Equal(want[i]) || n.Kind != KindReminder || n.TaskID != "report" {
+			t.Errorf("fire %d = %+v, want a reminder at %v", i, n, want[i])
+		}
+	}
+	// Only the reminder that lands on the deadline reads "Due now"; the others name it.
+	if got[4].Body != "Due now" || got[0].Body == "Due now" {
+		t.Errorf("bodies = %q / %q", got[0].Body, got[4].Body)
+	}
+
+	// Reminders replace the implicit deadline fire: the deadline fires only via "PT0M" above.
+	noDeadlineFire := &domain.Task{ID: "early", Status: domain.TaskOpen, DueAt: &deadline,
+		Reminders: []domain.Reminder{{Before: "P1D"}}}
+	if plan := PlanTasks([]*domain.Task{noDeadlineFire}, now, 30*24*time.Hour); len(plan) != 1 || plan[0].Kind != KindReminder {
+		t.Errorf("a task with reminders should not also fire at its deadline: %+v", plan)
+	}
+
+	// Relative reminders are inert without a deadline.
+	undated := &domain.Task{ID: "undated", Status: domain.TaskOpen, Reminders: []domain.Reminder{{Before: "P1D"}}}
+	if plan := PlanTasks([]*domain.Task{undated}, now, 30*24*time.Hour); len(plan) != 0 {
+		t.Errorf("relative reminders without a deadline should not fire: %+v", plan)
+	}
+
+	// A settled task with several past fires is dismissed once.
+	done := &domain.Task{ID: "done", Status: domain.TaskDone, DueAt: &deadline,
+		Reminders: []domain.Reminder{{Before: "P1D"}, {Before: "PT0M"}}}
+	after := deadline.Add(time.Hour)
+	if ids := SettledReminderIDs([]*domain.Task{done}, after, 48*time.Hour); len(ids) != 1 || ids[0] != "done" {
+		t.Errorf("SettledReminderIDs = %v, want [done]", ids)
+	}
+	if feed := FeedTasks([]*domain.Task{done}, after, 48*time.Hour); len(feed) != 2 || !feed[0].FireAt.Equal(deadline) {
+		t.Errorf("feed should list both past fires, newest first: %+v", feed)
+	}
+}
+
 func TestPlanTasks(t *testing.T) {
 	now := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
 	at := func(d time.Duration) *time.Time { v := now.Add(d); return &v }
 
 	tasks := []*domain.Task{
-		{ID: "reminder-soon", Title: "Call bank", Status: domain.TaskOpen, RemindAt: at(2 * time.Hour)},
-		{ID: "reminder-far", Title: "Far", Status: domain.TaskOpen, RemindAt: at(72 * time.Hour)}, // beyond horizon
-		{ID: "reminder-past", Title: "Past", Status: domain.TaskOpen, RemindAt: at(-time.Hour)},   // already past
-		{ID: "done", Title: "Done", Status: domain.TaskDone, RemindAt: at(time.Hour)},             // completed
-		{ID: "trashed", Title: "Trashed", Status: domain.TaskOpen, RemindAt: at(time.Hour), DeletingAt: at(0)},
+		{ID: "reminder-soon", Title: "Call bank", Status: domain.TaskOpen, Reminders: remind(at(2 * time.Hour))},
+		{ID: "reminder-far", Title: "Far", Status: domain.TaskOpen, Reminders: remind(at(72 * time.Hour))}, // beyond horizon
+		{ID: "reminder-past", Title: "Past", Status: domain.TaskOpen, Reminders: remind(at(-time.Hour))},   // already past
+		{ID: "done", Title: "Done", Status: domain.TaskDone, Reminders: remind(at(time.Hour))},             // completed
+		{ID: "trashed", Title: "Trashed", Status: domain.TaskOpen, Reminders: remind(at(time.Hour)), DeletingAt: at(0)},
 		{ID: "due-only", Title: "Ship it", Status: domain.TaskOpen, DueAt: at(3 * time.Hour)}, // due, no reminder
 		{ID: "no-time", Title: "Someday", Status: domain.TaskOpen},                            // nothing to fire
 	}
@@ -39,12 +102,12 @@ func TestFeedTasks(t *testing.T) {
 	at := func(d time.Duration) *time.Time { v := now.Add(d); return &v }
 
 	tasks := []*domain.Task{
-		{ID: "fired-recent", Title: "Call bank", Status: domain.TaskOpen, RemindAt: at(-2 * time.Hour)},
-		{ID: "fired-older", Title: "Water plants", Status: domain.TaskOpen, RemindAt: at(-48 * time.Hour)},
-		{ID: "fired-done", Title: "Done", Status: domain.TaskDone, RemindAt: at(-time.Hour)},          // settled: kept, flagged
-		{ID: "fired-stale", Title: "Stale", Status: domain.TaskOpen, RemindAt: at(-15 * 24 * time.Hour)}, // beyond lookback
-		{ID: "upcoming", Title: "Future", Status: domain.TaskOpen, RemindAt: at(time.Hour)},           // hasn't fired
-		{ID: "trashed", Title: "Trashed", Status: domain.TaskOpen, RemindAt: at(-time.Hour), DeletingAt: at(0)},
+		{ID: "fired-recent", Title: "Call bank", Status: domain.TaskOpen, Reminders: remind(at(-2 * time.Hour))},
+		{ID: "fired-older", Title: "Water plants", Status: domain.TaskOpen, Reminders: remind(at(-48 * time.Hour))},
+		{ID: "fired-done", Title: "Done", Status: domain.TaskDone, Reminders: remind(at(-time.Hour))},          // settled: kept, flagged
+		{ID: "fired-stale", Title: "Stale", Status: domain.TaskOpen, Reminders: remind(at(-15 * 24 * time.Hour))}, // beyond lookback
+		{ID: "upcoming", Title: "Future", Status: domain.TaskOpen, Reminders: remind(at(time.Hour))},           // hasn't fired
+		{ID: "trashed", Title: "Trashed", Status: domain.TaskOpen, Reminders: remind(at(-time.Hour)), DeletingAt: at(0)},
 		{ID: "due-fired", Title: "Ship it", Status: domain.TaskOpen, DueAt: at(-3 * time.Hour)}, // due, no reminder
 		{ID: "no-time", Title: "Someday", Status: domain.TaskOpen},
 	}
@@ -76,15 +139,15 @@ func TestSettledReminderIDs(t *testing.T) {
 
 	tasks := []*domain.Task{
 		// Done, reminder fired an hour ago → dismiss its lingering banner.
-		{ID: "done-fired", Status: domain.TaskDone, RemindAt: at(-time.Hour)},
+		{ID: "done-fired", Status: domain.TaskDone, Reminders: remind(at(-time.Hour))},
 		// Cancelled, due-based fire in the recent past → dismiss.
 		{ID: "cancelled-fired", Status: domain.TaskCancelled, DueAt: at(-2 * time.Hour)},
 		// Done but the reminder hasn't fired yet (future) → nothing was ever shown.
-		{ID: "done-pending", Status: domain.TaskDone, RemindAt: at(time.Hour)},
+		{ID: "done-pending", Status: domain.TaskDone, Reminders: remind(at(time.Hour))},
 		// Still open, reminder fired → keep it (user hasn't finished the task).
-		{ID: "open-fired", Status: domain.TaskOpen, RemindAt: at(-time.Hour)},
+		{ID: "open-fired", Status: domain.TaskOpen, Reminders: remind(at(-time.Hour))},
 		// Done long ago → too old to still be shown.
-		{ID: "done-stale", Status: domain.TaskDone, RemindAt: at(-72 * time.Hour)},
+		{ID: "done-stale", Status: domain.TaskDone, Reminders: remind(at(-72 * time.Hour))},
 		// Done with no reminder/due → never had a notification.
 		{ID: "done-notime", Status: domain.TaskDone},
 	}

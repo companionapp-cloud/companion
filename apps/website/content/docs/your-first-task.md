@@ -7,7 +7,7 @@ order: 3
 excerpt: Track something you need to get done.
 badge: Get started
 readTime: 3 min read
-updated: Jul 2026
+updated: Sep 2026
 related: [creating-and-linking-tasks, your-first-project]
 ---
 
@@ -17,13 +17,13 @@ Tasks are how intentions become done. They can stand on their own, hang off a no
 
 Open **Tasks** and type into **Add a task, press Enter** at the top of the list. That's the whole ceremony — the task appears, and its editor opens beside the list.
 
-![The task editor, with its due date, reminder, repeat, and type controls](/docs/task-editor.png)
+![The task editor, with its start, deadline, reminder, repeat, and type controls](/docs/task-editor.png)
 
 ## Dates in plain language
 
-Click **Add due date** and type it how you'd say it: "tomorrow", "next friday", "next monday 9am". Companion parses the phrase and shows you what it landed on, so you can tell at a glance whether it understood you. **Today**, **Tomorrow**, and **In a week** are one click away if you'd rather not type.
+Click **Add deadline** and type it how you'd say it: "tomorrow", "next friday", "next monday 9am". Companion parses the phrase and shows you what it landed on, so you can tell at a glance whether it understood you. **Today**, **Tomorrow**, and **In a week** are one click away if you'd rather not type. **Add start** works the same way, for when you mean to begin.
 
-**Add reminder** works the same way and is separate from the due date — you can be nudged at 9am about something due at 5pm.
+**Add reminder** is separate from both dates, and a task can have several: the day before its deadline, a week before, a month before — or 9am tomorrow about something due at 5pm.
 
 ## Repeats
 

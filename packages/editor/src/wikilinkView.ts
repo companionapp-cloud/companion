@@ -125,7 +125,8 @@ export class WikilinkView implements NodeView {
         if (!meta) return;
         meta.textContent = "";
         if (hit.dueAt) meta.appendChild(metaChip("pm-wikilink-due", formatDue(hit.dueAt)));
-        if (hit.remindAt) meta.appendChild(metaChip("pm-wikilink-remind", formatReminder(hit.remindAt)));
+        const reminder = reminderSummary(hit.reminders);
+        if (reminder) meta.appendChild(metaChip("pm-wikilink-remind", reminder));
       })
       .catch(() => {
         /* transient error: leave the chip as it is */
@@ -243,4 +244,18 @@ function formatReminder(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return `${formatDue(iso)}, ${d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+}
+
+// The reminder chip: the one reminder ("Jul 5, 9:00 AM" / "1 day before"), or a count.
+function reminderSummary(reminders?: { at?: string; before?: string }[] | null): string {
+  if (!reminders || reminders.length === 0) return "";
+  if (reminders.length > 1) return `${reminders.length} reminders`;
+  const r = reminders[0];
+  if (r.at) return formatReminder(r.at);
+  const m = /^P(?:(\d+)([DWM])|T(\d+)([HM]))$/i.exec(r.before ?? "");
+  if (!m) return "";
+  const n = Number(m[1] ?? m[3]);
+  if (n === 0) return "at deadline";
+  const unit = m[1] ? { D: "day", W: "week", M: "month" }[m[2].toUpperCase() as "D" | "W" | "M"] : m[4].toUpperCase() === "M" ? "minute" : "hour";
+  return `${n} ${unit}${n === 1 ? "" : "s"} before`;
 }

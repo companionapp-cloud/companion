@@ -3,13 +3,14 @@ package domain
 import (
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 )
 
 // Task status values (PLAN §4.1). A task's "kind" is not a subtype but a shape over these
-// columns: a one-off has neither DueAt nor RepeatRule; a scheduled task has DueAt; a
-// reminder has RemindAt (PLAN §6.4).
+// columns: a one-off has no dates and no RepeatRule; a scheduled task has a StartAt and/or a
+// deadline (DueAt); a reminder has Reminders (PLAN §6.4).
 const (
 	TaskOpen      = "open"
 	TaskDone      = "done"
@@ -17,15 +18,23 @@ const (
 )
 
 // Task is a to-do item and a first-class graph node: its NotesMD is scanned for wikilinks
-// the same way a note's body is (PLAN §6.4, §5.1). RepeatRule / RepeatSeedID are carried
-// for the repeating-tasks milestone but unused until then; they still sync.
+// the same way a note's body is (PLAN §6.4, §5.1). A repeating task is a seed (RepeatRule set)
+// whose occurrences the server materializes (RepeatSeedID points back at the seed).
 type Task struct {
-	ID           string     `json:"id"`
-	Title        string     `json:"title"`
-	NotesMD      string     `json:"notesMd"`
-	Status       string     `json:"status"` // open | done | cancelled
-	DueAt        *time.Time `json:"dueAt,omitempty"`
-	RemindAt     *time.Time `json:"remindAt,omitempty"`
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	NotesMD string `json:"notesMd"`
+	Status  string `json:"status"` // open | done | cancelled
+	// StartAt is when the task starts: the moment it becomes something to work on.
+	StartAt *time.Time `json:"startAt,omitempty"`
+	// DueAt is the task's deadline. The field keeps its original "due" name (column, wire and
+	// TS) but is presented as "Deadline". It places the task on the calendar, anchors relative
+	// reminders, and anchors a repeat's schedule.
+	DueAt *time.Time `json:"dueAt,omitempty"`
+	// Reminders are the task's notifications (see Reminder), normalized on write. Always a
+	// list, never omitted: an empty list means "no reminders", so a full-row sync push can
+	// clear them.
+	Reminders    []Reminder `json:"reminders"`
 	CompletedAt  *time.Time `json:"completedAt,omitempty"`
 	RepeatRule   *string    `json:"repeatRule,omitempty"`
 	RepeatSeedID *string    `json:"repeatSeedId,omitempty"`
@@ -61,7 +70,28 @@ func (t *Task) Validate() error {
 	if err := ValidateRepeatRule(t.RepeatRule); err != nil {
 		return errors.Join(ErrInvalidTask, err)
 	}
+	if err := ValidateReminders(t.Reminders); err != nil {
+		return errors.Join(ErrInvalidTask, err)
+	}
 	return nil
+}
+
+// ReminderFires resolves the task's reminders against its current deadline: the instants
+// they fire at, sorted and de-duplicated. Relative reminders drop out while the task has no
+// deadline.
+func (t *Task) ReminderFires() []time.Time {
+	out := make([]time.Time, 0, len(t.Reminders))
+	seen := map[int64]bool{}
+	for _, r := range t.Reminders {
+		at := r.FireAt(t.DueAt)
+		if at == nil || seen[at.UnixNano()] {
+			continue
+		}
+		seen[at.UnixNano()] = true
+		out = append(out, *at)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Before(out[j]) })
+	return out
 }
 
 // IsRepeatSeed reports whether this task is a repeating-task definition: it carries an

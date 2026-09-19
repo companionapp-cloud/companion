@@ -21,7 +21,7 @@ export type DatesApi = ReturnType<typeof datesApi>;
 
 /** Now as an RFC3339 string carrying the local UTC offset (not 'Z'), so the Go parser
  *  anchors relative/bare times to the user's wall clock. */
-function localNowWithOffset(): string {
+export function localNowWithOffset(): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   const offMin = -d.getTimezoneOffset(); // minutes east of UTC

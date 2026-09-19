@@ -195,6 +195,8 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.tasksRepeatPreview(payload)
 	case "tasks.parseRepeat":
 		return c.tasksParseRepeat(payload)
+	case "tasks.parseReminder":
+		return c.tasksParseReminder(payload)
 	case "tasks.get":
 		return c.tasksGet(payload)
 	case "tasks.create":

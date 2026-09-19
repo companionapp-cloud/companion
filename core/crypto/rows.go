@@ -8,7 +8,8 @@ import (
 
 // protectedFields lists, per entity type, the JSON field names whose values are encrypted before
 // they leave the device. Everything omitted stays plaintext because the server needs it to
-// function — scheduling (due_at, remind_at, repeat_rule), ordering, foreign keys, timestamps, and
+// function — scheduling (start_at, due_at, reminders, repeat_rule: the server times repeat
+// occurrences from them), ordering, foreign keys, timestamps, and
 // trash markers. See PLAN §E2EE for the field-by-field rationale; the short version is "content is
 // encrypted, coordination metadata is not".
 //

@@ -265,14 +265,16 @@ func TestStoreToolsSpecsDeterministic(t *testing.T) {
 	}
 }
 
-// TestCreateTaskDueAt confirms the RFC3339 due-date path parses and reaches the store.
+// TestCreateTaskDueAt confirms the RFC3339 start/deadline path parses and reaches the store,
+// with reminders given as leads before the deadline or as exact timestamps.
 func TestCreateTaskDueAt(t *testing.T) {
 	s := newTestStore(t)
 	r := NewStoreRegistry(s)
 	out, err := r.Invoke(context.Background(), "create_task",
-		json.RawMessage(`{"title":"Ship it","dueAt":"2026-07-10T09:00:00Z","remindAt":"2026-07-10T08:00:00Z"}`))
+		json.RawMessage(`{"title":"Ship it","startAt":"2026-07-06T13:00:00Z","dueAt":"2026-07-10T09:00:00Z",
+			"reminders":["1 hour before","a few days before","P1W","2026-07-08T12:00:00Z"]}`))
 	if err != nil {
-		t.Fatalf("create_task with due: %v", err)
+		t.Fatalf("create_task with dates: %v", err)
 	}
 	var created map[string]string
 	json.Unmarshal([]byte(out), &created)
@@ -283,9 +285,51 @@ func TestCreateTaskDueAt(t *testing.T) {
 	if got.DueAt == nil || !got.DueAt.Equal(time.Date(2026, 7, 10, 9, 0, 0, 0, time.UTC)) {
 		t.Errorf("dueAt not stored: %+v", got.DueAt)
 	}
-	// The reminder is a field on the same task, an hour before the due date.
-	if got.RemindAt == nil || !got.RemindAt.Equal(time.Date(2026, 7, 10, 8, 0, 0, 0, time.UTC)) {
-		t.Errorf("remindAt not stored: %+v", got.RemindAt)
+	if got.StartAt == nil || !got.StartAt.Equal(time.Date(2026, 7, 6, 13, 0, 0, 0, time.UTC)) {
+		t.Errorf("startAt not stored: %+v", got.StartAt)
+	}
+	// The reminders live on the same task, normalized: leads longest-first, then instants.
+	b, _ := json.Marshal(got.Reminders)
+	if want := `[{"before":"P1W"},{"before":"P3D"},{"before":"PT1H"},{"at":"2026-07-08T12:00:00Z"}]`; string(b) != want {
+		t.Errorf("reminders = %s, want %s", b, want)
+	}
+
+	// get_task resolves when each reminder fires.
+	read, err := r.Invoke(context.Background(), "get_task", json.RawMessage(`{"id":"`+got.ID+`"}`))
+	if err != nil {
+		t.Fatalf("get_task: %v", err)
+	}
+	if !strings.Contains(read, `"firesAt":"2026-07-10T08:00:00Z"`) || !strings.Contains(read, `"startAt":"2026-07-06T13:00:00Z"`) {
+		t.Errorf("get_task should show the start and each reminder's fire time: %s", read)
+	}
+
+	// addReminders keeps the existing ones; reminders replaces the list.
+	if _, err := r.Invoke(context.Background(), "update_task",
+		json.RawMessage(`{"id":"`+got.ID+`","addReminders":["the day before"]}`)); err != nil {
+		t.Fatalf("update_task addReminders: %v", err)
+	}
+	if got, _ = s.Tasks.Get(got.ID); len(got.Reminders) != 5 {
+		t.Errorf("after addReminders: %+v", got.Reminders)
+	}
+	if _, err := r.Invoke(context.Background(), "update_task",
+		json.RawMessage(`{"id":"`+got.ID+`","reminders":["at the deadline"],"clearStartAt":true}`)); err != nil {
+		t.Fatalf("update_task reminders: %v", err)
+	}
+	if got, _ = s.Tasks.Get(got.ID); len(got.Reminders) != 1 || got.Reminders[0].Before != "PT0M" || got.StartAt != nil {
+		t.Errorf("after replacing reminders: %+v start %v", got.Reminders, got.StartAt)
+	}
+	if _, err := r.Invoke(context.Background(), "update_task",
+		json.RawMessage(`{"id":"`+got.ID+`","reminders":[]}`)); err != nil {
+		t.Fatalf("update_task clear reminders: %v", err)
+	}
+	if got, _ = s.Tasks.Get(got.ID); len(got.Reminders) != 0 {
+		t.Errorf("reminders: [] should clear them, got %+v", got.Reminders)
+	}
+
+	// An unreadable reminder is a tool error surfaced to the model.
+	if _, err := r.Invoke(context.Background(), "create_task",
+		json.RawMessage(`{"title":"x","reminders":["whenever"]}`)); err == nil || !strings.Contains(err.Error(), "reminder") {
+		t.Errorf("expected a reminder error, got %v", err)
 	}
 
 	// A malformed due timestamp is a tool error, surfaced to the model, not a panic.

@@ -356,7 +356,7 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 	r.Add(Tool{
 		Spec: ToolSpec{
 			Name:        "get_task",
-			Description: "Read one task in full by id (title, notes, status, due date, reminder time). Call this to read a task's real details before summarizing or changing them. Get the id from list_tasks or search_notes.",
+			Description: "Read one task in full by id (title, notes, status, start, deadline, reminders with the moment each fires). Call this to read a task's real details before summarizing or changing them. Get the id from list_tasks or search_notes.",
 			Schema:      json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"}},"required":["id"]}`),
 		},
 		Handler: func(_ context.Context, args json.RawMessage) (string, error) {
@@ -373,9 +373,15 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 			if err != nil {
 				return "", err
 			}
+			// Each reminder carries the moment it fires, resolved against the deadline (nil for a
+			// lead while there is no deadline), so the model needn't do the calendar arithmetic.
+			reminders := make([]map[string]any, 0, len(t.Reminders))
+			for _, rem := range t.Reminders {
+				reminders = append(reminders, map[string]any{"at": rem.At, "before": rem.Before, "firesAt": rem.FireAt(t.DueAt)})
+			}
 			return jsonResult(map[string]any{
 				"id": t.ID, "title": t.Title, "notesMd": t.NotesMD, "status": t.Status,
-				"dueAt": t.DueAt, "remindAt": t.RemindAt,
+				"startAt": t.StartAt, "dueAt": t.DueAt, "reminders": reminders,
 				"repeatRule": t.RepeatRule, "repeatSeedId": t.RepeatSeedID,
 				"objectTypeId": t.ObjectTypeID, "props": t.Props,
 			})
@@ -411,7 +417,7 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 	r.Add(Tool{
 		Spec: ToolSpec{
 			Name:        "render_task",
-			Description: "Show the user an inline preview card of a task in the chat: its title, status, due date, reminder, repeat and notes. The user can tick it done or click it open. Prefer this over writing a task's details out whenever you point the user to a specific task (one you found, created or updated). Get the id from list_tasks, search_notes or create_task. This does not change the task.",
+			Description: "Show the user an inline preview card of a task in the chat: its title, status, start, deadline, reminders, repeat and notes. The user can tick it done or click it open. Prefer this over writing a task's details out whenever you point the user to a specific task (one you found, created or updated). Get the id from list_tasks, search_notes or create_task. This does not change the task.",
 			Schema:      json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"}},"required":["id"]}`),
 		},
 		Handler: func(_ context.Context, args json.RawMessage) (string, error) {
@@ -578,15 +584,16 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 	r.Add(Tool{
 		Spec: ToolSpec{
 			Name:        "create_task",
-			Description: "Create a single task. A task has an optional due date (dueAt) AND, separately, an optional reminder time (remindAt) — the moment to notify the user, usually a bit before the due date. A reminder is NOT a second task: \"remind me to take out the trash on Sunday, an hour before\" is ONE task with dueAt = Sunday and remindAt = one hour before that. Both are RFC3339 timestamps — call get_date first to compute the real dates in the user's timezone. For a REPEATING task (\"every monday\", \"the first of each month\"), set `repeat` and dueAt to the FIRST occurrence — the server generates the rest. To make it a structured object, set objectTypeId + props (call list_object_types first to see the archetypes and their fields).",
+			Description: "Create a single task. A task has an optional start (startAt: when to begin working on it), an optional deadline (dueAt: when it must be done), and any number of reminders. Reminders are NOT extra tasks: \"remind me to file taxes by April 30, a week before and the day before\" is ONE task with dueAt = April 30 and reminders [\"1 week before\", \"1 day before\"]. Each reminder is either a lead counted back from the deadline (\"at the deadline\", \"1 hour before\", \"1 day before\", \"3 days before\", \"1 week before\", \"2 weeks before\", \"1 month before\"), which needs a dueAt and follows it if it moves, or an RFC3339 timestamp for an exact moment. Dates are RFC3339 — call get_date first to compute them in the user's timezone. For a REPEATING task (\"every monday\", \"the first of each month\"), set `repeat` and dueAt (or startAt, if it has no deadline) to the FIRST occurrence — the server generates the rest, and lead reminders follow each occurrence. To make it a structured object, set objectTypeId + props (call list_object_types first to see the archetypes and their fields).",
 			Schema: json.RawMessage(`{
 				"type":"object",
 				"additionalProperties":false,
 				"properties":{
 					"title":{"type":"string"},
 					"notesMd":{"type":"string","description":"Optional Markdown details."},
-					"dueAt":{"type":"string","description":"Optional RFC3339 due timestamp (when it's due). For a repeat, this is the first occurrence."},
-					"remindAt":{"type":"string","description":"Optional RFC3339 reminder timestamp (when to notify the user; often shortly before dueAt)."},
+					"startAt":{"type":"string","description":"Optional RFC3339 start: when to begin working on it."},
+					"dueAt":{"type":"string","description":"Optional RFC3339 deadline: when it must be done. For a repeat, the first occurrence's deadline."},
+					"reminders":{"type":"array","items":{"type":"string"},"description":"Optional reminders, each a lead before the deadline (\"1 day before\", \"a week before\", \"at the deadline\") or an RFC3339 timestamp."},
 					"repeat":{"type":"string","description":"Optional recurrence: a phrase like \"every monday\", \"every 2 weeks\", \"the third wednesday of the month\", or an RFC5545 RRULE. Makes this a repeating task."},
 					"objectTypeId":{"type":"string","description":"Optional archetype id (from list_object_types) to make this a structured object."},
 					"props":{"type":"object","description":"Optional structured metadata for the objectTypeId, keyed by the type's field keys. Validated against the type's schema."}
@@ -599,8 +606,9 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 			var a struct {
 				Title        string          `json:"title"`
 				NotesMD      string          `json:"notesMd"`
+				StartAt      string          `json:"startAt"`
 				DueAt        string          `json:"dueAt"`
-				RemindAt     string          `json:"remindAt"`
+				Reminders    []string        `json:"reminders"`
 				Repeat       string          `json:"repeat"`
 				ObjectTypeID string          `json:"objectTypeId"`
 				Props        json.RawMessage `json:"props"`
@@ -608,11 +616,15 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 			if err := json.Unmarshal(args, &a); err != nil {
 				return "", err
 			}
+			start, err := optTime(a.StartAt, "startAt")
+			if err != nil {
+				return "", err
+			}
 			due, err := optTime(a.DueAt, "dueAt")
 			if err != nil {
 				return "", err
 			}
-			remind, err := optTime(a.RemindAt, "remindAt")
+			reminders, err := parseReminderArgs(a.Reminders)
 			if err != nil {
 				return "", err
 			}
@@ -621,7 +633,7 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 				return "", err
 			}
 			t, err := s.Tasks.Create(store.CreateTaskInput{
-				Title: a.Title, NotesMD: a.NotesMD, DueAt: due, RemindAt: remind, RepeatRule: repeat,
+				Title: a.Title, NotesMD: a.NotesMD, StartAt: start, DueAt: due, Reminders: reminders, RepeatRule: repeat,
 				ObjectTypeID: optStr(a.ObjectTypeID), Props: optProps(a.Props),
 			})
 			if err != nil {
@@ -634,7 +646,7 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 	r.Add(Tool{
 		Spec: ToolSpec{
 			Name:        "update_task",
-			Description: "Update an existing task — retitle it, change its notes, mark it done/cancelled, set/change its due date (dueAt) or reminder time (remindAt), make it repeat (repeat), or archetype it (objectTypeId + props). Use clearDueAt / clearRemindAt / clearRepeat to remove those. Call this only with an id you already know (from list_tasks or search_notes). Omit a field to leave it unchanged; compute any dates with get_date.",
+			Description: "Update an existing task — retitle it, change its notes, mark it done/cancelled, set/change its start (startAt) or deadline (dueAt), change its reminders, make it repeat (repeat), or archetype it (objectTypeId + props). `reminders` replaces the whole list ([] removes them all); `addReminders` adds to the existing ones. Use clearStartAt / clearDueAt / clearRepeat to remove those. Call this only with an id you already know (from list_tasks or search_notes). Omit a field to leave it unchanged; compute any dates with get_date.",
 			Schema: json.RawMessage(`{
 				"type":"object",
 				"additionalProperties":false,
@@ -643,10 +655,12 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 					"title":{"type":"string"},
 					"notesMd":{"type":"string"},
 					"status":{"type":"string","enum":["open","done","cancelled"]},
-					"dueAt":{"type":"string","description":"RFC3339 due timestamp to set."},
-					"clearDueAt":{"type":"boolean","description":"Remove the due date."},
-					"remindAt":{"type":"string","description":"RFC3339 reminder timestamp to set."},
-					"clearRemindAt":{"type":"boolean","description":"Remove the reminder."},
+					"startAt":{"type":"string","description":"RFC3339 start to set."},
+					"clearStartAt":{"type":"boolean","description":"Remove the start."},
+					"dueAt":{"type":"string","description":"RFC3339 deadline to set."},
+					"clearDueAt":{"type":"boolean","description":"Remove the deadline."},
+					"reminders":{"type":"array","items":{"type":"string"},"description":"Replace all reminders: each a lead before the deadline (\"1 day before\", \"a week before\", \"at the deadline\") or an RFC3339 timestamp. [] removes them all."},
+					"addReminders":{"type":"array","items":{"type":"string"},"description":"Reminders to add, in the same forms, keeping the existing ones."},
 					"repeat":{"type":"string","description":"Recurrence to set: a phrase like \"every monday\" or an RFC5545 RRULE."},
 					"clearRepeat":{"type":"boolean","description":"Stop the task repeating."},
 					"objectTypeId":{"type":"string","description":"Archetype id (from list_object_types) to set."},
@@ -663,10 +677,12 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 				Title           *string         `json:"title"`
 				NotesMD         *string         `json:"notesMd"`
 				Status          *string         `json:"status"`
+				StartAt         string          `json:"startAt"`
+				ClearStartAt    bool            `json:"clearStartAt"`
 				DueAt           string          `json:"dueAt"`
 				ClearDueAt      bool            `json:"clearDueAt"`
-				RemindAt        string          `json:"remindAt"`
-				ClearRemindAt   bool            `json:"clearRemindAt"`
+				Reminders       *[]string       `json:"reminders"`
+				AddReminders    []string        `json:"addReminders"`
 				Repeat          string          `json:"repeat"`
 				ClearRepeat     bool            `json:"clearRepeat"`
 				ObjectTypeID    string          `json:"objectTypeId"`
@@ -676,11 +692,11 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 			if err := json.Unmarshal(args, &a); err != nil {
 				return "", err
 			}
-			due, err := optTime(a.DueAt, "dueAt")
+			start, err := optTime(a.StartAt, "startAt")
 			if err != nil {
 				return "", err
 			}
-			remind, err := optTime(a.RemindAt, "remindAt")
+			due, err := optTime(a.DueAt, "dueAt")
 			if err != nil {
 				return "", err
 			}
@@ -690,9 +706,32 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 			}
 			in := store.UpdateTaskInput{
 				Title: a.Title, NotesMD: a.NotesMD, Status: a.Status,
-				DueAt: due, ClearDueAt: a.ClearDueAt, RemindAt: remind, ClearRemindAt: a.ClearRemindAt,
+				StartAt: start, ClearStartAt: a.ClearStartAt, DueAt: due, ClearDueAt: a.ClearDueAt,
 				RepeatRule: repeat, ClearRepeatRule: a.ClearRepeat,
 				ObjectTypeID: optStr(a.ObjectTypeID), ClearObjectType: a.ClearObjectType,
+			}
+			if a.Reminders != nil || len(a.AddReminders) > 0 {
+				var reminders []domain.Reminder
+				if a.Reminders != nil {
+					if reminders, err = parseReminderArgs(*a.Reminders); err != nil {
+						return "", err
+					}
+				} else {
+					current, err := s.Tasks.Get(a.ID)
+					if errors.Is(err, store.ErrNotFound) {
+						return "", fmt.Errorf("no task with id %q — use list_tasks or search_notes to find it", a.ID)
+					}
+					if err != nil {
+						return "", err
+					}
+					reminders = current.Reminders
+				}
+				added, err := parseReminderArgs(a.AddReminders)
+				if err != nil {
+					return "", err
+				}
+				reminders = append(reminders, added...)
+				in.Reminders = &reminders
 			}
 			if p := optProps(a.Props); p != nil {
 				in.Props = &p
@@ -759,6 +798,30 @@ func optTime(s, field string) (*time.Time, error) {
 		return nil, fmt.Errorf("%s must be an RFC3339 timestamp: %w", field, err)
 	}
 	return &t, nil
+}
+
+// parseReminderArgs turns the model's reminder strings into reminders (PLAN §6.4). Each is a
+// lead counted back from the deadline — a phrase ("1 day before", "a week before", "at the
+// deadline") or an ISO-8601 lead ("P1D") — or an RFC3339 timestamp for an exact moment. An
+// unreadable one is a tool error surfaced to the model.
+func parseReminderArgs(in []string) ([]domain.Reminder, error) {
+	out := make([]domain.Reminder, 0, len(in))
+	for _, s := range in {
+		if r, ok := domain.ParseReminderPhrase(s); ok {
+			out = append(out, r)
+			continue
+		}
+		if l, err := domain.ParseLead(s); err == nil {
+			out = append(out, domain.Reminder{Before: l.String()})
+			continue
+		}
+		at, err := time.Parse(time.RFC3339, strings.TrimSpace(s))
+		if err != nil {
+			return nil, fmt.Errorf("couldn't read reminder %q — use a lead like \"1 day before\" or \"a week before\", or an RFC3339 timestamp", s)
+		}
+		out = append(out, domain.Reminder{At: &at})
+	}
+	return out, nil
 }
 
 // parseRepeatArg turns the model's `repeat` argument into an RRULE (PLAN §6.4). It accepts
