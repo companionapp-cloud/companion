@@ -190,15 +190,37 @@ jobs:
           # Matches LSMinimumSystemVersion in apps/desktop/packaging/Info.plist.
           MACOSX_DEPLOYMENT_TARGET: "11.0"
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          # Google sign-in for calendar accounts (PLAN-caldav.md §9.5): the OAuth client of type
+          # "Desktop app". Google requires the secret in the token exchange but does not treat it
+          # as confidential for installed apps — it ships in the binary, and PKCE is what protects
+          # the flow. Repository secrets only keep it out of the repo. Unset (a fork, say), the
+          # build still succeeds and the app simply does not offer Google.
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: |
           # main.version is what the in-app updater compares with the latest release
           # (apps/desktop/updates.go); builds without it never update themselves.
           ldflags="-s -w -X main.version=${TAG#v}"
+          if [ -n "$GOOGLE_CLIENT_ID" ]; then
+            ldflags="$ldflags -X main.googleClientID=${GOOGLE_CLIENT_ID} -X main.googleClientSecret=${GOOGLE_CLIENT_SECRET}"
+          else
+            echo "::warning::GOOGLE_CLIENT_ID is not set; this build will not offer Google Calendar sign-in."
+          fi
           mkdir -p build
           GOARCH=arm64 go build -C apps/desktop -trimpath -ldflags="$ldflags" -o "$(pwd)/build/companion-desktop-arm64" .
           GOARCH=amd64 go build -C apps/desktop -trimpath -ldflags="$ldflags" -o "$(pwd)/build/companion-desktop-amd64" .
           lipo -create -output build/companion-desktop build/companion-desktop-arm64 build/companion-desktop-amd64
           lipo -info build/companion-desktop
+          # Prove the client id actually landed in the binary (a typo in -X is silently ignored by
+          # the linker). Prints a yes/no only, never the value.
+          if [ -n "$GOOGLE_CLIENT_ID" ]; then
+            if grep -aqF "$GOOGLE_CLIENT_ID" build/companion-desktop; then
+              echo "Google client id: embedded"
+            else
+              echo "::error::GOOGLE_CLIENT_ID is set but was not embedded in the binary (check the -X symbol names against apps/desktop/main.go)."
+              exit 1
+            fi
+          fi
 
       - name: Bundle, sign (ad-hoc) and zip
         id: pack
