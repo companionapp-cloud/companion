@@ -519,3 +519,17 @@ export interface LinkPreview {
    *  the case until a sync server is configured to proxy the fetch. */
   error?: string;
 }
+
+/** One ink group drawn over a note (PLAN-drawing.md): strokes drawn close together, pinned
+ *  to the text under them. `data` is the editor's payload (its strokes and text anchor); the
+ *  core stores it as-is and encrypts it whole on the wire. */
+export interface NoteInk {
+  id: string;
+  noteId: string;
+  data: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+  version: number;
+  dirty: boolean;
+}

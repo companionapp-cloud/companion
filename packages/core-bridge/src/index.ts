@@ -50,6 +50,7 @@ export type {
   CanvasRefs,
   CanvasDocument,
   LinkPreview,
+  NoteInk,
 } from "./types";
 export { notesApi } from "./notes";
 export type { NotesApi, CreateNoteInput, UpdateNoteInput, NoteConflict, NoteConflictAction } from "./notes";
@@ -102,6 +103,8 @@ export { listsApi } from "./lists";
 export type { ListsApi, CreateListInput, UpdateListInput, ListDetail, CreatedListTask } from "./lists";
 export { canvasesApi } from "./canvases";
 export type { CanvasesApi, CreateCanvasInput, UpdateCanvasInput, CanvasNodeInput, CanvasEdgeInput } from "./canvases";
+export { noteInkApi } from "./noteInk";
+export type { NoteInkApi, NoteInkInput } from "./noteInk";
 export { syncApi } from "./sync";
 export type { SyncApi } from "./sync";
 export { graphApi } from "./graph";

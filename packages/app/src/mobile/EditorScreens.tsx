@@ -35,6 +35,8 @@ export function NoteEditorScreen() {
   const [showProjects, setShowProjects] = useState(false);
   const [showGraph, setShowGraph] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Drawing on the note (PLAN-drawing.md): the pen lives in the nav bar here.
+  const [drawing, setDrawing] = useState(false);
   // `notes` gets a new identity on each save; delete reads the freshest store.
   const notesRef = useRef(notes);
   notesRef.current = notes;
@@ -66,6 +68,15 @@ export function NoteEditorScreen() {
           right={
             <>
               <NavAction icon="folder" label="Add to projects" onPress={() => setShowProjects(true)} />
+              <NavAction
+                icon="pen"
+                label={drawing ? "Stop drawing" : "Draw on note"}
+                active={drawing && !showGraph}
+                onPress={() => {
+                  setDrawing(!drawing || showGraph);
+                  setShowGraph(false);
+                }}
+              />
               <NavAction icon="graph" label={showGraph ? "Show note" : "Show note graph"} active={showGraph} onPress={() => setShowGraph((v) => !v)} />
               <NavAction icon="trash" label="Delete note" onPress={() => setConfirmDelete(true)} />
             </>
@@ -85,6 +96,8 @@ export function NoteEditorScreen() {
           note={note}
           onChange={notes.save}
           showToolbar={false}
+          drawing={drawing}
+          onDrawingChange={setDrawing}
           onCreatedNote={(nid) => nav.openNote(nid)}
           onOpenRef={(ref) => {
             if (ref.type === "task" || ref.type === "note") nav.openInNewTab({ kind: ref.type, id: ref.id });

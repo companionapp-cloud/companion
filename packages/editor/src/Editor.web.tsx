@@ -7,7 +7,7 @@ import type { EditorController, EditorProps } from "./types";
 // real DOM, so no WebView is needed — Vite resolves this via .web.tsx). It grows to
 // its content; the note view's ScrollView provides the scroll and document column.
 export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
-  { markdown, onChangeMarkdown, linkSource, documentSource, onOpenRef, onQuickCreate, linkRevision, variant, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange, onFocusChange, tableMenuPresenter },
+  { markdown, onChangeMarkdown, linkSource, documentSource, onOpenRef, onQuickCreate, linkRevision, variant, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange, onFocusChange, tableMenuPresenter, ink },
   ref,
 ) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -30,6 +30,10 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
   onFormatStateRef.current = onFormatStateChange;
   const onFocusChangeRef = useRef(onFocusChange);
   onFocusChangeRef.current = onFocusChange;
+  // Drawing (PLAN-drawing.md): on or off for the editor's lifetime, callbacks via a ref.
+  const inkRef = useRef(ink);
+  inkRef.current = ink;
+  const hasInk = useRef(!!ink).current;
 
   // The host's selection bar drives the editor through this ref.
   useImperativeHandle(
@@ -40,6 +44,8 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
       insertTable: () => handleRef.current?.insertTable(),
       insertDocument: () => handleRef.current?.insertDocument(),
       resolveQuickCreate: (target) => handleRef.current?.resolveQuickCreate(target),
+      inkUndo: () => handleRef.current?.inkUndo(),
+      inkRedo: () => handleRef.current?.inkRedo(),
     }),
     [],
   );
@@ -70,8 +76,20 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
       // Desktop injects a Wails-backed native menu presenter; web leaves it undefined (the
       // editor falls back to its built-in HTML popup). Captured once at mount, like documentSource.
       tableMenuPresenter,
+      ink: hasInk
+        ? {
+            onSave: (groups) => inkRef.current?.onSave(groups),
+            onDelete: (ids) => inkRef.current?.onDelete(ids),
+            onStateChange: (state) => inkRef.current?.onStateChange?.(state),
+            onExitRequest: () => inkRef.current?.onExitRequest?.(),
+          }
+        : undefined,
     });
     handleRef.current = handle;
+    if (inkRef.current) {
+      handle.setInkGroups(inkRef.current.groups);
+      handle.setInkTool(inkRef.current.tool);
+    }
     return () => {
       handleRef.current = null;
       handle.destroy();
@@ -91,13 +109,24 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
     handleRef.current?.refreshLinks();
   }, [linkRevision]);
 
-  // Empty the editor when the host bumps clearSignal (chat composer, post-send). Skips mount.
-  const firstClear = useRef(true);
+  // Follow the host's ink: groups as they load or sync in, and the drawing tool (both were
+  // applied at mount). Harmless to repeat, so these run on every change.
+  const inkGroups = ink?.groups;
   useEffect(() => {
-    if (firstClear.current) {
-      firstClear.current = false;
-      return;
-    }
+    if (inkGroups) handleRef.current?.setInkGroups(inkGroups);
+  }, [inkGroups]);
+  const inkTool = ink?.tool ?? null;
+  useEffect(() => {
+    handleRef.current?.setInkTool(inkTool);
+  }, [inkTool]);
+
+  // Empty the editor when the host bumps clearSignal (chat composer, post-send). Compares with
+  // the last value rather than skipping the first run: Fast Refresh re-runs every effect, and
+  // a first-run flag would then wipe the open document (and autosave the empty note).
+  const lastClear = useRef(clearSignal);
+  useEffect(() => {
+    if (Object.is(lastClear.current, clearSignal)) return;
+    lastClear.current = clearSignal;
     handleRef.current?.clear();
   }, [clearSignal]);
 

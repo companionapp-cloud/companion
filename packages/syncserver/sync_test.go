@@ -85,7 +85,7 @@ func newServerAPI(t *testing.T) (*httptest.Server, *Server) {
 		if !strings.Contains(dsn, "test") {
 			t.Fatalf("refusing to run destructive tests on %q; use a *_test database (COMPANION_TEST_DB)", dsn)
 		}
-		if _, err := db.Exec(`TRUNCATE users, sessions, refresh_tokens, user_seq, notes, tasks, areas, projects, project_members, user_secrets, canvases, canvas_nodes, canvas_edges;`); err != nil {
+		if _, err := db.Exec(`TRUNCATE users, sessions, refresh_tokens, user_seq, notes, tasks, areas, projects, project_members, user_secrets, canvases, canvas_nodes, canvas_edges, note_ink;`); err != nil {
 			t.Fatalf("truncate: %v", err)
 		}
 	}

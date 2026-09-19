@@ -44,6 +44,8 @@ export function TodayScreen() {
   const [today, setToday] = useState(todayISO);
   const [showCalendar, setShowCalendar] = useState(false);
   const [showAgenda, setShowAgenda] = useState(loadShowAgenda);
+  // Drawing on the day's note (PLAN-drawing.md).
+  const [drawing, setDrawing] = useState(false);
   const { openItem, sheet } = useCalendarItemSheet();
   const isToday = selected === today;
 
@@ -74,6 +76,7 @@ export function TodayScreen() {
         ) : null}
         <NavAction icon="listBullet" label={showAgenda ? "Hide agenda" : "Show agenda"} active={showAgenda} onPress={toggleAgenda} />
         <NavAction icon="calendar" label={showCalendar ? "Hide calendar" : "Show calendar"} active={showCalendar} onPress={() => setShowCalendar((v) => !v)} />
+        <NavAction icon="pen" label={drawing ? "Stop drawing" : "Draw on note"} active={drawing} onPress={() => setDrawing((v) => !v)} />
       </View>
       {showCalendar || showAgenda ? (
         // Capped and scrollable so a busy agenda can't push the note off the screen.
@@ -97,7 +100,14 @@ export function TodayScreen() {
         </ScrollView>
       ) : null}
       <View style={styles.note}>
-        <DailyNote key={selected} date={selected} onOpenRef={onOpenRef} headingPadding={20} />
+        <DailyNote
+          key={selected}
+          date={selected}
+          onOpenRef={onOpenRef}
+          headingPadding={20}
+          drawing={drawing}
+          onDrawingChange={setDrawing}
+        />
       </View>
       {sheet}
     </View>

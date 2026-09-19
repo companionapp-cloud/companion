@@ -478,6 +478,12 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.canvasesViewSet(payload)
 	case "canvases.linkPreview":
 		return c.canvasesLinkPreview(payload)
+	case "noteInk.list":
+		return c.noteInkList(payload)
+	case "noteInk.upsert":
+		return c.noteInkUpsert(payload)
+	case "noteInk.delete":
+		return c.noteInkDelete(payload)
 	default:
 		return nil, fmt.Errorf("unknown method %q", method)
 	}

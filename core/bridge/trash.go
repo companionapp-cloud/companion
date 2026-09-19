@@ -237,6 +237,11 @@ func (c *Core) deleteTrashItem(entityType, id string) error {
 		if err := c.store.Notes.Delete(id); err != nil {
 			return mapStoreErr(err)
 		}
+		// Ink rides along with its note (PLAN-drawing.md); the server's collector does the
+		// same when retention elapses.
+		if err := c.store.NoteInk.DeleteForNote(id); err != nil {
+			return err
+		}
 	case "task":
 		if err := c.store.Tasks.Delete(id); err != nil {
 			return mapStoreErr(err)

@@ -472,6 +472,42 @@ export const EDITOR_CSS = `
   text-align: center;
 }
 .pm-table-menu-sep { height: 1px; background: ${c("borderSubtle")}; margin: 4px 0; }
+
+/* Note ink (PLAN-drawing.md): two SVG layers over the editor. The host is its own stacking
+   context so the highlighter layer (z -1) paints under the text but above the page, and the
+   pen layer (z 1) over it. Both ignore the pointer unless a drawing tool is active. Ink
+   colours are theme roles, so ink flips with dark mode like the text does.
+   The layers reach a gutter past the text column, so there is room to draw in the margins
+   and the drawing-mode ring doesn't hug the words. The native WebView's column (.pm-wrap)
+   carries its own page padding, so there the layers sit inside it instead. */
+.pm-ink-host { position: relative; isolation: isolate; --pm-ink-gutter: 12px; }
+.pm-wrap.pm-ink-host { --pm-ink-gutter: -8px; }
+.pm-ink {
+  position: absolute;
+  left: calc(-1 * var(--pm-ink-gutter));
+  top: calc(-1 * var(--pm-ink-gutter));
+  width: calc(100% + 2 * var(--pm-ink-gutter));
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  border-radius: 8px;
+}
+.pm-ink-under { z-index: -1; }
+.pm-ink-over { z-index: 1; }
+.pm-ink-under path { opacity: 0.35; }
+.pm-ink path[data-c="ink"] { fill: ${c("textPrimary")}; }
+.pm-ink path[data-c="red"] { fill: ${c("danger")}; }
+.pm-ink path[data-c="orange"] { fill: ${c("accent")}; }
+.pm-ink path[data-c="yellow"] { fill: ${c("warning")}; }
+.pm-ink path[data-c="green"] { fill: ${c("success")}; }
+.pm-ink path[data-c="blue"] { fill: ${c("info")}; }
+.pm-ink-drawing { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.pm-ink-drawing .pm-ink-over { pointer-events: all; touch-action: none; cursor: crosshair; }
+/* Drawing mode shows where ink can go: the drawing area is tinted behind the text and ringed. */
+.pm-ink-drawing .pm-ink-under { background: ${c("accentSoft")}; }
+.pm-ink-drawing .pm-ink-over { outline: 1.5px dashed ${c("borderFocus")}; outline-offset: -1.5px; }
+.pm-ink-erasing .pm-ink-over { cursor: none; }
+.pm-ink-cursor { fill: none; stroke: ${c("textTertiary")}; stroke-width: 1; pointer-events: none; }
 `;
 
 // Web only: inject the editor CSS into the document head once.

@@ -42,6 +42,9 @@ var protectedFields = map[string][]string{
 	protocol.EntityCanvas:     {"name"},
 	protocol.EntityCanvasNode: {"data"},
 	protocol.EntityCanvasEdge: {"label"},
+	// Note ink: the whole group payload. The strokes are the user's handwriting and the anchor
+	// quotes the note's text, so none of it can stay plaintext; only the note id does.
+	protocol.EntityNoteInk: {"data"},
 }
 
 // ProtectedFields returns the encrypted field names for an entity type (nil if none). Exposed so

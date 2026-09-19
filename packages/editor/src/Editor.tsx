@@ -47,7 +47,7 @@ const FORMAT_BUTTONS: { name: FormatName; icon: IconName; label: string }[] = [
 function buildHtml(
   markdown: string,
   hasLinkSource: boolean,
-  opts: { simple: boolean; placeholder?: string; submitOnEnter: boolean; debounceMs?: number; hasDocumentSource: boolean },
+  opts: { simple: boolean; placeholder?: string; submitOnEnter: boolean; debounceMs?: number; hasDocumentSource: boolean; hasInk: boolean },
 ): string {
   // Escape `<` so note content can't break out of the <script> (e.g. "</script>").
   const initial = JSON.stringify(markdown).replace(/</g, "\\u003c");
@@ -69,7 +69,7 @@ function buildHtml(
 </head>
 <body>
 <div id="editor" class="${mountClass}"></div>
-<script>window.__INITIAL_MARKDOWN__ = ${initial}; window.__HAS_LINK_SOURCE__ = ${hasLinkSource ? "true" : "false"}; window.__HAS_DOCUMENT_SOURCE__ = ${opts.hasDocumentSource ? "true" : "false"}; window.__EDITOR_VARIANT__ = ${opts.simple ? '"simple"' : '"full"'}; window.__PLACEHOLDER__ = ${placeholder}; window.__SUBMIT_ON_ENTER__ = ${opts.submitOnEnter ? "true" : "false"}; window.__DEBOUNCE_MS__ = ${debounce};</script>
+<script>window.__INITIAL_MARKDOWN__ = ${initial}; window.__HAS_LINK_SOURCE__ = ${hasLinkSource ? "true" : "false"}; window.__HAS_DOCUMENT_SOURCE__ = ${opts.hasDocumentSource ? "true" : "false"}; window.__EDITOR_VARIANT__ = ${opts.simple ? '"simple"' : '"full"'}; window.__PLACEHOLDER__ = ${placeholder}; window.__SUBMIT_ON_ENTER__ = ${opts.submitOnEnter ? "true" : "false"}; window.__DEBOUNCE_MS__ = ${debounce}; window.__HAS_INK__ = ${opts.hasInk ? "true" : "false"};</script>
 <script>${EDITOR_JS}</script>
 </body>
 </html>`;
@@ -91,7 +91,7 @@ interface PickerState {
 }
 
 export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
-  { markdown, onChangeMarkdown, linkSource, documentSource, onOpenRef, onQuickCreate, linkRevision, variant, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange },
+  { markdown, onChangeMarkdown, linkSource, documentSource, onOpenRef, onQuickCreate, linkRevision, variant, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange, ink },
   ref,
 ) {
   const simple = variant === "simple";
@@ -110,6 +110,12 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
   const onSubmitRef = useRef(onSubmit);
   onSubmitRef.current = onSubmit;
   const webRef = useRef<WebView>(null);
+  // Drawing (PLAN-drawing.md): on or off for the WebView's lifetime (it's baked into the HTML);
+  // groups and the tool are injected once the page reports ready, then on every change.
+  const inkRef = useRef(ink);
+  inkRef.current = ink;
+  const hasInk = useRef(!!ink && !simple).current;
+  const readyRef = useRef(false);
 
   const [editorFocused, setEditorFocused] = useState(false);
   const [kbHeight, setKbHeight] = useState(0);
@@ -124,7 +130,7 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
 
   // Built once from the initial content; the WebView owns edits thereafter.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const html = useMemo(() => buildHtml(markdown, !!linkSource, { simple, placeholder, submitOnEnter: !!onSubmit, debounceMs, hasDocumentSource: !!documentSource }), []);
+  const html = useMemo(() => buildHtml(markdown, !!linkSource, { simple, placeholder, submitOnEnter: !!onSubmit, debounceMs, hasDocumentSource: !!documentSource, hasInk }), []);
 
   useEffect(() => {
     const showEvt = Platform.OS === "ios" ? "keyboardWillChangeFrame" : "keyboardDidShow";
@@ -168,16 +174,34 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linkRevision]);
 
-  // Empty the editor when the host bumps clearSignal (composer, post-send). Skips mount.
-  const firstClear = useRef(true);
+  // Empty the editor when the host bumps clearSignal (composer, post-send). Compares with the
+  // last value rather than skipping the first run: Fast Refresh re-runs every effect, and a
+  // first-run flag would then wipe the open document.
+  const lastClear = useRef(clearSignal);
   useEffect(() => {
-    if (firstClear.current) {
-      firstClear.current = false;
-      return;
-    }
+    if (Object.is(lastClear.current, clearSignal)) return;
+    lastClear.current = clearSignal;
     inject("window.__clear && window.__clear();");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clearSignal]);
+
+  // Push the host's ink into the page: the groups as they load or sync in, and the tool.
+  const pushInkGroups = () => {
+    if (hasInk && readyRef.current && inkRef.current) inject(`window.__inkSetGroups && window.__inkSetGroups(${jsonArg(inkRef.current.groups)});`);
+  };
+  const pushInkTool = () => {
+    if (hasInk && readyRef.current) inject(`window.__inkSetTool && window.__inkSetTool(${jsonArg(inkRef.current?.tool ?? null)});`);
+  };
+  const inkGroups = ink?.groups;
+  useEffect(() => {
+    pushInkGroups();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inkGroups]);
+  const inkTool = ink?.tool ?? null;
+  useEffect(() => {
+    pushInkTool();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inkTool]);
 
   // Host-driven controls (used by the shared shell; the on-screen toolbar below calls the
   // same injected globals directly).
@@ -191,6 +215,8 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
       insertDocument: () => void pickDocument(),
       resolveQuickCreate: (target) =>
         inject(`window.__resolveQuickCreate && window.__resolveQuickCreate(${jsonArg(target)});`),
+      inkUndo: () => inject(`window.__inkUndo && window.__inkUndo();`),
+      inkRedo: () => inject(`window.__inkRedo && window.__inkRedo();`),
     }),
     // `inject`/`jsonArg`/`pickDocument` read refs and are stable enough; rebuild is harmless.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -206,6 +232,23 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
     try {
       const msg = JSON.parse(event.nativeEvent.data);
       switch (msg.type) {
+        case "ready":
+          readyRef.current = true;
+          pushInkGroups();
+          pushInkTool();
+          break;
+        case "inkSave":
+          if (Array.isArray(msg.payload)) inkRef.current?.onSave(msg.payload);
+          break;
+        case "inkDelete":
+          if (Array.isArray(msg.payload)) inkRef.current?.onDelete(msg.payload);
+          break;
+        case "inkState":
+          if (msg.payload && typeof msg.payload === "object") inkRef.current?.onStateChange?.(msg.payload);
+          break;
+        case "inkExit":
+          inkRef.current?.onExitRequest?.();
+          break;
         case "change":
           if (typeof msg.payload === "string") onChangeRef.current(msg.payload);
           break;

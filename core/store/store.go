@@ -49,6 +49,8 @@ type Store struct {
 	Canvases    *CanvasesRepo
 	CanvasNodes *CanvasNodesRepo
 	CanvasEdges *CanvasEdgesRepo
+	// NoteInk holds the ink groups drawn over notes (PLAN-drawing.md).
+	NoteInk *NoteInkRepo
 }
 
 // New builds a Store over an already-open Driver, applying pending migrations. A nil
@@ -108,6 +110,7 @@ func New(d Driver, clock domain.Clock) (*Store, error) {
 	s.Canvases = &CanvasesRepo{db: d, clock: clock, links: s.Links}
 	s.CanvasNodes = &CanvasNodesRepo{db: d, clock: clock, links: s.Links}
 	s.CanvasEdges = &CanvasEdgesRepo{db: d, clock: clock}
+	s.NoteInk = &NoteInkRepo{db: d, clock: clock}
 	return s, nil
 }
 

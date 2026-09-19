@@ -46,6 +46,9 @@ const (
 	EntityCanvas     = "canvas"
 	EntityCanvasNode = "canvas_node"
 	EntityCanvasEdge = "canvas_edge"
+	// One ink group drawn over a note (PLAN-drawing.md): its strokes and the text anchor that
+	// pins it to the note. Keyed by note id; the payload is encrypted whole.
+	EntityNoteInk = "note_ink"
 )
 
 // Push statuses.

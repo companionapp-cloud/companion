@@ -18,9 +18,11 @@ import {
   type PressState,
 } from "@companion/design-system";
 import type { CalendarItem } from "@companion/core-bridge";
-import { Editor, type EditorController, type FormatState, type LinkRef } from "@companion/editor";
+import { Editor, type EditorController, type FormatState, type InkState, type LinkRef } from "@companion/editor";
 import { Agenda, itemDay } from "./CalendarAgenda";
 import { FormattingBar } from "./FormattingBar";
+import { DrawingBar, useDrawingTool } from "./DrawingBar";
+import { useNoteInk } from "./useNoteInk";
 import { tableMenuPresenter } from "./tableMenu";
 import { useNav } from "./nav-context";
 import { useNotes } from "./NotesProvider";
@@ -76,6 +78,8 @@ export function TodayScreen() {
   }, [nav.visible]);
 
   const isToday = selected === today;
+  // Drawing on the day's note (PLAN-drawing.md); kept here so it survives switching days.
+  const [drawing, setDrawing] = useState(false);
 
   return (
     <SplitView
@@ -107,6 +111,10 @@ export function TodayScreen() {
           {!isToday ? (
             <Button variant="ghost" size="sm" label="Jump to today" onPress={() => setSelected(today)} />
           ) : null}
+          <View style={{ flex: 1 }} />
+          <IconButton label={drawing ? "Stop drawing" : "Draw on note"} size="sm" active={drawing} onPress={() => setDrawing((d) => !d)}>
+            <Icon name="pen" size={13} color={drawing ? colors.textAccent : colors.textSecondary} />
+          </IconButton>
         </View>
         {/* Keyed by date so switching days remounts with that day's content seeded in.
             DailyNote owns its own scroll region on web so the pinned formatting bar stays
@@ -114,6 +122,8 @@ export function TodayScreen() {
         <DailyNote
           key={selected}
           date={selected}
+          drawing={drawing}
+          onDrawingChange={setDrawing}
           onOpenRef={(ref) => {
             // Clicking a chip opens its target in a new workspace tab.
             if (ref.type === "task" || ref.type === "note") nav.openInNewTab({ kind: ref.type, id: ref.id });
@@ -134,6 +144,9 @@ export function DailyNote(props: {
   /** Horizontal inset for the date heading, to align it with the editor body. Desktop nests
    *  this in a padded page already (0); mobile passes the editor's 20px body inset. */
   headingPadding?: number;
+  /** Drawing mode (PLAN-drawing.md). The host owns the toggle; the drawing bar shows here. */
+  drawing?: boolean;
+  onDrawingChange?: (drawing: boolean) => void;
 }) {
   const notes = useNotes();
   // `DailyNoteBody` resolves the day's existing note once, at mount, and deliberately never
@@ -149,10 +162,14 @@ function DailyNoteBody({
   date,
   onOpenRef,
   headingPadding = 0,
+  drawing = false,
+  onDrawingChange,
 }: {
   date: string;
   onOpenRef?: (ref: LinkRef) => void;
   headingPadding?: number;
+  drawing?: boolean;
+  onDrawingChange?: (drawing: boolean) => void;
 }) {
   const notes = useNotes();
   const tasks = useTasks();
@@ -195,10 +212,36 @@ function DailyNoteBody({
     [],
   );
 
-  // Create-on-first-keystroke, guarded so a burst of edits before the create resolves can't
-  // spawn duplicate notes; the latest content typed during creation is flushed afterwards.
-  const creating = useRef(false);
+  // Create-on-first-write (a keystroke, or a stroke of ink), guarded so a burst of edits before
+  // the create resolves can't spawn duplicate notes; the latest content typed during creation
+  // is flushed afterwards.
+  const creation = useRef<Promise<string | null> | null>(null);
   const latest = useRef<string | null>(null);
+  const notesRef = useRef(notes);
+  notesRef.current = notes;
+  const ensureNote = useCallback(
+    (md: string): Promise<string | null> => {
+      if (noteIdRef.current) return Promise.resolve(noteIdRef.current);
+      if (!creation.current) {
+        creation.current = notesRef.current
+          .create({ title: formatFullDate(date), contentMd: md, date })
+          .then((n) => {
+            noteIdRef.current = n.id;
+            setHasNote(true);
+            if (latest.current != null && latest.current !== md) {
+              notesRef.current.save(n.id, { contentMd: latest.current });
+            }
+            return n.id;
+          })
+          .catch(() => null)
+          .finally(() => {
+            creation.current = null;
+          });
+      }
+      return creation.current;
+    },
+    [date],
+  );
 
   const handleChange = (md: string) => {
     const id = noteIdRef.current;
@@ -207,21 +250,28 @@ function DailyNoteBody({
       return;
     }
     latest.current = md;
-    if (creating.current) return;
-    creating.current = true;
-    void notes
-      .create({ title: formatFullDate(date), contentMd: md, date })
-      .then((n) => {
-        noteIdRef.current = n.id;
-        setHasNote(true);
-        if (latest.current != null && latest.current !== md) {
-          notes.save(n.id, { contentMd: latest.current });
-        }
-      })
-      .finally(() => {
-        creating.current = false;
-      });
+    void ensureNote(md);
   };
+
+  // Drawing on the day's note (PLAN-drawing.md). A first stroke on a day with no note yet
+  // creates the note, just like a first keystroke.
+  const ink = useNoteInk(
+    hasNote ? noteIdRef.current : null,
+    useCallback(() => ensureNote(latest.current ?? ""), [ensureNote]),
+  );
+  const [tool, setTool] = useDrawingTool();
+  const [inkState, setInkState] = useState<InkState | null>(null);
+  const exitDrawing = () => onDrawingChange?.(false);
+  const drawingBar = drawing ? (
+    <DrawingBar
+      tool={tool}
+      onChange={setTool}
+      state={inkState}
+      onUndo={() => editorRef.current?.inkUndo()}
+      onRedo={() => editorRef.current?.inkRedo()}
+      onDone={exitDrawing}
+    />
+  ) : null;
 
   const body = (
     <>
@@ -248,6 +298,14 @@ function DailyNoteBody({
         onFocusChange={handleFocusChange}
         // Desktop injects a Wails-backed native table menu; web uses the built-in HTML popup.
         tableMenuPresenter={tableMenuPresenter()}
+        ink={{
+          groups: ink.groups,
+          tool: drawing ? tool : null,
+          onSave: ink.save,
+          onDelete: ink.remove,
+          onStateChange: setInkState,
+          onExitRequest: exitDrawing,
+        }}
       />
     </>
   );
@@ -259,6 +317,7 @@ function DailyNoteBody({
     return (
       <View style={styles.page}>
         {body}
+        {drawingBar}
         {quickCreate.dialog}
       </View>
     );
@@ -271,9 +330,10 @@ function DailyNoteBody({
       </ScrollView>
       {/* The bar is pinned under the document as the column's last row. A pointer keeps it
           up permanently; touch web only shows it while the editor has focus. */}
-      {!touch || editorFocused ? (
-        <FormattingBar state={formatState} editorRef={editorRef} canAttach={!!documentSource} />
-      ) : null}
+      {drawingBar ??
+        (!touch || editorFocused ? (
+          <FormattingBar state={formatState} editorRef={editorRef} canAttach={!!documentSource} />
+        ) : null)}
       {quickCreate.dialog}
     </View>
   );
@@ -539,10 +599,10 @@ const styles = {
     flexShrink: 0,
   },
   crumb: { flex: 1, minWidth: 0 },
-  // The document column: 20/28 page padding around a 720px measure, left-aligned like the
-  // note editor so the two read as the same page.
+  // The document column: 20/28 page padding around a 720px measure, centered like the note
+  // editor so the two read as the same page.
   docScroll: { paddingHorizontal: 28, paddingTop: space.xl2, paddingBottom: space.huge },
-  doc: { maxWidth: layout.contentMax, width: "100%" as const },
+  doc: { maxWidth: layout.contentMax, width: "100%" as const, alignSelf: "center" as const },
   page: { flex: 1 },
   // Touch drops the desktop title for the phone's 20px semibold heading.
   headingTouch: { fontSize: font.size["2xl"], lineHeight: 24, letterSpacing: -0.5 },

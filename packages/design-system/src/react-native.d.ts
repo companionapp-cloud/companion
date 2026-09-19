@@ -59,6 +59,11 @@ declare module "react-native" {
     onBlur?: () => void;
     onSubmitEditing?: () => void;
     returnKeyType?: string;
+    ref?: Ref<unknown>;
+    numberOfLines?: number;
+    scrollEnabled?: boolean;
+    blurOnSubmit?: boolean;
+    submitBehavior?: "submit" | "blurAndSubmit" | "newline";
   }
   interface PressableState {
     pressed: boolean;
