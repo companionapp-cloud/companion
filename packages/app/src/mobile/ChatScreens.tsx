@@ -5,6 +5,7 @@ import type { Chat } from "@companion/core-bridge";
 import { Icon, IconButton, Spinner, colors, space } from "@companion/design-system";
 import { ChatView } from "../ChatScreen";
 import { useCore } from "../CoreContext";
+import { useCalendarItemSheet } from "./CalendarScreens";
 import { useNav } from "../nav-context";
 import { timeAgo } from "../NotificationRow";
 import { Card, CardRow, EmptyCaption, FAB_CLEARANCE, Fab, NavAction, NavBar, ROW_ICON_INSET, RowIcon } from "./ui";
@@ -87,6 +88,8 @@ export function ChatListScreen() {
 export function ChatConversationScreen() {
   const nav = useNav();
   const navigation = useNavigation<NavLike>();
+  // An event preview opens the same read-only sheet as a calendar agenda row.
+  const { openItem: openEvent, sheet: eventSheet } = useCalendarItemSheet();
   const { chats } = useCore();
   const { chatId } = (useRoute().params ?? {}) as { chatId?: string };
   // The bar carries the conversation's title, which the core fills in after the first reply.
@@ -120,10 +123,17 @@ export function ChatConversationScreen() {
         <ChatView
           chatId={chatId}
           composer="floating"
-          onOpenEntity={(type, id) => (type === "task" ? nav.openTask(id) : nav.openNote(id))}
+          onOpenEntity={(type, id) => {
+            if (type === "task") nav.openTask(id);
+            else if (type === "canvas") nav.openCanvas(id);
+            else if (type === "project") nav.openProject(id);
+            else nav.openNote(id);
+          }}
+          onOpenEvent={openEvent}
           onConfigure={configure}
         />
       </View>
+      {eventSheet}
     </View>
   );
 }

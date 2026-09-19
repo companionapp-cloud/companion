@@ -753,6 +753,10 @@ export interface GraphViewProps {
   /** Reports what is actually on screen after the Show filters (ghosts included), whenever
    * it changes — for a host status line. */
   onCounts?: (counts: { nodes: number; links: number }) => void;
+  /** The graph sits inside a scrolling page (a chat preview) rather than filling a surface: the
+   * wheel scrolls the page instead of zooming, so the graph can't trap the reader. Pinch, the
+   * zoom buttons and dragging still work. */
+  embedded?: boolean;
 }
 
 /** Flow-space rectangle currently visible for a given viewport transform, padded by
@@ -936,7 +940,7 @@ function GraphBaseLayer({
  * messaging live in the wrapper screens (GraphScreen, NoteGraph). Wrapped in its own
  * ReactFlowProvider so GraphCanvas can read the live viewport at the same level it
  * configures <ReactFlow>. */
-export function GraphView({ graph, focusKey = null, onOpenNode, menu = false, onSelectNode, selectedKey = null, onCounts }: GraphViewProps) {
+export function GraphView({ graph, focusKey = null, onOpenNode, menu = false, onSelectNode, selectedKey = null, onCounts, embedded = false }: GraphViewProps) {
   const coarse = useCoarsePointer();
   const select = useMemo(() => ({ onSelect: onSelectNode ?? null, selectedKey, coarse }), [onSelectNode, selectedKey, coarse]);
   // Menu settings (physics + filters) are loaded regardless, but only take effect on views
@@ -982,6 +986,7 @@ export function GraphView({ graph, focusKey = null, onOpenNode, menu = false, on
           physics={physics}
           // The menu lists projects from the unfiltered graph so a hidden one can be re-shown.
           overlay={menu ? <GraphMenu graph={graph} {...settings} /> : null}
+          embedded={embedded}
         />
       </ReactFlowProvider>
       </GraphSelectContext.Provider>
@@ -996,6 +1001,7 @@ function GraphCanvas({
   large,
   physics,
   overlay,
+  embedded,
 }: {
   simNodes: SimNode[];
   simLinks: SimLink[];
@@ -1005,6 +1011,8 @@ function GraphCanvas({
   /** The settings menu. When present the graph gets its sub-toolbar (counts, fit, the menu's
    * settings button) and the legend strip; without it the canvas runs edge to edge. */
   overlay?: ReactNode;
+  /** See GraphViewProps.embedded. */
+  embedded: boolean;
 }) {
   const { setViewport } = useReactFlow();
   const { onSelect, selectedKey } = useContext(GraphSelectContext);
@@ -1169,6 +1177,8 @@ function GraphCanvas({
               // React Flow's fitView can't see the sim nodes that aren't mounted on a large graph.
               proOptions={{ hideAttribution: true }}
               minZoom={0.05}
+              zoomOnScroll={!embedded}
+              preventScrolling={!embedded}
               nodesConnectable={false}
               // Cull anything off-screen among the mounted set as you pan/zoom.
               onlyRenderVisibleElements={large}

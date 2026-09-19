@@ -17,6 +17,9 @@ export interface GraphCanvasProps {
   focusKey?: string | null;
   /** Called when a note, task, canvas or project node is opened in the canvas. */
   onOpenNode?: (type: string, id: string) => void;
+  /** Inside a scrolling page (a chat preview). Only the web variant needs it — there is no
+   *  scroll wheel to hand back on touch — so it is accepted here for a shared prop shape. */
+  embedded?: boolean;
 }
 
 function buildHtml(focusKey: string | null): string {

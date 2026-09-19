@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 import type { LinkRef } from "@companion/editor";
 import { Button, colors, space } from "@companion/design-system";
 import { DailyNote, TodayCalendar, todayISO } from "../TodayScreen";
@@ -8,10 +8,30 @@ import { useNav } from "../nav-context";
 import { useCalendarItemSheet } from "./CalendarScreens";
 import { NavAction, NavBar } from "./ui";
 
+const AGENDA_KEY = "companion.today.showAgenda";
+
+/** Whether the agenda shows. Per-device, mirrored to localStorage (guarded: absent in some
+ *  sandboxes); shown until the user hides it. */
+function loadShowAgenda(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(AGENDA_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+function saveShowAgenda(show: boolean) {
+  try {
+    globalThis.localStorage?.setItem(AGENDA_KEY, String(show));
+  } catch {
+    // Storage is best-effort.
+  }
+}
+
 // Mobile web "Today" — a port of the native app's TodayScreen: the full-height daily-note
-// editor with the month and the day's agenda tucked into a collapsible panel above it.
-// The desktop shell puts the calendar in a side panel; no room for that on a phone, so it
-// toggles from an action row instead, and picking a day hands the screen back to the note.
+// editor with the month and the day's agenda in a panel above it. The desktop shell puts
+// both in a side panel; no room for that on a phone, so each toggles from an action row
+// instead. The agenda toggle is remembered; the month collapses once a day is picked.
 export function TodayScreen() {
   const nav = useNav();
   // Opened on a specific day (a dated note from the calendar, or /today/<date>)? Seed the
@@ -23,8 +43,15 @@ export function TodayScreen() {
   }, [requestedDay]);
   const [today, setToday] = useState(todayISO);
   const [showCalendar, setShowCalendar] = useState(false);
+  const [showAgenda, setShowAgenda] = useState(loadShowAgenda);
   const { openItem, sheet } = useCalendarItemSheet();
   const isToday = selected === today;
+
+  const toggleAgenda = () => {
+    const next = !showAgenda;
+    setShowAgenda(next);
+    saveShowAgenda(next);
+  };
 
   const onOpenRef = (ref: LinkRef) => {
     if (ref.type === "task" || ref.type === "note") nav.openInNewTab({ kind: ref.type, id: ref.id });
@@ -45,23 +72,29 @@ export function TodayScreen() {
             }}
           />
         ) : null}
+        <NavAction icon="listBullet" label={showAgenda ? "Hide agenda" : "Show agenda"} active={showAgenda} onPress={toggleAgenda} />
         <NavAction icon="calendar" label={showCalendar ? "Hide calendar" : "Show calendar"} active={showCalendar} onPress={() => setShowCalendar((v) => !v)} />
       </View>
-      {showCalendar ? (
-        <View style={styles.calCard}>
-          <TodayCalendar
-            selected={selected}
-            today={today}
-            onSelect={(date) => {
-              setSelected(date);
-              // Collapse to hand the screen back to the note once a day is picked.
-              setShowCalendar(false);
-            }}
-          />
-          <View style={styles.agenda}>
-            <Agenda date={selected} onOpenItem={openItem} />
-          </View>
-        </View>
+      {showCalendar || showAgenda ? (
+        // Capped and scrollable so a busy agenda can't push the note off the screen.
+        <ScrollView style={styles.panel} contentContainerStyle={styles.panelContent}>
+          {showCalendar ? (
+            <TodayCalendar
+              selected={selected}
+              today={today}
+              onSelect={(date) => {
+                setSelected(date);
+                // Collapse to hand the screen back to the note once a day is picked.
+                setShowCalendar(false);
+              }}
+            />
+          ) : null}
+          {showAgenda ? (
+            <View style={showCalendar ? styles.agendaBelowMonth : null}>
+              <Agenda date={selected} onOpenItem={openItem} />
+            </View>
+          ) : null}
+        </ScrollView>
       ) : null}
       <View style={styles.note}>
         <DailyNote key={selected} date={selected} onOpenRef={onOpenRef} headingPadding={20} />
@@ -80,12 +113,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
   },
-  calCard: {
-    padding: space.lg,
+  panel: {
+    flexGrow: 0,
+    maxHeight: "62%",
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
     backgroundColor: colors.surfaceCard,
   },
-  agenda: { marginTop: space.lg, paddingTop: space.lg, borderTopWidth: 1, borderTopColor: colors.borderSubtle },
+  panelContent: { padding: space.lg },
+  agendaBelowMonth: { marginTop: space.lg, paddingTop: space.lg, borderTopWidth: 1, borderTopColor: colors.borderSubtle },
   note: { flex: 1, minHeight: 0 },
 });

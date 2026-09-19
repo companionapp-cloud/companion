@@ -11,7 +11,7 @@ import { NavAction } from '../ui/native';
 import { NotesListScreen } from './NotesListScreen';
 import { TasksListScreen } from './TasksListScreen';
 import { CanvasesListScreen } from './CanvasesListScreen';
-import { PlaceholderScreen } from './PlaceholderScreen';
+import { ProjectCalendarScreen } from './ProjectCalendarScreen';
 
 const Tabs = createBottomTabNavigator<ProjectTabParamList>();
 
@@ -72,7 +72,7 @@ export function ProjectScreen({ route }: NativeStackScreenProps<RootStackParamLi
         <Tabs.Screen name="ProjectNotes" component={NotesListScreen} />
         <Tabs.Screen name="ProjectTasks" component={TasksListScreen} />
         <Tabs.Screen name="ProjectCanvases" component={CanvasesListScreen} />
-        <Tabs.Screen name="ProjectCalendar" component={PlaceholderScreen} />
+        <Tabs.Screen name="ProjectCalendar" component={ProjectCalendarScreen} />
       </Tabs.Navigator>
     </ProjectContext.Provider>
   );

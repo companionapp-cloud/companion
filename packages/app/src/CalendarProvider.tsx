@@ -31,8 +31,9 @@ export interface CalendarStore {
   revision: number;
   /** Fetch the merged, read-only calendar for a window — feed events, due tasks, dated
    *  notes — sorted by start. The window differs per screen (a day agenda vs a week grid),
-   *  so this is a thin call rather than cached list state. */
-  range: (from: string, to: string) => Promise<CalendarItem[]>;
+   *  so this is a thin call rather than cached list state. With `projectId`, that project's
+   *  calendar: events from the calendars it holds, and its own tasks and notes. */
+  range: (from: string, to: string, opts?: { projectId?: string }) => Promise<CalendarItem[]>;
   /** Force the server to re-fetch the ICS feeds now, then pull — the manual refresh button.
    *  Resolves once done; `data.changed`/`calendar.changed` then bump `revision`. */
   refresh: () => Promise<void>;
@@ -66,10 +67,11 @@ export interface CalendarStore {
    *  Shown once, then dismissed. */
   conflicts: CalendarConflict[];
   dismissConflicts: () => void;
-  /** Read the persisted week-grid view state (visible week + scroll). */
-  getViewState: () => CalendarViewState;
+  /** Read the persisted week-grid view state (visible week + scroll). `key` keeps a separate
+   *  state per grid — each project's calendar has its own; the Calendar tool uses the default. */
+  getViewState: (key?: string) => CalendarViewState;
   /** Merge into the persisted view state (visible week + scroll). */
-  setViewState: (patch: Partial<CalendarViewState>) => void;
+  setViewState: (patch: Partial<CalendarViewState>, key?: string) => void;
 }
 
 const CalendarCtx = createContext<CalendarStore | null>(null);
@@ -130,14 +132,23 @@ export function CalendarProvider({ children }: { children: ReactNode }) {
   }, [core, refreshFeeds]);
 
   // Week-grid view state survives the screen unmounting on navigation (this provider stays
-  // mounted). A ref, not state — nothing here should trigger a re-render.
-  const viewState = useRef<CalendarViewState>({ anchorMs: null, scrollY: 0 });
-  const getViewState = useCallback(() => viewState.current, []);
-  const setViewState = useCallback((patch: Partial<CalendarViewState>) => {
-    viewState.current = { ...viewState.current, ...patch };
-  }, []);
+  // mounted). A ref, not state — nothing here should trigger a re-render. One entry per grid.
+  const viewStates = useRef(new Map<string, CalendarViewState>());
+  const getViewState = useCallback(
+    (key = "") => viewStates.current.get(key) ?? { anchorMs: null, scrollY: 0 },
+    [],
+  );
+  const setViewState = useCallback(
+    (patch: Partial<CalendarViewState>, key = "") => {
+      viewStates.current.set(key, { ...getViewState(key), ...patch });
+    },
+    [getViewState],
+  );
 
-  const range = useCallback((from: string, to: string) => calendar.range(from, to), [calendar]);
+  const range = useCallback(
+    (from: string, to: string, opts?: { projectId?: string }) => calendar.range(from, to, opts),
+    [calendar],
+  );
 
   // Manual refresh: re-fetch the ICS feeds on the server, then pull. The core emits
   // calendar.changed / data.changed on completion, which re-runs the feed list + windows.

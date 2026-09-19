@@ -325,11 +325,12 @@ export interface Project {
   dirty: boolean;
 }
 
-/** A membership edge: project ⇄ note/task/habit (mirrors core/domain.ProjectMember). */
+/** A membership edge: project ⇄ note/task/habit/canvas, or a calendar ("calendar" is a feed id,
+ *  "calendar_account" an account id) — mirrors core/domain.ProjectMember. */
 export interface ProjectMember {
   id: string;
   projectId: string;
-  entityType: "note" | "task" | "habit" | "canvas";
+  entityType: "note" | "task" | "habit" | "canvas" | "calendar" | "calendar_account";
   entityId: string;
   createdAt: string;
   updatedAt: string;

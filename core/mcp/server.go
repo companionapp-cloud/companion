@@ -237,8 +237,10 @@ func (s *Server) dispatch(ctx context.Context, g Grant, req rpcRequest) (rpcResp
 			"protocolVersion": ProtocolVersion,
 			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
 			"serverInfo":      map[string]any{"name": "companion", "version": "1"},
-			"instructions": "Tools over the user's Companion workspace: notes, tasks, projects and habits. " +
-				"Call get_date before reasoning about relative dates. Load a note with get_note before quoting it. " +
+			"instructions": "Tools over the user's Companion workspace: notes, tasks, projects, habits, calendar events and canvases. " +
+				"Call get_date before reasoning about relative dates. Load a note with get_note before quoting it; " +
+				"read the schedule with list_events and a canvas with get_canvas. " +
+				"The render_* tools show an entity as an inline preview in the user's chat. " +
 				"Reference entities with the [[note:…]] / [[task:…]] wikilinks the tools return.",
 		}, nil)
 	case "notifications/initialized", "notifications/cancelled", "notifications/progress":

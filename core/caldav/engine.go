@@ -102,7 +102,8 @@ func (e *Engine) SyncCalendars(ctx context.Context, c *Client, account *domain.C
 
 // collapseDuplicates reduces several feeds for one calendar to one: the copy holding the most
 // objects (it carries the etags, and any unpushed edits), oldest first on a tie. The others are
-// removed along with their occurrences, which is what clears the doubled events.
+// removed along with their occurrences, which is what clears the doubled events. A project that
+// held one of the removed copies is given the kept one, so the calendar stays in the project.
 func (e *Engine) collapseDuplicates(feeds []*domain.CalendarFeed) (*domain.CalendarFeed, error) {
 	keep, keepCount := feeds[0], -1
 	for _, f := range feeds { // List() is oldest first, so ">" keeps the oldest on a tie
@@ -117,6 +118,9 @@ func (e *Engine) collapseDuplicates(feeds []*domain.CalendarFeed) (*domain.Calen
 	for _, f := range feeds {
 		if f.ID == keep.ID {
 			continue
+		}
+		if err := e.Store.ProjectMembers.Reassign(domain.MemberCalendar, f.ID, keep.ID); err != nil {
+			return nil, err
 		}
 		if err := e.Store.CalendarFeeds.Delete(f.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
 			return nil, err

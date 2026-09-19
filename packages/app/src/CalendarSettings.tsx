@@ -5,6 +5,7 @@ import { CalendarAccountsSettings } from "./CalendarAccountsSettings";
 import { useCalendar } from "./CalendarProvider";
 import { useDialogKeys } from "./ConfirmDialog";
 import { Dialog } from "./Dialog";
+import { MembershipPicker } from "./MembershipPicker";
 import { Segmented, SettingsField, SettingsNote, SwatchPicker } from "./settingsUi";
 import { canPickIcsFile, pickIcsFile } from "./icsFile";
 
@@ -27,6 +28,8 @@ export function CalendarSettings() {
   const feeds = allFeeds.filter((f) => f.kind !== "caldav");
   const touch = useDensity() === "touch";
   const [adding, setAdding] = useState(false);
+  // The subscription being filed into projects (PLAN §6.6).
+  const [filing, setFiling] = useState<string | null>(null);
 
   return (
     <View style={styles.page}>
@@ -53,6 +56,9 @@ export function CalendarSettings() {
                 <Text variant="mono" tone="quaternary" numberOfLines={1} style={styles.feedUrl}>
                   {f.url ? f.url : "uploaded .ics file"}
                 </Text>
+                <IconButton label={`Add ${f.name} to projects`} size={touch ? undefined : "sm"} onPress={() => setFiling(f.id)}>
+                  <Icon name="folder" size={touch ? icon.lg : 13} color={colors.textTertiary} />
+                </IconButton>
                 <IconButton label={`Remove ${f.name}`} size={touch ? undefined : "sm"} onPress={() => void removeFeed(f.id)}>
                   <Icon name="trash" size={touch ? icon.lg : 13} color={colors.textTertiary} />
                 </IconButton>
@@ -67,6 +73,15 @@ export function CalendarSettings() {
       </View>
 
       {adding ? <AddSubscriptionDialog onClose={() => setAdding(false)} /> : null}
+      {filing ? (
+        <MembershipPicker
+          portal
+          entityType="calendar"
+          entityId={filing}
+          subtitle="This calendar’s events show in the projects you tick."
+          onClose={() => setFiling(null)}
+        />
+      ) : null}
     </View>
   );
 }

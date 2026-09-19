@@ -7,6 +7,7 @@ import { Agenda, itemDay } from "../CalendarAgenda";
 import { CalendarItemInfo } from "../CalendarItemInfo";
 import { useCalendar } from "../CalendarProvider";
 import { useNav } from "../nav-context";
+import { ProjectCalendarsPanel, ProjectCalendarsPicker } from "../ProjectCalendars";
 import { BottomSheet, NavAction, NavBar } from "./ui";
 
 // Mobile web Calendar (PLAN §6.7) — a port of the native app's CalendarScreen. The
@@ -77,6 +78,22 @@ export function CalendarScreen() {
           <Agenda date={selected} onOpenItem={openItem} />
         </View>
       </ScrollView>
+      {sheet}
+    </View>
+  );
+}
+
+/** A project's Calendar tab (PLAN §6.6): the calendars it holds, then what's coming up on them
+ *  and in its tasks. The picker sits outside the scroll view so it covers the whole tab. */
+export function ProjectCalendarScreen({ projectId }: { projectId: string }) {
+  const { openItem, sheet } = useCalendarItemSheet();
+  const [picking, setPicking] = useState(false);
+  return (
+    <View style={styles.root}>
+      <ScrollView contentContainerStyle={styles.content}>
+        <ProjectCalendarsPanel projectId={projectId} onAdd={() => setPicking(true)} onOpenItem={openItem} />
+      </ScrollView>
+      {picking ? <ProjectCalendarsPicker projectId={projectId} portal onClose={() => setPicking(false)} /> : null}
       {sheet}
     </View>
   );

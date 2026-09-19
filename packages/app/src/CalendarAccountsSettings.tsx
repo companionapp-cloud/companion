@@ -5,6 +5,7 @@ import { Button, Icon, IconButton, Input, Text, colors, icon, radius, row, space
 import { useCalendar } from "./CalendarProvider";
 import { ConfirmDialog, useDialogKeys } from "./ConfirmDialog";
 import { Dialog } from "./Dialog";
+import { MembershipPicker } from "./MembershipPicker";
 import { Segmented, SettingsField, SettingsNote } from "./settingsUi";
 
 // Providers whose CalDAV address is fixed, so the user only types a login. "Other" is any
@@ -48,6 +49,8 @@ export function CalendarAccountsSettings() {
   const [rescanning, setRescanning] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState<string | null>(null);
   const [removing, setRemoving] = useState<CalendarAccount | null>(null);
+  // The account, or one of its calendars, being filed into projects (PLAN §6.6).
+  const [filing, setFiling] = useState<{ type: "calendar" | "calendar_account"; id: string } | null>(null);
 
   const rescan = async (id: string) => {
     setRescanning(id);
@@ -104,6 +107,9 @@ export function CalendarAccountsSettings() {
                 onPress={() => void reconnect(a.id)}
               />
             ) : null}
+            <IconButton label={`Add ${a.name} to projects`} size={touch ? undefined : "sm"} onPress={() => setFiling({ type: "calendar_account", id: a.id })}>
+              <Icon name="folder" size={touch ? icon.lg : 13} color={colors.textTertiary} />
+            </IconButton>
             {canAddAccounts && a.hasCredential ? (
               <IconButton label={`Look for new calendars in ${a.name}`} size={touch ? undefined : "sm"} onPress={() => void rescan(a.id)}>
                 <Icon name="refresh" size={touch ? icon.lg : 13} color={rescanning === a.id ? colors.textQuaternary : colors.textTertiary} />
@@ -124,6 +130,9 @@ export function CalendarAccountsSettings() {
                   read-only
                 </Text>
               ) : null}
+              <IconButton label={`Add ${c.name} to projects`} size={touch ? undefined : "sm"} onPress={() => setFiling({ type: "calendar", id: c.id })}>
+                <Icon name="folder" size={touch ? icon.lg : 12} color={colors.textQuaternary} />
+              </IconButton>
             </View>
           ))}
           {a.lastError ? <SettingsNote tone="danger">{a.lastError}</SettingsNote> : null}
@@ -152,6 +161,19 @@ export function CalendarAccountsSettings() {
       )}
 
       {adding ? <AddAccountDialog onClose={() => setAdding(false)} /> : null}
+      {filing ? (
+        <MembershipPicker
+          portal
+          entityType={filing.type}
+          entityId={filing.id}
+          subtitle={
+            filing.type === "calendar_account"
+              ? "Every calendar in this account — including ones added later — shows in the projects you tick."
+              : "This calendar’s events show in the projects you tick."
+          }
+          onClose={() => setFiling(null)}
+        />
+      ) : null}
       {removing ? (
         <ConfirmDialog
           portal
@@ -303,6 +325,6 @@ const styles = {
   },
   accountHead: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.sm },
   accountTitle: { flex: 1, minWidth: 0, flexDirection: "row" as const, alignItems: "baseline" as const, gap: space.md },
-  calendarRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.md, paddingRight: space.md },
+  calendarRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.md },
   swatch: { width: 8, height: 8, borderRadius: radius.xs, flexShrink: 0 },
 };

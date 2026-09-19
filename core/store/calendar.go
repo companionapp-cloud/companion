@@ -198,6 +198,15 @@ func (r *CalendarFeedsRepo) Delete(id string) error {
 	if _, err := r.db.Exec(`DELETE FROM caldav_feed_state WHERE feed_id = ?;`, id); err != nil {
 		return fmt.Errorf("clear feed state: %w", err)
 	}
+	// The calendar leaves every project it was in (PLAN §6.6). A calendar membership has no graph
+	// edge, so tombstoning the row is all there is to it.
+	if _, err := r.db.Exec(
+		`UPDATE project_members SET deleted_at = ?, updated_at = ?, dirty = 1
+		 WHERE entity_type = ? AND entity_id = ? AND deleted_at IS NULL;`,
+		now.Format(timeFormat), now.Format(timeFormat), domain.MemberCalendar, id,
+	); err != nil {
+		return fmt.Errorf("remove feed from projects: %w", err)
+	}
 	return nil
 }
 
@@ -726,6 +735,30 @@ func scanEvent(rows Rows) (*domain.CalendarEvent, error) {
 // lexical comparison is a chronological one. Notes carry only a 'YYYY-MM-DD' local marker;
 // they are matched against the window's date bounds.
 func (r *CalendarEventsRepo) Range(from, to time.Time) ([]*domain.CalendarItem, error) {
+	return r.rangeItems(from, to, "")
+}
+
+// RangeForProject is Range narrowed to one project (PLAN §6.6, "Calendars"): events from the
+// calendars the project holds — each one it was given, plus every calendar of each account it
+// was given — and the tasks and notes that are its members.
+func (r *CalendarEventsRepo) RangeForProject(from, to time.Time, projectID string) ([]*domain.CalendarItem, error) {
+	return r.rangeItems(from, to, projectID)
+}
+
+// projectFeedIDs selects the ids of the calendars a project holds, directly or through an
+// account; its two parameters are both the project id. Deleted feeds are left to the caller's
+// own join to filter.
+const projectFeedIDs = `SELECT entity_id FROM project_members
+	 WHERE project_id = ? AND entity_type = '` + domain.MemberCalendar + `' AND deleted_at IS NULL
+	UNION
+	SELECT af.id FROM project_members pm JOIN calendar_feeds af ON af.account_id = pm.entity_id
+	 WHERE pm.project_id = ? AND pm.entity_type = '` + domain.MemberCalendarAccount + `' AND pm.deleted_at IS NULL`
+
+// projectMemberIDs selects the ids of a project's live members of one type (project id, type).
+const projectMemberIDs = `SELECT entity_id FROM project_members WHERE project_id = ? AND entity_type = ? AND deleted_at IS NULL`
+
+// rangeItems is Range, optionally narrowed to a project ("" for everything).
+func (r *CalendarEventsRepo) rangeItems(from, to time.Time, projectID string) ([]*domain.CalendarItem, error) {
 	fromTS := from.UTC().Format(timeFormat)
 	toTS := to.UTC().Format(timeFormat)
 	fromDate := from.UTC().Format(dateLayout)
@@ -735,6 +768,11 @@ func (r *CalendarEventsRepo) Range(from, to time.Time) ([]*domain.CalendarItem, 
 
 	// Feed events: overlap the window. A NULL ends_at is treated as an instantaneous event
 	// (ends == starts). Skip events whose feed was deleted.
+	eventsIn, eventArgs := "", []any{toTS, fromTS}
+	if projectID != "" {
+		eventsIn = ` AND e.feed_id IN (` + projectFeedIDs + `)`
+		eventArgs = append(eventArgs, projectID, projectID)
+	}
 	rows, err := r.db.Query(
 		`SELECT e.id, e.title, e.starts_at, e.ends_at, e.all_day, e.location, e.description, f.color,
 		        e.feed_id, f.kind, f.read_only, o.id, COALESCE(o.recurring, 0), COALESCE(o.push_state, 'synced')
@@ -742,8 +780,8 @@ func (r *CalendarEventsRepo) Range(from, to time.Time) ([]*domain.CalendarItem, 
 		   JOIN calendar_feeds f ON f.id = e.feed_id
 		   LEFT JOIN calendar_objects o ON o.feed_id = e.feed_id AND o.uid = e.ics_uid AND o.deleted_at IS NULL
 		  WHERE e.deleted_at IS NULL AND f.deleted_at IS NULL
-		    AND e.starts_at < ? AND COALESCE(e.ends_at, e.starts_at) >= ?
-		  ORDER BY e.starts_at ASC;`, toTS, fromTS)
+		    AND e.starts_at < ? AND COALESCE(e.ends_at, e.starts_at) >= ?`+eventsIn+`
+		  ORDER BY e.starts_at ASC;`, eventArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("range events: %w", err)
 	}
@@ -798,11 +836,16 @@ func (r *CalendarEventsRepo) Range(from, to time.Time) ([]*domain.CalendarItem, 
 	rows.Close()
 
 	// Tasks due within the window (not trashed/tombstoned/cancelled).
+	tasksIn, taskArgs := "", []any{fromTS, toTS}
+	if projectID != "" {
+		tasksIn = ` AND id IN (` + projectMemberIDs + `)`
+		taskArgs = append(taskArgs, projectID, domain.NodeTask)
+	}
 	rows, err = r.db.Query(
 		`SELECT id, title, due_at FROM tasks
 		  WHERE due_at IS NOT NULL AND due_at >= ? AND due_at < ?
-		    AND deleted_at IS NULL AND deleting_at IS NULL AND status != 'cancelled'
-		  ORDER BY due_at ASC;`, fromTS, toTS)
+		    AND deleted_at IS NULL AND deleting_at IS NULL AND status != 'cancelled'`+tasksIn+`
+		  ORDER BY due_at ASC;`, taskArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("range tasks: %w", err)
 	}
@@ -826,11 +869,16 @@ func (r *CalendarEventsRepo) Range(from, to time.Time) ([]*domain.CalendarItem, 
 	rows.Close()
 
 	// Daily notes dated within the window → all-day items at local midnight.
+	notesIn, noteArgs := "", []any{fromDate, toDate}
+	if projectID != "" {
+		notesIn = ` AND id IN (` + projectMemberIDs + `)`
+		noteArgs = append(noteArgs, projectID, domain.NodeNote)
+	}
 	rows, err = r.db.Query(
 		`SELECT id, title, date FROM notes
 		  WHERE date IS NOT NULL AND date >= ? AND date < ?
-		    AND deleted_at IS NULL AND deleting_at IS NULL
-		  ORDER BY date ASC;`, fromDate, toDate)
+		    AND deleted_at IS NULL AND deleting_at IS NULL`+notesIn+`
+		  ORDER BY date ASC;`, noteArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("range notes: %w", err)
 	}

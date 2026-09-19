@@ -12,8 +12,9 @@ import (
 )
 
 // ProjectMembersRepo owns project membership (PLAN §4.1, §6.6): an authored, synced
-// edge joining a project to a note/task/habit, mirrored into the local `links` index
-// as a `member` edge on every write and sync-apply.
+// edge joining a project to a note/task/habit/canvas — mirrored into the local `links`
+// index as a `member` edge on every write and sync-apply — or to a calendar, which is not
+// (see memberIndexed).
 type ProjectMembersRepo struct {
 	db    Driver
 	clock domain.Clock
@@ -27,6 +28,10 @@ func memberID(projectID, entityType, entityID string) string {
 }
 
 const memberColumns = `id, project_id, entity_type, entity_id, created_at, updated_at, deleted_at, version, dirty`
+
+// memberIndexed reports whether a membership is mirrored into the graph index. Calendars are
+// not graph nodes, so a `member` edge to one would only ever draw as a ghost.
+func memberIndexed(entityType string) bool { return !domain.IsCalendarMember(entityType) }
 
 // Add makes an entity a member of a project (idempotent). A tombstoned membership for
 // the same tuple is revived rather than duplicated.
@@ -67,8 +72,10 @@ func (r *ProjectMembersRepo) Add(projectID, entityType, entityID string) (*domai
 	default:
 		return nil, err
 	}
-	if err := r.links.AddEdge(domain.NodeProject, projectID, entityType, entityID, domain.KindMember); err != nil {
-		return nil, err
+	if memberIndexed(entityType) {
+		if err := r.links.AddEdge(domain.NodeProject, projectID, entityType, entityID, domain.KindMember); err != nil {
+			return nil, err
+		}
 	}
 	return m, nil
 }
@@ -102,7 +109,32 @@ func (r *ProjectMembersRepo) Remove(projectID, entityType, entityID string) erro
 	if affected, _ := res.RowsAffected(); affected == 0 {
 		return ErrNotFound
 	}
+	if !memberIndexed(entityType) {
+		return nil
+	}
 	return r.links.DeleteEdge(domain.NodeProject, projectID, entityType, entityID, domain.KindMember)
+}
+
+// Reassign moves every live membership of one entity to another of the same type: each project
+// the old one belonged to gets the new one instead. Used when two rows turn out to be the same
+// thing and one is dropped (a calendar a rescan found twice), so the projects keep it.
+func (r *ProjectMembersRepo) Reassign(entityType, fromID, toID string) error {
+	if fromID == toID {
+		return nil
+	}
+	members, err := r.ListForEntity(entityType, fromID)
+	if err != nil {
+		return err
+	}
+	for _, m := range members {
+		if _, err := r.Add(m.ProjectID, entityType, toID); err != nil {
+			return err
+		}
+		if err := r.Remove(m.ProjectID, entityType, fromID); err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+	}
+	return nil
 }
 
 // ListForProject returns a project's live members.
@@ -213,6 +245,9 @@ func (r *ProjectMembersRepo) Apply(m *domain.ProjectMember) error {
 		return fmt.Errorf("apply member: %w", err)
 	}
 	// Mirror the authored edge to match the applied state (PLAN §5.1).
+	if !memberIndexed(m.EntityType) {
+		return nil
+	}
 	if m.DeletedAt != nil {
 		return r.links.DeleteEdge(domain.NodeProject, m.ProjectID, m.EntityType, m.EntityID, domain.KindMember)
 	}

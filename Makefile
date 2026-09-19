@@ -181,7 +181,7 @@ android-lib: core-android
 
 ## mobile-artifacts: build both bindings and place them into the Expo local module
 ## (apps/mobile/modules/companion-core) where the podspec/build.gradle expect them.
-mobile-artifacts: android-lib core-ios
+mobile-artifacts: core-ios
 	rm -rf $(MOBILE_MODULE)/ios/vendor/Core.xcframework
 	mkdir -p $(MOBILE_MODULE)/ios/vendor
 	cp -R $(BUILD_DIR)/Core.xcframework $(MOBILE_MODULE)/ios/vendor/Core.xcframework

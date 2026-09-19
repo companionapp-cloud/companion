@@ -415,11 +415,13 @@ func (r *LinksRepo) count(query string) (int, error) {
 	return n, rows.Err()
 }
 
-// rebuildMemberEdges re-mirrors every live project membership as a 'member' edge
+// rebuildMemberEdges re-mirrors every live content membership as a 'member' edge
 // (source project → target member entity). Used by Rebuild after truncating links.
+// Calendar memberships are never mirrored (see memberIndexed).
 func (r *LinksRepo) rebuildMemberEdges() error {
 	rows, err := r.db.Query(
-		`SELECT project_id, entity_type, entity_id FROM project_members WHERE deleted_at IS NULL;`)
+		`SELECT project_id, entity_type, entity_id FROM project_members
+		  WHERE deleted_at IS NULL AND entity_type NOT IN (?, ?);`, domain.MemberCalendar, domain.MemberCalendarAccount)
 	if err != nil {
 		return fmt.Errorf("scan project_members: %w", err)
 	}

@@ -13,15 +13,34 @@ import (
 	"companion/core/sync/protocol"
 )
 
+// Option configures NewStoreRegistry.
+type Option func(*storeOptions)
+
+type storeOptions struct {
+	events EventWriter
+}
+
+// WithEventWriter enables the calendar write tools (create_event, update_event), which take the
+// host's event-editing path rather than writing the store directly (see EventWriter).
+func WithEventWriter(w EventWriter) Option {
+	return func(o *storeOptions) { o.events = w }
+}
+
 // NewStoreRegistry builds the tool set the model can call against the local SQLite store
-// (PLAN §6.8): read-only retrieval tools for "ask my data", plus write tools that create
-// and update notes and tasks. Write tools return the new entity's wikilink so the model
-// can reference it back to the user as a clickable chip.
+// (PLAN §6.8): read-only retrieval tools for "ask my data" (notes, tasks, projects, the
+// calendar, canvases), render tools that show an entity inline in the chat, plus write tools
+// that create and update notes, tasks and — given an EventWriter — calendar events. Write tools
+// return the new entity's wikilink so the model can reference it back to the user as a
+// clickable chip.
 //
 // Descriptions are prescriptive about *when* to call each tool — recent models reach for
 // tools conservatively, and trigger conditions in the description measurably improve
 // should-call accuracy.
-func NewStoreRegistry(s *store.Store) *Registry {
+func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
+	var o storeOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
 	r := NewRegistry()
 
 	r.Add(Tool{
@@ -391,6 +410,89 @@ func NewStoreRegistry(s *store.Store) *Registry {
 
 	r.Add(Tool{
 		Spec: ToolSpec{
+			Name:        "render_task",
+			Description: "Show the user an inline preview card of a task in the chat: its title, status, due date, reminder, repeat and notes. The user can tick it done or click it open. Prefer this over writing a task's details out whenever you point the user to a specific task (one you found, created or updated). Get the id from list_tasks, search_notes or create_task. This does not change the task.",
+			Schema:      json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"}},"required":["id"]}`),
+		},
+		Handler: func(_ context.Context, args json.RawMessage) (string, error) {
+			var a struct {
+				ID string `json:"id"`
+			}
+			if err := json.Unmarshal(args, &a); err != nil {
+				return "", err
+			}
+			t, err := s.Tasks.Get(a.ID)
+			if errors.Is(err, store.ErrNotFound) {
+				return "", fmt.Errorf("no task with id %q — use list_tasks or search_notes to find it first", a.ID)
+			}
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("An inline preview of [[task:%s]] (%q) is now shown to the user in the chat. Do not repeat its details in your reply — just add any commentary.", t.ID, t.Title), nil
+		},
+	})
+
+	r.Add(Tool{
+		Spec: ToolSpec{
+			Name:        "render_graph",
+			Description: "Show the user an interactive graph in the chat of a note, task, project or canvas and everything linked to it — references, embeds, project membership, canvases — out to `depth` hops. Call this when the user asks how something connects, what links to it or what it links to, or to see or visualize its graph or connections. Get the id from search_notes, list_tasks, list_projects or list_canvases. Returns the connected items so you can comment on them.",
+			Schema: json.RawMessage(`{
+				"type":"object",
+				"additionalProperties":false,
+				"properties":{
+					"type":{"type":"string","enum":["note","task","project","canvas"]},
+					"id":{"type":"string"},
+					"depth":{"type":"integer","description":"Hops to expand, 1–3 (default 2)."}
+				},
+				"required":["type","id"]
+			}`),
+		},
+		Handler: func(_ context.Context, args json.RawMessage) (string, error) {
+			var a struct {
+				Type  string `json:"type"`
+				ID    string `json:"id"`
+				Depth int    `json:"depth"`
+			}
+			if err := json.Unmarshal(args, &a); err != nil {
+				return "", err
+			}
+			title, err := graphRootTitle(s, a.Type, a.ID)
+			if err != nil {
+				return "", err
+			}
+			depth := a.Depth
+			if depth <= 0 {
+				depth = 2
+			} else if depth > 3 {
+				depth = 3
+			}
+			g, err := s.Links.Neighborhood(a.Type, a.ID, depth)
+			if err != nil {
+				return "", err
+			}
+			var linked []string
+			for _, n := range g.Nodes {
+				if n.Type == a.Type && n.ID == a.ID {
+					continue
+				}
+				linked = append(linked, fmt.Sprintf("[[%s:%s]] %q", n.Type, n.ID, n.Title))
+			}
+			shown := fmt.Sprintf("An interactive graph of [[%s:%s]] (%q) is now shown to the user in the chat", a.Type, a.ID, title)
+			if len(linked) == 0 {
+				return shown + ". Nothing links to it and it links to nothing yet, so it stands alone in the graph — say so rather than inventing connections.", nil
+			}
+			more := ""
+			if len(linked) > 25 {
+				more = fmt.Sprintf(", and %d more", len(linked)-25)
+				linked = linked[:25]
+			}
+			return fmt.Sprintf("%s, with the %d items connected to it within %d hops: %s%s. Don't list or redraw the graph as text — just add commentary.",
+				shown, len(g.Nodes)-1, depth, strings.Join(linked, ", "), more), nil
+		},
+	})
+
+	r.Add(Tool{
+		Spec: ToolSpec{
 			Name:        "create_note",
 			Description: "Create a new note. Call this when the user asks you to write down, capture, or draft a note. Use Markdown for the body; link to other entities with [[type:id]] wikilinks. To make it a structured object (e.g. a Book or Person), set objectTypeId + props — call list_object_types first to see the archetypes and their fields.",
 			Schema: json.RawMessage(`{
@@ -603,9 +705,48 @@ func NewStoreRegistry(s *store.Store) *Registry {
 		},
 	})
 
+	addCalendarTools(r, s, o.events)
+	addCanvasTools(r, s)
 	addWebTools(r)
 
 	return r
+}
+
+// graphRootTitle loads the entity a graph is centered on, for its title (and to fail clearly
+// on a wrong id).
+func graphRootTitle(s *store.Store, typ, id string) (string, error) {
+	var (
+		title string
+		err   error
+	)
+	switch typ {
+	case domain.NodeNote:
+		var n *domain.Note
+		if n, err = s.Notes.Get(id); err == nil {
+			title = n.Title
+		}
+	case domain.NodeTask:
+		var t *domain.Task
+		if t, err = s.Tasks.Get(id); err == nil {
+			title = t.Title
+		}
+	case domain.NodeProject:
+		var p *domain.Project
+		if p, err = s.Projects.Get(id); err == nil {
+			title = p.Name
+		}
+	case domain.NodeCanvas:
+		var c *domain.Canvas
+		if c, err = s.Canvases.Get(id); err == nil {
+			title = canvasName(c)
+		}
+	default:
+		return "", fmt.Errorf("type must be note, task, project or canvas, not %q", typ)
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		return "", fmt.Errorf("no %s with id %q — find its id with search_notes, list_tasks, list_projects or list_canvases", typ, id)
+	}
+	return title, err
 }
 
 // optTime parses an optional RFC3339 timestamp argument; "" means "not provided" (nil).

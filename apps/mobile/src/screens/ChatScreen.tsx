@@ -80,7 +80,13 @@ export function ChatScreen() {
           chatId={chatId}
           composer="floating"
           bottomInset={keyboardVisible ? 0 : insets.bottom}
-          onOpenEntity={(type, id) => nav.navigate(type === 'task' ? 'TaskEditor' : 'NoteEditor', { id })}
+          onOpenEntity={(type, id) => {
+            if (type === 'task') nav.navigate('TaskEditor', { id });
+            else if (type === 'canvas') nav.navigate('Canvas', { id });
+            else if (type === 'project') nav.navigate('Project', { projectId: id });
+            else nav.navigate('NoteEditor', { id });
+          }}
+          onOpenEvent={(item) => nav.navigate('CalendarEvent', { item })}
           onConfigure={() => nav.navigate('SettingsSection', { section: 'ai' })}
         />
       </View>

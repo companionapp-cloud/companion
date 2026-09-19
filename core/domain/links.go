@@ -26,7 +26,7 @@ const (
 	KindRef   = "ref"   // [[type:id]]
 	KindEmbed = "embed" // ![[type:id]]
 	// Authored kinds — mirrored into the index from their own synced tables, not parsed.
-	KindMember = "member" // project_members: project → note/task/habit
+	KindMember = "member" // project_members: project → note/task/habit/canvas (not calendars)
 	KindStack  = "stack"  // habit_links: habit → habit (arrives in the Habits milestone)
 	KindCanvas = "canvas" // canvas_nodes: canvas → note/task/document it embeds
 )

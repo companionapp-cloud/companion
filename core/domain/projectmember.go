@@ -20,14 +20,31 @@ func MemberID(projectID, entityType, entityID string) string {
 	return uuid.NewSHA1(memberNamespace, []byte(projectID+"\x00"+entityType+"\x00"+entityID)).String()
 }
 
+// Calendar member types (PLAN §6.6, "Calendars"). A project can hold calendars as well as
+// content: one calendar — a CalDAV collection or an ICS subscription, both CalendarFeed rows —
+// or a whole CalendarAccount, which brings every calendar the account has, including ones a
+// later rescan finds.
+const (
+	MemberCalendar        = "calendar"
+	MemberCalendarAccount = "calendar_account"
+)
+
+// IsCalendarMember reports whether a member type is a calendar rather than content. Calendar
+// memberships are not graph edges (calendars are not nodes, the same call canvasRefIndexed
+// makes for events) and are never trashed with their project's content.
+func IsCalendarMember(entityType string) bool {
+	return entityType == MemberCalendar || entityType == MemberCalendarAccount
+}
+
 // ProjectMember is an AUTHORED edge: a synced many-to-many row joining a project to a
-// note, task, or habit (PLAN §4.0/§4.1). It is mirrored into the local `links` index as
-// a `member` edge (source = project, target = the member entity) so read-side graph
-// queries hit one table. A note/task/habit can belong to many projects.
+// note, task, habit, canvas or calendar (PLAN §4.0/§4.1). Content memberships are
+// mirrored into the local `links` index as `member` edges (source = project, target = the
+// member entity) so read-side graph queries hit one table; calendar memberships are not.
+// An entity can belong to many projects.
 type ProjectMember struct {
 	ID         string     `json:"id"`
 	ProjectID  string     `json:"projectId"`
-	EntityType string     `json:"entityType"` // 'note' | 'task' | 'habit'
+	EntityType string     `json:"entityType"` // 'note' | 'task' | 'habit' | 'canvas' | 'calendar' | 'calendar_account'
 	EntityID   string     `json:"entityId"`
 	CreatedAt  time.Time  `json:"createdAt"`
 	UpdatedAt  time.Time  `json:"updatedAt"`
@@ -40,7 +57,10 @@ type ProjectMember struct {
 var ErrInvalidProjectMember = errors.New("invalid project member")
 
 // MemberEntityTypes are the entity kinds a project can contain.
-var MemberEntityTypes = map[string]bool{NodeNote: true, NodeTask: true, NodeHabit: true, NodeCanvas: true}
+var MemberEntityTypes = map[string]bool{
+	NodeNote: true, NodeTask: true, NodeHabit: true, NodeCanvas: true,
+	MemberCalendar: true, MemberCalendarAccount: true,
+}
 
 // Validate checks the invariants that must hold before a membership is persisted.
 func (m *ProjectMember) Validate() error {
@@ -51,7 +71,7 @@ func (m *ProjectMember) Validate() error {
 		return errors.Join(ErrInvalidProjectMember, errors.New("projectId is required"))
 	}
 	if !MemberEntityTypes[m.EntityType] {
-		return errors.Join(ErrInvalidProjectMember, errors.New("entityType must be note, task, habit, or canvas"))
+		return errors.Join(ErrInvalidProjectMember, errors.New("entityType must be note, task, habit, canvas, calendar, or calendar_account"))
 	}
 	if strings.TrimSpace(m.EntityID) == "" {
 		return errors.Join(ErrInvalidProjectMember, errors.New("entityId is required"))

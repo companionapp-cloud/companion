@@ -22,11 +22,13 @@ import { useCalendar } from "./CalendarProvider";
 import { itemDay } from "./CalendarAgenda";
 import { CalendarItemInfo } from "./CalendarItemInfo";
 import { EventEditorDialog, type EventEditorTarget } from "./EventEditorDialog";
+import { useProjectCalendars } from "./ProjectCalendars";
 import { useTasks } from "./TasksProvider";
 import { useNav } from "./nav-context";
 
 // The Calendar tool (PLAN §6.7): a week grid of merged events, due tasks, and dated notes,
-// mirroring the prototype's CalendarView. Habit streaks join it when habits (§16) land.
+// mirroring the prototype's CalendarView. Habit streaks join it when habits (§16) land. The
+// same grid is a project's calendar (PLAN §6.6) when given the project's id.
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -128,9 +130,22 @@ function layoutLanes(items: CalendarItem[]): Map<string, Lane> {
   return out;
 }
 
-export function CalendarScreen() {
-  const { range, revision, refresh, getViewState, setViewState, writableFeeds, updateEvent, conflicts, dismissConflicts } =
+/** The week grid. With `projectId` it is that project's calendar: the events of the calendars it
+ *  holds and its own tasks and notes, and a new event goes in one of its calendars. */
+export function CalendarScreen({ projectId }: { projectId?: string } = {}) {
+  const { range, revision, refresh, getViewState: viewStateOf, setViewState: saveViewState, writableFeeds, updateEvent, conflicts, dismissConflicts } =
     useCalendar();
+  // Each project's grid remembers its own week and scroll; the Calendar tool keeps the default.
+  const viewKey = projectId ? `project:${projectId}` : "";
+  const getViewState = useCallback(() => viewStateOf(viewKey), [viewStateOf, viewKey]);
+  const setViewState = useCallback(
+    (patch: Parameters<typeof saveViewState>[0]) => saveViewState(patch, viewKey),
+    [saveViewState, viewKey],
+  );
+  const project = useProjectCalendars(projectId);
+  // Where a new event can go: in a project, only the project's own writable calendars — an event
+  // put anywhere else would not show on the grid it was created from.
+  const creatable = projectId ? project.writableFeeds : writableFeeds;
   // The event being created or edited (PLAN-caldav.md §6); null when the dialog is closed.
   const [editor, setEditor] = useState<EventEditorTarget | null>(null);
   const tasks = useTasks();
@@ -306,13 +321,13 @@ export function CalendarScreen() {
     let alive = true;
     const from = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate());
     const to = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 7);
-    void range(from.toISOString(), to.toISOString()).then((list) => {
+    void range(from.toISOString(), to.toISOString(), projectId ? { projectId } : undefined).then((list) => {
       if (alive) setItems(list);
     });
     return () => {
       alive = false;
     };
-  }, [weekStart, range, revision]);
+  }, [weekStart, range, revision, projectId]);
 
   // Bucket items per weekday ISO, split into all-day (note markers, all-day events) and
   // timed. The grid always spans the full day (00:00–24:00) and scrolls.
@@ -409,7 +424,7 @@ export function CalendarScreen() {
           </IconButton>
         )}
         <Button variant="ghost" size="sm" label="Today" onPress={() => setAnchor(new Date())} />
-        {writableFeeds.length > 0 ? (
+        {creatable.length > 0 ? (
           <IconButton label="New event" size="sm" onPress={newEvent}>
             <Icon name="plus" size={14} color={colors.textSecondary} />
           </IconButton>
@@ -537,7 +552,7 @@ export function CalendarScreen() {
           })}
         </View>
       </ScrollView>
-      {editor ? <EventEditorDialog target={editor} onClose={() => setEditor(null)} /> : null}
+      {editor ? <EventEditorDialog target={editor} feeds={creatable} onClose={() => setEditor(null)} /> : null}
     </View>
   );
 }

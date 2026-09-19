@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, View } from "react-native";
 import type { CalendarItem, CalendarItemKind } from "@companion/core-bridge";
 import {
+  Button,
   Icon,
   Text,
   colors,
@@ -45,6 +46,7 @@ const KIND_ICON: Record<CalendarItemKind, IconName> = {
 };
 
 const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const DAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /** Local calendar bounds for a 'YYYY-MM-DD' day as half-open ISO instants [from, to). Local
  *  midnight → UTC instant is exactly what `calendar.range` compares against. */
@@ -118,6 +120,109 @@ export function Agenda({
           ))}
         </View>
       )}
+    </View>
+  );
+}
+
+/** Local 'YYYY-MM-DD' of a date. */
+function localDay(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** 'Today', 'Tomorrow', else 'Sat 20 Sep' — the day headings of the upcoming agenda. */
+function dayHeading(iso: string, today: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  const [ty, tm, td] = today.split("-").map(Number);
+  const diff = Math.round((date.getTime() - new Date(ty, tm - 1, td).getTime()) / 86_400_000);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Tomorrow";
+  return `${DAYS_SHORT[date.getDay()]} ${d} ${MONTHS_SHORT[m - 1]}`;
+}
+
+// How far the upcoming agenda looks, and how much each "show more" adds. It stops at a year:
+// that is as far as calendars are expanded.
+const UPCOMING_DAYS = 14;
+const UPCOMING_MAX_DAYS = 365;
+
+/** What's coming up, day by day, from today through the next two weeks (more on request) — the
+ *  project's calendar when `projectId` is given. Where one day's agenda is too narrow a window:
+ *  a project's Calendar tab on a phone, where the question is "what's next for this?". Rows are
+ *  the day agenda's. Something that began before today and runs into it is listed under today. */
+export function UpcomingAgenda({
+  projectId,
+  onOpenItem,
+}: {
+  projectId?: string;
+  onOpenItem?: (item: CalendarItem) => void;
+}) {
+  const { range, revision } = useCalendar();
+  const [days, setDays] = useState(UPCOMING_DAYS);
+  const [items, setItems] = useState<CalendarItem[] | null>(null);
+  const touch = useDensity() === "touch";
+  // Part of the query's key, so an agenda left open past midnight moves on with the next refresh.
+  const today = localDay(new Date());
+
+  useEffect(() => {
+    let alive = true;
+    const [y, m, d] = today.split("-").map(Number);
+    const from = new Date(y, m - 1, d);
+    const to = new Date(y, m - 1, d + days);
+    void range(from.toISOString(), to.toISOString(), projectId ? { projectId } : undefined).then((list) => {
+      if (alive) setItems(list);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [range, revision, projectId, days, today]);
+
+  const groups = useMemo(() => {
+    const byDay = new Map<string, CalendarItem[]>();
+    for (const it of items ?? []) {
+      const day = itemDay(it) < today ? today : itemDay(it);
+      const list = byDay.get(day);
+      if (list) list.push(it);
+      else byDay.set(day, [it]);
+    }
+    return [...byDay.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  }, [items, today]);
+
+  const timeWidth = touch ? TIME_W_TOUCH : (items ?? []).some((it) => it.allDay) ? TIME_W_ALL_DAY : TIME_W;
+
+  return (
+    <View>
+      <Text variant="eyebrow" tone="quaternary" style={styles.header}>
+        Upcoming
+      </Text>
+      {items && groups.length === 0 ? (
+        <Text variant="caption" tone="tertiary" style={styles.empty}>
+          Nothing scheduled in the next {days === UPCOMING_DAYS ? "two weeks" : `${days} days`}.
+        </Text>
+      ) : (
+        groups.map(([day, list]) => (
+          <View key={day}>
+            <Text variant="mono" tone="tertiary" style={styles.dayHeading}>
+              {dayHeading(day, today)}
+            </Text>
+            <View style={styles.rows}>
+              {list.map((it) => (
+                <AgendaRow key={it.id} item={it} onOpenItem={onOpenItem} timeWidth={timeWidth} touch={touch} />
+              ))}
+            </View>
+          </View>
+        ))
+      )}
+      {items && days < UPCOMING_MAX_DAYS ? (
+        <View style={styles.more}>
+          <Button
+            variant="ghost"
+            size="sm"
+            label="Show two more weeks"
+            onPress={() => setDays((n) => Math.min(UPCOMING_MAX_DAYS, n + UPCOMING_DAYS))}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -201,6 +306,8 @@ function AgendaRow({
 const styles = {
   header: { paddingHorizontal: space.sm, paddingTop: space.md, paddingBottom: 3 },
   empty: { paddingHorizontal: space.sm, paddingVertical: space.md },
+  dayHeading: { paddingHorizontal: space.sm, paddingTop: space.md, paddingBottom: 3 },
+  more: { flexDirection: "row" as const, paddingTop: space.md },
   rows: { gap: 1 },
   row: {
     justifyContent: "center" as const,

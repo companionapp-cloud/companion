@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"companion/core/calendar"
+	"companion/core/domain"
 	"companion/core/store"
 )
 
@@ -146,10 +147,13 @@ func (c *Core) fetchFeeds() error {
 // calendarRange returns the merged, read-only calendar for a window: feed events, due
 // tasks, and dated notes (PLAN §6.7). `from`/`to` are RFC3339 instants (half-open); the
 // UI passes the visible day or week bounds. One shared query, identical on every client.
+// With `projectId` it is that project's calendar: events from the calendars it holds, and
+// its own tasks and notes (PLAN §6.6).
 func (c *Core) calendarRange(payload []byte) ([]byte, error) {
 	var args struct {
-		From string `json:"from"`
-		To   string `json:"to"`
+		From      string `json:"from"`
+		To        string `json:"to"`
+		ProjectID string `json:"projectId"`
 	}
 	if err := unmarshal(payload, &args); err != nil {
 		return nil, err
@@ -162,7 +166,12 @@ func (c *Core) calendarRange(payload []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	items, err := c.store.CalendarEvents.Range(from, to)
+	var items []*domain.CalendarItem
+	if args.ProjectID != "" {
+		items, err = c.store.CalendarEvents.RangeForProject(from, to, args.ProjectID)
+	} else {
+		items, err = c.store.CalendarEvents.Range(from, to)
+	}
 	if err != nil {
 		return nil, err
 	}

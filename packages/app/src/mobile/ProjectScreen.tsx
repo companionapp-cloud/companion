@@ -6,15 +6,17 @@ import { useProjects } from "../ProjectsProvider";
 import { NotesListScreen, TasksListScreen } from "./ListScreens";
 import { ListsIndexScreen, ListRowsScreen } from "./ListsScreens";
 import { CanvasesListScreen } from "./CanvasScreens";
+import { ProjectCalendarScreen } from "./CalendarScreens";
 import { NavBar } from "./ui";
+import { useToolVisibility } from "../ToolVisibilityProvider";
 
-// A project's scoped view for the mobile web shell: a Notes/Tasks/Lists/Canvases switcher
-// over the shared list screens, each filtered to the project's members (PLAN §6.6). The
-// native app uses a bottom tab bar; a segmented control in the nav bar does the same job
+// A project's scoped view for the mobile web shell: a Notes/Tasks/Lists/Canvases/Calendar
+// switcher over the shared list screens, each filtered to the project's members (PLAN §6.6).
+// The native app uses a bottom tab bar; a segmented control in the nav bar does the same job
 // here without pulling in another navigator. The section lives in the route, so the URL
 // names it and Back from a drilled-in list lands on the tab it left.
 
-type Section = "notes" | "tasks" | "lists" | "canvases";
+type Section = "notes" | "tasks" | "lists" | "canvases" | "calendars";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type NavLike = any;
 
@@ -22,9 +24,19 @@ export function ProjectScreen() {
   const navigation = useNavigation<NavLike>();
   const params = (useRoute().params ?? {}) as { projectId?: string; section?: string; itemId?: string };
   const { projects } = useProjects();
+  // Hiding the Calendar tool in Settings › Tools drops the tab, as it drops the desktop chip.
+  const calendarShown = !useToolVisibility().hidden.has("calendar");
   const projectId = params.projectId ?? "";
   const section: Section =
-    params.section === "tasks" ? "tasks" : params.section === "lists" ? "lists" : params.section === "canvases" ? "canvases" : "notes";
+    params.section === "tasks"
+      ? "tasks"
+      : params.section === "lists"
+        ? "lists"
+        : params.section === "canvases"
+          ? "canvases"
+          : params.section === "calendars" && calendarShown
+            ? "calendars"
+            : "notes";
 
   if (!projectId) return null;
 
@@ -50,12 +62,15 @@ export function ProjectScreen() {
               { value: "tasks", label: "Tasks" },
               { value: "lists", label: "Lists" },
               { value: "canvases", label: "Canvases" },
+              ...(calendarShown ? [{ value: "calendars" as const, label: "Calendar" }] : []),
             ]}
           />
         }
       />
       {section === "notes" ? (
         <NotesListScreen key={projectId} projectId={projectId} />
+      ) : section === "calendars" ? (
+        <ProjectCalendarScreen key={projectId} projectId={projectId} />
       ) : section === "lists" ? (
         <ListsIndexScreen key={projectId} projectId={projectId} />
       ) : section === "canvases" ? (

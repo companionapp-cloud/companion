@@ -71,16 +71,21 @@ const UNIT: Record<string, [string, string]> = {
  *  background, from this device or (on web) one of the user's native ones. */
 export function EventEditorDialog({
   target,
+  feeds,
   onClose,
   onSaved,
 }: {
   target: EventEditorTarget;
+  /** The calendars a new event may go in (a project's calendar offers only its own); every
+   *  writable calendar when omitted. */
+  feeds?: CalendarFeed[];
   onClose: () => void;
   /** Called after a successful save or delete, before `onClose` — for a host holding a snapshot
    *  of the event (the mobile detail screen) that is now stale. */
   onSaved?: () => void;
 }) {
-  const { writableFeeds, createEvent, updateEvent, removeEvent } = useCalendar();
+  const { writableFeeds: allWritable, createEvent, updateEvent, removeEvent } = useCalendar();
+  const writableFeeds = feeds ?? allWritable;
   const { calendar } = useCore();
   const editing = target.mode === "edit" ? target.item : null;
   const recurring = !!editing?.recurring;

@@ -24,7 +24,9 @@ export interface UpdateProjectInput {
   archived?: boolean;
 }
 
-export type MemberEntityType = "note" | "task" | "habit" | "canvas";
+/** What a project can hold (PLAN §6.6): content, and calendars — one calendar (a CalDAV calendar
+ *  or an ICS subscription, by feed id) or a whole account (every calendar it has, by account id). */
+export type MemberEntityType = "note" | "task" | "habit" | "canvas" | "calendar" | "calendar_account";
 
 /** Typed wrappers over the areas.* / projects.* / nav.* core methods (PLAN §6.6). */
 export function projectsApi(core: CoreBridge) {
