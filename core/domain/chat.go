@@ -25,7 +25,9 @@ type Chat struct {
 	ConfigID *string `json:"configId,omitempty"`
 	Model    *string `json:"model,omitempty"`
 	// AgentSessionID is the CLI runtime's own conversation id (Claude Code / Codex session),
-	// so later turns resume it. Nil for HTTP runtimes and until the first turn completes.
+	// so later turns resume it. Nil for HTTP runtimes and until the first turn completes. It is
+	// local to the device hosting the agent: the sync server doesn't store it, and a pulled
+	// chat never overwrites it.
 	AgentSessionID *string    `json:"agentSessionId,omitempty"`
 	CreatedAt      time.Time  `json:"createdAt"`
 	UpdatedAt      time.Time  `json:"updatedAt"`

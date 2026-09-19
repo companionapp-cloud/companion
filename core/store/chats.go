@@ -178,15 +178,18 @@ func (r *ChatsRepo) Apply(c *domain.Chat) error {
 	if c.DeletedAt != nil {
 		deletedAt = c.DeletedAt.UTC().Format(timeFormat)
 	}
+	// agent_session_id is device-local (the server doesn't store it), so a pulled row never sets
+	// it: the local session survives unless the chat was re-pinned to another agent, which
+	// orphans it.
 	_, err := r.db.Exec(
-		`INSERT INTO chats (id, title, config_id, model, agent_session_id, created_at, updated_at, deleted_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+		`INSERT INTO chats (id, title, config_id, model, created_at, updated_at, deleted_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
 		 ON CONFLICT(id) DO UPDATE SET
 		   title = excluded.title, config_id = excluded.config_id, model = excluded.model,
-		   agent_session_id = excluded.agent_session_id,
+		   agent_session_id = CASE WHEN chats.config_id IS excluded.config_id THEN chats.agent_session_id END,
 		   created_at = excluded.created_at, updated_at = excluded.updated_at,
 		   deleted_at = excluded.deleted_at, version = excluded.version, dirty = 0;`,
-		c.ID, c.Title, c.ConfigID, c.Model, c.AgentSessionID, c.CreatedAt.UTC().Format(timeFormat), c.UpdatedAt.UTC().Format(timeFormat), deletedAt, c.Version,
+		c.ID, c.Title, c.ConfigID, c.Model, c.CreatedAt.UTC().Format(timeFormat), c.UpdatedAt.UTC().Format(timeFormat), deletedAt, c.Version,
 	)
 	if err != nil {
 		return fmt.Errorf("apply chat: %w", err)
