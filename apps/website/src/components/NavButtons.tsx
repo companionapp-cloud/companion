@@ -9,10 +9,27 @@ export interface NavLink {
   onClick?: () => void;
 }
 
-/** Row of link-wrapped design-system Buttons (header nav, hero CTAs, section CTAs). */
-export function NavButtons({ links, gap = 8 }: { links: NavLink[]; gap?: number }) {
+/** Row of link-wrapped design-system Buttons (header nav, hero CTAs, section CTAs). Centered
+ *  by default; `align="start"` for rows that sit in left-aligned card copy. */
+export function NavButtons({
+  links,
+  gap = 8,
+  align = "center",
+}: {
+  links: NavLink[];
+  gap?: number;
+  align?: "center" | "start";
+}) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap, flexWrap: "wrap", justifyContent: "center" }}>
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap,
+        flexWrap: "wrap",
+        justifyContent: align === "start" ? "flex-start" : "center",
+      }}
+    >
       {links.map((link) => (
         <a
           key={link.label}

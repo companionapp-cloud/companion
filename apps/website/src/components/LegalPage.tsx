@@ -20,6 +20,7 @@ export function LegalPage({ heading, updated, intro, toc, path, children }: Prop
       <Seo title={`${heading} — Companion`} description={intro} path={path} />
       <SiteHeader
         links={[
+          { label: "Pricing", href: "/pricing", variant: "ghost" },
           { label: "Docs", href: "/docs", variant: "ghost" },
           { label: "Contact us", href: "/contact", variant: "secondary" },
         ]}

@@ -142,6 +142,8 @@ func handler(srv *syncserver.Server, bill *billing, adm *admin) http.Handler {
 	// authenticated by its Stripe signature instead.
 	mux.Handle("POST /api/v1/billing/checkout", srv.Authed(bill.handleCheckout))
 	mux.Handle("GET /api/v1/billing/subscription", srv.Authed(bill.handleStatus))
+	mux.Handle("POST /api/v1/billing/cancel", srv.Authed(bill.handleCancel))
+	mux.Handle("POST /api/v1/billing/resume", srv.Authed(bill.handleResume))
 	mux.Handle("GET /api/v1/billing/invoices", srv.Authed(bill.handleInvoices))
 	mux.Handle("GET /api/v1/billing/upcoming", srv.Authed(bill.handleUpcoming))
 	mux.HandleFunc("POST /api/v1/billing/webhook", bill.handleWebhook)

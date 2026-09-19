@@ -99,8 +99,14 @@ geometry), `anchor.ts` (text index, snapshot, resolve), `layer.ts` (the layer).
   injects `__inkSetGroups`, `__inkSetTool`, `__inkUndo`, `__inkRedo` after `ready`.
   Native writes each stroke immediately (a WebView can be torn down right after one).
 - Layout: each group is placed at its anchor (`coordsAtPos`) on every edit, resize, font load
-  and visibility change. A group wider than the column is scaled down; one sticking out
+  and visibility change. A group wider than the layers is scaled down; one sticking out
   (drawn on a wider screen) is nudged back in.
+- The layers reach a gutter past the text column (`--pm-ink-gutter`: 12px on web/desktop;
+  8px *inside* the native `.pm-wrap`, whose own padding is the margin), so the margins are
+  drawable. Layer coordinates start at the layers' top-left; free ink is placed from the
+  text column's left edge, so it lines up the same on every platform.
+- While drawing, the drawable area is highlighted: tinted (`accentSoft`) behind the text and
+  ringed with a dashed `borderFocus` outline, reaching down into the room left to draw in.
 - Anchors are re-pinned 1.5s after nearby text is edited. Anchors whose text is deleted
   outright (a selection spanning them) are **orphaned**, not re-pinned: they stay where the
   text was and snap back if it returns (undo, a late sync).

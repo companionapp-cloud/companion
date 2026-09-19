@@ -20,6 +20,7 @@ export default function DocsHome() {
         sticky
         links={[
           { label: "Home", href: "/", variant: "ghost" },
+          { label: "Pricing", href: "/pricing", variant: "ghost" },
           { label: "Contact us", href: "/contact", variant: "secondary" },
         ]}
       />

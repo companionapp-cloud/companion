@@ -7,6 +7,7 @@ import { ProjectShowcase } from "../src/components/ProjectShowcase";
 import { Seo } from "../src/components/Seo";
 import { SiteFooter } from "../src/components/SiteFooter";
 import { SiteHeader } from "../src/components/SiteHeader";
+import { SyncShowcase } from "../src/components/SyncShowcase";
 
 const GITHUB_URL = "https://github.com/chrisdmacrae/companion";
 const WEB_APP_URL = "https://web.companionapp.cloud";
@@ -38,6 +39,7 @@ export default function Landing() {
         <SiteHeader
           border={false}
           links={[
+            { label: "Pricing", href: "/pricing", variant: "ghost" },
             { label: "Docs", href: "/docs", variant: "ghost" },
             {
               label: "Star on GitHub",
@@ -151,6 +153,27 @@ export default function Landing() {
           </p>
 
           <ProjectShowcase />
+        </div>
+      </section>
+
+      {/* sync */}
+      <section
+        id="sync"
+        style={{ position: "relative", background: "#f5f5f3", borderTop: "1px solid #e0e0dc", padding: "96px 24px 104px" }}
+      >
+        <div style={{ maxWidth: 1040, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <div className="eyebrow" style={{ marginBottom: 18 }}>
+            SYNC
+          </div>
+          <h2 className="section-title" style={{ margin: 0, maxWidth: "20ch" }}>
+            On every device, for your eyes only
+          </h2>
+          <p style={{ ...sectionSub, maxWidth: "56ch" }}>
+            Companion works offline on its own. Turn on sync and your notes, tasks and projects follow you everywhere —
+            end-to-end encrypted, so the server holds them without being able to read them.
+          </p>
+
+          <SyncShowcase />
         </div>
       </section>
 

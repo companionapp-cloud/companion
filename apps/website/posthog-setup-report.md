@@ -9,6 +9,9 @@ The wizard has completed a PostHog integration for the Companion marketing/docs 
 | `feature_tab_clicked` | User clicks a feature showcase tab (Ask AI, Notes, Tasks, Habits) | `src/components/FeatureShowcase.tsx` |
 | `doc_feedback_submitted` | User rates a docs article as helpful or not | `src/components/FeedbackRow.tsx` |
 | `hero_cta_clicked` | User clicks a hero CTA button (Get started / Learn more) | `app/index.tsx` |
+| `sync_cta_clicked` | User clicks a sync CTA on the landing page (cloud / self-hosted) | `src/components/SyncShowcase.tsx` |
+| `pricing_cta_clicked` | User clicks a CTA on the pricing page (header, hero, or a plan card) | `app/pricing.tsx` |
+| `pricing_faq_opened` | User opens a pricing FAQ entry | `app/pricing.tsx` |
 | `github_repo_clicked` | User clicks the Star on GitHub link | `app/index.tsx` |
 | `docs_search_result_clicked` | User clicks a result from the docs search | `src/components/DocsSearch.tsx` |
 | `doc_article_opened` | User opens a docs article from the homepage index | `src/components/DocsIndex.tsx` |

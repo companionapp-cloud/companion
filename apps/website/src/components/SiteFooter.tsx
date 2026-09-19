@@ -52,6 +52,7 @@ export function SiteFooter({ tone = "sunken" }: Props) {
 
         <div className="col">
           <div className="col-title">More</div>
+          <a href="/pricing">Pricing</a>
           <a href="/privacy">Privacy Policy</a>
           <a href="/terms">Terms</a>
         </div>

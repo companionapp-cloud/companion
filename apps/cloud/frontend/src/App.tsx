@@ -159,7 +159,7 @@ export default function App() {
         {view === "settings" && account ? (
           <Settings account={account} onBack={() => setView("home")} onAccountChanged={setAccount} />
         ) : (
-          <Home sub={sub} email={account?.email ?? ""} onError={setError} />
+          <Home sub={sub} email={account?.email ?? ""} onError={setError} onSubscriptionChange={setSub} />
         )}
       </ScrollView>
     </View>

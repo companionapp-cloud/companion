@@ -123,7 +123,15 @@ export async function updatePassword(currentPassword: string, newPassword: strin
 
 // ---- billing --------------------------------------------------------------
 
-export type Subscription = { status: string; currentPeriodEnd?: string };
+// cancelAtPeriodEnd: the subscription is set to stop at currentPeriodEnd (sync keeps working
+// until then). cancelable: there is a live Stripe subscription the portal may cancel — comped
+// accounts granted by an admin aren't ours to end here.
+export type Subscription = {
+  status: string;
+  currentPeriodEnd?: string;
+  cancelAtPeriodEnd?: boolean;
+  cancelable?: boolean;
+};
 
 export function getSubscription(): Promise<Subscription> {
   return req("/billing/subscription");
@@ -131,6 +139,16 @@ export function getSubscription(): Promise<Subscription> {
 
 export function startCheckout(): Promise<{ url: string }> {
   return req("/billing/checkout", { method: "POST" });
+}
+
+// cancelSubscription stops the subscription renewing at the end of the paid-for period;
+// resumeSubscription calls that off while it's still running. Both return the new state.
+export function cancelSubscription(): Promise<Subscription> {
+  return req("/billing/cancel", { method: "POST" });
+}
+
+export function resumeSubscription(): Promise<Subscription> {
+  return req("/billing/resume", { method: "POST" });
 }
 
 export type Invoice = {

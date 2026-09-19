@@ -17,6 +17,7 @@ import (
 	stripe "github.com/stripe/stripe-go/v81"
 	"github.com/stripe/stripe-go/v81/checkout/session"
 	"github.com/stripe/stripe-go/v81/invoice"
+	"github.com/stripe/stripe-go/v81/subscription"
 	"github.com/stripe/stripe-go/v81/webhook"
 )
 
@@ -156,25 +157,108 @@ func (b *billing) handleCheckout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"url": sess.URL})
 }
 
+// subscriptionState is the caller's subscription as the portal renders it: Stripe's status,
+// when the paid-for period ends, whether it is set to stop there, and whether the portal may
+// cancel it at all (an admin grant, or a row with no Stripe subscription behind it, can't be).
+type subscriptionState struct {
+	Status            string `json:"status"`
+	CurrentPeriodEnd  string `json:"currentPeriodEnd,omitempty"`
+	CancelAtPeriodEnd bool   `json:"cancelAtPeriodEnd"`
+	Cancelable        bool   `json:"cancelable"`
+
+	source string // 'stripe' | 'admin' — comped accounts aren't ours to cancel
+	subID  string // Stripe subscription id; empty until a checkout records one
+}
+
+// state reads the caller's subscription. A user with no row has status "none".
+func (b *billing) state(ctx context.Context, userID string) (subscriptionState, error) {
+	st := subscriptionState{Status: "none"}
+	var periodEnd, source, subID sql.NullString
+	var cancelAtPeriodEnd int64
+	err := b.db.QueryRowContext(ctx, b.rebind(`
+		SELECT status, current_period_end, source, stripe_subscription_id, cancel_at_period_end
+		FROM subscriptions WHERE user_id = ?;`), userID).
+		Scan(&st.Status, &periodEnd, &source, &subID, &cancelAtPeriodEnd)
+	if err == sql.ErrNoRows {
+		return st, nil
+	}
+	if err != nil {
+		return st, err
+	}
+	st.CurrentPeriodEnd, st.source, st.subID = periodEnd.String, source.String, subID.String
+	st.CancelAtPeriodEnd = cancelAtPeriodEnd == 1
+	switch stripe.SubscriptionStatus(st.Status) {
+	case stripe.SubscriptionStatusActive, stripe.SubscriptionStatusTrialing:
+		st.Cancelable = st.source == "stripe" && st.subID != ""
+	}
+	return st, nil
+}
+
 // handleStatus returns the caller's current subscription state.
 func (b *billing) handleStatus(w http.ResponseWriter, r *http.Request) {
-	uid := syncserver.UserID(r)
-	var status string
-	var periodEnd sql.NullString
-	err := b.db.QueryRowContext(r.Context(), b.rebind(
-		`SELECT status, current_period_end FROM subscriptions WHERE user_id = ?;`), uid).Scan(&status, &periodEnd)
-	if err == sql.ErrNoRows {
-		writeJSON(w, http.StatusOK, map[string]any{"status": "none"})
-		return
-	}
+	st, err := b.state(r.Context(), syncserver.UserID(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "status lookup failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":           status,
-		"currentPeriodEnd": periodEnd.String,
-	})
+	writeJSON(w, http.StatusOK, st)
+}
+
+// handleCancel stops the caller's subscription renewing. handleResume undoes that while the
+// period is still running. Both return the refreshed state so the portal can re-render.
+func (b *billing) handleCancel(w http.ResponseWriter, r *http.Request) {
+	b.setCancelAtPeriodEnd(w, r, true)
+}
+
+func (b *billing) handleResume(w http.ResponseWriter, r *http.Request) {
+	b.setCancelAtPeriodEnd(w, r, false)
+}
+
+// setCancelAtPeriodEnd flips Stripe's cancel_at_period_end for the caller's subscription and
+// mirrors the result locally. Cancelling ends the subscription when the period the user has
+// already paid for runs out — never immediately, which would throw that time away — so Guard
+// keeps letting them sync until then, and resuming before then is a no-loss undo.
+func (b *billing) setCancelAtPeriodEnd(w http.ResponseWriter, r *http.Request, cancel bool) {
+	uid := syncserver.UserID(r)
+	st, err := b.state(r.Context(), uid)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "status lookup failed")
+		return
+	}
+	if !st.Cancelable {
+		// Separate the two dead ends: nothing to cancel, versus a comped account whose
+		// entitlement we grant by hand and must therefore remove by hand.
+		if st.source == "admin" {
+			writeErr(w, http.StatusConflict, "this subscription isn't billed through Stripe — contact support to change it")
+			return
+		}
+		writeErr(w, http.StatusConflict, "you don't have an active subscription")
+		return
+	}
+	if stripe.Key == "" {
+		writeErr(w, http.StatusServiceUnavailable, "billing is not configured")
+		return
+	}
+	sub, err := subscription.Update(st.subID, &stripe.SubscriptionParams{CancelAtPeriodEnd: stripe.Bool(cancel)})
+	if err != nil {
+		slog.Error("billing: set cancel at period end", "user", uid, "cancel", cancel, "err", err)
+		writeErr(w, http.StatusBadGateway, "could not update your subscription")
+		return
+	}
+	periodEnd := ""
+	if sub.CurrentPeriodEnd > 0 {
+		periodEnd = time.Unix(sub.CurrentPeriodEnd, 0).UTC().Format(timeFormat)
+	}
+	if _, err := b.applySubscription(r.Context(), st.subID, string(sub.Status), periodEnd, sub.CancelAtPeriodEnd); err != nil {
+		// Stripe has the change; only our mirror is stale, and the next webhook repairs it.
+		slog.Error("billing: mirror cancel at period end", "user", uid, "err", err)
+	}
+	updated, err := b.state(r.Context(), uid)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "status lookup failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
 }
 
 // stripeIDs returns the Stripe customer + subscription ids recorded for a user, or empty
@@ -337,7 +421,7 @@ func (b *billing) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		if sub.CurrentPeriodEnd > 0 {
 			periodEnd = time.Unix(sub.CurrentPeriodEnd, 0).UTC().Format(timeFormat)
 		}
-		b.updateByCustomer(r.Context(), customerID, sub.ID, string(sub.Status), periodEnd)
+		b.updateByCustomer(r.Context(), customerID, sub.ID, string(sub.Status), periodEnd, sub.CancelAtPeriodEnd)
 	}
 
 	// Record that a signed webhook was successfully processed, so the admin dashboard can
@@ -379,18 +463,20 @@ func (b *billing) applyCheckoutSession(ctx context.Context, cs *stripe.CheckoutS
 }
 
 // upsertByUser records or refreshes a Stripe-sourced subscription after checkout. Keyed by
-// user_id so a repeat checkout replaces the prior linkage.
+// user_id so a repeat checkout replaces the prior linkage — including any cancellation the
+// user had scheduled on the subscription this one supersedes.
 func (b *billing) upsertByUser(ctx context.Context, userID, planID, customerID, subID, status, periodEnd string) {
 	now := time.Now().UTC().Format(timeFormat)
 	_, err := b.db.ExecContext(ctx, b.rebind(`
-		INSERT INTO subscriptions (user_id, plan_id, source, stripe_customer_id, stripe_subscription_id, status, current_period_end, created_at, updated_at)
-		VALUES (?, ?, 'stripe', ?, ?, ?, ?, ?, ?)
+		INSERT INTO subscriptions (user_id, plan_id, source, stripe_customer_id, stripe_subscription_id, status, current_period_end, cancel_at_period_end, created_at, updated_at)
+		VALUES (?, ?, 'stripe', ?, ?, ?, ?, 0, ?, ?)
 		ON CONFLICT (user_id) DO UPDATE SET
 		  plan_id = excluded.plan_id,
 		  source = 'stripe',
 		  stripe_customer_id = excluded.stripe_customer_id,
 		  stripe_subscription_id = excluded.stripe_subscription_id,
 		  status = excluded.status,
+		  cancel_at_period_end = 0,
 		  updated_at = excluded.updated_at;`),
 		userID, nullify(planID), nullify(customerID), nullify(subID), status, nullify(periodEnd), now, now)
 	if err != nil {
@@ -405,22 +491,17 @@ func (b *billing) upsertByUser(ctx context.Context, userID, planID, customerID, 
 // a superseded subscription would lock a paying user out of sync. Only when no row tracks
 // that subscription id yet does it fall back to the customer, and even then it won't adopt
 // the event over a row already bound to a different subscription.
-func (b *billing) updateByCustomer(ctx context.Context, customerID, subID, status, periodEnd string) {
+func (b *billing) updateByCustomer(ctx context.Context, customerID, subID, status, periodEnd string, cancelAtPeriodEnd bool) {
 	if subID == "" && customerID == "" {
 		return
 	}
-	now := time.Now().UTC().Format(timeFormat)
 	if subID != "" {
-		res, err := b.db.ExecContext(ctx, b.rebind(`
-			UPDATE subscriptions
-			SET status = ?, current_period_end = ?, updated_at = ?
-			WHERE stripe_subscription_id = ?;`),
-			status, nullify(periodEnd), now, subID)
+		n, err := b.applySubscription(ctx, subID, status, periodEnd, cancelAtPeriodEnd)
 		if err != nil {
 			slog.Error("billing: update subscription", "subscription", subID, "err", err)
 			return
 		}
-		if n, _ := res.RowsAffected(); n > 0 {
+		if n > 0 {
 			return
 		}
 	}
@@ -429,14 +510,43 @@ func (b *billing) updateByCustomer(ctx context.Context, customerID, subID, statu
 	}
 	// First lifecycle event after checkout, before the subscription id was recorded: bind it
 	// to the customer's row, but never clobber a row already tracking a different subscription.
+	now := time.Now().UTC().Format(timeFormat)
 	_, err := b.db.ExecContext(ctx, b.rebind(`
 		UPDATE subscriptions
-		SET stripe_subscription_id = ?, status = ?, current_period_end = ?, updated_at = ?
+		SET stripe_subscription_id = ?, status = ?, current_period_end = COALESCE(CAST(? AS TEXT), current_period_end),
+		    cancel_at_period_end = ?, updated_at = ?
 		WHERE stripe_customer_id = ? AND (stripe_subscription_id IS NULL OR stripe_subscription_id = ?);`),
-		nullify(subID), status, nullify(periodEnd), now, customerID, subID)
+		nullify(subID), status, nullify(periodEnd), boolInt(cancelAtPeriodEnd), now, customerID, subID)
 	if err != nil {
 		slog.Error("billing: update subscription", "customer", customerID, "err", err)
 	}
+}
+
+// applySubscription writes Stripe's view of one subscription onto the row that tracks it,
+// matched on the exact subscription id, and reports how many rows that touched. An unknown
+// period end (Stripe accounts on an API version that moved current_period_end onto the
+// subscription's items send none) leaves the date we already had rather than erasing it —
+// the portal quotes that date when it says when a cancellation takes effect.
+func (b *billing) applySubscription(ctx context.Context, subID, status, periodEnd string, cancelAtPeriodEnd bool) (int64, error) {
+	now := time.Now().UTC().Format(timeFormat)
+	res, err := b.db.ExecContext(ctx, b.rebind(`
+		UPDATE subscriptions
+		SET status = ?, current_period_end = COALESCE(CAST(? AS TEXT), current_period_end),
+		    cancel_at_period_end = ?, updated_at = ?
+		WHERE stripe_subscription_id = ?;`),
+		status, nullify(periodEnd), boolInt(cancelAtPeriodEnd), now, subID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// boolInt renders a flag for the BIGINT columns this schema stores booleans in.
+func boolInt(v bool) int64 {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 // nullify maps an empty string to a SQL NULL so optional columns stay NULL rather than "".

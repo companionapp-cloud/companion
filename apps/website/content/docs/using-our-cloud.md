@@ -16,15 +16,15 @@ Companion Cloud keeps your devices in step. New accounts are end-to-end encrypte
 
 ## Create your account
 
-Accounts are created in the [Companion Cloud portal](https://portal.companionapp.cloud) — sign up, pick a plan, and it'll give you the server URL to point your apps at.
+Accounts are created in the [Companion Cloud portal](https://portal.companionapp.cloud) — sign up and subscribe there ([what it costs](/pricing)), and the portal points you back at the app.
 
 ## Sign in
 
-Then, in the app, open **Settings → Sync**, enter that **Server URL** along with the **Email** and **Password** you registered with, and choose **Log in**.
+Then, in the app, open **Settings → Sync** and choose **Sign in**. Companion Cloud is the first tab, and it already knows the server — enter the **Email** and **Password** you registered with, then choose **Log in**.
 
 ![Settings → Sync, before signing in](/docs/sync-settings.png)
 
-Do the same on your other devices — same server, same account — and everything flows between them. Work offline and it reconciles the moment you reconnect.
+Do the same on your other devices — same account — and everything flows between them. Work offline and it reconciles the moment you reconnect.
 
 ## Your recovery code
 

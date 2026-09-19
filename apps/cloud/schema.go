@@ -36,6 +36,9 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   stripe_subscription_id TEXT,
   status                 TEXT NOT NULL DEFAULT 'none',
   current_period_end     TEXT,
+  -- The user asked us to stop renewing: Stripe keeps the subscription active (and sync
+  -- working) until current_period_end, then cancels it. Undone by resuming before then.
+  cancel_at_period_end   BIGINT NOT NULL DEFAULT 0,
   created_at             TEXT NOT NULL,
   updated_at             TEXT NOT NULL
 );
@@ -63,10 +66,12 @@ func applyCloudSchema(db *sql.DB, dialect string) error {
 	if _, err := db.Exec(cloudSchema); err != nil {
 		return err
 	}
-	// Column additions a plain CREATE IF NOT EXISTS can't retrofit (plans refactor).
+	// Column additions a plain CREATE IF NOT EXISTS can't retrofit (plans refactor, and
+	// self-serve cancellation).
 	alters := []string{
 		`ALTER TABLE subscriptions ADD COLUMN plan_id TEXT`,
 		`ALTER TABLE subscriptions ADD COLUMN source TEXT NOT NULL DEFAULT 'stripe'`,
+		`ALTER TABLE subscriptions ADD COLUMN cancel_at_period_end BIGINT NOT NULL DEFAULT 0`,
 	}
 	for _, a := range alters {
 		if dialect == "postgres" {

@@ -15,6 +15,7 @@ export default function Contact() {
       />
       <SiteHeader
         links={[
+          { label: "Pricing", href: "/pricing", variant: "ghost" },
           { label: "Docs", href: "/docs", variant: "ghost" },
           { label: "Home", href: "/", variant: "secondary" },
         ]}

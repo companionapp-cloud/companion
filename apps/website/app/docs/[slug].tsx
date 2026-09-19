@@ -61,6 +61,7 @@ export default function DocArticle() {
         sticky
         links={[
           { label: "All docs", href: "/docs", variant: "ghost" },
+          { label: "Pricing", href: "/pricing", variant: "ghost" },
           { label: "Contact us", href: "/contact", variant: "secondary" },
         ]}
       />
