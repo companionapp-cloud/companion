@@ -22,18 +22,16 @@ var trayIconTemplate []byte
 // bundled .app, a LaunchAgent plist otherwise). Like notifications, it is a no-op from
 // an unbundled dev build.
 //
-// checkForUpdates, when non-nil (release builds, see updates.go), adds "Check for Updates…".
-func installMenuBar(app *application.App, mainWindow application.Window, checkForUpdates func()) {
+// openWindow brings Companion up: the main window, or the updater window while an update has
+// the app (update_window.go). checkForUpdates, when non-nil (release builds, see updates.go),
+// adds "Check for Updates…".
+func installMenuBar(app *application.App, openWindow func(), checkForUpdates func()) {
 	tray := app.SystemTray.New()
 	// Just the icon in the menu bar — a template image, no text label. macOS auto-sizes
 	// it to the menu-bar thickness and recolours it for light/dark appearance.
 	tray.SetTemplateIcon(trayIconTemplate)
 	tray.SetTooltip("Companion")
 
-	openWindow := func() {
-		mainWindow.Show()
-		mainWindow.Focus()
-	}
 	tray.OnClick(openWindow)
 
 	menu := app.NewMenu()

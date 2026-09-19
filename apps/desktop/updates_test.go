@@ -317,6 +317,7 @@ type fakeEngine struct {
 	checkErr, installErr, restartErr error
 	staged                           string
 	gate                             chan struct{} // Check blocks on it when set
+	during                           func()        // runs while the download is in progress
 	checks, installs, restarts       int
 }
 
@@ -328,14 +329,20 @@ func (f *fakeEngine) Check(context.Context) (*updater.Release, error) {
 	if gate != nil {
 		<-gate
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.rel, f.checkErr
 }
 
 func (f *fakeEngine) DownloadAndInstall(context.Context) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.installs++
-	return f.installErr
+	during, err := f.during, f.installErr
+	f.mu.Unlock()
+	if during != nil {
+		during()
+	}
+	return err
 }
 
 func (f *fakeEngine) DownloadedPath() string { return f.staged }
@@ -347,6 +354,12 @@ func (f *fakeEngine) Restart(context.Context) error {
 	return f.restartErr
 }
 
+func (f *fakeEngine) restarted() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.restarts
+}
+
 func newRelease070() *updater.Release {
 	return &updater.Release{
 		Version:  "0.7.0",
@@ -356,10 +369,12 @@ func newRelease070() *updater.Release {
 }
 
 // testUpdateService returns a service running 0.6.1 from /Applications/Companion.app whose
-// bundle checks pass, recording every state it emits.
+// bundle checks pass, recording every state it emits. It's past its launch, with nothing of
+// Companion on screen (see fakeWindows).
 func testUpdateService(eng *fakeEngine) (*updateService, *[]updateState) {
 	s := newUpdateService("0.6.1", "/Applications/Companion.app")
 	s.engine = eng
+	s.windows = &fakeWindows{}
 	s.grace = 0
 	s.replaceable = func(string) error { return nil }
 	s.verify = func(string, string) error { return nil }
@@ -437,13 +452,11 @@ func TestUpdateRunShowsAManualCheckItsResult(t *testing.T) {
 	eng := &fakeEngine{rel: newRelease070()}
 	s, _ := testUpdateService(eng)
 	s.replaceable = func(string) error { return errors.New("no write access to /Applications") }
-	revealed := false
-	s.reveal = func() { revealed = true }
 
 	s.run(context.Background(), true)
 
-	if !revealed {
-		t.Fatal("a manual check that found an update didn't bring the window forward")
+	if got := s.windows.(*fakeWindows).screen(); !got.Updater || !got.Focused {
+		t.Fatalf("screen = %+v, want the updater window brought forward for a manual check", got)
 	}
 }
 
@@ -522,9 +535,8 @@ func TestUpdateRunReportsADownloadFailure(t *testing.T) {
 func TestUpdateRunKeepsTheWindowHiddenAcrossTheRestart(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "relaunch-hidden")
 	eng := &fakeEngine{rel: newRelease070(), staged: stagedUpdate(t)}
-	s, _ := testUpdateService(eng)
+	s, _ := testUpdateService(eng) // nothing on screen: closed to the menu bar
 	s.markerPath = marker
-	s.windowHidden = func() bool { return true }
 
 	s.run(context.Background(), false)
 
@@ -538,7 +550,6 @@ func TestUpdateRunClearsTheRelaunchMarkerWhenTheRestartFails(t *testing.T) {
 	eng := &fakeEngine{rel: newRelease070(), staged: stagedUpdate(t), restartErr: errors.New("spawn helper: permission denied")}
 	s, states := testUpdateService(eng)
 	s.markerPath = marker
-	s.windowHidden = func() bool { return true }
 
 	s.run(context.Background(), false)
 

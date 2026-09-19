@@ -4,21 +4,23 @@ package main
 //
 // Release builds are stamped with their version (the release workflow passes
 // -ldflags "-X main.version=<tag>"); dev builds leave it empty and never update. On launch,
-// hourly and on wake, Companion asks GitHub for the latest stable release. A newer one is mandatory:
-// the webview blocks the window behind an "Updating Companion" screen
-// (frontend/src/updates.tsx) while the Wails v3 updater downloads the universal zip, checks it
-// against the sha256 GitHub recorded for the asset, and unpacks it. We then confirm the
-// unpacked bundle is a sealed com.companion.desktop at the expected version, and the updater's
-// helper (this same binary, see updater.HandleHelperMode in main) swaps it into place once we
-// quit and relaunches it.
+// hourly and on wake, Companion asks GitHub for the latest stable release. A newer one is
+// mandatory, and it installs in a window of its own (update_window.go, frontend/updater.html):
+// a launch shows nothing until the check answers, then opens that window instead of the main
+// window if there's an update; mid-session the window takes the place of the app's windows.
+// The Wails v3 updater downloads the universal zip, checks it against the sha256 GitHub
+// recorded for the asset, and unpacks it. We then confirm the unpacked bundle is a sealed
+// com.companion.desktop at the expected version, and the updater's helper (this same binary,
+// see updater.HandleHelperMode in main) swaps it into place once we quit and relaunches it.
 //
 // No quarantine is involved: only quarantine-aware downloaders (browsers, Homebrew) set
 // com.apple.quarantine, and Go's HTTP client and zip reader don't, so the new bundle opens the
 // same way the brew-installed one does after the cask's postflight strips it.
 //
 // A check that fails (offline, rate-limited) never blocks: Companion is local-first, so it
-// opens normally and tries again on the next check. A failed download or install shows a
-// dismissible notice and is retried the same way.
+// opens normally and tries again on the next check, and a launch check that's slow to answer
+// opens the app after bootCheckWait. A failed download or install says why in the update
+// window, which lets you continue into Companion; the next check retries.
 
 import (
 	"context"
@@ -53,9 +55,13 @@ const (
 	updateCheckInterval = time.Hour
 	wakeCheckDelay      = 30 * time.Second
 	updateCheckTimeout  = 30 * time.Second
-	updateTotalTimeout  = 20 * time.Minute
+	// bootCheckWait is as long as a launch waits for the update check before showing the main
+	// window anyway. Nothing is on screen until then, so a network that swallows the request
+	// mustn't hold Companion up for the check's whole timeout.
+	bootCheckWait      = 5 * time.Second
+	updateTotalTimeout = 20 * time.Minute
 	// downloadStallTimeout gives up on a download that stops delivering bytes, so a dead
-	// connection can't hold the blocking update screen up; the next check retries.
+	// connection can't hold the updater window up; the next check retries.
 	downloadStallTimeout = time.Minute
 	// restartGrace keeps "Restarting…" on screen long enough for the webview's debounced saves
 	// (400ms in NotesProvider/TaskEditor) to reach the store before the process quits.
@@ -64,7 +70,7 @@ const (
 	// honoured; an older one means the restart never happened and the user opened the app later.
 	relaunchMarkerMaxAge = 2 * time.Minute
 
-	// updateStateEvent carries updateState to the webview (Wails event, all windows).
+	// updateStateEvent carries updateState to the updater window (a Wails event).
 	updateStateEvent = "update:state"
 
 	metaDownloadURL = "companion.downloadURL"
@@ -81,9 +87,14 @@ const (
 	updateFailed      updatePhase = "failed"
 )
 
-// updateState is what GET /update returns and the "update:state" event carries. The webview
-// blocks the window while the phase is downloading, installing or restarting, and shows a
-// dismissible notice while it's failed.
+// blocking reports whether an update is installing: the updater window can't be dismissed
+// and stands in for the app until Companion restarts.
+func (p updatePhase) blocking() bool {
+	return p == updateDownloading || p == updateInstalling || p == updateRestarting
+}
+
+// updateState is what GET /update returns and the "update:state" event carries: the updater
+// window shows progress while the phase is blocking, and why it failed once it's failed.
 type updateState struct {
 	Phase   updatePhase `json:"phase"`
 	Current string      `json:"current,omitempty"`
@@ -106,7 +117,9 @@ type updateEngine interface {
 	Restart(ctx context.Context) error
 }
 
-// updateService runs the forced-update flow and reports its state to the webview.
+// updateService runs the forced-update flow, reports its state to the updater window, and
+// decides what Companion shows while it does (update_window.go): the main window, or the
+// updater window in its place.
 type updateService struct {
 	current string // running version, "" in dev builds
 	bundle  string // the running .app bundle the update replaces, "" when not in one
@@ -115,28 +128,49 @@ type updateService struct {
 	emit   func(updateState)
 	// notify answers a check the user asked for (tray › Check for Updates…) with a dialog.
 	notify func(title, message string)
-	// reveal brings the main window forward when a check the user asked for starts an install,
-	// so they can watch it.
-	reveal func()
-	// windowHidden reports whether the main window is closed to the menu bar; the relaunched
-	// version then starts hidden too (see markerPath).
-	windowHidden func() bool
-	markerPath   string
+	// windows are Companion's windows as the flow sees them (update_window.go).
+	windows updateWindows
+	// markerPath is the relaunch marker: left for the restarted version when it should start
+	// in the menu bar (relaunchHidden).
+	markerPath string
 
 	// Checks against the real bundle, swapped out in tests.
 	replaceable func(bundle string) error
 	verify      func(staged, wantVersion string) error
 	grace       time.Duration
+	// launchWait is bootCheckWait, shortened in tests.
+	launchWait time.Duration
 
 	running atomic.Bool
 
 	mu           sync.Mutex
 	state        updateState
 	lastProgress time.Time
+
+	// What's on screen (update_window.go). winMu is held across the window calls, so they
+	// happen in the order the flow decided on them.
+	winMu sync.Mutex
+	// launching: Companion has started and the first check hasn't answered, so nothing is on
+	// screen yet.
+	launching bool
+	// held: the updater has the app — since launch, while an update installs, or until a
+	// failed one is dismissed — so opening Companion shows the updater window.
+	held bool
+	// heldApp: the update hid app windows that were on screen; they come back if it fails.
+	heldApp bool
+	// wantMain: the main window belongs on screen once the updater lets go, and after the
+	// restart into the new version.
+	wantMain bool
+	// updaterOpen: the updater window is open.
+	updaterOpen bool
+	// dismissed is the failure (failureKey) last dismissed; it doesn't reopen the window by
+	// itself.
+	dismissed string
 }
 
-// newUpdateService returns the service for this build. It is inert (enabled reports false)
-// in dev builds, off macOS, and outside an .app bundle; GET /update still answers "idle".
+// newUpdateService returns the service for this build. It never updates (enabled reports false)
+// in dev builds, off macOS, and outside an .app bundle; it still decides what shows at launch,
+// and GET /update answers "idle".
 func newUpdateService(current, bundle string) *updateService {
 	return &updateService{
 		current:     current,
@@ -145,45 +179,75 @@ func newUpdateService(current, bundle string) *updateService {
 		replaceable: replaceableBundle,
 		verify:      verifyStagedBundle,
 		grace:       restartGrace,
+		launchWait:  bootCheckWait,
 		state:       updateState{Phase: updateIdle, Current: current},
 	}
 }
 
 func (s *updateService) enabled() bool { return s.current != "" && s.bundle != "" }
 
-// attach wires the service to the running app: the Wails updater (fed by the GitHub release
-// source) as its engine, Wails events to reach every window, native dialogs and the main
-// window for check-for-updates, and the check loop once the app has started.
-func (s *updateService) attach(app *application.App, mainWindow *application.WebviewWindow) error {
+// attach wires the service to the running app and takes over the launch: the main window was
+// created hidden, and boot shows it (or the updater window) once the first check answers.
+// showMain is false for a launch that stays in the menu bar. Builds that update also get the
+// Wails updater (fed by the GitHub release source) as their engine, events to the updater
+// window, native dialogs for check-for-updates, and the check loop. Returns the tray's
+// Check for Updates… action, or nil when this build doesn't update.
+func (s *updateService) attach(app *application.App, mainWindow *application.WebviewWindow, showMain bool) (checkForUpdates func()) {
+	windows := newUpdaterWindows(app, mainWindow, s.snapshot, s.updaterClosed)
+	s.windows = windows
+	s.launching, s.held, s.wantMain = true, true, showMain
+	// A Dock click with no window on screen shows every hidden window by default, which would
+	// bring the main window back behind an update. Route it like every other way in.
+	app.Event.RegisterApplicationEventHook(events.Mac.ApplicationShouldHandleReopen, func(e *application.ApplicationEvent) {
+		if !e.Context().HasVisibleWindows() {
+			e.Cancel()
+			s.openApp()
+		}
+	})
+	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		go s.boot(context.Background())
+	})
+	if !s.enabled() {
+		return nil
+	}
+
 	source := newGitHubReleases("https://api.github.com", updateRepo, updateAssetSuffix, s.current)
 	source.progress = s.onProgress
 	if err := app.Updater.Init(updater.Config{
 		CurrentVersion: s.current,
 		Providers:      []updater.Provider{source},
-		// Headless: the update screen is ours (frontend/src/updates.tsx), driven by updateState.
+		// Headless: the update window is ours (frontend/src/updater.tsx), driven by updateState.
 		Window: updater.WindowNone,
 	}); err != nil {
-		return err
+		log.Printf("update: disabled: %v", err)
+		return nil
 	}
 	s.engine = app.Updater
-	s.emit = func(st updateState) { app.Event.Emit(updateStateEvent, st) }
+	s.emit = func(st updateState) {
+		app.Event.Emit(updateStateEvent, st)
+		windows.stateChanged(st)
+	}
 	s.notify = func(title, message string) {
 		app.Dialog.Info().SetTitle(title).SetMessage(message).Show()
 	}
-	s.reveal = func() {
-		mainWindow.Show()
-		mainWindow.Focus()
-	}
-	s.windowHidden = func() bool { return !mainWindow.IsVisible() }
-	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
-		go s.loop(context.Background())
-	})
 	// The hourly ticker doesn't count time asleep, so a laptop that stays asleep overnight
 	// would otherwise wait up to an hour after waking. Give the network a moment to come back.
 	app.Event.OnApplicationEvent(events.Common.SystemDidWake, func(*application.ApplicationEvent) {
 		time.AfterFunc(wakeCheckDelay, func() { s.run(context.Background(), false) })
 	})
-	return nil
+	return s.checkNow
+}
+
+// boot runs the launch. Nothing is on screen until the first check answers: an update opens
+// the updater window instead of the main window (takeOver), while no update, no network, or
+// no answer within launchWait shows the main window. Then it checks hourly.
+func (s *updateService) boot(ctx context.Context) {
+	if s.engine == nil {
+		s.endLaunch()
+		return
+	}
+	time.AfterFunc(s.launchWait, s.endLaunch)
+	s.loop(ctx)
 }
 
 // loop checks now and then every updateCheckInterval until ctx ends (or an update restarts the app).
@@ -205,30 +269,34 @@ func (s *updateService) checkNow() {
 	go s.run(context.Background(), true)
 }
 
-// run checks for an update and, when there is one, installs it and restarts into it. Only one
-// run happens at a time; a call that overlaps a running one returns immediately.
-func (s *updateService) run(ctx context.Context, manual bool) {
+// run checks for an update and, when there is one, installs it and restarts into it. asked is
+// a check the user asked for (tray › Check for Updates…): it answers with a dialog when there's
+// nothing to install, and brings the updater window forward when there is. Only one run
+// happens at a time; a call that overlaps a running one returns immediately.
+func (s *updateService) run(ctx context.Context, asked bool) {
 	if s.engine == nil || !s.running.CompareAndSwap(false, true) {
 		return
 	}
 	defer s.running.Store(false)
 
-	// Checking isn't a state the webview sees, and neither is a failed check: offline,
-	// rate-limited or GitHub down, Companion (local-first) just carries on, and a notice about
-	// an earlier failed install stays up.
+	// Checking isn't a state the updater window sees, and neither is a failed check: offline,
+	// rate-limited or GitHub down, Companion (local-first) just carries on — a launch opens the
+	// main window — and a failure the updater window is showing stays up.
 	checkCtx, cancel := context.WithTimeout(ctx, updateCheckTimeout)
 	rel, err := s.engine.Check(checkCtx)
 	cancel()
 	if err != nil {
 		log.Printf("update: check failed: %v", err)
-		if manual {
+		s.endLaunch()
+		if asked {
 			s.tell("Couldn’t check for updates", err.Error())
 		}
 		return
 	}
 	if rel == nil {
 		s.set(updateState{Phase: updateIdle})
-		if manual {
+		s.upToDate()
+		if asked {
 			s.tell("You’re up to date", fmt.Sprintf("Companion %s is the latest version.", s.current))
 		}
 		return
@@ -237,13 +305,11 @@ func (s *updateService) run(ctx context.Context, manual bool) {
 	releaseURL, _ := rel.Metadata[metaReleaseURL].(string)
 	fail := func(err error, manualUpdate bool) {
 		log.Printf("update: installing %s failed: %v", rel.Version, err)
-		s.set(updateState{Phase: updateFailed, Version: rel.Version, Error: err.Error(), Manual: manualUpdate, ReleaseURL: releaseURL})
+		st := updateState{Phase: updateFailed, Version: rel.Version, Error: err.Error(), Manual: manualUpdate, ReleaseURL: releaseURL}
+		s.set(st)
+		s.failed(st, asked)
 	}
 	log.Printf("update: %s is available (running %s)", rel.Version, s.current)
-	// Someone who asked sees how it goes, even if the window was closed to the menu bar.
-	if manual && s.reveal != nil {
-		s.reveal()
-	}
 
 	// Find out before downloading whether the swap could work at all.
 	if err := s.replaceable(s.bundle); err != nil {
@@ -251,7 +317,9 @@ func (s *updateService) run(ctx context.Context, manual bool) {
 		return
 	}
 
+	// Set before the updater window opens, so the window's first GET /update shows the download.
 	s.set(updateState{Phase: updateDownloading, Version: rel.Version, Total: rel.Artifact.Size})
+	s.takeOver(asked)
 	installCtx, cancel := context.WithTimeout(ctx, updateTotalTimeout)
 	defer cancel()
 	if err := s.engine.DownloadAndInstall(installCtx); err != nil {
@@ -326,10 +394,11 @@ func (s *updateService) tell(title, message string) {
 	}
 }
 
-// markRelaunchHidden leaves the relaunch marker when the main window is closed to the menu
-// bar, so the restarted version doesn't pop its window open. Reports whether it wrote one.
+// markRelaunchHidden leaves the relaunch marker when nothing of Companion was on screen for
+// the update (see relaunchHidden), so the restarted version doesn't pop its window open.
+// Reports whether it wrote one.
 func (s *updateService) markRelaunchHidden() bool {
-	if s.markerPath == "" || s.windowHidden == nil || !s.windowHidden() {
+	if s.markerPath == "" || !s.relaunchHidden() {
 		return false
 	}
 	return os.WriteFile(s.markerPath, []byte(time.Now().UTC().Format(time.RFC3339)), 0o600) == nil
@@ -359,8 +428,8 @@ func discardStaged(staged string) {
 	}
 }
 
-// handleState serves GET /update: the current updateState, for a window that opens (or
-// reloads) mid-update and missed the events.
+// handleState serves GET /update: the current updateState, for the updater window, which
+// opens (or reloads) mid-update and missed the events.
 func (s *updateService) handleState(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -381,7 +450,7 @@ type githubReleases struct {
 	userAgent         string
 	client            *http.Client
 	stallTimeout      time.Duration
-	// progress, when set, also receives download progress (the update screen's bar).
+	// progress, when set, also receives download progress (the updater window's bar).
 	progress func(written, total int64)
 
 	mu     sync.Mutex

@@ -37,6 +37,10 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+// captureWindowName names the quick-capture panel, which stays usable while an update installs
+// (update_window.go).
+const captureWindowName = "capture"
+
 // version is the release this binary was built as, stamped by the release workflow
 // (-ldflags "-X main.version=1.2.3"). Empty in dev builds, which never self-update and keep
 // their data apart from the installed release's (see databasePath).
@@ -107,8 +111,8 @@ func main() {
 
 	// Assigned right after the app is built; the /window handler (below) captures it by
 	// reference and only runs once requests arrive, so the app is set by then. mainWindow
-	// is likewise captured by the single-instance callback (declared here so it's in scope
-	// for Options) and assigned just below.
+	// is likewise captured by the /chrome handler (declared here so it's in scope for
+	// Options) and assigned just below.
 	var app *application.App
 	var mainWindow *application.WebviewWindow
 	// Native table context menu (editor tables). Built after the window exists; the
@@ -143,7 +147,7 @@ func main() {
 			return
 		}
 		win := app.Window.NewWithOptions(application.WebviewWindowOptions{
-			Name:          "capture",
+			Name:          captureWindowName,
 			Title:         "Quick Capture",
 			Width:         560,
 			Height:        480,
@@ -194,8 +198,11 @@ func main() {
 		log.Printf("notify: not running from an app bundle; OS notifications disabled (use make desktop-app-run)")
 	}
 
-	// Forced updates (updates.go): release builds running from an .app bundle only. Built
-	// before the app so the asset handler can serve its state; attached once the app exists.
+	// Forced updates (updates.go): release builds running from an .app bundle only. The
+	// service also decides what a launch shows — the updater window if an update is out, the
+	// main window otherwise — and answers every way of opening Companion (update_window.go).
+	// Built before the app so the asset handler can serve its state; attached once the main
+	// window exists.
 	updates := newUpdateService(version, runningBundle())
 	updates.markerPath = relaunchMarkerPath(dbPath)
 	// An update restart while the main window was closed to the menu bar comes back hidden.
@@ -212,10 +219,7 @@ func main() {
 		SingleInstance: &application.SingleInstanceOptions{
 			UniqueID: instanceID(dev),
 			OnSecondInstanceLaunch: func(application.SecondInstanceData) {
-				if mainWindow != nil {
-					mainWindow.Show()
-					mainWindow.Focus()
-				}
+				updates.openApp()
 			},
 		},
 		Assets: application.AssetOptions{
@@ -228,6 +232,8 @@ func main() {
 	// Transparent titlebar: the standard window controls stay, but the titlebar is
 	// see-through and content extends to the top edge, so the app's own toolbar
 	// reads as the window chrome. Background matches the app canvas (#f5f5f3).
+	// Created hidden: the update service shows it once the launch's update check has answered
+	// (update_window.go). It loads meanwhile, so it's ready when it shows.
 	mainWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "main",
 		Title:            "Companion",
@@ -237,7 +243,7 @@ func main() {
 		MinHeight:        400,
 		BackgroundColour: application.NewRGB(245, 245, 243),
 		URL:              "/",
-		Hidden:           startHidden,
+		Hidden:           true,
 		Mac: application.MacWindow{
 			TitleBar: application.MacTitleBarHiddenInset,
 		},
@@ -267,24 +273,17 @@ func main() {
 			log.Printf("notify: response has no resolvable taskId — not deep-linking")
 			return
 		}
-		mainWindow.Show()
-		mainWindow.Focus()
+		updates.openApp()
 		log.Printf("notify: deep-linking to task %s (emitting notify.activate)", taskID)
 		payload, _ := json.Marshal(map[string]string{"taskId": taskID})
 		handler.OnEvent("notify.activate", payload)
 	})
 
-	// Check on launch, hourly and on wake; the tray also offers a manual check.
-	var checkForUpdates func()
-	if updates.enabled() {
-		if err := updates.attach(app, mainWindow); err != nil {
-			log.Printf("update: disabled: %v", err)
-		} else {
-			checkForUpdates = updates.checkNow
-		}
-	}
+	// Check on launch (before anything shows), hourly and on wake; the tray also offers a
+	// manual check.
+	checkForUpdates := updates.attach(app, mainWindow, !startHidden)
 
-	installMenuBar(app, mainWindow, checkForUpdates)
+	installMenuBar(app, updates.openApp, checkForUpdates)
 
 	// Register the native table context menu now that the app + window exist. The /table-menu
 	// route (set up above, capturing tableCtxMenu by reference) drives it.

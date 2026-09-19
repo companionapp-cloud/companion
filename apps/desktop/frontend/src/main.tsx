@@ -3,7 +3,7 @@
 // and toolbar). No-ops outside the Wails webview.
 import "@wailsio/runtime";
 import { Browser, Window } from "@wailsio/runtime";
-import { Fragment, createElement } from "react";
+import { createElement } from "react";
 import { AppRegistry } from "react-native";
 import {
   App,
@@ -19,7 +19,6 @@ import type { CoreBridge } from "@companion/core-bridge";
 import type { DocumentSource } from "@companion/editor";
 import { desktopNotificationScheduler } from "./notifications";
 import { desktopTableMenuPresenter } from "./tableMenu";
-import { UpdateGate } from "./updates";
 
 // Double-clicking the window chrome (any `--wails-draggable: drag` region, e.g. the
 // toolbar or rail) zooms the window, matching native macOS titlebar behaviour. The
@@ -135,15 +134,10 @@ void fetchWindowControls().then((windowControls) => {
   AppRegistry.registerComponent(
     "Companion",
     // shell: "desktop" — the desktop app never renders the mobile shell, however narrow
-    // its window gets. Forced updates cover every window while they install (./updates.tsx),
-    // except the small capture panel, which closes with the rest when Companion restarts.
+    // its window gets. Updates install in a window of their own (updater.html), so no app
+    // window shows anything for them.
     () => () =>
-      createElement(
-        Fragment,
-        null,
-        createElement(App, { core, shell: "desktop", topInset, windowControls, notificationScheduler, documentSource }),
-        isCaptureWindow ? null : createElement(UpdateGate),
-      ),
+      createElement(App, { core, shell: "desktop", topInset, windowControls, notificationScheduler, documentSource }),
   );
   AppRegistry.runApplication("Companion", { rootTag });
 });

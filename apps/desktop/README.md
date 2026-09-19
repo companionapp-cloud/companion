@@ -76,24 +76,32 @@ in this repo; the Release workflow stamps the version + sha256 and pushes the wh
 ## Updates
 
 Release builds update themselves, and updating isn't optional
-([`updates.go`](updates.go)):
+([`updates.go`](updates.go), [`update_window.go`](update_window.go)):
 
 - On launch, hourly and on wake, the app asks GitHub for the latest stable release.
-- If it's newer, an "Updating Companion" screen
-  ([`frontend/src/updates.tsx`](frontend/src/updates.tsx)) covers every window while
-  the Wails v3 updater (`pkg/updater`) downloads `Companion-<version>-macos-universal.zip`,
+- A launch shows nothing until that first check answers. If there's a newer release,
+  the updater window ([`frontend/updater.html`](frontend/updater.html),
+  [`frontend/src/updater.tsx`](frontend/src/updater.tsx)) opens instead of the main
+  window and shows the download, the install and the restart. Otherwise the main
+  window opens, as it also does when the check fails or hasn't answered in 5 seconds.
+- An update found later takes the place of the app's windows (the main window and
+  pop-outs; quick capture stays usable), without pulling Companion in front of
+  another app. If none of them was on screen, it installs out of sight and the new
+  version starts in the menu bar too. Opening Companion meanwhile — from the menu
+  bar, the Dock or a notification — shows the updater window.
+- The Wails v3 updater (`pkg/updater`) downloads `Companion-<version>-macos-universal.zip`,
   checks it against the sha256 GitHub recorded for the asset, and unpacks it. The app
   then checks the bundle is sealed (`codesign --verify --strict`) and is
   `com.companion.desktop` at the expected version. The updater's helper (this binary,
   re-run) swaps it in once the app quits and relaunches it.
 - There's no quarantine to strip: only quarantine-aware downloaders (browsers,
   Homebrew) set `com.apple.quarantine`.
-- A failed check stays silent (Companion is local-first). A failed install shows a
-  dismissible notice. Both retry on the next check. If the app can't replace itself
-  (a standard account running it from `/Applications`, or App Translocation), the
-  notice offers `brew upgrade --cask companionapp-cloud/tap/companion` and the release
-  page instead.
-- If the main window was closed to the menu bar, the new version starts hidden too.
+- A failed check stays silent (Companion is local-first). A failed install says why in
+  the updater window, whose Continue gives the app back; a failure you've dismissed
+  doesn't reopen the window by itself. Both retry on the next check. If the app can't
+  replace itself (a standard account running it from `/Applications`, or App
+  Translocation), the window offers `brew upgrade --cask companionapp-cloud/tap/companion`
+  and the release page instead.
 
 Only stable releases install. Tags like `v1.2.3-rc1` are published as prereleases,
 and the updater skips them. The release workflow stamps the version into the binary
@@ -102,7 +110,8 @@ and the updater skips them. The release workflow stamps the version into the bin
 To watch it work, build an app that thinks it's old. With a version stamped it's a
 release build, so it opens your real `Companion/` data (and runs this branch's
 migrations on it). Quit any running Companion first, or the single-instance lock hands
-the launch to that one. The app replaces itself with the latest release:
+the launch to that one. The updater window opens instead of the main window, and the
+app replaces itself with the latest release:
 
 ```bash
 make desktop-app DESKTOP_VERSION=0.0.1
