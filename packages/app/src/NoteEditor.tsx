@@ -2,8 +2,10 @@ import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Platform, ScrollView, View } from "react-native";
 import type { Note } from "@companion/core-bridge";
 import { Badge, Icon, IconButton, Text, colors, layout, row, space, useDensity } from "@companion/design-system";
-import { Editor, type EditorController, type FormatState, type LinkRef } from "@companion/editor";
+import { Editor, type EditorController, type FormatState, type InkState, type LinkRef } from "@companion/editor";
 import { FormattingBar } from "./FormattingBar";
+import { DrawingBar, useDrawingTool } from "./DrawingBar";
+import { useNoteInk } from "./useNoteInk";
 import { tableMenuPresenter } from "./tableMenu";
 import { useTasks } from "./TasksProvider";
 import { useNotes } from "./NotesProvider";
@@ -41,12 +43,27 @@ export interface NoteEditorProps {
    *  structured fields show inline under the title once a type is set (there is no side
    *  panel to toggle). Sync-conflict and quick-create dialogs stay in here either way. */
   showToolbar?: boolean;
+  /** Drawing mode (PLAN-drawing.md), for hosts that put the pen toggle in their own chrome (the
+   *  mobile nav bar). Omit both and the editor keeps its own state behind its sub-toolbar
+   *  toggle. */
+  drawing?: boolean;
+  onDrawingChange?: (drawing: boolean) => void;
 }
 
 /** The document-style editor for a single note: a sub-toolbar of note-scoped actions,
  * the title, and a ProseMirror body (from @companion/editor). App-level chrome stays in
  * the app toolbar. Keyed by note id upstream, so each note gets a fresh instance. */
-export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote, onOpenRef, showToolbar = true }: NoteEditorProps) {
+export function NoteEditor({
+  note,
+  onChange,
+  onPopOut,
+  onDelete,
+  onCreatedNote,
+  onOpenRef,
+  showToolbar = true,
+  drawing: drawingProp,
+  onDrawingChange,
+}: NoteEditorProps) {
   // Task metadata (for `[[task:…]]` chip hydration) also refreshes the chips; `tasks.tasks`
   // identity changes on any task edit, which we pass as linkRevision below.
   const tasks = useTasks();
@@ -80,6 +97,20 @@ export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote, 
   // note/task and swaps the raw text for a real chip.
   const quickCreate = useQuickCreateLink(editorRef);
   const [formatState, setFormatState] = useState<FormatState | null>(null);
+  // Drawing over the note (PLAN-drawing.md): the note's ink, the active tool, and whether the
+  // editor is in drawing mode (controlled by the host when it passes `drawing`).
+  const ink = useNoteInk(note.id);
+  const [drawingLocal, setDrawingLocal] = useState(false);
+  const drawing = drawingProp ?? drawingLocal;
+  const setDrawing = useCallback(
+    (on: boolean) => {
+      if (onDrawingChange) onDrawingChange(on);
+      else setDrawingLocal(on);
+    },
+    [onDrawingChange],
+  );
+  const [tool, setTool] = useDrawingTool();
+  const [inkState, setInkState] = useState<InkState | null>(null);
   // Touch web: the formatting bar only shows while the editor is focused (with a pointer it
   // is always there). Tapping a bar button briefly blurs the editor (then the action
   // refocuses it), so hiding is delayed a beat to avoid a flicker — a toolbar tap never
@@ -153,6 +184,17 @@ export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote, 
           <Icon name="folder" size={glyph} color={colors.textSecondary} />
         </IconButton>
         <IconButton
+          label={drawing ? "Stop drawing" : "Draw on note"}
+          size={btn}
+          active={drawing && !showGraph}
+          onPress={() => {
+            setShowGraph(false);
+            setDrawing(!drawing || showGraph);
+          }}
+        >
+          <Icon name="pen" size={glyph} color={drawing && !showGraph ? colors.textAccent : colors.textSecondary} />
+        </IconButton>
+        <IconButton
           label={showGraph ? "Show document" : "Show note graph"}
           size={btn}
           active={showGraph}
@@ -200,6 +242,8 @@ export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote, 
                     setTitle(t);
                     onChange(note.id, { title: t });
                   }}
+                  // Enter in the title carries on into the body.
+                  onSubmit={() => bodyRef.current?.querySelector?.<HTMLElement>(".ProseMirror")?.focus()}
                 />
                 <View style={styles.metaLine}>
                   <Text variant="mono" tone="tertiary">
@@ -250,6 +294,14 @@ export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote, 
                     // `tasks.tasks` gets a fresh identity whenever any task changes (local edit or a
                     // synced pull), signalling the editor to re-hydrate its `[[task:…]]` chips.
                     linkRevision={tasks.tasks}
+                    ink={{
+                      groups: ink.groups,
+                      tool: drawing ? tool : null,
+                      onSave: ink.save,
+                      onDelete: ink.remove,
+                      onStateChange: setInkState,
+                      onExitRequest: () => setDrawing(false),
+                    }}
                   />
                 </View>
               </View>
@@ -257,8 +309,20 @@ export function NoteEditor({ note, onChange, onPopOut, onDelete, onCreatedNote, 
           )}
 
           {/* Web/desktop formatting bar (native uses its own keyboard toolbar). Includes the
-              file-embed action when a documentSource is wired. */}
-          {showBar ? <FormattingBar state={formatState} editorRef={editorRef} canAttach={!!documentSource} /> : null}
+              file-embed action when a documentSource is wired. While drawing, the drawing bar
+              takes its place. */}
+          {drawing && !showGraph ? (
+            <DrawingBar
+              tool={tool}
+              onChange={setTool}
+              state={inkState}
+              onUndo={() => editorRef.current?.inkUndo()}
+              onRedo={() => editorRef.current?.inkRedo()}
+              onDone={() => setDrawing(false)}
+            />
+          ) : showBar ? (
+            <FormattingBar state={formatState} editorRef={editorRef} canAttach={!!documentSource} />
+          ) : null}
         </View>
 
         {showMeta && showToolbar ? (
@@ -319,7 +383,8 @@ const styles = {
   // Page gutters: 20px top / 28px sides with a pointer, a 20px inset on a phone.
   page: { paddingTop: space.xl2, paddingHorizontal: 28, paddingBottom: space.huge },
   pageTouch: { paddingTop: space.xl, paddingHorizontal: space.xl2, paddingBottom: space.huge },
-  doc: { maxWidth: layout.contentMax, width: "100%" as const },
+  // The document column, centered in the page.
+  doc: { maxWidth: layout.contentMax, width: "100%" as const, alignSelf: "center" as const },
   // Inline structured fields (toolbar-less hosts): a hairline-ruled block above the body.
   inlineMeta: {
     marginBottom: space.xl,

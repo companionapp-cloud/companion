@@ -269,6 +269,22 @@ CREATE TABLE IF NOT EXISTS canvas_edges (
 CREATE INDEX IF NOT EXISTS idx_canvas_edges_user_seq ON canvas_edges (user_id, server_seq);
 CREATE INDEX IF NOT EXISTS idx_canvas_edges_canvas ON canvas_edges (canvas_id);
 
+-- Note ink (PLAN-drawing.md): one row per ink group drawn over a note. data_json is an
+-- encrypted envelope on an encrypted account; note_id stays plaintext for the purge cascade.
+CREATE TABLE IF NOT EXISTS note_ink (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  note_id    TEXT NOT NULL,
+  data_json  TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  version    BIGINT NOT NULL DEFAULT 1,
+  server_seq BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_note_ink_user_seq ON note_ink (user_id, server_seq);
+CREATE INDEX IF NOT EXISTS idx_note_ink_note ON note_ink (note_id);
+
 CREATE TABLE IF NOT EXISTS chats (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL,

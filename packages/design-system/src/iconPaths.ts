@@ -53,6 +53,10 @@ export const ICON_PATHS = {
   redo: "M21 7v6h-6M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7",
   fit: "M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3",
   palette: "M12 22a10 10 0 1 1 0-20 10 10 0 0 1 8 4 3 3 0 0 1-2 5h-2a2 2 0 0 0-1.5 3.3 2 2 0 0 1-1.5 3.4V22ZM7.5 10.5h.01M12 7h.01M16.5 10h.01",
+  // Drawing on notes (PLAN-drawing.md): Lucide pen-line, highlighter, eraser.
+  pen: "M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z",
+  highlighter: "M9 11l-6 6v3h9l3-3M22 12l-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4",
+  eraser: "M7 21l-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21M22 21H7M5 11l9 9",
   // Quick capture (⌥⇧Space).
   capture: "M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M8 12h8",
   chevronDown: "m6 9 6 6 6-6",

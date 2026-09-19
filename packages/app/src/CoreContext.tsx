@@ -12,6 +12,7 @@ import {
   listsApi,
   llmApi,
   notesApi,
+  noteInkApi,
   notifyApi,
   objectTypesApi,
   projectsApi,
@@ -30,6 +31,7 @@ import {
   type ListsApi,
   type LlmApi,
   type NotesApi,
+  type NoteInkApi,
   type NotifyApi,
   type ObjectTypesApi,
   type ProjectsApi,
@@ -57,6 +59,8 @@ interface CoreValue {
   /** OAuth sign-in flows (Google). Generic: calendar accounts today, app login later. */
   oauth: OAuthApi;
   canvases: CanvasesApi;
+  /** Ink groups drawn over notes (PLAN-drawing.md). */
+  noteInk: NoteInkApi;
 }
 
 const CoreCtx = createContext<CoreValue | null>(null);
@@ -83,6 +87,7 @@ export function CoreProvider({ core, children }: { core: CoreBridge; children: R
       calendar: calendarApi(core),
       oauth: oauthApi(core),
       canvases: canvasesApi(core),
+      noteInk: noteInkApi(core),
     }),
     [core],
   );

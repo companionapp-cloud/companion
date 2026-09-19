@@ -268,6 +268,9 @@ func New(st *store.Store, t Transport, clock domain.Clock) *Engine {
 	e.register(newRepoSyncer[*domain.Canvas](st.Canvases, clock))
 	e.register(newRepoSyncer[*domain.CanvasNode](st.CanvasNodes, clock))
 	e.register(newRepoSyncer[*domain.CanvasEdge](st.CanvasEdges, clock))
+	// Note ink (PLAN-drawing.md) after notes, so a pulled group's note is usually already
+	// there; a group arriving first is a tolerated dangle, like a canvas node before its board.
+	e.register(newRepoSyncer[*domain.NoteInk](st.NoteInk, clock))
 	return e
 }
 

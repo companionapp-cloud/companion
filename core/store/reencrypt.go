@@ -27,6 +27,7 @@ var reencryptTables = []string{
 	"canvases",
 	"canvas_nodes",
 	"canvas_edges",
+	"note_ink",
 }
 
 // MarkAllForReencryption flags every content row dirty so a following sync re-pushes it encrypted.

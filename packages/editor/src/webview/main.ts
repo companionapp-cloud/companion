@@ -6,6 +6,7 @@ import { createEditor } from "../createEditor";
 import type { FormatName } from "./../formatCommands";
 import type { DocumentSource, LinkSource, LinkSuggestion, QuickCreateTarget, ResolvedDocument } from "../types";
 import type { TableMenuRequest } from "../tableMenu";
+import type { InkGroupRecord, InkTool } from "../ink/types";
 
 declare global {
   interface Window {
@@ -17,6 +18,7 @@ declare global {
     __PLACEHOLDER__?: string;
     __SUBMIT_ON_ENTER__?: boolean;
     __DEBOUNCE_MS__?: number;
+    __HAS_INK__?: boolean;
     __resolveLink?: (requestId: number, payload: unknown) => void;
     __resolveDoc?: (requestId: number, payload: unknown) => void;
     __refreshLinks?: () => void;
@@ -30,6 +32,12 @@ declare global {
     // chosen action id (or a dismiss). Set while a menu request is in flight.
     __runTableAction?: (id: string) => void;
     __dismissTableMenu?: () => void;
+    // Drawing (PLAN-drawing.md): the host feeds the note's ink groups and the active tool in,
+    // and drives undo/redo from its drawing toolbar.
+    __inkSetGroups?: (groups: InkGroupRecord[]) => void;
+    __inkSetTool?: (tool: InkTool | null) => void;
+    __inkUndo?: () => void;
+    __inkRedo?: () => void;
   }
 }
 
@@ -134,6 +142,17 @@ function init(): void {
     },
     // Copy actions can't use navigator.clipboard reliably in the WebView; route to the host.
     clipboard: (text) => post("copy", text),
+    // Ink writes go straight to the host (no batching delay): a WebView can be torn down
+    // right after a stroke, and teardown never calls the bridge.
+    ink: window.__HAS_INK__
+      ? {
+          saveDelayMs: 0,
+          onSave: (groups) => post("inkSave", groups),
+          onDelete: (ids) => post("inkDelete", ids),
+          onStateChange: (state) => post("inkState", state),
+          onExitRequest: () => post("inkExit", null),
+        }
+      : undefined,
   });
   // Table menu: the host answers the posted request by running an action or dismissing.
   window.__runTableAction = (id) => {
@@ -159,6 +178,10 @@ function init(): void {
   window.__insertDocumentEmbed = (id, filename) => handle.insertDocumentEmbed(id, filename);
   // The host injects the quick-create result (or null) to finish an empty-link resolution.
   window.__resolveQuickCreate = (target) => handle.resolveQuickCreate(target);
+  window.__inkSetGroups = (groups) => handle.setInkGroups(groups);
+  window.__inkSetTool = (tool) => handle.setInkTool(tool);
+  window.__inkUndo = () => handle.inkUndo();
+  window.__inkRedo = () => handle.inkRedo();
 
   // The simple editor is an inline field (task note / composer), not a full-screen page, so
   // report its content height and let the host size the WebView to it (bounded by the host's

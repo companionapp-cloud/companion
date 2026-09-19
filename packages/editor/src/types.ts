@@ -1,5 +1,6 @@
 import type { FormatName, FormatState } from "./formatCommands";
 import type { TableMenuPresenter } from "./tableMenu";
+import type { InkGroupRecord, InkState, InkTool } from "./ink/types";
 
 export type { TableMenuPresenter, TableMenuRequest } from "./tableMenu";
 export type { TableMenuItem } from "./tableCommands";
@@ -19,6 +20,28 @@ export interface EditorController {
    * {@link EditorProps.onQuickCreate}): pass the newly created target to swap the raw text
    * for a resolved chip, or null to cancel and leave the text as-is. */
   resolveQuickCreate(target: QuickCreateTarget | null): void;
+  /** Undo / redo the last drawing change (PLAN-drawing.md). No-op without {@link EditorProps.ink}. */
+  inkUndo(): void;
+  inkRedo(): void;
+}
+
+/** Drawing over the note (PLAN-drawing.md). The host owns persistence: it loads the note's ink
+ *  groups, passes them in, and stores what the editor reports. The editor pins each group to
+ *  the text under it, so ink follows its words through edits and reflow. */
+export interface EditorInkProps {
+  /** The note's ink groups as stored. Pass a new array when they change (load, sync). */
+  groups: InkGroupRecord[];
+  /** The active drawing tool, or null for ordinary text editing. While a tool is active the
+   *  whole document takes pointer input as ink and the text isn't editable. */
+  tool: InkTool | null;
+  /** Persist groups the reader drew or changed (whole groups, created or updated). */
+  onSave(groups: InkGroupRecord[]): void;
+  /** Persist deleted groups (erased, or undone). */
+  onDelete(ids: string[]): void;
+  /** Undo/redo availability, for the host's drawing toolbar. */
+  onStateChange?(state: InkState): void;
+  /** The reader pressed Escape while drawing: the host should leave drawing mode. */
+  onExitRequest?(): void;
 }
 
 /** Fired when the reader double-clicks an unresolved `[[label]]` link. The host opens its
@@ -90,6 +113,9 @@ export interface EditorProps {
    * passes the Wails-backed presenter here (injected via `setTableMenuPresenter`); web leaves it
    * undefined (HTML popup). iOS wires its own presenter inside the WebView. Full variant only. */
   tableMenuPresenter?: TableMenuPresenter;
+  /** Enables drawing over the note (full variant only). Read once at mount for whether ink is
+   *  on at all; `groups` and `tool` are then followed as they change. */
+  ink?: EditorInkProps;
 }
 
 /** A reference to open — the payload of {@link EditorProps.onOpenRef}. */

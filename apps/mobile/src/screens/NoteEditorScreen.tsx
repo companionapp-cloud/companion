@@ -1,11 +1,11 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useCore, useNotes, useTasks, MembershipPicker, ConfirmDialog, NoteConflictDialog, useNoteSyncGuard, useQuickCreateLink, ArchetypeChip, ObjectMetadataPanel, timeAgo } from '@companion/app';
-import { Center, Icon, IconButton, Text, TextField, colors, space } from '@companion/design-system';
+import { useCore, useNotes, useTasks, MembershipPicker, ConfirmDialog, NoteConflictDialog, useNoteSyncGuard, useQuickCreateLink, ArchetypeChip, ObjectMetadataPanel, timeAgo, useNoteInk, useDrawingTool, DrawingBar, DocTitleField } from '@companion/app';
+import { Center, Icon, IconButton, Text, colors, space } from '@companion/design-system';
 import type { ObjectProps } from '@companion/core-bridge';
-import { Editor, type EditorController, type LinkRef, type LinkSource } from '@companion/editor';
+import { Editor, type EditorController, type InkState, type LinkRef, type LinkSource } from '@companion/editor';
 import type { RootStackParamList } from '../MobileShell';
 import { useNativeDocumentSource } from '../useNativeDocumentSource';
 import { NavAction, NavActions, SheetSurface } from '../ui/native';
@@ -19,6 +19,7 @@ export function NoteEditorScreen() {
   const { params } = useRoute<RouteProp<RootStackParamList, 'NoteEditor'>>();
   const noteId = params.id;
   const note = store.byId(noteId);
+  const { width: windowWidth } = useWindowDimensions();
   const [title, setTitle] = useState(note?.title ?? '');
   const [showProjects, setShowProjects] = useState(false);
   const [showMeta, setShowMeta] = useState(false);
@@ -92,6 +93,14 @@ export function NoteEditorScreen() {
   const editorRef = useRef<EditorController>(null);
   const quickCreate = useQuickCreateLink(editorRef);
 
+  // Drawing over the note (PLAN-drawing.md): the pen is a nav bar action; while drawing, the
+  // drawing bar sits under the note and the editor takes touches and the Pencil as ink.
+  const ink = useNoteInk(noteId);
+  const [drawing, setDrawing] = useState(false);
+  const [tool, setTool] = useDrawingTool();
+  const [inkState, setInkState] = useState<InkState | null>(null);
+  const inkTool = drawing ? tool : null;
+
   // Clicking a chip pushes its target onto the stack (tasks and notes have screens).
   const onOpenRef = useCallback(
     (ref: LinkRef) => {
@@ -115,9 +124,17 @@ export function NoteEditorScreen() {
         documentSource={documentSource}
         onOpenRef={onOpenRef}
         onQuickCreate={quickCreate.onQuickCreate}
+        ink={{
+          groups: ink.groups,
+          tool: inkTool,
+          onSave: ink.save,
+          onDelete: ink.remove,
+          onStateChange: setInkState,
+          onExitRequest: () => setDrawing(false),
+        }}
       />
     ),
-    [seed.key, seed.content, onChangeMarkdown, linkSource, documentSource, onOpenRef, quickCreate.onQuickCreate],
+    [seed.key, seed.content, onChangeMarkdown, linkSource, documentSource, onOpenRef, quickCreate.onQuickCreate, ink.groups, ink.save, ink.remove, inkTool],
   );
 
   // Deps exclude note/store so content edits don't re-run setOptions; only the title
@@ -128,13 +145,14 @@ export function NoteEditorScreen() {
       headerRight: () => (
         <NavActions>
           <NavAction icon="folder" label="Add to projects" onPress={() => setShowProjects(true)} />
+          <NavAction icon="pen" label={drawing ? 'Stop drawing' : 'Draw on note'} active={drawing} onPress={() => setDrawing((v) => !v)} />
           <NavAction icon="graph" label="Show note graph" onPress={() => nav.navigate('NoteGraph', { id: noteId })} />
           <NavAction icon="panelRight" label="Show metadata" onPress={() => setShowMeta(true)} />
           <NavAction icon="trash" label="Delete note" onPress={() => setConfirmDelete(true)} />
         </NavActions>
       ),
     });
-  }, [nav, noteId, title]);
+  }, [nav, noteId, title, drawing]);
 
   if (!note) {
     return (
@@ -146,13 +164,12 @@ export function NoteEditorScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.title}>
+      <View style={[styles.title, { paddingHorizontal: windowWidth > 640 ? 28 : 20 }]}>
         <Text variant="mono" tone="quaternary" style={styles.edited}>
           edited {timeAgo(note.updatedAt)}
         </Text>
-        {/* 20px under touch density — the 30px desktop display size clips at phone width. */}
-        <TextField
-          variant="title"
+        {/* Wraps onto more lines rather than scrolling; 20px under touch density. */}
+        <DocTitleField
           value={title}
           placeholder="Untitled"
           onChangeText={(t) => {
@@ -162,6 +179,16 @@ export function NoteEditorScreen() {
         />
       </View>
       {body}
+      {drawing ? (
+        <DrawingBar
+          tool={tool}
+          onChange={setTool}
+          state={inkState}
+          onUndo={() => editorRef.current?.inkUndo()}
+          onRedo={() => editorRef.current?.inkRedo()}
+          onDone={() => setDrawing(false)}
+        />
+      ) : null}
       {quickCreate.dialog}
       {showProjects ? (
         <MembershipPicker entityType="note" entityId={noteId} onClose={() => setShowProjects(false)} />
@@ -246,9 +273,10 @@ function NoteMetadataSheet({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceCard },
-  // 20px matches the editor body's horizontal inset on mobile (.pm-wrap in
-  // packages/editor/src/styles.ts) so the title lines up with the content beneath it.
-  title: { paddingHorizontal: 20, paddingTop: space.lg },
+  // Centered in the same 720px column as the editor body (.pm-wrap in
+  // packages/editor/src/styles.ts), with its 20px / 28px inset (wider above 640px), so the
+  // title lines up with the content beneath it on a phone and an iPad alike.
+  title: { width: '100%', maxWidth: 720, alignSelf: 'center', paddingTop: space.lg },
   edited: { marginBottom: space.md },
   sheetLayer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 },
   sheetHeader: { flexDirection: 'row', alignItems: 'center', paddingBottom: space.md },

@@ -29,6 +29,8 @@ export function TodayScreen() {
   const [today, setToday] = useState(todayISO);
   const [showCalendar, setShowCalendar] = useState(false);
   const [showAgenda, setShowAgenda] = useState(loadShowAgenda);
+  // Drawing on the day's note (PLAN-drawing.md); the drawing bar shows under the note.
+  const [drawing, setDrawing] = useState(false);
   const isToday = selected === today;
 
   const toggleAgenda = () => {
@@ -68,6 +70,9 @@ export function TodayScreen() {
         >
           <Icon name="calendar" size={18} color={showCalendar ? colors.textAccent : colors.textSecondary} />
         </IconButton>
+        <IconButton label={drawing ? 'Stop drawing' : 'Draw on note'} size="lg" active={drawing} onPress={() => setDrawing((v) => !v)}>
+          <Icon name="pen" size={18} color={drawing ? colors.textAccent : colors.textSecondary} />
+        </IconButton>
       </View>
       {showCalendar || showAgenda ? (
         // Capped and scrollable so a busy agenda can't push the note off the screen.
@@ -98,7 +103,14 @@ export function TodayScreen() {
         </ScrollView>
       ) : null}
       <View style={styles.note}>
-        <DailyNote key={selected} date={selected} onOpenRef={onOpenRef} headingPadding={20} />
+        <DailyNote
+          key={selected}
+          date={selected}
+          onOpenRef={onOpenRef}
+          headingPadding={20}
+          drawing={drawing}
+          onDrawingChange={setDrawing}
+        />
       </View>
     </View>
   );

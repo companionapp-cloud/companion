@@ -99,16 +99,21 @@ func (s *Server) PurgeExpired() (int, error) {
 					log.Printf("trash collector: blob gc for document %s: %v", r.id, err)
 				}
 			}
-			// A purged board takes its nodes and edges with it so they stop syncing
-			// (PLAN-canvases.md §1.5); the client does the same on "delete forever".
-			if table == "canvases" {
-				childSeq, err := s.purgeCanvasChildren(r.uid, r.id)
-				if err != nil {
-					return purged, err
-				}
-				if childSeq > maxSeqByUser[r.uid] {
-					maxSeqByUser[r.uid] = childSeq
-				}
+			// A purged board takes its nodes and edges with it, and a purged note its ink, so
+			// they stop syncing (PLAN-canvases.md §1.5, PLAN-drawing.md); the client does the
+			// same on "delete forever".
+			var childSeq int64
+			switch table {
+			case "canvases":
+				childSeq, err = s.purgeChildren(r.uid, "canvas_id", r.id, "canvas_nodes", "canvas_edges")
+			case "notes":
+				childSeq, err = s.purgeChildren(r.uid, "note_id", r.id, "note_ink")
+			}
+			if err != nil {
+				return purged, err
+			}
+			if childSeq > maxSeqByUser[r.uid] {
+				maxSeqByUser[r.uid] = childSeq
 			}
 		}
 	}
@@ -173,9 +178,11 @@ func (s *Server) purgeOne(table, uid, id string) (int64, error) {
 	return seq, nil
 }
 
-// purgeCanvasChildren tombstones every live node and edge of a purged board under fresh
-// versions/sequences, returning the highest seq assigned (0 if there was nothing to do).
-func (s *Server) purgeCanvasChildren(uid, canvasID string) (int64, error) {
+// purgeChildren tombstones every live row of the child tables whose parentCol points at a
+// purged parent (a board's nodes and edges, a note's ink) under fresh versions/sequences,
+// returning the highest seq assigned (0 if there was nothing to do). parentCol and tables are
+// compile-time constants from PurgeExpired, never input, so splicing them into SQL is safe.
+func (s *Server) purgeChildren(uid, parentCol, parentID string, tables ...string) (int64, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, err
@@ -183,8 +190,8 @@ func (s *Server) purgeCanvasChildren(uid, canvasID string) (int64, error) {
 	defer tx.Rollback()
 	now := s.clock.Now().UTC().Format(timeFormat)
 	var maxSeq int64
-	for _, table := range []string{"canvas_nodes", "canvas_edges"} {
-		rows, err := tx.Query(s.rebind(`SELECT id FROM `+table+` WHERE canvas_id = ? AND user_id = ? AND deleted_at IS NULL;`), canvasID, uid)
+	for _, table := range tables {
+		rows, err := tx.Query(s.rebind(`SELECT id FROM `+table+` WHERE `+parentCol+` = ? AND user_id = ? AND deleted_at IS NULL;`), parentID, uid)
 		if err != nil {
 			return 0, err
 		}

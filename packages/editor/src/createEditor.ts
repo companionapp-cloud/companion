@@ -22,6 +22,8 @@ import { wikilinkNodeView, type WikilinkView } from "./wikilinkView";
 import { documentNodeView, isDocumentEmbed } from "./documentView";
 import { buildFormatCommands, computeFormatState, type FormatName, type FormatState } from "./formatCommands";
 import type { DocumentSource, LinkRef, LinkSource, QuickCreateRequest, QuickCreateTarget } from "./types";
+import { InkLayer } from "./ink/layer";
+import type { InkCallbacks, InkGroupRecord, InkTool } from "./ink/types";
 
 // The shared ProseMirror setup — pure DOM, no framework. Used directly on web/desktop
 // (Editor.web.tsx) and inside the WebView on native (webview/main.ts). Content is
@@ -54,6 +56,13 @@ export interface EditorHandle {
   /** Complete (or cancel) a quick-create started from an empty `[[label]]` link: replace the
    * raw text with a resolved chip for `target`, or leave it untouched when `target` is null. */
   resolveQuickCreate(target: QuickCreateTarget | null): void;
+  /** Replace the note's ink groups with the host's current set (PLAN-drawing.md). No-op
+   *  unless the editor was created with `ink`. */
+  setInkGroups(groups: InkGroupRecord[]): void;
+  /** Start drawing with a tool, switch tools, or stop drawing (null). */
+  setInkTool(tool: InkTool | null): void;
+  inkUndo(): void;
+  inkRedo(): void;
 }
 
 export interface CreateEditorOptions {
@@ -100,6 +109,10 @@ export interface CreateEditorOptions {
    * markdown is passed so the host sends exactly what's shown, not a debounced draft. Simple
    * variant only. */
   onSubmit?: (markdown: string) => void;
+  /** Enables drawing over the note (PLAN-drawing.md): the host persists ink groups through
+   *  these callbacks and feeds them back with {@link EditorHandle.setInkGroups}. Full variant
+   *  only. `saveDelayMs` batches a burst of strokes into one write (0 writes each stroke). */
+  ink?: InkCallbacks & { saveDelayMs?: number };
 }
 
 // Show placeholder text over an empty document. Decorates the single empty paragraph with a
@@ -387,6 +400,9 @@ export function createEditor(
   // drop land on a contenteditable if dragover's default is prevented — otherwise it opens
   // the file instead — so we handle the whole gesture explicitly. A depth counter keeps the
   // drop highlight stable across the dragenter/dragleave that fire for every child element.
+  // The ink layer over the document (PLAN-drawing.md), created once the view exists.
+  let ink: InkLayer | null = null;
+
   let dragDepth = 0;
   const dragHasFiles = (event: DragEvent): boolean =>
     !!options.documentSource?.ingest && !!event.dataTransfer && Array.from(event.dataTransfer.types).includes("Files");
@@ -508,6 +524,7 @@ export function createEditor(
     dispatchTransaction(tr) {
       const next = view.state.apply(tr);
       view.updateState(next);
+      ink?.onTransaction(tr);
       if (tr.docChanged) {
         pending = serialize(next.doc);
         if (!timer) timer = setTimeout(flush, debounceMs);
@@ -519,6 +536,8 @@ export function createEditor(
 
   // Seed the toolbar with the initial selection's state.
   emitFormatState();
+
+  if (options.ink && !simple) ink = new InkLayer(view, mount, options.ink, options.ink.saveDelayMs);
 
   // Swap the whole document for freshly parsed content, off the undo history. Emits a
   // change like any edit (the composer's onChange resets its draft).
@@ -536,6 +555,7 @@ export function createEditor(
     destroy() {
       if (options.flushOnDestroy) flush();
       else if (timer) clearTimeout(timer);
+      ink?.destroy(!!options.flushOnDestroy);
       view.destroy();
     },
     refreshLinks() {
@@ -576,6 +596,18 @@ export function createEditor(
       } catch {
         /* view torn down */
       }
+    },
+    setInkGroups(groups: InkGroupRecord[]) {
+      ink?.setGroups(groups);
+    },
+    setInkTool(tool: InkTool | null) {
+      ink?.setTool(tool);
+    },
+    inkUndo() {
+      ink?.undo();
+    },
+    inkRedo() {
+      ink?.redo();
     },
     resolveQuickCreate(target: QuickCreateTarget | null) {
       const pending = pendingQuickCreate;

@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Platform, Pressable, ScrollView, TextInput, View, type GestureResponderEvent } from "react-native";
 import type { Task, TaskReminder, UpdateTaskInput } from "@companion/core-bridge";
 import {
@@ -8,7 +8,6 @@ import {
   IconButton,
   Input,
   Text,
-  TextField,
   colors,
   control,
   font,
@@ -145,7 +144,10 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
       <ScrollView style={{ flex: 1 }} contentContainerStyle={touch ? styles.pageTouch : styles.page}>
         <View style={styles.doc}>
         <View style={styles.titleRow}>
-          <Checkbox checked={done} onPress={toggleDone} size={checkSize} />
+          {/* Level with the title's first line, however many lines it wraps to. */}
+          <View style={{ marginTop: ((touch ? TITLE_LINE.touch : TITLE_LINE.pointer) - checkSize) / 2 }}>
+            <Checkbox checked={done} onPress={toggleDone} size={checkSize} />
+          </View>
           <View style={{ flex: 1, minWidth: 0 }}>
             <DocTitleField
               value={title}
@@ -308,30 +310,74 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
   );
 }
 
-/** The document title: the 30px display `TextField` with a pointer, 20px on touch density
- *  (30px clips on a phone). Shared by the note and task editors. */
+/** Line heights of the document title, which the task checkbox lines up with. */
+const TITLE_LINE = { pointer: 36, touch: 26 };
+
+/** The document title: a borderless ("ghost") textarea, so a long title wraps onto more
+ *  lines instead of scrolling out of view. It is still one line of text: Enter leaves the
+ *  field (calling `onSubmit`, e.g. to move into the body) rather than adding a line break,
+ *  and pasted line breaks become spaces. 30px display with a pointer, 20px on touch density
+ *  (30px clips on a phone). Shared by the note and task editors, on web and native. */
 export function DocTitleField({
   value,
   placeholder,
   autoFocus,
   onChangeText,
+  onSubmit,
 }: {
   value: string;
   placeholder: string;
   autoFocus?: boolean;
   onChangeText: (text: string) => void;
+  /** Enter was pressed; the field blurs, and the host may move focus on. */
+  onSubmit?: () => void;
 }) {
   const touch = useDensity() === "touch";
-  if (!touch) return <TextField variant="title" value={value} placeholder={placeholder} autoFocus={autoFocus} onChangeText={onChangeText} />;
+  // On web this is the <textarea>.
+  const node = useRef<unknown>(null);
+  // A web textarea doesn't grow with its text, so it's sized to its content whenever the text
+  // or the column's width changes. Native multiline inputs grow by themselves.
+  useLayoutEffect(() => fitToContent(node.current), [value, touch]);
+  useEffect(() => {
+    const el = node.current as HTMLElement | null;
+    if (Platform.OS !== "web" || !el || typeof ResizeObserver === "undefined") return;
+    let width = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fitToContent(el);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   return (
     <TextInput
+      ref={(el: unknown) => {
+        node.current = el;
+      }}
       value={value}
       placeholder={placeholder}
       placeholderTextColor={colors.textQuaternary}
-      onChangeText={onChangeText}
-      style={styles.titleTouch}
+      autoFocus={autoFocus}
+      multiline
+      // One row to start (a web textarea otherwise opens two rows tall); native grows freely.
+      numberOfLines={Platform.OS === "web" ? 1 : undefined}
+      scrollEnabled={false}
+      blurOnSubmit
+      submitBehavior="blurAndSubmit"
+      onSubmitEditing={() => onSubmit?.()}
+      onChangeText={(t) => onChangeText(t.replace(/[\r\n]+/g, " "))}
+      style={[styles.title, touch ? styles.titleTouch : styles.titlePointer]}
     />
   );
+}
+
+/** Size a web textarea to its content (a no-op on native). */
+function fitToContent(node: unknown): void {
+  if (Platform.OS !== "web" || !node) return;
+  const el = node as HTMLTextAreaElement;
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
 }
 
 /** A checkbox that renders a task's done state: 1px border-strong box, accent fill + white
@@ -946,18 +992,21 @@ const styles = {
   // Page gutters: 20px top / 28px sides with a pointer; a tight inset on a phone.
   page: { paddingTop: space.xl2, paddingHorizontal: 28, paddingBottom: space.huge },
   pageTouch: { paddingVertical: space.lg, paddingHorizontal: space.xl },
-  doc: { maxWidth: 560, width: "100%" as const, gap: space.sm },
-  titleRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.md },
-  // The 20px touch title (DocTitleField) — 30px clips on a phone.
-  titleTouch: {
+  // The document column, centered in the page.
+  doc: { maxWidth: 560, width: "100%" as const, alignSelf: "center" as const, gap: space.sm },
+  titleRow: { flexDirection: "row" as const, alignItems: "flex-start" as const, gap: space.md },
+  // The document title (DocTitleField): the 30px display size with a pointer, 20px on touch
+  // (30px clips on a phone). Line heights are fixed so wrapped lines and the checkbox align.
+  title: {
     padding: 0,
     color: colors.textPrimary,
     fontFamily: font.sans,
-    fontSize: font.size["2xl"],
     fontWeight: font.weight.semibold,
-    letterSpacing: font.tracking.snug,
-    ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as Record<string, unknown>) : null),
+    textAlignVertical: "top" as const,
+    ...(Platform.OS === "web" ? ({ outlineStyle: "none", overflow: "hidden" } as Record<string, unknown>) : null),
   },
+  titlePointer: { fontSize: font.size.display, lineHeight: TITLE_LINE.pointer, letterSpacing: font.tracking.tight },
+  titleTouch: { fontSize: font.size["2xl"], lineHeight: TITLE_LINE.touch, letterSpacing: font.tracking.snug },
   // Chips + their expanded editors sit indented under the title (past the checkbox; the
   // indent itself is computed from the checkbox size).
   metaRow: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: space.sm, marginTop: space.xs, zIndex: 1 },
