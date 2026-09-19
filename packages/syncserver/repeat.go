@@ -13,7 +13,8 @@ import (
 
 // Repeating tasks (PLAN §6.4, §11 milestone 11). Only the server generates occurrences, and
 // it does so **just in time**: an occurrence row (repeat_seed_id = seed.id) is created only
-// once its due instant has actually arrived — never ahead of time. A minute-cadence sweep
+// once it becomes relevant — at its instant, or earlier if it starts or has a reminder before
+// then — never further ahead. A minute-cadence sweep
 // asks each live seed "is a new occurrence due?" and creates the ones whose time has come;
 // seed writes trigger the same check immediately (folded into push, sync.go), so a task that
 // is already due appears at once. Occurrences sync down as ordinary tasks; completing one is
@@ -113,8 +114,9 @@ type serverSeed struct {
 	id           string
 	title        string
 	notesMD      string
+	startAt      *time.Time
 	dueAt        *time.Time
-	remindAt     *time.Time
+	reminders    []domain.Reminder
 	repeatRule   string
 	objectTypeID *string
 	props        string
@@ -122,27 +124,96 @@ type serverSeed struct {
 	gone         bool // deleted or trashed: stop generating (existing occurrences are left be)
 }
 
-// reminderOffset is the seed's reminder lead relative to its due date (usually negative:
-// remind before due), or 0 when it has no reminder. An occurrence inherits the same offset,
-// and generation is timed so the occurrence's reminder still lands (PLAN §6.4).
-func (s *serverSeed) reminderOffset() time.Duration {
-	if s.remindAt == nil || s.dueAt == nil {
-		return 0
+// startAnchored reports whether the seed's schedule runs on its start rather than a deadline:
+// it has a start and no deadline (domain.RepeatAnchor), so each occurrence gets a start and no
+// deadline, and is identified by its start. Every other seed's occurrences carry a deadline —
+// the occurrence instant — and are identified by it.
+func (s *serverSeed) startAnchored() bool { return s.dueAt == nil && s.startAt != nil }
+
+// ref is the seed's current occurrence instant: its deadline, else its start, else its
+// creation. The seed's displayed dates advance to each generated occurrence; the schedule
+// anchor does not (see materializeSeed).
+func (s *serverSeed) ref() time.Time {
+	switch {
+	case s.dueAt != nil:
+		return *s.dueAt
+	case s.startAt != nil:
+		return *s.startAt
+	default:
+		return s.createdAt
 	}
-	return s.remindAt.Sub(*s.dueAt)
+}
+
+// lead is how long before its occurrence instant an occurrence becomes relevant: when it
+// starts or its earliest reminder fires, whichever comes first (0 when neither precedes the
+// instant). Generation is timed by it, so an occurrence exists by the time it starts and its
+// first reminder can still fire. A month lead counts as 31 days (domain.Lead.Approx), an upper
+// bound, so such an occurrence may appear a few days early — never late.
+func (s *serverSeed) lead() time.Duration {
+	ref := s.ref()
+	var lead time.Duration
+	precedes := func(t time.Time) {
+		if d := ref.Sub(t); d > lead {
+			lead = d
+		}
+	}
+	if s.startAt != nil {
+		precedes(*s.startAt)
+	}
+	for _, r := range s.reminders {
+		switch {
+		case r.At != nil:
+			precedes(*r.At)
+		case !s.startAnchored():
+			// A lead counts back from the occurrence's deadline. A start-anchored occurrence
+			// has none, so its leads never fire and don't time generation.
+			if l, err := domain.ParseLead(r.Before); err == nil && l.Approx() > lead {
+				lead = l.Approx()
+			}
+		}
+	}
+	return lead
+}
+
+// occurrenceDates are one occurrence's scheduling fields, also written back onto the seed so
+// it displays the latest generated instance.
+type occurrenceDates struct {
+	startAt   *time.Time
+	dueAt     *time.Time
+	reminders []domain.Reminder
+}
+
+// datesAt shapes the occurrence at instant `at`: the instant becomes its deadline (its start,
+// for a start-anchored seed), and every other date moves by the same delta, so a start's or an
+// exact reminder's distance from the deadline carries over. Lead reminders are copied: they
+// follow the new deadline on their own.
+func (s *serverSeed) datesAt(at time.Time) occurrenceDates {
+	delta := at.Sub(s.ref())
+	d := occurrenceDates{reminders: domain.ShiftReminders(s.reminders, delta)}
+	if s.startAnchored() {
+		d.startAt = &at
+		return d
+	}
+	d.dueAt = &at
+	if s.startAt != nil {
+		start := s.startAt.Add(delta)
+		d.startAt = &start
+	}
+	return d
 }
 
 // materializeSeed creates the seed's next occurrence the moment it becomes relevant, and
-// nothing else (PLAN §6.4). "Relevant" is the occurrence's own **reminder time** when the
-// seed has a lead-time reminder (so that reminder can still fire), else its due time. The
-// occurrence copies the seed's content, its project memberships, and its due/reminder shifted
-// forward to the occurrence's date; the seed's own due/reminder then advance to show the last
-// generated instance. Only one occurrence per sweep, never the whole schedule; a gone
-// (deleted/trashed) seed generates nothing and leaves its existing occurrences in place.
+// nothing else (PLAN §6.4). "Relevant" is when the occurrence starts or its earliest reminder
+// fires, if either comes before its occurrence instant (so it is there to start and that
+// reminder can still fire), else the instant itself. The occurrence copies the seed's content,
+// its project memberships, and its dates moved forward to the occurrence (datesAt); the seed's
+// own dates then advance to show the last generated instance. Only one occurrence per sweep,
+// never the whole schedule; a gone (deleted/trashed) seed generates nothing and leaves its
+// existing occurrences in place.
 //
-// The schedule anchor is the *first* occurrence's due date (immutable) rather than the seed's
-// current due date — so advancing the seed's displayed due date can't shift the schedule or
-// reset a COUNT/UNTIL bound.
+// The schedule anchor is the *first* occurrence's instant (immutable) rather than the seed's
+// current dates — so advancing the seed's displayed dates can't shift the schedule or reset a
+// COUNT/UNTIL bound.
 //
 // It returns the number of rows written (occurrence + memberships + the seed update) and the
 // max server_seq assigned, but does NOT publish — callers batch the hub notification.
@@ -162,22 +233,19 @@ func (s *Server) materializeSeed(uid, seedID string) (int, int64, error) {
 	}
 
 	now := s.clock.Now().UTC()
-	anchor := seed.createdAt
-	if seed.dueAt != nil {
-		anchor = *seed.dueAt
-	}
+	startAnchored := seed.startAnchored()
+	anchor := seed.ref()
 	// Pin the anchor to the first occurrence ever generated, so it stays fixed even as the
-	// seed's displayed due date advances below.
-	if first, err := s.firstOccurrenceDue(tx, uid, seedID); err != nil {
+	// seed's displayed dates advance below.
+	if first, err := s.firstOccurrence(tx, uid, seedID, startAnchored); err != nil {
 		return 0, 0, err
 	} else if first != nil {
 		anchor = *first
 	}
 
-	// Trigger generation when the occurrence's reminder is due (its due date shifted back by
-	// the reminder lead), so a "remind me before it's due" reminder still lands.
-	offset := seed.reminderOffset()
-	trigger := now.Add(-offset)
+	// Trigger generation once the occurrence becomes relevant — up to the seed's lead before
+	// its instant — so it has started and its earliest reminder still lands.
+	trigger := now.Add(seed.lead())
 
 	due, err := domain.LatestOccurrence(seed.repeatRule, anchor, trigger)
 	if err != nil {
@@ -192,17 +260,11 @@ func (s *Server) materializeSeed(uid, seedID string) (int, int64, error) {
 
 	// Already created (in any state — a completed or user-deleted occurrence is never
 	// resurrected)? Then there's nothing new to do this sweep.
-	exists, err := s.occurrenceExists(tx, uid, seedID, *due)
+	exists, err := s.occurrenceExists(tx, uid, seedID, *due, startAnchored)
 	if err != nil || exists {
 		return 0, 0, err
 	}
-
-	// The occurrence's reminder is its due date shifted by the same lead as the seed's.
-	var remind *time.Time
-	if seed.reminderOffset() != 0 {
-		r := due.Add(offset)
-		remind = &r
-	}
+	dates := seed.datesAt(*due)
 
 	written := 0
 	var maxSeq int64
@@ -218,7 +280,7 @@ func (s *Server) materializeSeed(uid, seedID string) (int, int64, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	occID, err := s.insertOccurrence(tx, uid, seed, *due, remind, seq)
+	occID, err := s.insertOccurrence(tx, uid, seed, dates, seq)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -240,12 +302,12 @@ func (s *Server) materializeSeed(uid, seedID string) (int, int64, error) {
 		bump(seq)
 	}
 
-	// 3. Advance the seed's displayed due/reminder to this occurrence (the anchor stays fixed).
+	// 3. Advance the seed's displayed dates to this occurrence (the anchor stays fixed).
 	seq, err = s.nextSeq(tx, uid)
 	if err != nil {
 		return 0, 0, err
 	}
-	if err := s.advanceSeedDates(tx, uid, seedID, *due, remind, seq); err != nil {
+	if err := s.advanceSeedDates(tx, uid, seedID, dates, seq); err != nil {
 		return 0, 0, err
 	}
 	bump(seq)
@@ -256,17 +318,19 @@ func (s *Server) materializeSeed(uid, seedID string) (int, int64, error) {
 	return written, maxSeq, nil
 }
 
-// firstOccurrenceDue returns the earliest due instant among a seed's occurrences (any state),
-// or nil if none exist yet — the immutable schedule anchor.
-func (s *Server) firstOccurrenceDue(tx *sql.Tx, uid, seedID string) (*time.Time, error) {
-	var due sql.NullString
-	err := tx.QueryRow(s.rebind(
-		`SELECT MIN(due_at) FROM tasks WHERE user_id = ? AND repeat_seed_id = ? AND due_at IS NOT NULL;`),
-		uid, seedID).Scan(&due)
-	if err != nil {
+// firstOccurrence returns the earliest occurrence instant among a seed's occurrences (any
+// state) — the deadline, or the start of a start-anchored seed's deadline-less ones — or nil
+// if none exist yet: the immutable schedule anchor.
+func (s *Server) firstOccurrence(tx *sql.Tx, uid, seedID string, startAnchored bool) (*time.Time, error) {
+	query := `SELECT MIN(due_at) FROM tasks WHERE user_id = ? AND repeat_seed_id = ? AND due_at IS NOT NULL;`
+	if startAnchored {
+		query = `SELECT MIN(start_at) FROM tasks WHERE user_id = ? AND repeat_seed_id = ? AND due_at IS NULL AND start_at IS NOT NULL;`
+	}
+	var at sql.NullString
+	if err := tx.QueryRow(s.rebind(query), uid, seedID).Scan(&at); err != nil {
 		return nil, err
 	}
-	return parseServerTime(due)
+	return parseServerTime(at)
 }
 
 // seedProjectIDs returns the ids of projects the seed is a live member of, so its occurrences
@@ -303,10 +367,10 @@ func (s *Server) copyOccurrenceMembership(tx *sql.Tx, uid, projectID, occID stri
 	return err
 }
 
-// advanceSeedDates moves the seed's displayed due/reminder forward to its latest generated
-// occurrence (bumping version + server_seq so it pulls down), without touching the schedule
-// anchor (which firstOccurrenceDue pins to the first occurrence).
-func (s *Server) advanceSeedDates(tx *sql.Tx, uid, seedID string, due time.Time, remind *time.Time, seq int64) error {
+// advanceSeedDates moves the seed's displayed dates forward to its latest generated occurrence
+// (bumping version + server_seq so it pulls down), without touching the schedule anchor
+// (which firstOccurrence pins to the first occurrence).
+func (s *Server) advanceSeedDates(tx *sql.Tx, uid, seedID string, dates occurrenceDates, seq int64) error {
 	var version int64
 	if err := tx.QueryRow(s.rebind(
 		`SELECT version FROM tasks WHERE id = ? AND user_id = ?;`), seedID, uid).Scan(&version); err != nil {
@@ -314,19 +378,22 @@ func (s *Server) advanceSeedDates(tx *sql.Tx, uid, seedID string, due time.Time,
 	}
 	now := s.clock.Now().UTC().Format(timeFormat)
 	_, err := tx.Exec(s.rebind(
-		`UPDATE tasks SET due_at = ?, remind_at = ?, updated_at = ?, version = ?, server_seq = ?
+		`UPDATE tasks SET start_at = ?, due_at = ?, reminders_json = ?, updated_at = ?, version = ?, server_seq = ?
 		 WHERE id = ? AND user_id = ?;`),
-		due.UTC().Format(timeFormat), fmtTime(remind), now, version+1, seq, seedID, uid)
+		fmtTime(dates.startAt), fmtTime(dates.dueAt), remindersJSON(dates.reminders), now, version+1, seq, seedID, uid)
 	return err
 }
 
 // occurrenceExists reports whether this seed already has an occurrence at the given instant,
-// in any row state — so a completed or user-deleted occurrence is never regenerated.
-func (s *Server) occurrenceExists(tx *sql.Tx, uid, seedID string, due time.Time) (bool, error) {
+// in any row state — so a completed or user-deleted occurrence is never regenerated. The
+// instant is the occurrence's deadline, or its start for a start-anchored seed.
+func (s *Server) occurrenceExists(tx *sql.Tx, uid, seedID string, at time.Time, startAnchored bool) (bool, error) {
+	query := `SELECT 1 FROM tasks WHERE user_id = ? AND repeat_seed_id = ? AND due_at = ? LIMIT 1;`
+	if startAnchored {
+		query = `SELECT 1 FROM tasks WHERE user_id = ? AND repeat_seed_id = ? AND due_at IS NULL AND start_at = ? LIMIT 1;`
+	}
 	var one int
-	err := tx.QueryRow(s.rebind(
-		`SELECT 1 FROM tasks WHERE user_id = ? AND repeat_seed_id = ? AND due_at = ? LIMIT 1;`),
-		uid, seedID, due.UTC().Format(timeFormat)).Scan(&one)
+	err := tx.QueryRow(s.rebind(query), uid, seedID, at.UTC().Format(timeFormat)).Scan(&one)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -334,23 +401,23 @@ func (s *Server) occurrenceExists(tx *sql.Tx, uid, seedID string, due time.Time)
 }
 
 // insertOccurrence writes one occurrence: the seed's content (title, notes, archetype/props)
-// stamped with a concrete due date and a reminder shifted to match. It is a plain task — no
-// repeat_rule of its own — pointing back at its seed. Returns the new occurrence id so the
-// caller can attach the seed's project memberships to it.
-func (s *Server) insertOccurrence(tx *sql.Tx, uid string, seed *serverSeed, due time.Time, remind *time.Time, seq int64) (string, error) {
+// stamped with its concrete dates (datesAt). It is a plain task — no repeat_rule of its own —
+// pointing back at its seed. Returns the new occurrence id so the caller can attach the seed's
+// project memberships to it.
+func (s *Server) insertOccurrence(tx *sql.Tx, uid string, seed *serverSeed, dates occurrenceDates, seq int64) (string, error) {
 	id, err := uuid.NewV7()
 	if err != nil {
 		return "", err
 	}
 	now := s.clock.Now().UTC().Format(timeFormat)
 	_, err = tx.Exec(s.rebind(
-		`INSERT INTO tasks (id, user_id, title, notes_md, status, due_at, remind_at, completed_at,
+		`INSERT INTO tasks (id, user_id, title, notes_md, status, start_at, due_at, reminders_json, completed_at,
 		   repeat_rule, repeat_seed_id, object_type_id, props_json, created_at, updated_at,
 		   deleting_at, deleted_at, version, server_seq)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, NULL, NULL, 1, ?)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, NULL, NULL, 1, ?)
 		 ON CONFLICT (id) DO NOTHING;`),
 		id.String(), uid, seed.title, seed.notesMD, domain.TaskOpen,
-		due.UTC().Format(timeFormat), fmtTime(remind), seed.id, seed.objectTypeID, seed.props,
+		fmtTime(dates.startAt), fmtTime(dates.dueAt), remindersJSON(dates.reminders), seed.id, seed.objectTypeID, seed.props,
 		now, now, seq)
 	if err != nil {
 		return "", err
@@ -365,17 +432,18 @@ func (s *Server) loadServerSeed(tx *sql.Tx, uid, id string) (*serverSeed, error)
 	var (
 		seed                     serverSeed
 		notesMD, propsJSON       sql.NullString
-		dueAt, remindAt          sql.NullString
+		startAt, dueAt           sql.NullString
+		remindersRaw             sql.NullString
 		repeatRule, repeatSeedID sql.NullString
 		objectTypeID             sql.NullString
 		createdAt                string
 		deletingAt, deletedAt    sql.NullString
 	)
 	row := tx.QueryRow(s.rebind(
-		`SELECT id, title, notes_md, due_at, remind_at, repeat_rule, repeat_seed_id,
+		`SELECT id, title, notes_md, start_at, due_at, reminders_json, repeat_rule, repeat_seed_id,
 		   object_type_id, props_json, created_at, deleting_at, deleted_at
 		 FROM tasks WHERE id = ? AND user_id = ?;`), id, uid)
-	if err := row.Scan(&seed.id, &seed.title, &notesMD, &dueAt, &remindAt, &repeatRule,
+	if err := row.Scan(&seed.id, &seed.title, &notesMD, &startAt, &dueAt, &remindersRaw, &repeatRule,
 		&repeatSeedID, &objectTypeID, &propsJSON, &createdAt, &deletingAt, &deletedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -396,12 +464,13 @@ func (s *Server) loadServerSeed(tx *sql.Tx, uid, id string) (*serverSeed, error)
 	if seed.createdAt, err = time.Parse(timeFormat, createdAt); err != nil {
 		return nil, err
 	}
+	if seed.startAt, err = parseServerTime(startAt); err != nil {
+		return nil, err
+	}
 	if seed.dueAt, err = parseServerTime(dueAt); err != nil {
 		return nil, err
 	}
-	if seed.remindAt, err = parseServerTime(remindAt); err != nil {
-		return nil, err
-	}
+	seed.reminders = parseReminders(remindersRaw.String)
 	seed.gone = deletedAt.Valid || deletingAt.Valid
 	return &seed, nil
 }

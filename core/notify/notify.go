@@ -29,8 +29,9 @@ type Notification struct {
 
 // PlanTasks returns the notifications due to fire in the window (now, now+horizon], sorted
 // by FireAt. Only open tasks contribute — a done, cancelled, trashed, or tombstoned task
-// never notifies. A task's explicit reminder (RemindAt) fires as a reminder; a task with a
-// due date but no reminder fires a due notification at its due time.
+// never notifies. Each of a task's reminders fires on its own (a relative one counted back
+// from the deadline, PLAN §6.4); a task with a deadline but no reminders fires once, at its
+// deadline.
 func PlanTasks(tasks []*domain.Task, now time.Time, horizon time.Duration) []Notification {
 	end := now.Add(horizon)
 	out := []Notification{}
@@ -38,21 +39,10 @@ func PlanTasks(tasks []*domain.Task, now time.Time, horizon time.Duration) []Not
 		if t == nil || t.Status != domain.TaskOpen || t.DeletedAt != nil || t.DeletingAt != nil {
 			continue
 		}
-		title := t.Title
-		if title == "" {
-			title = "Untitled task"
-		}
-		switch {
-		case t.RemindAt != nil && inWindow(*t.RemindAt, now, end):
-			out = append(out, Notification{
-				TaskID: t.ID, Kind: KindReminder, FireAt: t.RemindAt.UTC(),
-				Title: title, Body: reminderBody(t),
-			})
-		case t.RemindAt == nil && t.DueAt != nil && inWindow(*t.DueAt, now, end):
-			out = append(out, Notification{
-				TaskID: t.ID, Kind: KindDue, FireAt: t.DueAt.UTC(),
-				Title: title, Body: "Due now",
-			})
+		for _, n := range taskFires(t) {
+			if inWindow(n.FireAt, now, end) {
+				out = append(out, n)
+			}
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -74,8 +64,8 @@ type FeedItem struct {
 // FeedTasks returns the fires that already happened in the trailing window [now-lookback,
 // now], newest first — the in-app notification feed (the mirror image of PlanTasks, which
 // looks forward). Trashed/deleted tasks drop out entirely; settled (done/cancelled) tasks
-// keep their past fires as history, flagged Settled. The reminder-over-due precedence
-// matches PlanTasks so the feed lists exactly what the OS surfaced.
+// keep their past fires as history, flagged Settled. The fires are exactly PlanTasks' (every
+// reminder, or the deadline when there are none), so the feed lists what the OS surfaced.
 func FeedTasks(tasks []*domain.Task, now time.Time, lookback time.Duration) []FeedItem {
 	start := now.Add(-lookback)
 	out := []FeedItem{}
@@ -83,24 +73,13 @@ func FeedTasks(tasks []*domain.Task, now time.Time, lookback time.Duration) []Fe
 		if t == nil || t.DeletedAt != nil || t.DeletingAt != nil {
 			continue
 		}
-		title := t.Title
-		if title == "" {
-			title = "Untitled task"
-		}
 		settled := t.Status != domain.TaskOpen
 		// (start, now] — a fire exactly at `now` has happened; one older than the lookback
 		// has aged out of the feed.
-		switch {
-		case t.RemindAt != nil && inWindow(*t.RemindAt, start, now):
-			out = append(out, FeedItem{Settled: settled, Notification: Notification{
-				TaskID: t.ID, Kind: KindReminder, FireAt: t.RemindAt.UTC(),
-				Title: title, Body: reminderBody(t),
-			}})
-		case t.RemindAt == nil && t.DueAt != nil && inWindow(*t.DueAt, start, now):
-			out = append(out, FeedItem{Settled: settled, Notification: Notification{
-				TaskID: t.ID, Kind: KindDue, FireAt: t.DueAt.UTC(),
-				Title: title, Body: "Due now",
-			}})
+		for _, n := range taskFires(t) {
+			if inWindow(n.FireAt, start, now) {
+				out = append(out, FeedItem{Settled: settled, Notification: n})
+			}
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -118,7 +97,7 @@ func FeedTasks(tasks []*domain.Task, now time.Time, lookback time.Duration) []Fe
 // a *pending* fire is handled by re-planning (a settled task drops out of PlanTasks); this
 // covers the case a reminder already surfaced before the user finished the task. Bounded to
 // fires within the trailing `horizon` so the list stays small (older notifications are long
-// gone from the OS).
+// gone from the OS). A task with several fires is listed once.
 func SettledReminderIDs(tasks []*domain.Task, now time.Time, horizon time.Duration) []string {
 	lower := now.Add(-horizon)
 	out := []string{}
@@ -129,18 +108,39 @@ func SettledReminderIDs(tasks []*domain.Task, now time.Time, horizon time.Durati
 		if t.Status == domain.TaskOpen && t.DeletedAt == nil && t.DeletingAt == nil {
 			continue // still an active task — keep its notification
 		}
-		fire := t.RemindAt
-		if fire == nil {
-			fire = t.DueAt
+		for _, n := range taskFires(t) {
+			// Neither in the future nor too old to still be shown.
+			if !n.FireAt.After(now) && !n.FireAt.Before(lower) {
+				out = append(out, t.ID)
+				break
+			}
 		}
-		if fire == nil {
-			continue // never had a notification
+	}
+	return out
+}
+
+// taskFires lists every notification a task produces over its life: one per resolved
+// reminder, or — when it has no reminders — one at its deadline. A reminder landing exactly on
+// the deadline reads "Due now", like the implicit one.
+func taskFires(t *domain.Task) []Notification {
+	title := t.Title
+	if title == "" {
+		title = "Untitled task"
+	}
+	if len(t.Reminders) == 0 {
+		if t.DueAt == nil {
+			return nil
 		}
-		f := fire.UTC()
-		if f.After(now) || f.Before(lower) {
-			continue // not yet fired, or too old to still be shown
+		return []Notification{{TaskID: t.ID, Kind: KindDue, FireAt: t.DueAt.UTC(), Title: title, Body: "Due now"}}
+	}
+	fires := t.ReminderFires()
+	out := make([]Notification, 0, len(fires))
+	for _, at := range fires {
+		body := reminderBody(t)
+		if t.DueAt != nil && at.Equal(*t.DueAt) {
+			body = "Due now"
 		}
-		out = append(out, t.ID)
+		out = append(out, Notification{TaskID: t.ID, Kind: KindReminder, FireAt: at, Title: title, Body: body})
 	}
 	return out
 }

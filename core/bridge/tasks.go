@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"companion/core/dates"
 	"companion/core/domain"
 	"companion/core/notify"
 	"companion/core/store"
@@ -85,6 +86,39 @@ func (c *Core) tasksParseRepeat(payload []byte) ([]byte, error) {
 		return json.Marshal(map[string]any{"rule": nil})
 	}
 	return json.Marshal(map[string]any{"rule": rule})
+}
+
+// tasksParseReminder turns a typed reminder into a Reminder (PLAN §6.4), parsed in Go so every
+// platform understands the same phrases: a relative one counted back from the deadline ("the
+// day before", "a few weeks before", "an hour before") or, failing that, an absolute instant
+// read by the date parser ("tomorrow at 9am"). `ref` is the caller's local now (RFC3339) for
+// relative dates. Returns {reminder:null} when neither reads, so the UI can say so inline.
+func (c *Core) tasksParseReminder(payload []byte) ([]byte, error) {
+	var args struct {
+		Text string `json:"text"`
+		Ref  string `json:"ref"`
+	}
+	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	if r, ok := domain.ParseReminderPhrase(args.Text); ok {
+		return json.Marshal(map[string]any{"reminder": r})
+	}
+	ref := time.Now()
+	if args.Ref != "" {
+		if parsed, err := time.Parse(time.RFC3339, args.Ref); err == nil {
+			ref = parsed
+		}
+	}
+	res, err := dates.Parse(args.Text, ref)
+	if err != nil {
+		return nil, err
+	}
+	if res == nil {
+		return json.Marshal(map[string]any{"reminder": nil})
+	}
+	at := res.At.UTC()
+	return json.Marshal(map[string]any{"reminder": domain.Reminder{At: &at}})
 }
 
 // tasksRepeatPreview validates a candidate RRULE and returns its next few occurrences from

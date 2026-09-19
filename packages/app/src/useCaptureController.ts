@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
+import type { TaskReminder } from "@companion/core-bridge";
 import type { DocumentSource, LinkSource } from "@companion/editor";
 import { useNotes } from "./NotesProvider";
 import { useTasks } from "./TasksProvider";
 import { useCore } from "./CoreContext";
 import { useLinkSource } from "./useLinkSource";
 import { useDocumentSource } from "./DocumentSourceContext";
+import { reminderLabel } from "./reminders";
 
 export type CaptureKind = "note" | "task";
 
@@ -47,7 +49,7 @@ export interface CaptureController {
 export function useCaptureController(onClose: () => void): CaptureController {
   const notes = useNotes();
   const tasks = useTasks();
-  const { dates } = useCore();
+  const { dates, tasks: tasksApi } = useCore();
   const linkSource = useLinkSource();
   const documentSource = useDocumentSource();
 
@@ -76,10 +78,28 @@ export function useCaptureController(onClose: () => void): CaptureController {
     setDueFailed(r === "invalid");
     setDueResolved(typeof r === "string" && r !== "invalid" ? formatResolved(r) : null);
   };
+  // The reminder field reads either kind (parsed in core): a time ("tomorrow 9am") or a lead
+  // before the deadline typed above it ("a day before"). `null` when empty, 'invalid' when
+  // neither reads.
+  const parseReminder = async (text: string): Promise<TaskReminder | null | "invalid"> => {
+    const t = text.trim();
+    if (!t) return null;
+    const { reminder } = await tasksApi.parseReminder(t);
+    return reminder ?? "invalid";
+  };
   const previewRemind = async () => {
-    const r = await parseNl(remind);
+    const r = await parseReminder(remind);
     setRemindFailed(r === "invalid");
-    setRemindResolved(typeof r === "string" && r !== "invalid" ? formatResolved(r) : null);
+    if (!r || r === "invalid") {
+      setRemindResolved(null);
+    } else if (r.at) {
+      setRemindResolved(formatResolved(r.at));
+    } else {
+      // A lead only fires once the task has a deadline; say so while the field above is empty.
+      const label = reminderLabel(r);
+      const lead = label === "At deadline" ? "At the deadline" : `${label} the deadline`;
+      setRemindResolved(due.trim() ? lead : `${lead} — set one above`);
+    }
   };
 
   const saveNote = async () => {
@@ -101,13 +121,13 @@ export function useCaptureController(onClose: () => void): CaptureController {
       setBusy(false);
       return;
     }
-    const remindAt = await parseNl(remind);
-    if (remindAt === "invalid") {
+    const reminder = await parseReminder(remind);
+    if (reminder === "invalid") {
       setRemindFailed(true);
       setBusy(false);
       return;
     }
-    await tasks.create({ title, dueAt: dueAt ?? undefined, remindAt: remindAt ?? undefined });
+    await tasks.create({ title, dueAt: dueAt ?? undefined, reminders: reminder ? [reminder] : undefined });
     onClose();
   };
 

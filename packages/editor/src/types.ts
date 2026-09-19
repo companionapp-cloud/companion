@@ -103,11 +103,12 @@ export interface LinkSuggestion {
   type: "note" | "task" | "habit" | "project" | "document" | "canvas";
   id: string;
   title: string;
-  /** Task-only extras, so a `[[task:…]]` chip can render like a todo (done state + dates).
-   * Left undefined for other types (and for hosts that don't supply them). */
+  /** Task-only extras, so a `[[task:…]]` chip can render like a todo (done state, deadline,
+   * reminders). Left undefined for other types (and for hosts that don't supply them). */
   status?: string | null;
   dueAt?: string | null;
-  remindAt?: string | null;
+  /** Each an absolute instant (`at`) or a lead before the deadline (`before`, ISO-8601). */
+  reminders?: { at?: string; before?: string }[] | null;
 }
 
 /** The entity types the `[[` menu can scope its search to. */

@@ -1,12 +1,14 @@
-import type { CoreBridge, ObjectProps, RepeatPreview, RepeatingTask, Task, TaskStatus } from "./types";
+import type { CoreBridge, ObjectProps, RepeatPreview, RepeatingTask, Task, TaskReminder, TaskStatus } from "./types";
+import { localNowWithOffset } from "./dates";
 
 export interface CreateTaskInput {
   title?: string;
   notesMd?: string;
   status?: TaskStatus;
-  /** ISO timestamp. */
+  /** ISO timestamps: when the task starts, and its deadline. */
+  startAt?: string | null;
   dueAt?: string | null;
-  remindAt?: string | null;
+  reminders?: TaskReminder[];
   /** RFC5545 RRULE (e.g. "FREQ=WEEKLY;BYDAY=MO") — turns this into a repeating-task seed;
    *  the server materializes its occurrences (PLAN §6.4). */
   repeatRule?: string | null;
@@ -19,11 +21,13 @@ export interface UpdateTaskInput {
   title?: string;
   notesMd?: string;
   status?: TaskStatus;
-  /** ISO timestamp to set, or set clearDueAt to remove it. */
+  /** ISO timestamps to set, or set clearStartAt / clearDueAt to remove them. */
+  startAt?: string | null;
+  clearStartAt?: boolean;
   dueAt?: string | null;
   clearDueAt?: boolean;
-  remindAt?: string | null;
-  clearRemindAt?: boolean;
+  /** Replaces the whole reminder list; [] removes every reminder. */
+  reminders?: TaskReminder[];
   /** RRULE to set, or set clearRepeatRule to stop repeating. */
   repeatRule?: string | null;
   clearRepeatRule?: boolean;
@@ -47,6 +51,11 @@ export function tasksApi(core: CoreBridge) {
      *  month") into an RRULE, or {rule:null} when it isn't a recognizable recurrence. */
     parseRepeat: (text: string, ref?: string) =>
       core.invoke<{ rule: string | null }>("tasks.parseRepeat", { text, ref }),
+    /** Parse a typed reminder: a lead before the deadline ("the day before", "a few weeks
+     *  before", "an hour before") or an absolute time ("tomorrow at 9am"), read in core so
+     *  every platform agrees. {reminder:null} when neither reads. */
+    parseReminder: (text: string, ref?: string) =>
+      core.invoke<{ reminder: TaskReminder | null }>("tasks.parseReminder", { text, ref: ref ?? localNowWithOffset() }),
     get: (id: string) => core.invoke<Task>("tasks.get", { id }),
     create: (input: CreateTaskInput) => core.invoke<Task>("tasks.create", input),
     update: (id: string, fields: UpdateTaskInput) => core.invoke<Task>("tasks.update", { id, ...fields }),
