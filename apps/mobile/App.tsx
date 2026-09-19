@@ -12,11 +12,13 @@ import { openCore } from './src/core';
 import { nativeSyncStorage } from './src/syncStorage';
 import { nativeToolsStorage } from './src/toolsStorage';
 import { registerIcsFilePicker } from './src/icsFilePicker';
+import { registerThingsSourcePicker } from './src/thingsSourcePicker';
 import { WatchTasksBridge } from './src/WatchTasksBridge';
 
 // Register the native .ics file picker so the shared CalendarSettings can upload calendars
 // on mobile (web uses its own DOM picker). Module-scope: runs once at import.
 registerIcsFilePicker();
+registerThingsSourcePicker();
 
 // Opens the on-device SQLite database via the shared core singleton, wraps it in the
 // shared CoreBridge, then mounts the shared data layer (Core/Sync/Notes providers)

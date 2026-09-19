@@ -81,6 +81,7 @@ import { SettingsScreen } from "./SettingsScreen";
 import { useSync } from "./SyncProvider";
 import { SyncHealthBanner } from "./SyncHealthBanner";
 import { CaptureForm } from "./CaptureForm";
+import { ThingsImportHost } from "./ThingsImport";
 
 // Monotonic tab uid so React keys are stable across reorders/overwrites even when two
 // tabs hold the same surface.
@@ -387,6 +388,7 @@ function NavBridge({
   return (
     <NavContext.Provider value={nav}>
       <ReminderNavigationBridge />
+      <ThingsImportHost />
       <MultiSelectProvider>
         <DndProvider>
           <Shell topInset={topInset} windowControls={windowControls} />

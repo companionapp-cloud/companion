@@ -9,6 +9,12 @@ export interface CoreBridge {
   on(event: string, cb: (payload: unknown) => void): () => void;
   /** Release the underlying core/store. */
   close(): void;
+  /** Stage a file the user picked so core can read it by handle — web only (PLAN §6.12): the
+   *  bytes stay in JS instead of crossing invoke as JSON. Native shells pass a path instead and
+   *  leave this undefined. */
+  stageFile?(name: string, bytes: Uint8Array): string;
+  /** Drop a staged file. */
+  releaseFile?(handle: string): void;
 }
 
 /** A value that can cross the SQLite bind/column boundary. */

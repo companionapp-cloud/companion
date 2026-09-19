@@ -19,6 +19,8 @@ type CompanionInit = (opts: {
   /** OPFS + fetch blob store for document bytes (PLAN §6.9). Optional: when absent, document
    *  metadata still syncs but bytes can't transfer or render locally. */
   blobs?: WebBlobStore;
+  /** Files staged for an import (PLAN §6.12), read by core by handle. */
+  files?: { take(handle: string): Uint8Array | null };
 }) => Promise<GoHandle>;
 
 /** localStorageSecrets keeps LLM keys in localStorage under a namespaced prefix. The browser
@@ -87,11 +89,17 @@ export async function createWasmBridge(opts: WasmBridgeOptions): Promise<CoreBri
     for (const cb of set) cb(payload);
   };
 
+  // Files the user picked for an import (PLAN §6.12): held here until released, so a scan and
+  // then a run can both read them without the bytes crossing invoke as JSON.
+  const staged = new Map<string, Uint8Array>();
+  let stagedSeq = 0;
+
   const handle = await g.__companionInit({
     sqlite: opts.sqlite,
     onEvent,
     secrets: localStorageSecrets(),
     blobs: opts.blobs,
+    files: { take: (h) => staged.get(h) ?? null },
   });
 
   return {
@@ -112,6 +120,14 @@ export async function createWasmBridge(opts: WasmBridgeOptions): Promise<CoreBri
     },
     close() {
       handle.close();
+    },
+    stageFile(name, bytes) {
+      const h = `file-${++stagedSeq}-${name}`;
+      staged.set(h, bytes);
+      return h;
+    },
+    releaseFile(h) {
+      staged.delete(h);
     },
   };
 }

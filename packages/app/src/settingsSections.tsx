@@ -6,9 +6,10 @@ import { ObjectTypeSettings } from "./ObjectTypeSettings";
 import { ToolSettings } from "./ToolSettings";
 import { CalendarSettings } from "./CalendarSettings";
 import { ShortcutSettings } from "./ShortcutSettings";
+import { ImportSettings } from "./ImportSettings";
 import { shortcutStore } from "./shortcuts";
 
-export type SettingsSectionId = "sync" | "ai" | "objects" | "calendar" | "tools" | "shortcuts";
+export type SettingsSectionId = "sync" | "ai" | "objects" | "calendar" | "import" | "tools" | "shortcuts";
 
 /** One entry in the settings navigation list (PLAN §3.1 shell). Each section is a
  *  self-contained component that reads its own data through the app providers, so the
@@ -52,6 +53,13 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
     description: "Calendar accounts and ICS subscriptions",
     icon: "calendar",
     Component: CalendarSettings,
+  },
+  {
+    id: "import",
+    label: "Import",
+    description: "Bring areas, projects and to-dos over from Things 3",
+    icon: "download",
+    Component: ImportSettings,
   },
   {
     id: "tools",

@@ -225,7 +225,8 @@ func main() {
 		Assets: application.AssetOptions{
 			Handler: rootHandler(handler, notifHandler, openFocusWindow, func(w http.ResponseWriter, r *http.Request) {
 				tableCtxMenu.handleOpen(w, r)
-			}, shortcuts.handleShortcuts, windowChromeHandler(func() *application.WebviewWindow { return mainWindow }), updates.handleState),
+			}, shortcuts.handleShortcuts, windowChromeHandler(func() *application.WebviewWindow { return mainWindow }), updates.handleState,
+				pickThingsHandler(func() *application.App { return app })),
 		},
 	})
 
@@ -285,6 +286,13 @@ func main() {
 
 	installMenuBar(app, updates.openApp, checkForUpdates)
 
+	// File › Import › Things 3… (PLAN §6.12): bring the window forward and have the app open
+	// its import modal.
+	app.Menu.Set(applicationMenu(func() {
+		updates.openApp()
+		handler.OnEvent(importThingsEvent, nil)
+	}))
+
 	// Register the native table context menu now that the app + window exist. The /table-menu
 	// route (set up above, capturing tableCtxMenu by reference) drives it.
 	tableCtxMenu = installTableMenu(app, mainWindow)
@@ -305,7 +313,7 @@ func main() {
 // (/invoke, /events) to the bridge handler. /window spawns a focus-mode window for a
 // document (the workspace's expand/pop-out action) — browser window.open can't create a
 // real app window in the Wails webview, so the frontend asks the Go side here.
-func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusWindow func(url string), openTableMenu http.HandlerFunc, shortcuts http.HandlerFunc, chrome http.HandlerFunc, updates http.HandlerFunc) http.Handler {
+func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusWindow func(url string), openTableMenu http.HandlerFunc, shortcuts http.HandlerFunc, chrome http.HandlerFunc, updates http.HandlerFunc, pickThings http.HandlerFunc) http.Handler {
 	frontend, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {
 		log.Fatalf("mount frontend assets: %v", err)
@@ -335,6 +343,8 @@ func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusW
 	mux.HandleFunc("/chrome", chrome)
 	// The forced-update state, for a window that opens mid-update (updates.go).
 	mux.HandleFunc("/update", updates)
+	// The native open panel for choosing a Things database to import (import_things.go).
+	mux.HandleFunc("/import/things/pick", pickThings)
 	mux.Handle("/", files)
 	return mux
 }

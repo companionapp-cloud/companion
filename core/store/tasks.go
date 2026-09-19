@@ -42,6 +42,9 @@ type CreateTaskInput struct {
 	RepeatRule   *string         `json:"repeatRule,omitempty"`
 	ObjectTypeID *string         `json:"objectTypeId,omitempty"`
 	Props        json.RawMessage `json:"props,omitempty"`
+	// CompletedAt dates a task created already done (an import keeps when it was finished);
+	// a done task created without one is completed now. Ignored unless Status is done.
+	CompletedAt *time.Time `json:"completedAt,omitempty"`
 }
 
 // UpdateTaskInput carries partial updates; nil fields are unchanged. The nullable startAt /
@@ -86,6 +89,13 @@ func (r *TasksRepo) Create(in CreateTaskInput) (*domain.Task, error) {
 		ObjectTypeID: in.ObjectTypeID, Props: json.RawMessage(normalizeProps(in.Props)),
 		CreatedAt: now, UpdatedAt: now, Version: 0, Dirty: true,
 	}
+	if status == domain.TaskDone {
+		completed := now
+		if in.CompletedAt != nil {
+			completed = in.CompletedAt.UTC()
+		}
+		t.CompletedAt = &completed
+	}
 	if err := t.Validate(); err != nil {
 		return nil, err
 	}
@@ -93,9 +103,9 @@ func (r *TasksRepo) Create(in CreateTaskInput) (*domain.Task, error) {
 		return nil, err
 	}
 	if _, err := r.db.Exec(
-		`INSERT INTO tasks (id, title, notes_md, status, start_at, due_at, reminders_json, repeat_rule, object_type_id, props_json, created_at, updated_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-		t.ID, t.Title, t.NotesMD, t.Status, nullTime(t.StartAt), nullTime(t.DueAt), remindersJSON(t.Reminders), t.RepeatRule, t.ObjectTypeID, string(t.Props),
+		`INSERT INTO tasks (id, title, notes_md, status, start_at, due_at, reminders_json, completed_at, repeat_rule, object_type_id, props_json, created_at, updated_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		t.ID, t.Title, t.NotesMD, t.Status, nullTime(t.StartAt), nullTime(t.DueAt), remindersJSON(t.Reminders), nullTime(t.CompletedAt), t.RepeatRule, t.ObjectTypeID, string(t.Props),
 		t.CreatedAt.Format(timeFormat), t.UpdatedAt.Format(timeFormat), t.Version, boolToInt(t.Dirty),
 	); err != nil {
 		return nil, fmt.Errorf("insert task: %w", err)
