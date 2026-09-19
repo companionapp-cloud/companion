@@ -89,6 +89,13 @@ type Core struct {
 	// oauth holds provider configuration, in-flight sign-ins and cached access tokens
 	// (oauth.go). Generic: calendar accounts are its first user, not its owner.
 	oauth *oauthState
+
+	// importCancel stops the one import that may run at a time (imports.go, PLAN §6.12); nil
+	// when none is. importFiles reads files the user picked by handle — set by the web shell,
+	// which stages uploads (native shells pass paths). Guarded by importMu.
+	importMu     sync.Mutex
+	importCancel context.CancelFunc
+	importFiles  func(handle string) ([]byte, error)
 }
 
 // New builds a Core over an already-open store.
@@ -279,6 +286,12 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.projectsForEntity(payload)
 	case "projects.memberEntityIds":
 		return c.projectsMemberEntityIds(payload)
+	case "import.thingsScan":
+		return c.importThingsScan(payload)
+	case "import.thingsRun":
+		return c.importThingsRun(payload)
+	case "import.cancel":
+		return c.importCancelRun()
 	case "lists.list":
 		return c.listsList(payload)
 	case "lists.get":

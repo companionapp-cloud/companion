@@ -1112,6 +1112,96 @@ policy, and the same "normal write path, so extraction + sync just work, no
   mutually-referencing blocks); download-failure fallback; scan counts match run
   results; extraction-equals-rebuild over an imported graph.
 
+### 6.12 Things 3 import (every platform)
+
+One-way, one-shot import of a Things 3 library — areas, projects, headings, to-dos with
+their checklists, notes, tags, dates, reminders and repeats — from Things' own SQLite
+database. Things has no API and no export command; Cultured Code's documented export *is*
+the database file (quit Things, copy `Things Database.thingsdatabase`), and iPhone/iPad
+produce the same database from Settings › General › Diagnostics (code 491348 → `Things
+Database.aar`). Unlike §6.10/§6.11 this works on **web too**: the input is a file the user
+picks, parsed on the device, so plaintext never reaches the server (E2EE) and nothing talks
+to Things Cloud (its protocol is private, its ToS forbids third-party access, and a browser
+would need a server relay).
+
+- **Reading: `core/importer/sqlitefile`**, a small pure-Go, read-only SQLite file reader —
+  table B-trees, overflow pages, UTF-8/16 text, and **WAL replay** (Things runs in WAL mode;
+  recent edits live in `main.sqlite-wal` until checkpointed, so the reader overlays the
+  committed frames). It is not a SQL engine: it lists tables and streams rows. A reader
+  rather than a driver because core has no SQLite of its own in the browser (web's store is
+  wa-sqlite in JS), and one pure-Go path means the import behaves identically everywhere and
+  is tested natively against files written by real SQLite (modernc).
+- **Sources** (`importer/things.Source`): a path — the `.thingsdatabase` package, a folder
+  holding it, `main.sqlite`, or a `.zip` — or uploaded files: a `.zip` of the package
+  (Safari uploads a package as a zip; Finder › Compress makes one) or `main.sqlite` plus its
+  `-wal`. `Backups/` copies inside a zipped `ThingsData-*` folder are ignored.
+  - **Desktop**: a native open panel (`/import/things/pick` on the desktop HTTP handler, Wails
+    dialog) opened at Things' group container — which the app only stats, never lists — with
+    packages selectable, so the user opens ThingsData and picks `Things Database.thingsdatabase`. A file the user picks is exempt from
+    macOS 15's "access data from other apps" prompt (and macOS 27's silent denial), which
+    reading the path directly would hit — and the ad-hoc-signed app would be re-prompted after
+    every update. The UI says to quit Things first (Cultured Code's own instruction); the
+    reader also re-checks the WAL after reading and retries if Things wrote meanwhile.
+  - **Web**: `<input type=file>` for the zip, or `main.sqlite` (+ `main.sqlite-wal`); the
+    bytes are staged in the wasm bridge (`CoreBridge.stageFile`) and core reads them by
+    handle — they never cross the bridge as JSON.
+  - **Mobile**: the document picker (a zip or `main.sqlite`). The iOS `.aar` export (Apple
+    Archive, LZFSE) is a follow-up: it needs a pure-Go LZFSE decoder.
+- **Schema**: Things 3.15.16+ databases (Meta `databaseVersion` ≥ 22, April 2023 onward;
+  things.py and the things-api atlas are the references). Older layouts are rejected with
+  "update Things and export again". Columns are looked up by name, so additive schema
+  changes don't break the reader.
+- **Bridge, scan then run** (the §6.10 contract): `import.thingsScan {source, timeZone}` →
+  an outline, writing nothing: the Inbox's counts, every area (its own to-dos' counts and its
+  projects), and the projects in no area — each with open / completed / repeating counts,
+  headings, and a `finished` flag — plus warnings. `import.thingsRun {source, timeZone,
+  includeCompleted, selection}` imports the user's choice, streaming `import.progress {stage,
+  done, total}`, and returns the created counts and the warnings about what it imported;
+  `import.cancel` stops between batches (written batches stay — the summary says so). The
+  selection is whole containers, never single to-dos: `inbox` (with every to-do in no area or
+  project), `areas` (each with its own to-dos), `projects` (a chosen project brings its area,
+  since Companion projects need one). `timeZone` is the caller's IANA zone: Things' dates are
+  wall-clock dates, and the web core's `time.Local` is a fixed offset with no DST (the importer
+  embeds tzdata on js, ~450 KB).
+- **Mapping:**
+
+  | Things | Companion |
+  |---|---|
+  | Area | Area, in Things' order, after existing areas |
+  | Project in an area | Project in that area, in Things' order |
+  | Project with no area | Project in a **"Things"** area created for them (Companion projects need an area) |
+  | To-dos directly in an area | A project named after the area, inside it (tasks belong to projects, not areas) |
+  | A project's to-dos and headings | One list per project, **"To-dos"**: loose to-dos first, then each heading as a sublist heading with its to-dos, in Things' order (tasks have no order outside lists) |
+  | Inbox to-do | Task in no project (**Unsorted tasks**) |
+  | When date | `start_at` at local midnight (shows as a date); This Evening → 6pm |
+  | Deadline | `due_at` at 5pm local — the deadline presets' time, so "a day before" and overdue read right |
+  | Reminder (a time on the When date) | An absolute reminder |
+  | Checklist | A markdown task list appended to the notes (`- [x]` done; canceled struck through) — the §6.10 checkbox policy |
+  | Tags (to-do/project/area) | A `Tags: #a #b` line at the end of the notes (Companion has no tags) |
+  | Notes | Markdown as-is (Things notes are Markdown since 3.14); a legacy `<note>` XML wrapper is stripped; `things:///show?id=…` links to imported items become `[[task:…]]` / `[[project:…]]` wikilinks |
+  | Project notes / deadline | A note in the project, titled after it |
+  | Someday | An open task with no start (no Someday in Companion) |
+  | Completed / canceled (Logbook) | Skipped by default. Opt-in imports them done/cancelled with their completion dates, and archives completed/canceled projects |
+  | Trash | Skipped |
+  | Repeating to-do | A seed with the rule converted to an RRULE (daily/weekly/monthly/yearly, interval, weekdays, nth weekday, day of month, count, end date), anchored on the **next** instance — its deadline when the series has deadlines, else its start (start-anchored, §6.4) — so the server never regenerates an instance Things already made; Things' open instances import as ordinary tasks. "After completion" repeats become fixed schedules and paused ones one-offs (both warned); repeating projects import once (warned) |
+
+- **Writing**: the normal store write path (areas, projects, lists, tasks, memberships,
+  notes), so link extraction runs, `data.changed` fires, rows are born dirty and sync pushes
+  them — encrypted like any other row. Batched, never one library-sized transaction. No
+  provenance in v1: re-running duplicates, and the UI says so before the run.
+- **UI**: an **Import** settings section on every shell, whose **Import from Things 3…**
+  button opens the import dialog; on the desktop, **File › Import › Things 3…** opens the same
+  dialog (the menu item emits `import.things` on the core's event stream, like
+  `notify.activate`). The dialog: choose the database (platform picker, with instructions
+  for finding it) → the outline as checkboxes — Inbox, each area (ticking it ticks its
+  projects), each project, projects in no area — plus **Include completed to-dos** (the
+  Logbook; finished projects appear, archived, only with it) → import with progress and Stop →
+  summary and warnings.
+- **Testing**: `sqlitefile` against databases written by modernc (every serial type, overflow
+  chains, interior pages, small page sizes, ALTER-added columns, UTF-16, WAL with committed
+  and uncommitted frames); a synthetic Things database built from the real DDL covering every
+  mapping row; scan counts match run results.
+
 ---
 
 ## 7. Sync protocol
@@ -1414,7 +1504,12 @@ Next:
     progress/cancel plumbing and Import settings tab (now a source chooser); single-file
     input so mobile needs no staging directory; fixture-graph golden tests +
     extraction==rebuild asserted over an import.
-15. **Things 3 import of tasks**: TODO
+15. **Things 3 import** — §6.12: `core/importer/sqlitefile` (pure-Go read-only SQLite +
+    WAL replay, so the same import runs on web); `core/importer/things` (source resolution —
+    package, folder, zip, `main.sqlite` + `-wal` — schema-checked model, mapping to areas /
+    projects / lists / tasks with dates, reminders, checklists, tags and repeats);
+    `import.thingsScan` / `import.thingsRun` / `import.cancel` + `import.progress`; an Import
+    settings tab on every shell (desktop open panel, web upload, mobile document picker).
 16.  **Habits** — cadence kinds + polarity + streak math + streak-health; entries UI;
     `habit_links` stacking + suggestions; `stack` edges in the graph; habit
     membership; the sidebar fire icon goes live; notification schedules; geofence

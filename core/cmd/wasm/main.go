@@ -7,14 +7,16 @@
 //
 // JS contract (see packages/core-bridge):
 //
-//	globalThis.__companionInit({ sqlite, onEvent }) -> Promise<{ invoke, close }>
+//	globalThis.__companionInit({ sqlite, onEvent, secrets?, blobs?, files? }) -> Promise<{ invoke, close }>
 //	    sqlite  : object with async exec/query/close (see store.NewJSDriver)
 //	    onEvent : (name: string, payloadJson: string) => void
+//	    files   : { take(handle: string): Uint8Array | null } — uploads staged for an import
 //	    invoke  : (method: string, payloadJson: string) => Promise<string>  // JSON result
 //	    close   : () => void
 package main
 
 import (
+	"fmt"
 	"syscall/js"
 
 	"companion/core/blob"
@@ -38,6 +40,7 @@ func initCore(_ js.Value, args []js.Value) any {
 	onEvent := opts.Get("onEvent")
 	secrets := opts.Get("secrets")
 	blobs := opts.Get("blobs")
+	files := opts.Get("files")
 
 	return newPromise(func(resolve, reject func(any)) {
 		go func() {
@@ -61,6 +64,19 @@ func initCore(_ js.Value, args []js.Value) any {
 			// can't transfer, and rendering falls back to "not downloaded".
 			if blobs.Type() == js.TypeObject {
 				core.SetBlobStore(blob.NewJSStore(blobs))
+			}
+			// Imports (PLAN §6.12): the user's pick is staged in JS, and core takes its bytes by
+			// handle rather than as JSON through invoke.
+			if files.Type() == js.TypeObject {
+				core.SetImportFiles(func(handle string) ([]byte, error) {
+					v := files.Call("take", handle)
+					if v.IsNull() || v.IsUndefined() {
+						return nil, fmt.Errorf("the chosen file is no longer available — choose it again")
+					}
+					b := make([]byte, v.Get("length").Int())
+					js.CopyBytesToGo(b, v)
+					return b, nil
+				})
 			}
 
 			handle := js.Global().Get("Object").New()

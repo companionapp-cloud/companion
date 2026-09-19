@@ -12,6 +12,7 @@ import {
   setCaptureWindowCloser,
   setTableMenuPresenter,
   setShortcutStore,
+  setThingsSourcePicker,
 } from "@companion/app";
 import type { ShortcutBinding, ShortcutId, WindowControls } from "@companion/app";
 import { createHttpBridge, documentsApi } from "@companion/core-bridge";
@@ -86,6 +87,16 @@ setShortcutStore({
     return (await res.json()) as ShortcutBinding;
   },
 });
+
+// Things 3 import (PLAN §6.12): the Go side shows the native open panel — beside Things' database,
+// able to pick the "Things Database.thingsdatabase" package whole — and core reads the chosen path.
+setThingsSourcePicker(async () => {
+  const res = await fetch("/import/things/pick", { method: "POST" });
+  if (res.status === 204) return null;
+  if (!res.ok) throw new Error((await res.text()).trim() || "Couldn’t open the file panel.");
+  const { path } = (await res.json()) as { path: string };
+  return { source: { path }, label: path.split("/").filter(Boolean).pop() ?? path };
+}, "panel");
 
 // Editor tables: present a native Wails context menu instead of the built-in HTML popup. The
 // presenter posts the menu state to /table-menu and runs the chosen action on the "table:action"

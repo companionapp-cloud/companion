@@ -5,7 +5,11 @@
 // exercised.
 package store
 
-import "companion/core/domain"
+import (
+	"fmt"
+
+	"companion/core/domain"
+)
 
 // Store is the client's database (via an injected Driver) plus its repositories.
 type Store struct {
@@ -109,3 +113,26 @@ func New(d Driver, clock domain.Clock) (*Store, error) {
 
 // Close closes the underlying driver.
 func (s *Store) Close() error { return s.db.Close() }
+
+// Batch runs fn inside one transaction (PLAN §6.12): bulk writers such as importers commit a
+// batch of rows at once rather than a transaction per statement — on web each autocommit
+// statement is its own IndexedDB transaction. The store has a single connection, so anything
+// else written meanwhile joins the batch; a failed batch rolls back, and callers keep batches
+// small so that stays cheap.
+func (s *Store) Batch(fn func() error) (err error) {
+	if _, err = s.db.Exec("BEGIN;"); err != nil {
+		return fmt.Errorf("begin batch: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			s.db.Exec("ROLLBACK;")
+		}
+	}()
+	if err = fn(); err != nil {
+		return err
+	}
+	if _, err = s.db.Exec("COMMIT;"); err != nil {
+		return fmt.Errorf("commit batch: %w", err)
+	}
+	return nil
+}

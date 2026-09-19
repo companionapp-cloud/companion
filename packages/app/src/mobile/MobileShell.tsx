@@ -36,6 +36,7 @@ import { ProjectScreen } from "./ProjectScreen";
 import { SettingsListScreen, SettingsSectionScreen } from "./SettingsScreens";
 import { GraphScreen } from "./GraphScreen";
 import { HabitsScreen, NotificationsRouteScreen, TrashRouteScreen } from "./UtilityScreens";
+import { ThingsImportHost } from "../ThingsImport";
 
 // ---------------------------------------------------------------------------
 // The mobile web shell (phone-width browsers / PWA). Same information architecture as
@@ -304,6 +305,7 @@ function MobileNavBridge({
   return (
     <NavContext.Provider value={nav}>
       <MobileReminderBridge />
+      <ThingsImportHost />
       <View style={[styles.root, { paddingTop: topInset }]}>
         <SyncHealthBanner onOpenSettings={() => nav.goView("settings")} />
         <View style={styles.content}>{children}</View>

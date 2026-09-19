@@ -55,6 +55,18 @@ export { notesApi } from "./notes";
 export type { NotesApi, CreateNoteInput, UpdateNoteInput, NoteConflict, NoteConflictAction } from "./notes";
 export { tasksApi } from "./tasks";
 export type { TasksApi, CreateTaskInput, UpdateTaskInput } from "./tasks";
+export { importsApi } from "./imports";
+export type {
+  ImportsApi,
+  ImportSource,
+  ImportCounts,
+  ImportProgress,
+  ThingsAreaOutline,
+  ThingsPreview,
+  ThingsProjectOutline,
+  ThingsSelection,
+  ThingsSummary,
+} from "./imports";
 export { calendarApi } from "./calendar";
 export { oauthApi } from "./oauth";
 export type { OAuthApi, OAuthBeginResult, OAuthDone, OAuthProviderId, OAuthPurpose } from "./oauth";
