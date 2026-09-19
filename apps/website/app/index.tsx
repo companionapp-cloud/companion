@@ -3,6 +3,7 @@ import { usePostHog } from "posthog-js/react";
 import { DocsIndex } from "../src/components/DocsIndex";
 import { FeatureShowcase } from "../src/components/FeatureShowcase";
 import { NavButtons } from "../src/components/NavButtons";
+import { ProjectShowcase } from "../src/components/ProjectShowcase";
 import { Seo } from "../src/components/Seo";
 import { SiteFooter } from "../src/components/SiteFooter";
 import { SiteHeader } from "../src/components/SiteHeader";
@@ -130,6 +131,26 @@ export default function Landing() {
           </p>
 
           <FeatureShowcase />
+        </div>
+      </section>
+
+      {/* projects */}
+      <section
+        id="projects"
+        style={{ position: "relative", background: "#fbfaf9", borderTop: "1px solid #e0e0dc", padding: "96px 24px 104px" }}
+      >
+        <div style={{ maxWidth: 1040, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <div className="eyebrow" style={{ marginBottom: 18 }}>
+            PROJECTS
+          </div>
+          <h2 className="section-title" style={{ margin: 0, maxWidth: "20ch" }}>
+            Projects keep you on track and on time
+          </h2>
+          <p style={{ ...sectionSub, textWrap: "balance" }}>
+            Organize the areas of your life into projects, keeping your calm workspace neat and tidy.
+          </p>
+
+          <ProjectShowcase />
         </div>
       </section>
 

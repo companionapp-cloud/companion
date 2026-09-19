@@ -4,19 +4,22 @@ import { BrandMark, Icon, type IconName } from "../ds";
 // In-browser product mockups shown inside the landing page's "safari window". Each one is
 // the web app's desktop layout drawn at 1:1 — the 44px icon rail, the tab toolbar, the inset
 // panel and the mono status strip — with each feature's screen rebuilt from the real
-// components (packages/app: ChatScreen, NoteEditor, TaskEditor, GraphView). The window is
-// laid out at a fixed 978×480 and scaled down as a whole on narrower screens, so it always
-// reads like a screenshot of the app rather than a reflowed approximation.
+// components (packages/app: ChatScreen, NoteEditor, TaskEditor, CanvasView, CalendarScreen,
+// GraphView). The window is laid out at a fixed 978×480 and scaled down as a whole on
+// narrower screens, so it always reads like a screenshot of the app rather than a reflowed
+// approximation. The pieces are exported for ProjectMockups, which crops the project view
+// out of the same kit.
 
-export type FeatureKey = "chat" | "notes" | "tasks" | "habits" | "graph";
+export type FeatureKey = "chat" | "notes" | "tasks" | "canvases" | "calendar" | "habits" | "graph";
 
 // The app's dense-redesign values (packages/design-system: palette.ts, tokens.ts). The site's
 // own ds snapshot is deliberately airier, so the mockups carry the app's numbers instead.
-const C = {
+export const C = {
   textPrimary: "#1a1a18",
   textSecondary: "#595954",
   textTertiary: "#7b7b75",
   textQuaternary: "#a7a7a1",
+  textInverse: "#ffffff",
   textAccent: "#e04e02",
   surfaceApp: "#f5f5f3",
   surfaceCard: "#ffffff",
@@ -33,32 +36,34 @@ const C = {
   success: "#2e9e5b",
   warning: "#d68a0c",
   info: "#3b74d6",
+  infoSoft: "#eaf1fb",
+  infoActive: "#2b579e",
   avatar: "#3e3e3a",
   meeting: "#6e56cf",
 };
-const SANS = "'Geist', ui-sans-serif, system-ui, sans-serif";
-const MONO = "'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace";
+export const SANS = "'Geist', ui-sans-serif, system-ui, sans-serif";
+export const MONO = "'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace";
 
 const W = 978;
 const H = 480;
 
-const mono = (color = C.textQuaternary, size = 11): CSSProperties => ({
+export const mono = (color = C.textQuaternary, size = 11): CSSProperties => ({
   fontFamily: MONO,
   fontSize: size,
   lineHeight: `${Math.round(size * 1.35)}px`,
   color,
   whiteSpace: "nowrap",
 });
-const eyebrow: CSSProperties = { ...mono(C.textQuaternary, 10), fontWeight: 600, letterSpacing: 1.2, textTransform: "uppercase" };
-const ellipsis: CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
-const hairline = `1px solid ${C.borderSubtle}`;
-const displayTitle: CSSProperties = { fontSize: 30, fontWeight: 600, letterSpacing: "-0.75px", lineHeight: "34px", color: C.textPrimary };
+export const eyebrow: CSSProperties = { ...mono(C.textQuaternary, 10), fontWeight: 600, letterSpacing: 1.2, textTransform: "uppercase" };
+export const ellipsis: CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+export const hairline = `1px solid ${C.borderSubtle}`;
+export const displayTitle: CSSProperties = { fontSize: 30, fontWeight: 600, letterSpacing: "-0.75px", lineHeight: "34px", color: C.textPrimary };
 
-function Glyph({ name, size = 14, color = C.textSecondary, strokeWidth = 1.5 }: { name: IconName; size?: number; color?: string; strokeWidth?: number }) {
+export function Glyph({ name, size = 14, color = C.textSecondary, strokeWidth = 1.5 }: { name: IconName; size?: number; color?: string; strokeWidth?: number }) {
   return <Icon name={name} size={size} color={color} strokeWidth={strokeWidth} />;
 }
 
-function IconBtn({ children, active }: { children: ReactNode; active?: boolean }) {
+export function IconBtn({ children, active }: { children: ReactNode; active?: boolean }) {
   return (
     <span
       style={{
@@ -77,7 +82,7 @@ function IconBtn({ children, active }: { children: ReactNode; active?: boolean }
   );
 }
 
-function Badge({ label, accent }: { label: string; accent?: boolean }) {
+export function Badge({ label, accent }: { label: string; accent?: boolean }) {
   return (
     <span
       style={{
@@ -98,14 +103,14 @@ function Badge({ label, accent }: { label: string; accent?: boolean }) {
   );
 }
 
-const Spacer = () => <span style={{ flex: 1 }} />;
-const VDivider = ({ height = 10 }: { height?: number }) => <span style={{ width: 1, height, flexShrink: 0, background: C.borderSubtle }} />;
+export const Spacer = () => <span style={{ flex: 1 }} />;
+export const VDivider = ({ height = 10 }: { height?: number }) => <span style={{ width: 1, height, flexShrink: 0, background: C.borderSubtle }} />;
 
 // ---------------------------------------------------------------------------
 // Shell: rail · tab toolbar · inset panel · status strip (AppShell + Frame).
 // ---------------------------------------------------------------------------
 
-const RAIL: { id: FeatureKey | "today" | "calendar" | "canvases"; icon: IconName }[] = [
+const RAIL: { id: FeatureKey | "today"; icon: IconName }[] = [
   { id: "today", icon: "today" },
   { id: "chat", icon: "chat" },
   { id: "calendar", icon: "calendar" },
@@ -256,12 +261,30 @@ function StatusBar({ tabCount }: { tabCount: number }) {
 // Shared pieces: list column, dense rows, document header, inline chips.
 // ---------------------------------------------------------------------------
 
-function ListPane({ title, count, plus = true, input, children }: { title: string; count: string; plus?: boolean; input?: ReactNode; children: ReactNode }) {
+/** A browse column. `menu` marks a title that is a filter dropdown (All notes ▾) rather than a
+ *  plain label (a project's Notes column). */
+export function ListPane({
+  title,
+  count,
+  plus = true,
+  menu = true,
+  width = 260,
+  input,
+  children,
+}: {
+  title: string;
+  count: string;
+  plus?: boolean;
+  menu?: boolean;
+  width?: number;
+  input?: ReactNode;
+  children: ReactNode;
+}) {
   return (
-    <div style={{ width: 260, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: hairline }}>
+    <div style={{ width, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: hairline }}>
       <div style={{ height: 32, flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "0 6px 0 10px" }}>
         <span style={{ fontSize: 13, fontWeight: 500, color: C.textPrimary }}>{title}</span>
-        <Glyph name="chevronDown" size={10} color={C.textTertiary} />
+        {menu ? <Glyph name="chevronDown" size={10} color={C.textTertiary} /> : null}
         <Spacer />
         <span style={mono()}>{count}</span>
         {plus ? (
@@ -276,7 +299,7 @@ function ListPane({ title, count, plus = true, input, children }: { title: strin
   );
 }
 
-function FieldInput({ icon, placeholder }: { icon: IconName; placeholder: string }) {
+export function FieldInput({ icon, placeholder }: { icon: IconName; placeholder: string }) {
   return (
     <div
       style={{
@@ -296,7 +319,25 @@ function FieldInput({ icon, placeholder }: { icon: IconName; placeholder: string
   );
 }
 
-function Row({ lead, title, meta, metaColor, selected }: { lead: ReactNode; title: string; meta?: string; metaColor?: string; selected?: boolean }) {
+/** A dense 24px row. `done` is a completed task's title: struck through in quaternary ink;
+ *  `dragging` is the lifted row mid-reorder. */
+export function Row({
+  lead,
+  title,
+  meta,
+  metaColor,
+  selected,
+  done,
+  dragging,
+}: {
+  lead: ReactNode;
+  title: string;
+  meta?: string;
+  metaColor?: string;
+  selected?: boolean;
+  done?: boolean;
+  dragging?: boolean;
+}) {
   return (
     <div
       style={{
@@ -307,21 +348,46 @@ function Row({ lead, title, meta, metaColor, selected }: { lead: ReactNode; titl
         gap: 6,
         padding: "0 4px 0 6px",
         borderRadius: 3,
-        background: selected ? C.surfaceSelected : "transparent",
+        background: selected ? C.surfaceSelected : dragging ? C.surfaceActive : "transparent",
       }}
     >
       {lead}
-      <span style={{ ...ellipsis, flex: 1, fontSize: 13, fontWeight: 500, color: selected ? C.textAccent : C.textPrimary }}>{title}</span>
+      <span
+        style={{
+          ...ellipsis,
+          flex: 1,
+          fontSize: 13,
+          fontWeight: 500,
+          color: done ? C.textQuaternary : selected ? C.textAccent : C.textPrimary,
+          textDecoration: done ? "line-through" : undefined,
+        }}
+      >
+        {title}
+      </span>
       {meta ? <span style={mono(metaColor)}>{meta}</span> : null}
     </div>
   );
 }
 
-const Checkbox = ({ size = 12, border = 1 }: { size?: number; border?: number }) => (
-  <span style={{ width: size, height: size, flexShrink: 0, borderRadius: size > 14 ? 3 : 2, border: `${border}px solid ${C.borderStrong}`, background: C.surfaceCard }} />
+export const Checkbox = ({ size = 12, border = 1, checked }: { size?: number; border?: number; checked?: boolean }) => (
+  <span
+    style={{
+      width: size,
+      height: size,
+      flexShrink: 0,
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: size > 14 ? 3 : 2,
+      border: `${border}px solid ${checked ? C.accent : C.borderStrong}`,
+      background: checked ? C.accent : C.surfaceCard,
+    }}
+  >
+    {checked ? <Glyph name="check" size={Math.round(size * 0.72)} strokeWidth={2.5} color={C.onAccent} /> : null}
+  </span>
 );
 
-function DocHeader({ badge, meta }: { badge: string; meta: string }) {
+export function DocHeader({ badge, meta }: { badge: string; meta: string }) {
   return (
     <div style={{ height: 28, flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "0 6px 0 10px", borderBottom: hairline }}>
       <Badge label={badge} accent />
@@ -367,7 +433,7 @@ function TaskChip({ title, due, remind }: { title: string; due?: string; remind?
 }
 
 /** A `[[note:…]]` reference in prose. */
-function NoteChip({ title }: { title: string }) {
+export function NoteChip({ title }: { title: string }) {
   return (
     <span style={chipBox}>
       <Glyph name="link" size={11} color={C.textQuaternary} />
@@ -377,7 +443,7 @@ function NoteChip({ title }: { title: string }) {
 }
 
 /** A field chip in a document's meta row (due date, reminder, cadence). */
-function FieldChip({ icon, label, clear, sans, outline }: { icon?: IconName; label: string; clear?: boolean; sans?: boolean; outline?: boolean }) {
+export function FieldChip({ icon, label, clear, sans, outline }: { icon?: IconName; label: string; clear?: boolean; sans?: boolean; outline?: boolean }) {
   return (
     <span
       style={{
@@ -399,7 +465,7 @@ function FieldChip({ icon, label, clear, sans, outline }: { icon?: IconName; lab
   );
 }
 
-const prose: CSSProperties = { fontSize: 14, lineHeight: "24px", color: C.textPrimary, margin: 0 };
+export const prose: CSSProperties = { fontSize: 14, lineHeight: "24px", color: C.textPrimary, margin: 0 };
 
 // ---------------------------------------------------------------------------
 // Chat — chat list column + a thread: a turn from Claude Code, hosted on the desktop.
@@ -690,6 +756,605 @@ function TasksScreen() {
 }
 
 // ---------------------------------------------------------------------------
+// Canvases — the boards list beside an open board (CanvasesScreen, CanvasPane, CanvasView):
+// the name row, the 28px tool strip, the board on its 16px dotted grid, and the mono status
+// strip. Cards, stickies, groups and arrows carry CanvasView's numbers: 4px cards with a 2px
+// bar in their kind's colour, stickies washed at 18% inside a full-strength border, groups
+// washed at 7% behind the cards with a mono label notched into the top edge, and 1.25px
+// curved edges that end in a filled arrowhead.
+// ---------------------------------------------------------------------------
+
+export type Side = "top" | "right" | "bottom" | "left";
+type Box = { id: string; x: number; y: number; w: number; h: number };
+export type BoardNode = Box &
+  (
+    | { kind: "group"; label: string; color?: string }
+    | { kind: "sticky"; text: string; color?: string }
+    | { kind: "note"; title: string; excerpt: string }
+    | { kind: "task"; title: string; meta: string; done?: boolean }
+    | { kind: "event"; title: string; meta: string }
+  );
+export type BoardEdge = { from: string; fromSide: Side; to: string; toSide: Side; label?: string };
+
+/** A swatch at the given alpha (CanvasView's `wash`). */
+function wash(hex: string, alpha: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
+const boardCard: CSSProperties = {
+  position: "absolute",
+  display: "flex",
+  flexDirection: "column",
+  gap: 2,
+  padding: "4px 7px",
+  overflow: "hidden",
+  borderRadius: 4,
+  border: hairline,
+  background: C.surfaceCard,
+  fontSize: 13,
+  lineHeight: "18px",
+  color: C.textPrimary,
+};
+const cardHead: CSSProperties = { display: "flex", alignItems: "center", gap: 5, minWidth: 0, flexShrink: 0 };
+const cardTitle: CSSProperties = { ...ellipsis, flex: 1, fontSize: 13, fontWeight: 500 };
+const cardMeta: CSSProperties = { ...mono(), ...ellipsis, lineHeight: "14px", flexShrink: 0 };
+const cardBody: CSSProperties = { fontSize: 12, lineHeight: "16px", color: C.textSecondary, overflow: "hidden" };
+// The colours the graph gives these entities, as the cards' left bars.
+const KIND_BAR = { note: C.success, task: C.info, event: C.textPrimary };
+
+function BoardCard({ node }: { node: BoardNode }) {
+  const box = { left: node.x, top: node.y, width: node.w, height: node.h };
+  switch (node.kind) {
+    case "group": {
+      const color = node.color ?? "#64748b";
+      return (
+        <div style={{ position: "absolute", ...box, borderRadius: 6, border: `1px solid ${wash(color, 0.45)}`, background: wash(color, 0.07) }}>
+          <span style={{ ...mono(C.textTertiary), position: "absolute", top: -1, left: 8, transform: "translateY(-50%)", padding: "0 4px", background: C.surfaceCard }}>
+            {node.label}
+          </span>
+        </div>
+      );
+    }
+    case "sticky": {
+      const color = node.color ?? "#eab308";
+      const tint = wash(color, 0.18);
+      return (
+        <div
+          style={{
+            ...boardCard,
+            ...box,
+            display: "block",
+            padding: "4px 6px",
+            border: `1px solid ${color}`,
+            background: `linear-gradient(${tint}, ${tint}), ${C.surfaceCard}`,
+            fontSize: 12,
+            lineHeight: "16px",
+          }}
+        >
+          {node.text}
+        </div>
+      );
+    }
+    case "note":
+      return (
+        <div style={{ ...boardCard, ...box, borderLeft: `2px solid ${KIND_BAR.note}` }}>
+          <div style={cardHead}>
+            <Glyph name="file" size={11} color={C.textQuaternary} />
+            <span style={cardTitle}>{node.title}</span>
+          </div>
+          <div style={cardMeta}>note</div>
+          <div style={{ ...cardBody, flex: 1, minHeight: 0 }}>{node.excerpt}</div>
+        </div>
+      );
+    case "task":
+      return (
+        <div style={{ ...boardCard, ...box, flexDirection: "row", alignItems: "flex-start", gap: 6, borderLeft: `2px solid ${KIND_BAR.task}` }}>
+          <span style={{ display: "flex", marginTop: 3 }}>
+            <Checkbox checked={node.done} />
+          </span>
+          <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+            <span style={{ ...cardTitle, flex: "none", color: node.done ? C.textTertiary : C.textPrimary, textDecoration: node.done ? "line-through" : undefined }}>
+              {node.title}
+            </span>
+            <span style={cardMeta}>{node.meta}</span>
+          </div>
+        </div>
+      );
+    case "event":
+      return (
+        <div style={{ ...boardCard, ...box, borderLeft: `2px solid ${KIND_BAR.event}` }}>
+          <div style={cardHead}>
+            <Glyph name="calendar" size={11} color={C.textQuaternary} />
+            <span style={cardTitle}>{node.title}</span>
+          </div>
+          <div style={cardMeta}>{node.meta}</div>
+        </div>
+      );
+  }
+}
+
+const OUTWARD: Record<Side, [number, number]> = { top: [0, -1], right: [1, 0], bottom: [0, 1], left: [-1, 0] };
+
+/** Where an edge meets a card: the middle of that side, where its handle sits. */
+function anchor(n: Box, side: Side): [number, number] {
+  if (side === "top") return [n.x + n.w / 2, n.y];
+  if (side === "bottom") return [n.x + n.w / 2, n.y + n.h];
+  if (side === "left") return [n.x, n.y + n.h / 2];
+  return [n.x + n.w, n.y + n.h / 2];
+}
+
+/** React Flow's bezier control point for a handle on `side` (getBezierPath, curvature 0.3). */
+function control(side: Side, [x1, y1]: [number, number], [x2, y2]: [number, number]): [number, number] {
+  const offset = (d: number) => (d >= 0 ? 0.5 * d : 0.3 * 25 * Math.sqrt(-d));
+  if (side === "left") return [x1 - offset(x1 - x2), y1];
+  if (side === "right") return [x1 + offset(x2 - x1), y1];
+  if (side === "top") return [x1, y1 - offset(y1 - y2)];
+  return [x1, y1 + offset(y2 - y1)];
+}
+
+function edgeGeometry(edge: BoardEdge, byId: Record<string, Box>) {
+  const s = anchor(byId[edge.from], edge.fromSide);
+  const tip = anchor(byId[edge.to], edge.toSide);
+  const [ox, oy] = OUTWARD[edge.toSide];
+  // The line stops 7px short of the target, so the filled arrowhead covers the join.
+  const t: [number, number] = [tip[0] + ox * 7, tip[1] + oy * 7];
+  const c1 = control(edge.fromSide, s, t);
+  const c2 = control(edge.toSide, t, s);
+  // The label rides the curve's midpoint.
+  const mid = (i: 0 | 1) => s[i] * 0.125 + c1[i] * 0.375 + c2[i] * 0.375 + t[i] * 0.125;
+  return {
+    d: `M${s[0]},${s[1]} C${c1[0]},${c1[1]} ${c2[0]},${c2[1]} ${t[0]},${t[1]}`,
+    tip,
+    angle: (Math.atan2(-oy, -ox) * 180) / Math.PI,
+    label: [mid(0), mid(1)],
+  };
+}
+
+/** A board at 1:1: groups behind, edges under the cards, edge labels on top. */
+export function CanvasBoard({ nodes, edges }: { nodes: BoardNode[]; edges: BoardEdge[] }) {
+  const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
+  const lines = edges.map((edge) => ({ edge, key: `${edge.from}-${edge.to}`, ...edgeGeometry(edge, byId) }));
+  return (
+    <div
+      style={{
+        position: "relative",
+        flex: 1,
+        minHeight: 0,
+        overflow: "hidden",
+        backgroundImage: `radial-gradient(circle, ${C.borderDefault} 1px, transparent 1.2px)`,
+        backgroundSize: "16px 16px",
+      }}
+    >
+      {nodes
+        .filter((n) => n.kind === "group")
+        .map((n) => (
+          <BoardCard key={n.id} node={n} />
+        ))}
+      <svg style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", overflow: "visible" }}>
+        {lines.map((l) => (
+          <g key={l.key}>
+            <path d={l.d} fill="none" stroke={C.borderStrong} strokeWidth={1.25} strokeLinecap="round" />
+            <path
+              d="M 0 0 L -8 -4 L -6 0 L -8 4 Z"
+              transform={`translate(${l.tip[0]} ${l.tip[1]}) rotate(${l.angle})`}
+              fill={C.borderStrong}
+              stroke={C.borderStrong}
+              strokeWidth={1}
+              strokeLinejoin="round"
+            />
+          </g>
+        ))}
+      </svg>
+      {nodes
+        .filter((n) => n.kind !== "group")
+        .map((n) => (
+          <BoardCard key={n.id} node={n} />
+        ))}
+      {lines.map((l) =>
+        l.edge.label ? (
+          <span
+            key={l.key}
+            style={{
+              position: "absolute",
+              left: l.label[0],
+              top: l.label[1],
+              transform: "translate(-50%, -50%)",
+              padding: "0 5px",
+              borderRadius: 3,
+              border: hairline,
+              background: C.surfaceCard,
+              fontSize: 11,
+              lineHeight: "14px",
+              color: C.textSecondary,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {l.edge.label}
+          </span>
+        ) : null,
+      )}
+    </div>
+  );
+}
+
+/** A board's name row: its name edited in place, then projects and delete. */
+export function CanvasPaneHeader({ name }: { name: string }) {
+  return (
+    <div style={{ height: 28, flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "0 6px 0 10px", borderBottom: hairline }}>
+      <Glyph name="canvas" size={12} color={C.textQuaternary} />
+      <span style={{ ...ellipsis, flex: 1, fontSize: 13, fontWeight: 600, color: C.textPrimary }}>{name}</span>
+      <IconBtn>
+        <Glyph name="folder" size={13} />
+      </IconBtn>
+      <IconBtn>
+        <Glyph name="trash" size={13} />
+      </IconBtn>
+    </div>
+  );
+}
+
+const ToolDivider = () => <span style={{ width: 1, height: 14, flexShrink: 0, margin: "0 4px", background: C.borderSubtle }} />;
+const monoButton: CSSProperties = { ...mono(C.textSecondary, 12), width: 22, flexShrink: 0, textAlign: "center" };
+// The strip's quick swatches: amber, teal, violet, indigo, slate.
+const QUICK_SWATCHES = ["#f59e0b", "#14b8a6", "#8b5cf6", "#6366f1", "#64748b"];
+
+/** The board's tool strip with nothing selected, so connect, redo and the swatches rest
+ *  disabled. */
+export function CanvasToolStrip() {
+  const add: IconName[] = ["sticky", "group", "file", "tasks", "calendar", "image", "link"];
+  const off: CSSProperties = { display: "flex", opacity: 0.35 };
+  return (
+    <div style={{ height: 28, flexShrink: 0, display: "flex", alignItems: "center", gap: 2, padding: "0 6px", borderBottom: hairline }}>
+      {add.map((name) => (
+        <IconBtn key={name}>
+          <Glyph name={name} size={13} />
+        </IconBtn>
+      ))}
+      <span style={off}>
+        <IconBtn>
+          <Glyph name="arrow" size={13} />
+        </IconBtn>
+      </span>
+      <ToolDivider />
+      <IconBtn>
+        <Glyph name="undo" size={13} />
+      </IconBtn>
+      <span style={off}>
+        <IconBtn>
+          <Glyph name="redo" size={13} />
+        </IconBtn>
+      </span>
+      <ToolDivider />
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "0 2px", opacity: 0.4 }}>
+        {QUICK_SWATCHES.map((c) => (
+          <span key={c} style={{ width: 11, height: 11, flexShrink: 0, borderRadius: 2, background: c }} />
+        ))}
+      </span>
+      <Spacer />
+      <span style={monoButton}>−</span>
+      <span style={{ ...mono(), width: 34, flexShrink: 0, textAlign: "center" }}>100%</span>
+      <span style={monoButton}>+</span>
+      <IconBtn>
+        <Glyph name="fit" size={13} />
+      </IconBtn>
+      <ToolDivider />
+      <IconBtn>
+        <Glyph name="search" size={13} />
+      </IconBtn>
+      <span style={monoButton}>?</span>
+    </div>
+  );
+}
+
+function CanvasStatus({ nodes, edges }: { nodes: number; edges: number }) {
+  return (
+    <div style={{ height: 22, flexShrink: 0, display: "flex", alignItems: "center", gap: 8, padding: "0 10px", borderTop: hairline, background: C.surfaceApp }}>
+      <span style={{ ...mono(), ...ellipsis }}>double-click the board for a sticky · drag from a card’s edge to connect</span>
+      <Spacer />
+      <span style={{ ...mono(), flexShrink: 0 }}>
+        {nodes} nodes · {edges} edges
+      </span>
+    </div>
+  );
+}
+
+const CANVASES = [
+  { title: "Launch map", when: "2m ago" },
+  { title: "Pricing page flow", when: "yesterday" },
+  { title: "Offsite brainstorm", when: "4d ago" },
+];
+
+// Board space: the open board is 687×330 in this window.
+const LAUNCH_MAP: BoardNode[] = [
+  { id: "before", kind: "group", label: "Before launch", x: 268, y: 26, w: 232, h: 128 },
+  {
+    id: "positioning",
+    kind: "note",
+    title: "Pricing page positioning",
+    excerpt: "Lead with self-hosting. The annual toggle defaults to yearly.",
+    x: 24,
+    y: 40,
+    w: 200,
+    h: 88,
+  },
+  { id: "review", kind: "task", title: "Review pricing page copy", meta: "task · due sep 19", x: 282, y: 44, w: 204, h: 42 },
+  { id: "draft", kind: "task", title: "Draft the launch announcement", meta: "task · due sep 18", x: 282, y: 96, w: 204, h: 42 },
+  { id: "launch", kind: "event", title: "Launch day", meta: "event · thu, sep 24 · all day", x: 448, y: 214, w: 216, h: 44 },
+  { id: "faq", kind: "sticky", text: "Ship the FAQ before the pricing page?", color: "#f59e0b", x: 24, y: 176, w: 176, h: 52 },
+  { id: "changelog", kind: "sticky", text: "Changelog first, then the newsletter.", color: "#8b5cf6", x: 540, y: 40, w: 124, h: 70 },
+];
+const LAUNCH_EDGES: BoardEdge[] = [
+  { from: "positioning", fromSide: "right", to: "review", toSide: "left" },
+  { from: "draft", fromSide: "right", to: "launch", toSide: "top", label: "by thu" },
+  { from: "faq", fromSide: "right", to: "launch", toSide: "left" },
+];
+
+function CanvasesScreen() {
+  return (
+    <>
+      <ListPane title="All canvases" count={String(CANVASES.length)} width={220} input={<FieldInput icon="search" placeholder="Search canvases" />}>
+        {CANVASES.map((c, i) => (
+          <Row key={c.title} selected={i === 0} lead={<Glyph name="canvas" size={12} color={i === 0 ? C.textAccent : C.textQuaternary} />} title={c.title} meta={c.when} />
+        ))}
+      </ListPane>
+
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+        <CanvasPaneHeader name="Launch map" />
+        <CanvasToolStrip />
+        <CanvasBoard nodes={LAUNCH_MAP} edges={LAUNCH_EDGES} />
+        <CanvasStatus nodes={LAUNCH_MAP.length} edges={LAUNCH_EDGES.length} />
+      </div>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Calendar — the week grid (CalendarScreen): the month toolbar and its legend, the day
+// header, the all-day band, and 34px hour rows scrolled to the working day. Events are ink
+// blocks barred in their calendar's colour, a task sits on its due time in blue, and a dated
+// note is a green-barred chip in the all-day band. Today's column is tinted, with the now
+// line across it.
+// ---------------------------------------------------------------------------
+
+export type CalKind = "event" | "task" | "note";
+/** One item in the week. `day` indexes the week (0 is Sunday) and times are minutes since
+ *  midnight; an item without a start sits in the all-day band. */
+export type CalItem = { day: number; kind: CalKind; title: string; start?: number; end?: number; color?: string };
+export type WeekDay = { name: string; date: number };
+
+const ROW_H = 34;
+const GUTTER = 40;
+const DAY_HOURS = Array.from({ length: 24 }, (_, h) => h);
+const CAL_KIND: Record<CalKind, { bg: string; fg: string; bar: string }> = {
+  event: { bg: C.textPrimary, fg: C.textInverse, bar: C.textTertiary },
+  task: { bg: C.infoSoft, fg: C.infoActive, bar: C.info },
+  note: { bg: C.surfaceApp, fg: C.textSecondary, bar: C.success },
+};
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+const hourLabel = (h: number) => (h === 0 ? "12a" : h < 12 ? `${h}a` : h === 12 ? "12p" : `${h - 12}p`);
+
+function CalendarToolbar({ month, week }: { month: string; week: string }) {
+  const legend: [string, string][] = [
+    ["events", C.textPrimary],
+    ["tasks", C.info],
+    ["notes", C.success],
+  ];
+  return (
+    <div style={{ height: 32, flexShrink: 0, display: "flex", alignItems: "center", gap: 8, padding: "0 10px", borderBottom: hairline }}>
+      <Glyph name="calendar" size={14} />
+      <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: "-0.18px", lineHeight: "20px", color: C.textPrimary, whiteSpace: "nowrap" }}>{month}</span>
+      <span style={{ display: "flex", gap: 1 }}>
+        <IconBtn>
+          <Glyph name="chevronLeft" size={14} />
+        </IconBtn>
+        <IconBtn>
+          <Glyph name="chevronRight" size={14} />
+        </IconBtn>
+      </span>
+      <span style={mono()}>{week}</span>
+      <VDivider height={14} />
+      <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {legend.map(([label, color]) => (
+          <span key={label} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <span style={{ width: 7, height: 7, borderRadius: 3, background: color }} />
+            <span style={mono(C.textTertiary)}>{label}</span>
+          </span>
+        ))}
+      </span>
+      <Spacer />
+      <IconBtn>
+        <Glyph name="refresh" size={13} />
+      </IconBtn>
+      <span style={{ height: 22, flexShrink: 0, display: "inline-flex", alignItems: "center", padding: "0 8px", borderRadius: 4, background: C.surfaceSunken, fontSize: 12, fontWeight: 500, color: C.textPrimary }}>
+        Today
+      </span>
+      <IconBtn>
+        <Glyph name="plus" size={14} />
+      </IconBtn>
+    </div>
+  );
+}
+
+/** A timed item in its day column. Short blocks run the title and time on one line. */
+function TimedBlock({ item }: { item: CalItem }) {
+  const start = item.start ?? 0;
+  const end = item.end ?? start + 60; // no end reads as an hour, as in the app
+  const height = Math.max(ROW_H / 2, ((end - start) / 60) * ROW_H);
+  const tight = height < 26;
+  const k = CAL_KIND[item.kind];
+  return (
+    <div style={{ position: "absolute", left: 0, right: 0, top: (start / 60) * ROW_H + 1, height: height - 2, padding: "0 2px" }}>
+      <div
+        style={{
+          height: "100%",
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: tight ? "row" : "column",
+          alignItems: tight ? "center" : "stretch",
+          gap: tight ? 4 : 0,
+          padding: tight ? "0 4px" : "2px 4px",
+          borderLeft: `2px solid ${item.color ?? k.bar}`,
+          borderRadius: 3,
+          background: k.bg,
+          color: k.fg,
+        }}
+      >
+        <span style={{ ...ellipsis, flex: tight ? 1 : undefined, fontSize: 12, lineHeight: "16px", fontWeight: 600 }}>{item.title}</span>
+        <span style={{ fontFamily: MONO, fontSize: 9, lineHeight: "12px", opacity: 0.75, flexShrink: 0 }}>
+          {pad2(Math.floor(start / 60))}:{pad2(start % 60)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** The week grid under its toolbar. `scrollTop` is how far the 24-hour grid is scrolled;
+ *  `colWidth` fixes the day columns for a cropped view (they share the width otherwise). */
+export function WeekView({
+  month,
+  week,
+  days,
+  items,
+  scrollTop,
+  today,
+  now,
+  colWidth,
+}: {
+  month: string;
+  week: string;
+  days: WeekDay[];
+  items: CalItem[];
+  scrollTop: number;
+  /** Today's index in `days`, when the week holds it. */
+  today?: number;
+  /** Minutes since midnight, for the now line. */
+  now?: number;
+  colWidth?: number;
+}) {
+  const col: CSSProperties = colWidth ? { width: colWidth, flexShrink: 0 } : { flex: 1, minWidth: 0 };
+  const allDay = items.filter((it) => it.start == null);
+  const timed = items.filter((it) => it.start != null);
+  const tint = (i: number) => (i === today ? C.accentSoft : undefined);
+  return (
+    <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+      <CalendarToolbar month={month} week={week} />
+
+      <div style={{ flexShrink: 0, display: "flex", borderBottom: hairline }}>
+        <span style={{ width: GUTTER, flexShrink: 0 }} />
+        {days.map((d, i) => (
+          <div key={d.date} style={{ ...col, display: "flex", flexDirection: "column", alignItems: "center", gap: 1, padding: "4px 0 5px", borderLeft: hairline }}>
+            <span style={{ ...mono(i === today ? C.textAccent : C.textQuaternary, 10), letterSpacing: 0.66, textTransform: "uppercase" }}>{d.name}</span>
+            <span
+              style={{
+                minWidth: 20,
+                height: 20,
+                padding: "0 4px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: 999,
+                background: i === today ? C.accent : "transparent",
+                fontSize: 13,
+                fontWeight: 500,
+                color: i === today ? C.onAccent : C.textPrimary,
+              }}
+            >
+              {d.date}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {allDay.length ? (
+        <div style={{ flexShrink: 0, display: "flex", borderBottom: hairline }}>
+          <div style={{ width: GUTTER, flexShrink: 0, display: "flex", justifyContent: "flex-end", padding: "7px 2px 0 0" }}>
+            <span style={mono(C.textQuaternary, 9)}>all-day</span>
+          </div>
+          {days.map((d, i) => (
+            <div key={d.date} style={{ ...col, minHeight: 26, display: "flex", flexDirection: "column", gap: 2, padding: "4px 3px", borderLeft: hairline, background: tint(i) }}>
+              {allDay
+                .filter((it) => it.day === i)
+                .map((it) => (
+                  <span
+                    key={it.title}
+                    style={{ height: 18, display: "flex", alignItems: "center", padding: "0 5px", borderLeft: `2px solid ${it.color ?? CAL_KIND[it.kind].bar}`, borderRadius: 3, background: C.surfaceApp }}
+                  >
+                    <span style={{ ...ellipsis, fontSize: 12, fontWeight: 500, color: C.textSecondary }}>{it.title}</span>
+                  </span>
+                ))}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div style={{ flex: 1, minHeight: 0, position: "relative", overflow: "hidden" }}>
+        <div style={{ position: "absolute", top: -scrollTop, left: 0, right: colWidth ? undefined : 0, display: "flex" }}>
+          <div style={{ width: GUTTER, flexShrink: 0 }}>
+            {DAY_HOURS.map((h) => (
+              <div key={h} style={{ height: ROW_H }}>
+                <div style={{ ...mono(C.textQuaternary, 10), position: "relative", top: -5, paddingRight: 6, textAlign: "right" }}>{hourLabel(h)}</div>
+              </div>
+            ))}
+          </div>
+          {days.map((d, i) => (
+            <div key={d.date} style={{ ...col, position: "relative", borderLeft: hairline, background: tint(i) }}>
+              {DAY_HOURS.map((h) => (
+                <div key={h} style={{ height: ROW_H, borderBottom: hairline }} />
+              ))}
+              {timed
+                .filter((it) => it.day === i)
+                .map((it) => (
+                  <TimedBlock key={it.title} item={it} />
+                ))}
+              {i === today && now != null ? (
+                <div style={{ position: "absolute", left: 0, right: 0, top: (now / 60) * ROW_H, borderTop: `2px solid ${C.accent}`, zIndex: 5 }}>
+                  <span style={{ position: "absolute", left: -3, top: -4, width: 7, height: 7, borderRadius: "50%", background: C.accent }} />
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const hm = (h: number, m = 0) => h * 60 + m;
+const WORK = "#6366f1";
+const PERSONAL = "#ec4899";
+
+// The launch week: today is Friday the 18th, a little before three.
+const W38: WeekDay[] = [
+  { name: "Sun", date: 13 },
+  { name: "Mon", date: 14 },
+  { name: "Tue", date: 15 },
+  { name: "Wed", date: 16 },
+  { name: "Thu", date: 17 },
+  { name: "Fri", date: 18 },
+  { name: "Sat", date: 19 },
+];
+const LAUNCH_WEEK: CalItem[] = [
+  { day: 1, kind: "event", title: "Sprint 38", color: WORK },
+  { day: 5, kind: "note", title: "September 18, 2026" },
+  { day: 1, kind: "task", title: "Weekly team sync", start: hm(9) },
+  { day: 1, kind: "event", title: "Launch sync", start: hm(10), end: hm(11), color: WORK },
+  { day: 2, kind: "event", title: "Design review", start: hm(14), end: hm(15), color: WORK },
+  { day: 3, kind: "event", title: "1:1 with Priya", start: hm(11), end: hm(11, 30), color: WORK },
+  { day: 3, kind: "event", title: "Dentist", start: hm(16), end: hm(17), color: PERSONAL },
+  { day: 4, kind: "event", title: "Pricing workshop", start: hm(13), end: hm(14, 30), color: WORK },
+  { day: 5, kind: "event", title: "Lunch with Sam", start: hm(12, 30), end: hm(13, 30), color: PERSONAL },
+  { day: 5, kind: "task", title: "Draft the launch announcement", start: hm(16) },
+  { day: 6, kind: "event", title: "Farmers market", start: hm(10), end: hm(11), color: PERSONAL },
+  { day: 6, kind: "task", title: "Review pricing page copy", start: hm(15) },
+];
+
+function CalendarScreen() {
+  return <WeekView month="September 2026" week="w38" days={W38} items={LAUNCH_WEEK} today={5} now={hm(14, 40)} scrollTop={9 * ROW_H - 8} />;
+}
+
+// ---------------------------------------------------------------------------
 // Habits — the app only has a placeholder here so far ("Habits, streaks, and gentle
 // nudges are on the way"), so this is the planned screen drawn in the same dense language:
 // the list/detail split, a check-in, and a streak grid.
@@ -706,15 +1371,16 @@ const WEEKS = 16;
 const TODAY = (WEEKS - 1) * 7 + 4; // Friday of the last week
 const STREAK = 12;
 
-/** A fixed, plausible check-in history: mostly done, the odd miss, a 12-day current run. */
-function checkedIn(i: number): boolean | null {
+/** A fixed, plausible check-in history: mostly done, the odd miss, then the current run of
+ *  `streak` days. `seed` varies the older pattern between habits. */
+function checkedIn(i: number, streak: number, seed: number): boolean | null {
   if (i > TODAY) return null;
-  if (i > TODAY - STREAK) return true;
-  if (i === TODAY - STREAK) return false;
-  return (i * 37 + 11) % 10 < 7;
+  if (i > TODAY - streak) return true;
+  if (i === TODAY - streak) return false;
+  return (i * seed + 11) % 10 < 7;
 }
 
-function RoundCheck({ done, size = 12 }: { done: boolean; size?: number }) {
+export function RoundCheck({ done, size = 12 }: { done: boolean; size?: number }) {
   return (
     <span
       style={{
@@ -734,7 +1400,7 @@ function RoundCheck({ done, size = 12 }: { done: boolean; size?: number }) {
   );
 }
 
-function StreakGrid() {
+export function StreakGrid({ streak = STREAK, seed = 37 }: { streak?: number; seed?: number }) {
   const cell = 12;
   const gap = 3;
   const months: [number, string][] = [
@@ -762,7 +1428,7 @@ function StreakGrid() {
         </div>
         <div style={{ display: "grid", gridTemplateRows: `repeat(7, ${cell}px)`, gridAutoFlow: "column", gridAutoColumns: `${cell}px`, gap }}>
           {Array.from({ length: WEEKS * 7 }, (_, i) => {
-            const state = checkedIn(i);
+            const state = checkedIn(i, streak, seed);
             return (
               <span
                 key={i}
@@ -1000,6 +1666,22 @@ const SCREENS: Record<FeatureKey, { tabs: TabSpec[]; label: string; Screen: () =
     ],
     label: "Companion's task list and editor: a task with a due date, a reminder and linked notes",
     Screen: TasksScreen,
+  },
+  canvases: {
+    tabs: [
+      { icon: "today", label: "Today" },
+      { icon: "canvas", label: "Launch map", active: true },
+    ],
+    label: "Companion's canvases: a launch board where a note, two tasks, an event and sticky notes are grouped and joined by arrows",
+    Screen: CanvasesScreen,
+  },
+  calendar: {
+    tabs: [
+      { icon: "today", label: "Today" },
+      { icon: "calendar", label: "Calendar", active: true },
+    ],
+    label: "Companion's calendar: a week of events from a work and a personal calendar, beside due tasks and a daily note",
+    Screen: CalendarScreen,
   },
   habits: {
     tabs: [

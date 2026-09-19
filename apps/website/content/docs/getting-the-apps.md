@@ -26,7 +26,7 @@ brew install --cask companionapp-cloud/tap/companion
 
 That adds the Companion tap and puts **Companion** in your Applications folder. Open it from Launchpad or Spotlight.
 
-Companion keeps itself up to date. When a new version comes out, it downloads it, installs it and restarts. 
+Companion keeps itself up to date. When a new version comes out, it downloads it, installs it and restarts. If one is waiting when you open Companion, a small window shows its progress, and Companion opens on the new version.
 :::
 ::: tab Windows
 **Coming soon.** There's no Windows build to download yet. Until there is, [use Companion on the web](#use-companion-on-the-web) — it runs in any modern browser.

@@ -522,6 +522,46 @@ a:hover {
   }
 }
 
+/* ---- feature chips on the landing page (FeatureShowcase island) ---- */
+
+.feature-chips {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 36px;
+}
+.feature-chip {
+  padding: 9px 18px;
+  font-size: 14px;
+}
+/* At full size the seven chips wrap to three rows on a phone; a step down keeps them to two. */
+@media (max-width: 440px) {
+  .feature-chips {
+    gap: 8px;
+  }
+  .feature-chip {
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+}
+
+/* ---- project cards on the landing page (ProjectShowcase island) ---- */
+
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  width: 100%;
+  margin-top: 52px;
+}
+@media (max-width: 820px) {
+  .project-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* ---- contact form ---- */
 
 .field {

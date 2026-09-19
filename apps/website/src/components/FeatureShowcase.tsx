@@ -6,16 +6,17 @@ const FEATURES: { key: FeatureKey; label: string }[] = [
   { key: "chat", label: "Ask AI" },
   { key: "notes", label: "Notes" },
   { key: "tasks", label: "Tasks" },
+  { key: "canvases", label: "Canvases" },
+  { key: "calendar", label: "Calendars" },
   { key: "habits", label: "Habits" },
   { key: "graph", label: "Graph" },
 ];
 
+// Size and spacing live in .feature-chips / .feature-chip (global.css), which step down on phones.
 function chipStyle(on: boolean): React.CSSProperties {
   return {
-    padding: "9px 18px",
     borderRadius: 999,
     fontFamily: "'Geist', sans-serif",
-    fontSize: 14,
     fontWeight: 550,
     cursor: "pointer",
     whiteSpace: "nowrap",
@@ -38,18 +39,9 @@ export function FeatureShowcase() {
 
   return (
     <>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          flexWrap: "wrap",
-          justifyContent: "center",
-          marginTop: 36,
-        }}
-      >
+      <div className="feature-chips">
         {FEATURES.map((f) => (
-          <button key={f.key} type="button" onClick={() => handleFeatureClick(f.key)} style={chipStyle(f.key === feature)}>
+          <button key={f.key} type="button" className="feature-chip" onClick={() => handleFeatureClick(f.key)} style={chipStyle(f.key === feature)}>
             {f.label}
           </button>
         ))}
