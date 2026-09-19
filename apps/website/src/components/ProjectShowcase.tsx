@@ -32,7 +32,7 @@ const CARDS: { section: ProjectSection; title: string; body: string }[] = [
   },
   {
     section: "habits",
-    title: "Project habits",
+    title: "Project habits, coming soon",
     body: "Pair a project with the routines that move it forward, and watch the streak grow every time you check in.",
   },
 ];

@@ -8,7 +8,7 @@ const FEATURES: { key: FeatureKey; label: string }[] = [
   { key: "tasks", label: "Tasks" },
   { key: "canvases", label: "Canvases" },
   { key: "calendar", label: "Calendars" },
-  { key: "habits", label: "Habits" },
+  { key: "habits", label: "Habits - Coming soon" },
   { key: "graph", label: "Graph" },
 ];
 
