@@ -266,3 +266,132 @@ func TestRelayEndToEnd(t *testing.T) {
 		}
 	}
 }
+
+// openInbox connects a host's relay inbox and returns its frames.
+func openInbox(t *testing.T, ctx context.Context, base, token, device string) <-chan relayFrame {
+	t.Helper()
+	res, err := http.DefaultClient.Do(authedReq(t, http.MethodGet, base+"/v1/relay/inbox", token, device, nil).WithContext(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { res.Body.Close() })
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("inbox status = %d", res.StatusCode)
+	}
+	frames := make(chan relayFrame, 8)
+	go sseFrames(bufio.NewScanner(res.Body), frames)
+	time.Sleep(50 * time.Millisecond)
+	return frames
+}
+
+// postRelayRequest sends a caller's request, waits for the host to receive it, and returns its id.
+func postRelayRequest(t *testing.T, base, token string, inbox <-chan relayFrame) string {
+	t.Helper()
+	res, err := http.DefaultClient.Do(authedReq(t, http.MethodPost, base+"/v1/relay/request", token, "caller", map[string]any{
+		"toDeviceId": "host", "method": "agents.models", "payload": "sealed",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ack struct {
+		RequestID string `json:"requestId"`
+	}
+	json.NewDecoder(res.Body).Decode(&ack)
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK || ack.RequestID == "" {
+		t.Fatalf("request status = %d ack=%+v", res.StatusCode, ack)
+	}
+	select {
+	case <-inbox:
+	case <-time.After(3 * time.Second):
+		t.Fatal("host never received the request frame")
+	}
+	return ack.RequestID
+}
+
+// A host may answer before the caller has opened its response stream: agents.models on a CLI
+// agent is a canned list, so the host's POST routinely beats the caller's GET. The answer waits
+// for the caller instead of vanishing with the request (which the caller saw as a 404).
+func TestRelayHoldsAnAnswerThatBeatsTheCallersStream(t *testing.T) {
+	ts := newServer(t)
+	tok := register(t, ts.URL, "fast@x.co", "password")
+	registerDevice(t, ts.URL, tok, "host", "Host", true)
+	registerDevice(t, ts.URL, tok, "caller", "Caller", false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inbox := openInbox(t, ctx, ts.URL, tok, "host")
+	id := postRelayRequest(t, ts.URL, tok, inbox)
+
+	// The host answers before the caller asks for the response.
+	res, _ := http.DefaultClient.Do(authedReq(t, http.MethodPost, ts.URL+"/v1/relay/response/"+id, tok, "host", map[string]any{
+		"frames": []map[string]any{{"type": "done", "payload": "models"}},
+	}))
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("host response status = %d", res.StatusCode)
+	}
+	// The request is finished: the host can't add to it and the caller can't cancel it.
+	res, _ = http.DefaultClient.Do(authedReq(t, http.MethodPost, ts.URL+"/v1/relay/response/"+id, tok, "host", map[string]any{
+		"frames": []map[string]any{{"type": "delta", "payload": "late"}},
+	}))
+	res.Body.Close()
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("late post status = %d, want 404", res.StatusCode)
+	}
+
+	respRes, err := http.DefaultClient.Do(authedReq(t, http.MethodGet, ts.URL+"/v1/relay/response/"+id, tok, "caller", nil).WithContext(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respRes.Body.Close()
+	if respRes.StatusCode != http.StatusOK {
+		t.Fatalf("response stream status = %d, want 200", respRes.StatusCode)
+	}
+	frames := make(chan relayFrame, 8)
+	go sseFrames(bufio.NewScanner(respRes.Body), frames)
+	select {
+	case f := <-frames:
+		if f.Type != relayFrameDone || f.Payload != "models" {
+			t.Fatalf("frame = %+v, want the host's done frame", f)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("caller never got the host's answer")
+	}
+
+	// Collected: a second stream for the same request finds nothing.
+	res, _ = http.DefaultClient.Do(authedReq(t, http.MethodGet, ts.URL+"/v1/relay/response/"+id, tok, "caller", nil))
+	res.Body.Close()
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("second stream status = %d, want 404", res.StatusCode)
+	}
+}
+
+// A request whose caller never opens its response stream is forgotten after a while rather
+// than held forever.
+func TestRelayForgetsAnUnclaimedRequest(t *testing.T) {
+	defer func(d time.Duration) { relayUnclaimedTTL = d }(relayUnclaimedTTL)
+	relayUnclaimedTTL = 100 * time.Millisecond
+
+	ts := newServer(t)
+	tok := register(t, ts.URL, "gone@x.co", "password")
+	registerDevice(t, ts.URL, tok, "host", "Host", true)
+	registerDevice(t, ts.URL, tok, "caller", "Caller", false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inbox := openInbox(t, ctx, ts.URL, tok, "host")
+	id := postRelayRequest(t, ts.URL, tok, inbox)
+
+	time.Sleep(300 * time.Millisecond)
+	res, _ := http.DefaultClient.Do(authedReq(t, http.MethodPost, ts.URL+"/v1/relay/response/"+id, tok, "host", map[string]any{
+		"frames": []map[string]any{{"type": "done"}},
+	}))
+	res.Body.Close()
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("host post after expiry status = %d, want 404", res.StatusCode)
+	}
+	res, _ = http.DefaultClient.Do(authedReq(t, http.MethodGet, ts.URL+"/v1/relay/response/"+id, tok, "caller", nil))
+	res.Body.Close()
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("stream after expiry status = %d, want 404", res.StatusCode)
+	}
+}

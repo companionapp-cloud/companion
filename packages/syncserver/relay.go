@@ -53,6 +53,11 @@ const (
 	relayIdleFrame  = 5 * time.Minute
 )
 
+// relayUnclaimedTTL bounds how long a request waits for its caller to open the response stream
+// (a var so tests can shorten it). The caller opens it right after its POST returns; one that
+// never does has gone away.
+var relayUnclaimedTTL = time.Minute
+
 // relayFrame is what travels on both streams. Payload is opaque (sealed by the clients).
 type relayFrame struct {
 	Type         string `json:"type"`
@@ -78,12 +83,17 @@ type relayInbox struct {
 	ch     chan relayFrame
 }
 
+// relayPending is one request, registered until its caller's stream has read the answer. The
+// host may answer before that stream opens (a canned model list beats the caller's GET), so the
+// frames wait in ch. ch is never closed: the stream ends on a terminal frame, and a close could
+// race a host post still sending.
 type relayPending struct {
 	userID       string
 	fromDeviceID string
 	toDeviceID   string
 	ch           chan relayFrame
-	closed       bool
+	finished     bool // a terminal frame is queued; the host may add nothing more
+	claimed      bool // the caller's stream has opened (only one may)
 }
 
 func newRelayHub() *relayHub {
@@ -137,52 +147,69 @@ func (h *relayHub) deliver(deviceID string, f relayFrame) bool {
 	}
 }
 
+// addPending registers a request. One whose caller never opens the response stream is forgotten
+// after relayUnclaimedTTL.
 func (h *relayHub) addPending(id string, p *relayPending) {
 	h.mu.Lock()
 	h.pending[id] = p
 	h.mu.Unlock()
+	time.AfterFunc(relayUnclaimedTTL, func() {
+		h.mu.Lock()
+		if h.pending[id] == p && !p.claimed {
+			delete(h.pending, id)
+		}
+		h.mu.Unlock()
+	})
 }
 
+// getPending returns a request the host is still answering: nil when unknown or finished.
 func (h *relayHub) getPending(id string) *relayPending {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.pending[id]
+	if p := h.pending[id]; p != nil && !p.finished {
+		return p
+	}
+	return nil
 }
 
-// respond pushes a response frame to the caller; false when the request is unknown/finished.
+// claim hands a request to its caller's response stream, finished or not; nil when it is
+// unknown, another user's, or already streaming.
+func (h *relayHub) claim(id, userID string) *relayPending {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	p := h.pending[id]
+	if p == nil || p.userID != userID || p.claimed {
+		return nil
+	}
+	p.claimed = true
+	return p
+}
+
+// respond queues a response frame for the caller; false when the request is unknown/finished.
 func (h *relayHub) respond(id string, f relayFrame) bool {
 	h.mu.Lock()
 	p := h.pending[id]
-	if p == nil || p.closed {
+	if p == nil || p.finished {
 		h.mu.Unlock()
 		return false
 	}
-	terminal := f.Type == relayFrameDone || f.Type == relayFrameError
-	if terminal {
-		p.closed = true
-		delete(h.pending, id)
+	if f.Type == relayFrameDone || f.Type == relayFrameError {
+		p.finished = true
 	}
 	h.mu.Unlock()
 	// Blocking send with a bound: a caller that stopped reading shouldn't stall the host.
 	select {
 	case p.ch <- f:
+		return true
 	case <-time.After(5 * time.Second):
 		return false
 	}
-	if terminal {
-		close(p.ch)
-	}
-	return true
 }
 
-// dropPending removes a request whose caller went away without a terminal frame.
-func (h *relayHub) dropPending(id string) {
+// forget removes a request once its stream has ended (or it could not be delivered).
+func (h *relayHub) forget(id string) {
 	h.mu.Lock()
-	if p := h.pending[id]; p != nil && !p.closed {
-		p.closed = true
-		delete(h.pending, id)
-		close(p.ch)
-	}
+	delete(h.pending, id)
 	h.mu.Unlock()
 }
 
@@ -293,7 +320,7 @@ func (s *Server) handleRelayRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	s.relay.addPending(id, &relayPending{userID: uid, fromDeviceID: from, toDeviceID: in.ToDeviceID, ch: make(chan relayFrame, 64)})
 	if !s.relay.deliver(in.ToDeviceID, relayFrame{Type: relayFrameRequest, RequestID: id, FromDeviceID: from, Method: in.Method, Payload: in.Payload}) {
-		s.relay.dropPending(id)
+		s.relay.forget(id)
 		s.setRelayStatus(id, relayStatusFailed)
 		writeErr(w, http.StatusConflict, "host_offline")
 		return
@@ -309,11 +336,13 @@ func (s *Server) handleRelayResponseStream(w http.ResponseWriter, r *http.Reques
 	}
 	uid := userID(r)
 	id := r.PathValue("id")
-	p := s.relay.getPending(id)
-	if p == nil || p.userID != uid {
+	// Claim, not getPending: the host may already have answered, and its frames wait for us.
+	p := s.relay.claim(id, uid)
+	if p == nil {
 		writeErr(w, http.StatusNotFound, "unknown request")
 		return
 	}
+	defer s.relay.forget(id)
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeErr(w, http.StatusInternalServerError, "streaming unsupported")
@@ -330,14 +359,10 @@ func (s *Server) handleRelayResponseStream(w http.ResponseWriter, r *http.Reques
 	for {
 		select {
 		case <-ctx.Done():
-			// Caller went away: tell the host to stop, forget the request.
+			// Caller went away: tell the host to stop.
 			s.relay.deliver(p.toDeviceID, relayFrame{Type: relayFrameCancel, RequestID: id})
-			s.relay.dropPending(id)
 			return
-		case f, ok := <-p.ch:
-			if !ok {
-				return
-			}
+		case f := <-p.ch:
 			writeSSE(w, f.Type, f)
 			flusher.Flush()
 			if f.Type == relayFrameDone || f.Type == relayFrameError {
@@ -353,7 +378,6 @@ func (s *Server) handleRelayResponseStream(w http.ResponseWriter, r *http.Reques
 			writeSSE(w, relayFrameError, relayFrame{Type: relayFrameError, RequestID: id, Error: "host_timeout"})
 			flusher.Flush()
 			s.relay.deliver(p.toDeviceID, relayFrame{Type: relayFrameCancel, RequestID: id})
-			s.relay.dropPending(id)
 			s.setRelayStatus(id, relayStatusExpired)
 			return
 		case <-ping.C:

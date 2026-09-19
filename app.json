@@ -1,5 +1,8 @@
 {
   "plugins": [
     "expo-background-task"
-  ]
+  ],
+  "ios": {
+    "bundleIdentifier": "com.anonymous.companion"
+  }
 }

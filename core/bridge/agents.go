@@ -26,12 +26,13 @@ func (c *Core) emitAgentsChanged() {
 	c.emit(eventLLMConfigsChanged, nil)
 }
 
-// agentView decorates an agent with runtime facts the UI needs: whether this device hosts it
-// and whether its host is reachable right now.
+// agentView decorates an agent with runtime facts the UI needs: whether this device hosts it,
+// whether its host is reachable right now, and whether this device can supply its API key.
 type agentView struct {
 	*domain.Agent
 	HostedHere bool `json:"hostedHere"`
 	Online     bool `json:"online"`
+	HasKey     bool `json:"hasKey"`
 }
 
 func (c *Core) agentView(a *domain.Agent) agentView {
@@ -45,7 +46,8 @@ func (c *Core) agentView(a *domain.Agent) agentView {
 			online = c.deviceOnline(*a.HostDeviceID)
 		}
 	}
-	return agentView{Agent: a, HostedHere: hostedHere, Online: online}
+	key, err := c.agentAPIKey(a)
+	return agentView{Agent: a, HostedHere: hostedHere, Online: online, HasKey: err == nil && key != ""}
 }
 
 func (c *Core) agentsList() ([]byte, error) {
@@ -298,7 +300,12 @@ func (c *Core) agentAPIKey(a *domain.Agent) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("read api key: %w", err)
 		}
-		return key, nil
+		// Secret stores return "" for a ref they don't hold: the row synced from a device that
+		// kept the key to itself (an unencrypted account), or the key was lost. That is a missing
+		// key, not an empty one to send.
+		if key != "" {
+			return key, nil
+		}
 	}
 	if a.Runtime.NeedsAPIKey() {
 		return "", fmt.Errorf("%s has no API key on this device; add it in Settings › AI", a.Name)

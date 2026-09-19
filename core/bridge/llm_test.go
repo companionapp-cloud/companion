@@ -161,6 +161,54 @@ func TestLLMModelsList(t *testing.T) {
 	}
 }
 
+// TestAgentModelsWithoutTheKeyHere covers an agent whose row names a key ref that this device's
+// keychain doesn't hold (the key was saved on another device of an unencrypted account, or lost).
+// Secret stores return "" for a missing ref; that must surface as a missing key, not a request
+// the API rejects with a bare 401.
+func TestAgentModelsWithoutTheKeyHere(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.Error(w, `{"type":"error","error":{"type":"authentication_error","message":"x-api-key header is required"}}`, http.StatusUnauthorized)
+	}))
+	t.Cleanup(srv.Close)
+
+	c, _ := newTestCore(t)
+	secrets := newFakeSecrets()
+	c.SetSecretStore(secrets)
+	out, err := c.Invoke("agents.install", mustJSON(map[string]any{
+		"name": "Anthropic", "runtime": "anthropic-api", "baseUrl": srv.URL, "apiKey": "sk-elsewhere",
+	}))
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	var a struct {
+		ID     string `json:"id"`
+		HasKey bool   `json:"hasKey"`
+	}
+	json.Unmarshal(out, &a)
+	if !a.HasKey {
+		t.Error("hasKey should be true while the keychain holds the key")
+	}
+	clear(secrets.m)
+
+	_, err = c.Invoke("agents.models", mustJSON(map[string]any{"agentId": a.ID}))
+	if err == nil || !strings.Contains(err.Error(), "Anthropic has no API key on this device") {
+		t.Fatalf("models error = %v, want the missing-key error", err)
+	}
+	if calls != 0 {
+		t.Errorf("the API was called %d time(s) without a key", calls)
+	}
+	list, _ := c.Invoke("agents.list", nil)
+	var views []struct {
+		HasKey bool `json:"hasKey"`
+	}
+	json.Unmarshal(list, &views)
+	if len(views) != 1 || views[0].HasKey {
+		t.Errorf("agents.list = %s, want hasKey false", list)
+	}
+}
+
 // TestAgentInstallEncryptsKeyOnE2EEAccount verifies that with the master key unlocked the API
 // key rides in the synced row (apiKeyEnc) rather than the device keychain.
 func TestAgentInstallEncryptsKeyOnE2EEAccount(t *testing.T) {

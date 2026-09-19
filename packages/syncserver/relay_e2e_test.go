@@ -1,7 +1,9 @@
 package syncserver
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"companion/core/agents"
 	"companion/core/bridge"
 	"companion/core/domain"
 	"companion/core/store"
@@ -225,4 +228,71 @@ func TestRelayDrivesHostedAgentFromAnotherDevice(t *testing.T) {
 func mustJSONArgs(v any) []byte {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+// cannedRunners stands in for the desktop's CLI runners. Like the real Claude Code runner, its
+// model list is canned, so the host answers agents.models without any I/O.
+type cannedRunners struct{ dir string }
+
+func (r cannedRunners) RunnerFor(string, string) (agents.Runner, error) { return cannedRunner{}, nil }
+func (r cannedRunners) WorkDir(string) (string, error)                  { return r.dir, nil }
+
+type cannedRunner struct{}
+
+func (cannedRunner) ListModels(context.Context) ([]string, error) {
+	return []string{"default", "opus"}, nil
+}
+
+func (cannedRunner) Run(context.Context, agents.RunRequest, func(string), func(agents.ToolUse)) (*agents.RunResult, error) {
+	return nil, errors.New("not used by this test")
+}
+
+// TestRelayListsModelsOfAHostedCLIAgent drives agents.models for a desktop-hosted Claude Code
+// agent from a phone. The host's canned answer is quicker than the phone's GET for the response
+// stream, which the server used to lose (the phone's model picker said "couldn't load models").
+func TestRelayListsModelsOfAHostedCLIAgent(t *testing.T) {
+	ts := newServer(t)
+	tok := register(t, ts.URL, "cli@x.co", "password")
+
+	desktop, _ := newCore(t, "macos", true)
+	desktop.SetAgentRunners(cannedRunners{dir: t.TempDir()})
+	phone, _ := newCore(t, "ios", false)
+	invoke(t, desktop, "sync.configure", map[string]any{"baseUrl": ts.URL, "token": tok})
+	invoke(t, phone, "sync.configure", map[string]any{"baseUrl": ts.URL, "token": tok})
+	// Close the desktop's inbox before the server shuts down, which waits on open streams.
+	t.Cleanup(func() { desktop.Invoke("sync.disconnect", nil) })
+
+	out := invoke(t, desktop, "agents.install", map[string]any{"runtime": "claude-cli", "name": "Claude Code", "binaryPath": "/usr/local/bin/claude"})
+	var agent struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal(out, &agent)
+	invoke(t, desktop, "sync.run", nil)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		invoke(t, phone, "sync.run", nil)
+		time.Sleep(100 * time.Millisecond) // presence refresh is async after sync.run
+		var agents []struct {
+			Online bool `json:"online"`
+		}
+		list := invoke(t, phone, "agents.list", nil)
+		json.Unmarshal(list, &agents)
+		if len(agents) == 1 && agents[0].Online {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("phone never saw the desktop online: %s", list)
+		}
+	}
+
+	for i := 0; i < 20; i++ {
+		models, err := phone.Invoke("agents.models", mustJSONArgs(map[string]any{"agentId": agent.ID}))
+		if err != nil {
+			t.Fatalf("remote models (try %d): %v", i+1, err)
+		}
+		if string(models) != `["default","opus"]` {
+			t.Fatalf("remote models (try %d) = %s", i+1, models)
+		}
+	}
 }

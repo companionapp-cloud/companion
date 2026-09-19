@@ -171,7 +171,16 @@ function AgentRow({ agent, last, touch, onError }: { agent: Agent; last: boolean
             </View>
           </SettingsField>
           {agent.runtime === "anthropic-api" || agent.runtime === "openai-api" ? (
-            <SettingsField label="API key" help={agent.apiKeyEnc ? "Synced to your other devices, end-to-end encrypted." : "Stored on this device only."}>
+            <SettingsField
+              label="API key"
+              help={
+                agent.apiKeyEnc
+                  ? "Synced to your other devices, end-to-end encrypted."
+                  : agent.hasKey
+                    ? "Stored on this device only."
+                    : "Not on this device. Add the key to use this agent here."
+              }
+            >
               <View style={styles.inline}>
                 <View style={styles.control}>
                   <Input mono value={apiKey} onChangeText={setApiKey} placeholder="Replace key…" secureTextEntry autoCapitalize="none" />

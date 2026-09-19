@@ -72,6 +72,9 @@ export interface Agent {
   hostedHere: boolean;
   /** True when the agent can be chatted with right now from this device. */
   online: boolean;
+  /** True when this device can supply the agent's API key (synced on the row, or in this
+   *  device's keychain). */
+  hasKey: boolean;
 }
 
 /** What discovery found on this machine (mirrors core/agents.Discovered). */
