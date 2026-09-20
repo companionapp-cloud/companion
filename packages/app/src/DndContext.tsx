@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Animated, PanResponder, View, type GestureResponderHandlers, type PanResponderGestureState } from "react-native";
+import { Animated, PanResponder, Platform, View, type GestureResponderHandlers, type PanResponderGestureState } from "react-native";
 import { Icon, Text, colors, radius, shadow, space } from "@companion/design-system";
 
 /** What is being dragged (a note or task), plus a label for the drag ghost. */
@@ -24,6 +24,11 @@ interface DndValue {
 }
 
 const DndCtx = createContext<DndValue | null>(null);
+
+// A drag is only claimed after a few px of movement, by which point a mouse-down on a row's
+// text has already begun a native selection that then fights the PanResponder (the body-level
+// suppression below kicks in too late). Sources opt out of selection up front. No-op on native.
+const NO_SELECT = Platform.OS === "web" ? ({ userSelect: "none" } as const) : null;
 
 /** A tiny drag-and-drop layer for "drop a document onto a project" (web/desktop). A source
  *  (`useDraggable`) starts a ghost drag on pointer move; targets (`useDropTarget`) register
@@ -184,7 +189,11 @@ export function useDraggable(getPayload: () => DragPayload): GestureResponderHan
 /** A convenience wrapper: makes its children a draggable source with the given payload. */
 export function Draggable({ payload, children }: { payload: DragPayload; children: ReactNode }) {
   const handlers = useDraggable(() => payload);
-  return <View {...handlers}>{children}</View>;
+  return (
+    <View {...handlers} style={NO_SELECT}>
+      {children}
+    </View>
+  );
 }
 
 /** Register an element as a drop target. Returns a ref to attach and whether a drag is
