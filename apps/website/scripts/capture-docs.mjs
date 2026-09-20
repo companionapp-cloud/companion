@@ -100,6 +100,10 @@ async function seed(page) {
     // --- area + project ---
     const area = await call("areas.create", { name: "Work" });
     const project = await call("projects.create", { areaId: area.id, name: "v1.2 launch" });
+    // A few more projects, so the command palette's project chips have something to walk.
+    await call("projects.create", { areaId: area.id, name: "Hiring" });
+    const home = await call("areas.create", { name: "Home" });
+    await call("projects.create", { areaId: home.id, name: "Kitchen renovation" });
 
     // --- tasks ---
     const draft = await call("tasks.create", {
@@ -195,6 +199,44 @@ async function seed(page) {
       entityIds: [plan.id, positioning.id],
     });
 
+    // --- a canvas: the launch, laid out. Cards reference the notes and tasks above; x/y are
+    // the top-left corner, on the board's 8px grid, and the whole layout keeps roughly the pane's
+    // proportions so that Fit board leaves the cards legible. Groups sit behind their contents (z -1). ---
+    const canvas = await call("canvases.create", { name: "Launch map" });
+    const card = (kind, x, y, width, height, extra = {}) => ({ kind, x, y, width, height, data: {}, ...extra });
+    const ref = (type, entity, x, y, height) => card(type, x, y, 260, height, { refType: type, refId: entity.id });
+    const nodes = await call("canvases.nodes.upsert", {
+      canvasId: canvas.id,
+      nodes: [
+        ref("note", plan, 0, 72, 170),
+        card("text", 16, 312, 220, 140, { data: { text: "Ship on the 30th.\nPricing page is the long pole." } }),
+        card("group", 320, 0, 600, 248, { z: -1, color: "#14b8a6", data: { label: "Pricing page" } }),
+        ref("note", positioning, 344, 56, 170),
+        ref("task", pricing, 632, 56, 92),
+        card("group", 320, 296, 600, 224, { z: -1, color: "#8b5cf6", data: { label: "Announcement" } }),
+        ref("task", draft, 344, 352, 92),
+        card("text", 632, 352, 220, 140, {
+          color: "#8b5cf6",
+          data: { text: "Lead with self-hosting — it's what people ask about first." },
+        }),
+        ref("task", investor, 344, 568, 92),
+      ],
+    });
+    const [planCard, , , positioningCard, , , draftCard, , investorCard] = nodes;
+    const arrow = (from, to, label = "") => ({
+      fromNodeId: from.id,
+      toNodeId: to.id,
+      fromEnd: "none",
+      toEnd: "arrowFilled",
+      style: "curved",
+      label,
+    });
+    await call("canvases.edges.upsert", {
+      canvasId: canvas.id,
+      edges: [arrow(planCard, positioningCard), arrow(planCard, draftCard), arrow(draftCard, investorCard, "then")],
+    });
+    await call("projects.addMembers", { projectId: project.id, entityType: "canvas", entityIds: [canvas.id] });
+
     return { planId: plan.id, planMarkdown, projectId: project.id };
   });
 }
@@ -245,6 +287,30 @@ async function pinSidebar(page) {
   const pin = page.getByLabel("Pin sidebar");
   if (await pin.isVisible().catch(() => false)) await pin.click();
   await page.waitForTimeout(400);
+}
+
+/**
+ * Screenshot the command palette with some of the app around it. A full-viewport shot would
+ * leave the palette a small card in a sea of scrim, so clip to the card plus a margin. Unlike
+ * `shot`, this keeps focus where it is — the focused project chip is part of the picture.
+ */
+async function paletteShot(page, name) {
+  const panel = page.locator('[aria-label="Close quick capture"] + div');
+  const box = await panel.boundingBox();
+  const margin = { x: 200, top: 96, bottom: 72 };
+  await page.waitForTimeout(400);
+  await page.screenshot({
+    path: path.join(outDir, `${name}.png`),
+    // A caret mid-blink would make the shot differ from run to run.
+    caret: "hide",
+    clip: {
+      x: Math.max(0, box.x - margin.x),
+      y: Math.max(0, box.y - margin.top),
+      width: Math.min(VIEWPORT.width, box.width + margin.x * 2),
+      height: box.height + margin.top + margin.bottom,
+    },
+  });
+  process.stdout.write(`  ✓ ${name}.png\n`);
 }
 
 // ---------------------------------------------------------------- capture
@@ -317,6 +383,35 @@ async function capture(page, seeded) {
   await openFromList(page, "Launch plan — v1.2");
   await shot(page, "project-view");
 
+  // Canvases — the seeded board, fitted to the pane
+  await go(page, "/canvases");
+  await openFromList(page, "Launch map");
+  await page.waitForTimeout(1200);
+  await page.locator('[aria-label^="Fit board"]').click();
+  await page.waitForTimeout(800);
+  await shot(page, "canvas");
+
+  // The command palette, over Today: its commands, a new task being filed, and a search
+  await go(page, "/today");
+  await page.getByText("Capture", { exact: true }).click();
+  await page.waitForTimeout(600);
+  await paletteShot(page, "palette");
+
+  await page.keyboard.press("Enter"); // New task is the first command
+  await page.waitForTimeout(400);
+  await page.keyboard.type("Book the launch venue", { delay: 20 });
+  await page.keyboard.press("Tab"); // onto the first project chip
+  await paletteShot(page, "palette-new-task");
+
+  await page.keyboard.press("Escape"); // back to the commands
+  await page.waitForTimeout(300);
+  await page.keyboard.type("launch", { delay: 40 });
+  await page.waitForTimeout(700);
+  await paletteShot(page, "palette-find");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+
   // Graph — let the layout settle, then fit it to the canvas
   await go(page, "/graph");
   await page.waitForTimeout(2500);
@@ -340,6 +435,9 @@ async function capture(page, seeded) {
   await page.getByText("Meeting", { exact: true }).first().click();
   await page.waitForTimeout(600);
   await shot(page, "object-type");
+  // The type opens in a dialog, whose scrim would swallow the next click on the settings nav.
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(400);
 
   // AI — the Add agent sheet on its Cloud tab, which shows where an API key is kept. (Its
   // first tab only explains the desktop app on the web, since a browser can't host agents.)
@@ -349,6 +447,9 @@ async function capture(page, seeded) {
   await page.getByText("Cloud", { exact: true }).click();
   await page.waitForTimeout(600);
   await shot(page, "ai-settings");
+  // As above — but this sheet covers the middle of its scrim, so click the scrim's corner.
+  await page.getByLabel("Close", { exact: true }).first().click({ position: { x: 8, y: 8 } });
+  await page.waitForTimeout(400);
 
   // Sync
   await settingsSection("Sync").click();

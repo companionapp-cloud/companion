@@ -1,11 +1,12 @@
 ---
 title: Importing from Things 3
-group: The basics
-groupIcon: notes
-groupOrder: 2
-order: 7
+group: Coming from other tools
+groupIcon: download
+groupOrder: 3
+order: 1
+featured: true
 excerpt: Bring your Inbox, areas and projects over from Things 3 — and choose exactly which.
-badge: The basics
+badge: Coming from other tools
 readTime: 4 min read
 updated: Sep 2026
 related: [creating-and-linking-tasks, your-first-project]

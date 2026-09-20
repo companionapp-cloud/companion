@@ -2,7 +2,7 @@
 title: App won't sync
 group: Troubleshooting
 groupIcon: settings
-groupOrder: 6
+groupOrder: 7
 order: 2
 excerpt: What to do when sync stalls, locks, or conflicts.
 badge: Troubleshooting

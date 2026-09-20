@@ -2,7 +2,7 @@
 title: Hosting your own cloud
 group: Companion Cloud & sync
 groupIcon: refresh
-groupOrder: 4
+groupOrder: 5
 order: 2
 excerpt: Run the sync server yourself.
 badge: Companion Cloud

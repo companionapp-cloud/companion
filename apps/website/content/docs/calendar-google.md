@@ -2,7 +2,7 @@
 title: Google Calendar
 group: Calendars
 groupIcon: calendar
-groupOrder: 3
+groupOrder: 4
 order: 4
 excerpt: Sign in with Google to see and edit your Google calendars — and what to do if your version doesn't offer it yet.
 badge: Calendars

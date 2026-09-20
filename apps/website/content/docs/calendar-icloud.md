@@ -2,7 +2,7 @@
 title: iCloud Calendar
 group: Calendars
 groupIcon: calendar
-groupOrder: 3
+groupOrder: 4
 order: 2
 excerpt: Connect your iCloud calendars with an app-specific password, and edit their events from Companion.
 badge: Calendars

@@ -2,7 +2,7 @@
 title: ICS subscriptions
 group: Calendars
 groupIcon: calendar
-groupOrder: 3
+groupOrder: 4
 order: 5
 excerpt: Show a read-only calendar from a link or an .ics file beside your work.
 badge: Calendars

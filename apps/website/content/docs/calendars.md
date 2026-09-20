@@ -2,7 +2,7 @@
 title: How calendars work
 group: Calendars
 groupIcon: calendar
-groupOrder: 3
+groupOrder: 4
 order: 1
 excerpt: Connect an account you can edit, or subscribe to a feed you only need to see.
 featured: true

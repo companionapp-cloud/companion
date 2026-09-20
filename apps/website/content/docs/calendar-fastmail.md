@@ -2,7 +2,7 @@
 title: Fastmail
 group: Calendars
 groupIcon: calendar
-groupOrder: 3
+groupOrder: 4
 order: 3
 excerpt: Connect your Fastmail calendars with an app password — or any other CalDAV server the same way.
 badge: Calendars

@@ -8,7 +8,7 @@ excerpt: Group notes and tasks into areas and projects.
 badge: Get started
 readTime: 3 min read
 updated: Sep 2026
-related: [your-first-task, today-home-base]
+related: [your-first-canvas, today-home-base]
 ---
 
 Notes and tasks pile up fast. Projects are how you gather the ones that belong together — and areas are how you group the projects.
@@ -52,4 +52,4 @@ Habits are in the app's plumbing but not yet in your hands: the **Habits** tab i
 
 ## Next steps
 
-See how the day comes together on [Today](/docs/today-home-base), or give your notes structure with [object types](/docs/object-types).
+Lay a project out spatially with [your first canvas](/docs/your-first-canvas), or see how the day comes together on [Today](/docs/today-home-base).
