@@ -42,7 +42,7 @@ func write(ctx context.Context, st *store.Store, p *plan, progress Progress) (*S
 	// in an area (an area's own to-dos — PLAN-areas.md §2), or nowhere (the Inbox).
 	createTask := func(t *planTask, projectID, areaID string) error {
 		created, err := st.Tasks.Create(store.CreateTaskInput{
-			Title: t.title, NotesMD: t.notes, Status: t.status, StartAt: t.startAt, DueAt: t.dueAt,
+			Title: t.title, NotesMD: t.notes, Status: t.status, StartAt: t.startAt, Someday: t.someday, DueAt: t.dueAt,
 			Reminders: t.reminders, RepeatRule: t.repeatRule, CompletedAt: t.completed,
 		})
 		if err != nil {
@@ -84,7 +84,9 @@ func write(ctx context.Context, st *store.Store, p *plan, progress Progress) (*S
 		}
 		for _, pp := range a.projects {
 			add("projects", func() error {
-				created, err := st.Projects.Create(store.CreateProjectInput{AreaID: a.id, Name: pp.name})
+				created, err := st.Projects.Create(store.CreateProjectInput{
+					AreaID: a.id, Name: pp.name, StartAt: pp.startAt, DueAt: pp.dueAt, Someday: pp.someday, CompletedAt: pp.completed,
+				})
 				if err != nil {
 					return err
 				}

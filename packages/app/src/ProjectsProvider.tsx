@@ -17,7 +17,13 @@ import { useSync } from "./SyncProvider";
 export interface ProjectsStore {
   sidebar: SidebarData;
   areas: Area[];
+  /** The open projects. A completed project is hidden from the app (PLAN-scheduling.md §2), so
+   *  every picker and list reading this never offers one. */
   projects: Project[];
+  /** The completed projects, newest first — the Logbook's. */
+  completedProjects: Project[];
+  /** Any live project, open or completed (a completed one still opens from the Logbook). */
+  projectById: (id: string) => Project | undefined;
   loading: boolean;
   createArea: (input: CreateAreaInput) => Promise<Area>;
   updateArea: (id: string, fields: UpdateAreaInput) => Promise<void>;
@@ -61,8 +67,14 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
   const { trigger: syncTrigger } = useSync();
   const [sidebar, setSidebar] = useState<SidebarData>(EMPTY_SIDEBAR);
   const [areas, setAreas] = useState<Area[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [allProjects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const projects = useMemo(() => allProjects.filter((p) => !p.completedAt), [allProjects]);
+  const completedProjects = useMemo(
+    () => allProjects.filter((p) => !!p.completedAt).sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? "")),
+    [allProjects],
+  );
+  const projectById = useCallback((id: string) => allProjects.find((p) => p.id === id), [allProjects]);
 
   const refresh = useCallback(async () => {
     const [nextSidebar, nextAreas, nextProjects] = await Promise.all([api.sidebar(), api.listAreas(), api.listProjects()]);
@@ -227,6 +239,8 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
       sidebar,
       areas,
       projects,
+      completedProjects,
+      projectById,
       loading,
       createArea,
       updateArea,
@@ -246,7 +260,7 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
       removeAreaMember,
       membershipsForArea,
     }),
-    [addAreaMember, addAreaMembers, removeAreaMember, membershipsForArea, sidebar, areas, projects, loading, createArea, updateArea, deleteArea, createProject, updateProject, deleteProject, reorderAreas, reorderProjects, addMember, addMembers, removeMember, membershipsFor, membershipsForProject],
+    [addAreaMember, addAreaMembers, removeAreaMember, membershipsForArea, sidebar, areas, projects, completedProjects, projectById, loading, createArea, updateArea, deleteArea, createProject, updateProject, deleteProject, reorderAreas, reorderProjects, addMember, addMembers, removeMember, membershipsFor, membershipsForProject],
   );
 
   return <ProjectsCtx.Provider value={value}>{children}</ProjectsCtx.Provider>;

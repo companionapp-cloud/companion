@@ -26,6 +26,8 @@ export const ICON_PATHS = {
   moreH: "M12 12h.01M19 12h.01M5 12h.01",
   grip: "M9 5h.01M9 12h.01M9 19h.01M15 5h.01M15 12h.01M15 19h.01",
   trash: "M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6",
+  // Lucide book-check: the Logbook.
+  logbook: "M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20M9 9.5l2 2 4-4",
   external: "M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6",
   close: "M18 6 6 18M6 6l12 12",
   check: "M20 6 9 17l-5-5",

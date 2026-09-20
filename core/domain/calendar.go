@@ -126,6 +126,8 @@ const (
 	ItemTask ItemKind = "task"
 	// ItemNote is a daily note surfaced on its date (all-day).
 	ItemNote ItemKind = "note"
+	// ItemProject is a project with both a start and a deadline, spanning those days.
+	ItemProject ItemKind = "project"
 )
 
 // CalendarItem is one entry in the merged, read-only calendar view produced by
@@ -141,6 +143,12 @@ type CalendarItem struct {
 	StartsAt time.Time  `json:"startsAt"`
 	EndsAt   *time.Time `json:"endsAt,omitempty"`
 	AllDay   bool       `json:"allDay"`
+	// Span marks an open task or project that has both a start and a deadline
+	// (PLAN-scheduling.md §4): StartsAt/EndsAt are those two instants, and the item belongs in
+	// the all-day band of every local day from one to the other. It is not AllDay — that flag
+	// promises UTC-midnight date markers, and which days an instant falls on is the viewer's
+	// timezone's call, so clients place a span themselves.
+	Span bool `json:"span,omitempty"`
 	// SourceID is the id of the backing row (event/task/note) so the UI can open it.
 	SourceID string `json:"sourceId"`
 	// Location and Description carry an event's extra detail (shown on hover / in the mobile

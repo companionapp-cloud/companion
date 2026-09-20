@@ -381,7 +381,7 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 			}
 			return jsonResult(map[string]any{
 				"id": t.ID, "title": t.Title, "notesMd": t.NotesMD, "status": t.Status,
-				"startAt": t.StartAt, "dueAt": t.DueAt, "reminders": reminders,
+				"startAt": t.StartAt, "someday": t.Someday, "dueAt": t.DueAt, "reminders": reminders,
 				"repeatRule": t.RepeatRule, "repeatSeedId": t.RepeatSeedID,
 				"objectTypeId": t.ObjectTypeID, "props": t.Props,
 			})
@@ -592,6 +592,7 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 					"title":{"type":"string"},
 					"notesMd":{"type":"string","description":"Optional Markdown details."},
 					"startAt":{"type":"string","description":"Optional RFC3339 start: when to begin working on it."},
+					"someday":{"type":"boolean","description":"File the task under Someday instead of giving it a start: something to pick up eventually, kept out of the everyday lists. Not together with startAt."},
 					"dueAt":{"type":"string","description":"Optional RFC3339 deadline: when it must be done. For a repeat, the first occurrence's deadline."},
 					"reminders":{"type":"array","items":{"type":"string"},"description":"Optional reminders, each a lead before the deadline (\"1 day before\", \"a week before\", \"at the deadline\") or an RFC3339 timestamp."},
 					"repeat":{"type":"string","description":"Optional recurrence: a phrase like \"every monday\", \"every 2 weeks\", \"the third wednesday of the month\", or an RFC5545 RRULE. Makes this a repeating task."},
@@ -607,6 +608,7 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 				Title        string          `json:"title"`
 				NotesMD      string          `json:"notesMd"`
 				StartAt      string          `json:"startAt"`
+				Someday      bool            `json:"someday"`
 				DueAt        string          `json:"dueAt"`
 				Reminders    []string        `json:"reminders"`
 				Repeat       string          `json:"repeat"`
@@ -633,7 +635,7 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 				return "", err
 			}
 			t, err := s.Tasks.Create(store.CreateTaskInput{
-				Title: a.Title, NotesMD: a.NotesMD, StartAt: start, DueAt: due, Reminders: reminders, RepeatRule: repeat,
+				Title: a.Title, NotesMD: a.NotesMD, StartAt: start, Someday: a.Someday, DueAt: due, Reminders: reminders, RepeatRule: repeat,
 				ObjectTypeID: optStr(a.ObjectTypeID), Props: optProps(a.Props),
 			})
 			if err != nil {
@@ -657,6 +659,7 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 					"status":{"type":"string","enum":["open","done","cancelled"]},
 					"startAt":{"type":"string","description":"RFC3339 start to set."},
 					"clearStartAt":{"type":"boolean","description":"Remove the start."},
+					"someday":{"type":"boolean","description":"true files the task under Someday (removing any start); false takes it back out."},
 					"dueAt":{"type":"string","description":"RFC3339 deadline to set."},
 					"clearDueAt":{"type":"boolean","description":"Remove the deadline."},
 					"reminders":{"type":"array","items":{"type":"string"},"description":"Replace all reminders: each a lead before the deadline (\"1 day before\", \"a week before\", \"at the deadline\") or an RFC3339 timestamp. [] removes them all."},
@@ -679,6 +682,7 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 				Status          *string         `json:"status"`
 				StartAt         string          `json:"startAt"`
 				ClearStartAt    bool            `json:"clearStartAt"`
+				Someday         *bool           `json:"someday"`
 				DueAt           string          `json:"dueAt"`
 				ClearDueAt      bool            `json:"clearDueAt"`
 				Reminders       *[]string       `json:"reminders"`
@@ -706,7 +710,7 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 			}
 			in := store.UpdateTaskInput{
 				Title: a.Title, NotesMD: a.NotesMD, Status: a.Status,
-				StartAt: start, ClearStartAt: a.ClearStartAt, DueAt: due, ClearDueAt: a.ClearDueAt,
+				StartAt: start, ClearStartAt: a.ClearStartAt, Someday: a.Someday, DueAt: due, ClearDueAt: a.ClearDueAt,
 				RepeatRule: repeat, ClearRepeatRule: a.ClearRepeat,
 				ObjectTypeID: optStr(a.ObjectTypeID), ClearObjectType: a.ClearObjectType,
 			}

@@ -68,7 +68,8 @@ export function ProjectsSidebar({
       />
       {collapsed.has(area.id) ? null : (
         <SortableList
-          items={area.projects}
+          // Someday projects are filed away: off the rail, listed on the area's overview.
+          items={area.projects.filter((p) => !p.someday)}
           keyExtractor={(p) => p.id}
           onReorder={(ids) => void reorderProjects(area.id, ids)}
           renderItem={({ item: p, isActive, drag }) => (
@@ -113,6 +114,7 @@ export function ProjectsSidebar({
               Unsorted
             </Text>
           </View>
+          {/* Someday ones included: with no area, there is no overview to find them on. */}
           {sidebar.unsorted.map((p) => (
             <ProjectRow key={p.id} project={p} active={p.id === activeProjectId} onPress={() => onSelectProject?.(p.id)} />
           ))}

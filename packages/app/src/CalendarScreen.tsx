@@ -19,7 +19,7 @@ import {
   type PressState,
 } from "@companion/design-system";
 import { useCalendar } from "./CalendarProvider";
-import { itemDay } from "./CalendarAgenda";
+import { isAllDay, itemDay, itemDays } from "./CalendarAgenda";
 import { CalendarItemInfo } from "./CalendarItemInfo";
 import { EventEditorDialog, type EventEditorTarget } from "./EventEditorDialog";
 import { useProjectCalendars } from "./ProjectCalendars";
@@ -64,6 +64,7 @@ const KIND: Record<CalendarItemKind, { bg: string; fg: string; bar: string }> = 
   event: { bg: colors.textPrimary, fg: colors.textInverse, bar: colors.textTertiary },
   task: { bg: colors.infoSoft, fg: colors.infoActive, bar: colors.info },
   note: { bg: colors.surfaceApp, fg: colors.textSecondary, bar: colors.success },
+  project: { bg: colors.accentSoft, fg: colors.accentActive, bar: colors.accent },
 };
 
 function pad(n: number): string {
@@ -155,6 +156,7 @@ export function CalendarScreen({ projectId }: { projectId?: string } = {}) {
   // the editor; subscription events are read-only and only surface their hover card.
   const openItem = (item: CalendarItem) => {
     if (item.kind === "task") nav.openInNewTab({ kind: "task", id: item.sourceId });
+    else if (item.kind === "project") nav.openProject(item.sourceId);
     else if (item.kind === "note") nav.openInNewTab({ kind: "view", view: "today", date: itemDay(item) });
     else if (item.editable) setEditor({ mode: "edit", item });
   };
@@ -338,10 +340,13 @@ export function CalendarScreen({ projectId }: { projectId?: string } = {}) {
       // All-day items (dated notes, all-day events) carry a date-only marker stored as
       // midnight UTC; converting that instant to local time would shift it a day in some
       // zones, so bucket them by the date portion directly. Timed items use their instant.
-      const iso = itemDay(it);
-      const bucket = map.get(iso);
-      if (!bucket) continue;
-      (it.allDay ? bucket.allDay : bucket.timed).push(it);
+      // A span — a task or project running from its start to its deadline — sits in the
+      // all-day band of every day it covers (PLAN-scheduling.md §4).
+      for (const iso of itemDays(it)) {
+        const bucket = map.get(iso);
+        if (!bucket) continue;
+        (isAllDay(it) ? bucket.allDay : bucket.timed).push(it);
+      }
     }
     return map;
   }, [items, weekDays]);
@@ -774,7 +779,7 @@ function AllDayChip({
   onHover?: (dayIndex: number, on: boolean) => void;
 }) {
   const [hovered, setHovered] = useState(false);
-  const openable = item.kind === "task" || item.kind === "note" || !!item.editable;
+  const openable = item.kind === "task" || item.kind === "note" || item.kind === "project" || !!item.editable;
   const flipRight = dayIndex >= 4;
   const latest = useRef({ dayIndex, onHover });
   latest.current = { dayIndex, onHover };
@@ -857,6 +862,7 @@ function Legend() {
       {dot(colors.textPrimary, "events")}
       {dot(colors.info, "tasks")}
       {dot(colors.success, "notes")}
+      {dot(colors.accent, "projects")}
     </View>
   );
 }

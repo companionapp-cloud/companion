@@ -6,6 +6,7 @@ import { useNav } from "../nav-context";
 import { useNotifications } from "../NotificationsProvider";
 import { NotificationsScreen } from "../NotificationsScreen";
 import { TrashScreen } from "../TrashScreen";
+import { LogbookScreen } from "../LogbookScreen";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { NavAction, NavBar } from "./ui";
 
@@ -23,6 +24,18 @@ export function HabitsScreen() {
         <Text variant="caption" tone="tertiary" style={styles.placeholderText}>
           Habits, streaks, and gentle nudges are on the way.
         </Text>
+      </View>
+    </View>
+  );
+}
+
+/** The Logbook under a plain nav bar; rows open through the shell's navigator. */
+export function LogbookRouteScreen() {
+  return (
+    <View style={styles.root}>
+      <NavBar title="Logbook" />
+      <View style={styles.body}>
+        <LogbookScreen />
       </View>
     </View>
   );

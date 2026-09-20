@@ -155,6 +155,10 @@ declare module "react-native" {
   };
   export const Platform: { OS: string; select<T>(spec: Record<string, T>): T };
   export const Linking: { openURL(url: string): Promise<void>; canOpenURL(url: string): Promise<boolean> };
+  export const AppState: {
+    currentState: string;
+    addEventListener(type: "change", listener: (state: string) => void): { remove(): void };
+  };
 
   export const AppRegistry: {
     registerComponent(appKey: string, getComponent: () => CT<unknown>): void;

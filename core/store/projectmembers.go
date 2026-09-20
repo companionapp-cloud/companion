@@ -257,7 +257,7 @@ func (r *ProjectMembersRepo) ListForAreaTree(areaID string) ([]*domain.ProjectMe
 	return r.list(`SELECT `+memberColumns+` FROM project_members
 		WHERE deleted_at IS NULL AND entity_type NOT IN (?, ?)
 		  AND ((container_type = ? AND project_id = ?)
-		    OR (container_type <> ? AND project_id IN (SELECT id FROM projects WHERE area_id = ? AND deleted_at IS NULL)))
+		    OR (container_type <> ? AND project_id IN (SELECT id FROM projects WHERE area_id = ? AND deleted_at IS NULL AND completed_at IS NULL)))
 		ORDER BY created_at, id;`,
 		domain.MemberCalendar, domain.MemberCalendarAccount,
 		domain.ContainerArea, areaID, domain.ContainerArea, areaID)
@@ -277,6 +277,31 @@ func (r *ProjectMembersRepo) MemberEntityIDs(entityType string) ([]string, error
 		`SELECT DISTINCT entity_id FROM project_members WHERE entity_type = ? AND deleted_at IS NULL;`, entityType)
 	if err != nil {
 		return nil, fmt.Errorf("query member entity ids: %w", err)
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// SomedayTaskIDs returns the ids of tasks filed in a live Someday project. They are filed away
+// with it (PLAN-scheduling.md §1): out of every task list but the Someday filter and the
+// project's own.
+func (r *ProjectMembersRepo) SomedayTaskIDs() ([]string, error) {
+	rows, err := r.db.Query(
+		`SELECT DISTINCT m.entity_id FROM project_members m
+		   JOIN projects p ON p.id = m.project_id
+		  WHERE m.entity_type = ? AND m.container_type = ? AND m.deleted_at IS NULL
+		    AND p.someday = 1 AND p.deleted_at IS NULL AND p.completed_at IS NULL;`,
+		domain.NodeTask, domain.ContainerProject)
+	if err != nil {
+		return nil, fmt.Errorf("query someday task ids: %w", err)
 	}
 	defer rows.Close()
 	out := []string{}

@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   notes_md       TEXT NOT NULL DEFAULT '',
   status         TEXT NOT NULL DEFAULT 'open',
   start_at       TEXT,
+  someday        BIGINT NOT NULL DEFAULT 0,     -- filed away instead of started (PLAN-scheduling.md)
   due_at         TEXT,                          -- the deadline (PLAN §6.4)
   reminders_json TEXT NOT NULL DEFAULT '[]',    -- [{"at":…}|{"before":lead}] (PLAN §6.4)
   remind_at      TEXT,                          -- legacy single reminder: moved into reminders_json by migrate, never written
@@ -164,6 +165,12 @@ CREATE TABLE IF NOT EXISTS projects (
   description_md    TEXT NOT NULL DEFAULT '',
   sort_order  BIGINT NOT NULL DEFAULT 0,
   archived_at TEXT,
+  start_at     TEXT,                       -- scheduling + repeat (PLAN-scheduling.md): plaintext,
+  due_at       TEXT,                       -- because the server times a project's next copy
+  someday      BIGINT NOT NULL DEFAULT 0,  -- from them, exactly like a task's
+  completed_at TEXT,
+  repeat_rule  TEXT,
+  repeat_after TEXT,
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL,
   deleted_at  TEXT,
@@ -547,6 +554,14 @@ func migrate(db *sql.DB, dialect string) error {
 		`ALTER TABLE projects ADD COLUMN cover_document_id TEXT`,
 		`ALTER TABLE projects ADD COLUMN description_md TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE project_members ADD COLUMN container_type TEXT NOT NULL DEFAULT 'project'`,
+		// Someday, and project scheduling + repeat (PLAN-scheduling.md), retrofitted onto older DBs.
+		`ALTER TABLE tasks ADD COLUMN someday BIGINT NOT NULL DEFAULT 0`,
+		`ALTER TABLE projects ADD COLUMN start_at TEXT`,
+		`ALTER TABLE projects ADD COLUMN due_at TEXT`,
+		`ALTER TABLE projects ADD COLUMN someday BIGINT NOT NULL DEFAULT 0`,
+		`ALTER TABLE projects ADD COLUMN completed_at TEXT`,
+		`ALTER TABLE projects ADD COLUMN repeat_rule TEXT`,
+		`ALTER TABLE projects ADD COLUMN repeat_after TEXT`,
 	}
 	for _, alter := range alters {
 		if dialect == "postgres" {

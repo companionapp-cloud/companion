@@ -11,7 +11,7 @@ import { BottomSheet, Card, CardRow, CountPill, FAB_CLEARANCE, Fab, IconTile, Se
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-type SectionRoute = 'Today' | 'Chat' | 'Notes' | 'Tasks' | 'Canvases' | 'Habits' | 'Calendar' | 'Graph' | 'Trash';
+type SectionRoute = 'Today' | 'Chat' | 'Notes' | 'Tasks' | 'Canvases' | 'Habits' | 'Calendar' | 'Graph' | 'Logbook' | 'Trash';
 const SECTIONS: { route: SectionRoute; label: string; subtitle: string; icon: IconName; accent?: boolean }[] = [
   { route: 'Today', label: 'Today', subtitle: "Today's note and your month", icon: 'today' },
   { route: 'Chat', label: 'Chat', subtitle: 'Ask, capture, recall — anything', icon: 'chat', accent: true },
@@ -21,6 +21,7 @@ const SECTIONS: { route: SectionRoute; label: string; subtitle: string; icon: Ic
   { route: 'Habits', label: 'Habits', subtitle: 'Streaks and daily builders', icon: 'habits' },
   { route: 'Calendar', label: 'Calendar', subtitle: 'Events, tasks, and notes', icon: 'calendar' },
   { route: 'Graph', label: 'Graph', subtitle: 'See how everything connects', icon: 'graph' },
+  { route: 'Logbook', label: 'Logbook', subtitle: 'Completed tasks and projects', icon: 'logbook' },
   { route: 'Trash', label: 'Trash', subtitle: 'Recently deleted, kept 30 days', icon: 'trash' },
 ];
 
@@ -41,6 +42,12 @@ export function HomeScreen() {
   const store = useNotes();
   const tasks = useTasks();
   const { sidebar, createArea, createProject, deleteArea, reorderAreas, reorderProjects } = useProjects();
+  // Someday projects are filed away (PLAN-scheduling.md §1): off this list, shown on their area's
+  // overview. `empty` still counts them — an area holding one can't be deleted.
+  const areas = useMemo(
+    () => sidebar.areas.map((a) => ({ ...a, empty: a.projects.length === 0, projects: a.projects.filter((p) => !p.someday) })),
+    [sidebar.areas],
+  );
 
   const [addingArea, setAddingArea] = useState(false);
   const [areaName, setAreaName] = useState('');
@@ -141,7 +148,7 @@ export function HomeScreen() {
         </Card>
 
         <SortableList
-          items={sidebar.areas}
+          items={areas}
           keyExtractor={(a) => a.id}
           enabled={editing}
           activateOnStart
@@ -157,7 +164,7 @@ export function HomeScreen() {
                   editing ? (
                     <>
                       {/* Areas are only deletable once empty (PLAN §6.6). */}
-                      {area.projects.length === 0 ? (
+                      {area.empty ? (
                         <IconButton label={`Delete area ${area.name}`} onPress={() => setDeletingArea(area)}>
                           <Icon name="trash" size={16} color={colors.textTertiary} />
                         </IconButton>

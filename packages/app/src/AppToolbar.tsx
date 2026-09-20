@@ -33,6 +33,7 @@ const VIEW_META: Record<SurfaceViewId, { label: string; icon: IconName }> = {
   calendar: { label: "Calendar", icon: "calendar" },
   habits: { label: "Habits", icon: "habits" },
   graph: { label: "Graph", icon: "graph" },
+  logbook: { label: "Logbook", icon: "logbook" },
   trash: { label: "Trash", icon: "trash" },
   settings: { label: "Settings", icon: "settings" },
   notifications: { label: "Notifications", icon: "bell" },
@@ -67,7 +68,7 @@ export function AppToolbar({
   const notes = useNotes();
   const tasks = useTasks();
   const canvases = useCanvases();
-  const { projects, areas } = useProjects();
+  const { projectById, areas } = useProjects();
   const sync = useSync();
   const theme = useTheme();
 
@@ -83,7 +84,7 @@ export function AppToolbar({
     if (doc) return { label: docLabel(doc), icon: DOC_ICON[doc.kind] };
     if (ref.kind === "browse") return SECTION_META[ref.section];
     if (ref.kind === "view") return VIEW_META[ref.view];
-    if (ref.kind === "project") return { label: projects.find((p) => p.id === ref.projectId)?.name || "Project", icon: "folder" };
+    if (ref.kind === "project") return { label: projectById(ref.projectId)?.name || "Project", icon: "folder" };
     if (ref.kind === "area") return { label: areas.find((a) => a.id === ref.areaId)?.name || "Area", icon: "folder" };
     return { label: "Untitled" };
   };

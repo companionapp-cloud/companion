@@ -29,6 +29,7 @@ export function ContainerOverview({
   onUpdatePage,
   onOpenRef,
   documentSource: documentSourceProp,
+  meta,
   children,
   footer,
 }: {
@@ -47,6 +48,8 @@ export function ContainerOverview({
   onOpenRef?: (ref: LinkRef) => void;
   /** Overrides the context's document source (the mobile shell supplies its own). */
   documentSource?: DocumentSource;
+  /** Sits between the name and the description: a project's schedule chips. */
+  meta?: ReactNode;
   children?: ReactNode;
   footer?: ReactNode;
 }) {
@@ -170,6 +173,8 @@ export function ContainerOverview({
               }
             }}
           />
+
+          {meta}
 
           <View style={styles.description}>
             <Editor

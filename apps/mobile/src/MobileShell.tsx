@@ -17,6 +17,7 @@ import { CanvasesListScreen } from './screens/CanvasesListScreen';
 import { CanvasScreen } from './screens/CanvasScreen';
 import { NotificationsScreen } from './screens/NotificationsScreen';
 import { TrashRouteScreen } from './screens/TrashRouteScreen';
+import { LogbookRouteScreen } from './screens/LogbookRouteScreen';
 import { TaskEditorScreen } from './screens/TaskEditorScreen';
 import { TaskGraphScreen } from './screens/TaskGraphScreen';
 import { NoteGraphScreen } from './screens/NoteGraphScreen';
@@ -57,6 +58,7 @@ export type RootStackParamList = {
   Calendar: undefined;
   CalendarEvent: { item: CalendarItem };
   Graph: undefined;
+  Logbook: undefined;
   Trash: undefined;
   Notifications: undefined;
   // A project and its scoped tab bar.
@@ -162,6 +164,7 @@ export function MobileShell() {
             <RootStack.Screen name="Calendar" component={CalendarScreen} options={{ title: 'Calendar' }} />
             <RootStack.Screen name="CalendarEvent" component={CalendarEventScreen} options={{ title: 'Event' }} />
             <RootStack.Screen name="Graph" component={GraphScreen} options={{ title: 'Graph' }} />
+            <RootStack.Screen name="Logbook" component={LogbookRouteScreen} options={{ title: 'Logbook' }} />
             <RootStack.Screen name="Trash" component={TrashRouteScreen} options={{ title: 'Trash' }} />
             <RootStack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifications' }} />
             <RootStack.Screen name="Project" component={ProjectScreen} options={{ title: 'Project' }} />

@@ -4,6 +4,7 @@ import { Button, Icon, IconButton, Text, colors, layout, row, space, useDensity 
 import { useMultiSelect } from "./MultiSelectProvider";
 import { useNotes } from "./NotesProvider";
 import { useTasks } from "./TasksProvider";
+import { useCanvases } from "./canvas/CanvasesProvider";
 import { BulkAssignPicker } from "./BulkAssignPicker";
 import { ConfirmDialog } from "./ConfirmDialog";
 
@@ -15,17 +16,19 @@ export function MultiSelectBar() {
   const ms = useMultiSelect();
   const notes = useNotes();
   const tasks = useTasks();
+  const canvases = useCanvases();
   const [showAssign, setShowAssign] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const touch = useDensity() === "touch";
   const size = touch ? "lg" : "sm";
 
-  const noun = ms.kind === "task" ? "task" : "note";
-  const nounPlural = `${noun}s`;
+  const noun = ms.kind === "canvas" ? "canvas" : ms.kind;
+  const nounPlural = ms.kind === "canvas" ? "canvases" : `${noun}s`;
   const many = ms.count !== 1;
 
   const doDelete = async () => {
     if (ms.kind === "task") await tasks.removeMany(ms.selectedIds);
+    else if (ms.kind === "canvas") await canvases.removeMany(ms.selectedIds);
     else await notes.removeMany(ms.selectedIds);
     setConfirmDelete(false);
     ms.clear();

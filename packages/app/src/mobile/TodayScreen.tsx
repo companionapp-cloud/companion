@@ -94,7 +94,7 @@ export function TodayScreen() {
           ) : null}
           {showAgenda ? (
             <View style={showCalendar ? styles.agendaBelowMonth : null}>
-              <Agenda date={selected} onOpenItem={openItem} />
+              <Agenda date={selected} onOpenItem={openItem} creatable />
             </View>
           ) : null}
         </ScrollView>

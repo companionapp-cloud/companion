@@ -31,6 +31,7 @@ export function ProjectCalendarScreen() {
           onOpenItem={(item) => {
             if (item.kind === 'task') nav.navigate('TaskEditor', { id: item.sourceId });
             else if (item.kind === 'note') nav.navigate('NoteEditor', { id: item.sourceId });
+            else if (item.kind === 'project') return; // the project's own span: already here
             else nav.navigate('CalendarEvent', { item });
           }}
         />

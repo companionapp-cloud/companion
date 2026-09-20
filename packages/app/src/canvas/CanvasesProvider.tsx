@@ -16,6 +16,8 @@ export interface CanvasesStore {
   rename: (id: string, name: string) => Promise<void>;
   /** Move a board to the Trash. */
   remove: (id: string) => Promise<void>;
+  /** Bulk-trash several boards in one core call (multiselect delete). */
+  removeMany: (ids: string[]) => Promise<void>;
 }
 
 const CanvasesCtx = createContext<CanvasesStore | null>(null);
@@ -84,11 +86,22 @@ export function CanvasesProvider({ children }: { children: ReactNode }) {
     [api, syncTrigger],
   );
 
+  const removeMany = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return;
+      await api.removeMany(ids);
+      const drop = new Set(ids);
+      setCanvases((prev) => prev.filter((c) => !drop.has(c.id)));
+      syncTrigger();
+    },
+    [api, syncTrigger],
+  );
+
   const visible = useMemo(() => (filter === "all" ? canvases : canvases.filter((c) => !memberIds.has(c.id))), [canvases, memberIds, filter]);
 
   const value = useMemo<CanvasesStore>(
-    () => ({ canvases, visible, filter, setFilter, loading, byId: (id) => canvases.find((c) => c.id === id), create, rename, remove }),
-    [canvases, visible, filter, loading, create, rename, remove],
+    () => ({ canvases, visible, filter, setFilter, loading, byId: (id) => canvases.find((c) => c.id === id), create, rename, remove, removeMany }),
+    [canvases, visible, filter, loading, create, rename, remove, removeMany],
   );
   return <CanvasesCtx.Provider value={value}>{children}</CanvasesCtx.Provider>;
 }

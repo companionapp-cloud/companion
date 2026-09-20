@@ -24,7 +24,9 @@ import { containerOfLocation, useNav, type ContainerRef, type ProjectSection } f
 import { useToolVisibility, type ToolId } from "./ToolVisibilityProvider";
 import { useProjects } from "./ProjectsProvider";
 import { useNotes } from "./NotesProvider";
-import { useTasks, filterTasksByDue } from "./TasksProvider";
+import { useTasks } from "./TasksProvider";
+import { ScheduledTasks } from "./TaskGroups";
+import { filterBySchedule, newTaskDefaults, scheduleGroups, withoutSomeday } from "./taskSchedule";
 import { ListFilterMenu } from "./ListFilterMenu";
 import { ListSectionFold } from "./ListSectionFold";
 import { NoteEditor } from "./NoteEditor";
@@ -72,7 +74,7 @@ const AREA_SECTIONS = new Set<ProjectSection>(["notes", "tasks", "canvases"]);
  * projects hold (each such row names its project), the same set its overview summarizes. */
 export function ProjectView() {
   const nav = useNav();
-  const { projects, areas } = useProjects();
+  const { projectById, areas } = useProjects();
   // Hiding a tool in Settings › Tools also drops its section from the chips.
   const { hidden } = useToolVisibility();
   const loc = nav.current;
@@ -94,7 +96,7 @@ export function ProjectView() {
 
   if (!container) return null;
   const page: Project | Area | undefined =
-    container.kind === "area" ? areas.find((a) => a.id === container.id) : projects.find((p) => p.id === container.id);
+    container.kind === "area" ? areas.find((a) => a.id === container.id) : projectById(container.id);
   if (!page) {
     return (
       <Center>
@@ -276,13 +278,20 @@ function ListColumn({
     if (!q) return notes;
     return notes.filter((n) => n.title.toLowerCase().includes(q) || n.contentMd.toLowerCase().includes(q));
   }, [notes, noteQuery]);
+  // An area rolls up its projects' tasks, so the ones in a Someday project are filed away with
+  // it; a project's own list shows its tasks whatever the project's state (PLAN-scheduling.md §1).
+  const filedAway = inArea ? tasksStore.somedayIds : undefined;
   const filteredTasks = useMemo(() => {
-    if (taskFilter === "all") return tasks;
-    if (taskFilter === "unsorted") return tasks.filter((t) => directIds.has(t.id));
-    return filterTasksByDue(tasks, taskFilter);
-  }, [tasks, taskFilter, directIds]);
+    if (taskFilter === "all") return withoutSomeday(tasks, filedAway);
+    if (taskFilter === "unsorted") return withoutSomeday(tasks, filedAway).filter((t) => directIds.has(t.id));
+    return filterBySchedule(tasks, taskFilter, filedAway);
+  }, [tasks, taskFilter, directIds, filedAway]);
   // Completed tasks drop to their own section at the bottom, as in the root task list (§6.4).
-  const openTasks = useMemo(() => filteredTasks.filter((t) => t.status !== "done"), [filteredTasks]);
+  // Open ones in the order shown (grouped views sort by date), so a range-select matches.
+  const openTasks = useMemo(() => {
+    const open = filteredTasks.filter((t) => t.status !== "done");
+    return scheduleGroups(open, taskFilter)?.flatMap((g) => g.items) ?? open;
+  }, [filteredTasks, taskFilter]);
   const doneTasks = useMemo(() => filteredTasks.filter((t) => t.status === "done"), [filteredTasks]);
 
   // Register the on-screen section list for multiselect (notes / actionable tasks; seeds
@@ -313,6 +322,7 @@ function ListColumn({
   if (section === "canvases") {
     return (
       <CanvasesList
+        scope={`${container.kind}:${container.id}:canvases`}
         canvases={canvases}
         selectedId={itemId ?? null}
         onSelect={(id) => openItem("canvases", id)}
@@ -333,7 +343,8 @@ function ListColumn({
     openItem("notes", note.id);
   };
   const createTaskInProject = async (title?: string) => {
-    const task = await tasksStore.create({ title: title?.trim() || "Untitled task" });
+    // A task typed into a schedule view lands in it: Someday, tomorrow (Upcoming), today (Overdue).
+    const task = await tasksStore.create({ title: title?.trim() || "Untitled task", ...newTaskDefaults(taskFilter) });
     await file("task", task.id);
     openItem("tasks", task.id);
   };
@@ -363,8 +374,10 @@ function ListColumn({
                 { value: "all", label: "All tasks" },
                 // An area's own tasks, as opposed to the ones its projects hold.
                 ...(inArea ? [{ value: "unsorted" as const, label: "Unsorted tasks" }] : []),
+                { value: "anytime", label: "Anytime tasks" },
                 { value: "upcoming", label: "Upcoming tasks" },
                 { value: "overdue", label: "Overdue tasks" },
+                { value: "someday", label: "Someday tasks" },
                 ...projectLists.map((l) => ({ value: `list:${l.id}` as const, label: `List: ${l.name}` })),
               ]}
             />
@@ -440,20 +453,25 @@ function ListColumn({
             </Text>
           )
         ) : section === "tasks" ? (
-          filteredTasks.length || (taskFilter === "all" && seeds.length) ? (
+          // Upcoming always lays out the days of the month, so it has no empty state.
+          filteredTasks.length || taskFilter === "upcoming" || (taskFilter === "all" && seeds.length) ? (
             <>
-              {openTasks.map((t) => (
-                <TaskRow
-                  key={t.id}
-                  handle={<DragHandle payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }} />}
-                  task={t}
-                  selected={ms.active ? ms.isSelected(t.id) : t.id === itemId}
-                  onPress={(e) => {
-                    if (!ms.press(t.id, pressMods(e))) openItem("tasks", t.id);
-                  }}
-                  onToggle={() => void tasksStore.setStatus(t.id, "done")}
-                />
-              ))}
+              <ScheduledTasks
+                tasks={openTasks}
+                mode={taskFilter}
+                renderTask={(t) => (
+                  <TaskRow
+                    key={t.id}
+                    handle={<DragHandle payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }} />}
+                    task={t}
+                    selected={ms.active ? ms.isSelected(t.id) : t.id === itemId}
+                    onPress={(e) => {
+                      if (!ms.press(t.id, pressMods(e))) openItem("tasks", t.id);
+                    }}
+                    onToggle={() => void tasksStore.setStatus(t.id, "done")}
+                  />
+                )}
+              />
               {/* Repeating definitions have no concrete due date, so hide them under a due filter. */}
               {taskFilter === "all" && seeds.length ? (
                 <ListSectionFold label={`Repeating · ${seeds.length}`} storageKey="tasks.repeating" defaultOpen>
@@ -488,13 +506,7 @@ function ListColumn({
             </>
           ) : (
             <Text tone="tertiary" variant="caption" style={styles.empty}>
-              {taskFilter === "upcoming"
-                ? `No upcoming tasks in this ${where}.`
-                : taskFilter === "overdue"
-                  ? `No overdue tasks in this ${where}.`
-                  : taskFilter === "unsorted"
-                    ? "Every task in this area belongs to one of its projects."
-                    : "No tasks yet. Add one with ＋, or move existing tasks here from a task’s “Move to” menu."}
+              {emptyTasksCaption(taskFilter, where)}
             </Text>
           )
         ) : (
@@ -505,6 +517,24 @@ function ListColumn({
       </ScrollView>
     </View>
   );
+}
+
+/** What an empty tasks section says, per filter. */
+function emptyTasksCaption(filter: TaskListFilter, where: "area" | "project"): string {
+  switch (filter) {
+    case "upcoming":
+      return `No upcoming tasks in this ${where}.`;
+    case "overdue":
+      return `No overdue tasks in this ${where}.`;
+    case "anytime":
+      return `No tasks without a start or a deadline in this ${where}.`;
+    case "someday":
+      return `Nothing filed under Someday in this ${where}.`;
+    case "unsorted":
+      return "Every task in this area belongs to one of its projects.";
+    default:
+      return "No tasks yet. Add one with ＋, or move existing tasks here from a task’s “Move to” menu.";
+  }
 }
 
 /** The detail pane: the selected note, task, list or canvas — or the empty state. Nothing
@@ -527,6 +557,8 @@ function DetailPane({ container, section }: { container: ContainerRef & { itemId
     } else if (id && ms.kind === "task") {
       const task = tasksStore.byId(id) ?? tasksStore.seedById(id);
       if (task) body = <TaskEditor key={task.id} task={task} save={tasksStore.update} />;
+    } else if (id && ms.kind === "canvas") {
+      body = <CanvasPane key={id} canvasId={id} onDeleted={ms.clear} />;
     }
     return (
       <View style={styles.detail}>

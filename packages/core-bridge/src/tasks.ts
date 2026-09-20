@@ -7,6 +7,8 @@ export interface CreateTaskInput {
   status?: TaskStatus;
   /** ISO timestamps: when the task starts, and its deadline. */
   startAt?: string | null;
+  /** File it under Someday instead of starting it (wins over a `startAt`). */
+  someday?: boolean;
   dueAt?: string | null;
   reminders?: TaskReminder[];
   /** RFC5545 RRULE (e.g. "FREQ=WEEKLY;BYDAY=MO") — turns this into a repeating-task seed;
@@ -24,6 +26,8 @@ export interface UpdateTaskInput {
   /** ISO timestamps to set, or set clearStartAt / clearDueAt to remove them. */
   startAt?: string | null;
   clearStartAt?: boolean;
+  /** Someday and a start exclude each other: core clears one when the other is set. */
+  someday?: boolean;
   dueAt?: string | null;
   clearDueAt?: boolean;
   /** Replaces the whole reminder list; [] removes every reminder. */

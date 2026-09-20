@@ -117,7 +117,7 @@ func scanServerNote(sc rowScanner) (*domain.Note, int64, error) {
 
 // ---- tasks ---------------------------------------------------------------
 
-const taskCols = `id, title, notes_md, status, start_at, due_at, reminders_json, completed_at, repeat_rule, repeat_seed_id, object_type_id, props_json, created_at, updated_at, deleting_at, deleted_at, version, server_seq`
+const taskCols = `id, title, notes_md, status, start_at, due_at, reminders_json, completed_at, repeat_rule, repeat_seed_id, object_type_id, props_json, created_at, updated_at, deleting_at, deleted_at, version, server_seq, someday`
 
 var taskHandler = &entityHandler{
 	typ:   protocol.EntityTask,
@@ -137,18 +137,18 @@ var taskHandler = &entityHandler{
 			return err
 		}
 		_, err = tx.Exec(s.rebind(
-			`INSERT INTO tasks (id, user_id, title, notes_md, status, start_at, due_at, reminders_json, completed_at, repeat_rule, repeat_seed_id, object_type_id, props_json, created_at, updated_at, deleting_at, deleted_at, version, server_seq)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO tasks (id, user_id, title, notes_md, status, start_at, someday, due_at, reminders_json, completed_at, repeat_rule, repeat_seed_id, object_type_id, props_json, created_at, updated_at, deleting_at, deleted_at, version, server_seq)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT (id) DO UPDATE SET
 			   title = excluded.title, notes_md = excluded.notes_md, status = excluded.status,
-			   start_at = excluded.start_at, due_at = excluded.due_at, reminders_json = excluded.reminders_json,
+			   start_at = excluded.start_at, someday = excluded.someday, due_at = excluded.due_at, reminders_json = excluded.reminders_json,
 			   completed_at = excluded.completed_at,
 			   repeat_rule = excluded.repeat_rule, repeat_seed_id = excluded.repeat_seed_id,
 			   object_type_id = excluded.object_type_id, props_json = excluded.props_json,
 			   updated_at = excluded.updated_at, deleting_at = excluded.deleting_at,
 			   deleted_at = excluded.deleted_at, version = excluded.version, server_seq = excluded.server_seq;`),
 			t.ID, uid, t.Title, t.NotesMD, t.Status,
-			fmtTime(t.StartAt), fmtTime(t.DueAt), remindersJSON(reminders), fmtTime(t.CompletedAt), t.RepeatRule, t.RepeatSeedID,
+			fmtTime(t.StartAt), boolInt(t.Someday), fmtTime(t.DueAt), remindersJSON(reminders), fmtTime(t.CompletedAt), t.RepeatRule, t.RepeatSeedID,
 			t.ObjectTypeID, propsOrDefault(t.Props),
 			t.CreatedAt.UTC().Format(timeFormat), updatedAt.Format(timeFormat),
 			fmtTime(t.DeletingAt), fmtTime(t.DeletedAt), version, seq)
@@ -192,12 +192,13 @@ func scanServerTask(sc rowScanner) (*domain.Task, int64, error) {
 		repeatRule, repeatSeedID                         sql.NullString
 		objectTypeID, propsJSON                          sql.NullString
 		createdAt, updatedAt                             string
-		seq                                              int64
+		seq, someday                                     int64
 	)
 	if err := sc.Scan(&t.ID, &t.Title, &notesMD, &t.Status, &startAt, &dueAt, &remindersRaw, &completedAt,
-		&repeatRule, &repeatSeedID, &objectTypeID, &propsJSON, &createdAt, &updatedAt, &deletingAt, &deleted, &t.Version, &seq); err != nil {
+		&repeatRule, &repeatSeedID, &objectTypeID, &propsJSON, &createdAt, &updatedAt, &deletingAt, &deleted, &t.Version, &seq, &someday); err != nil {
 		return nil, 0, err
 	}
+	t.Someday = someday != 0
 	t.NotesMD = notesMD.String
 	t.Reminders = parseReminders(remindersRaw.String)
 	if objectTypeID.Valid {
@@ -450,7 +451,7 @@ func scanServerArea(sc rowScanner) (*domain.Area, int64, error) {
 
 // ---- projects ------------------------------------------------------------
 
-const projectCols = `id, area_id, name, color, icon, cover_document_id, description_md, sort_order, archived_at, created_at, updated_at, deleted_at, version, server_seq`
+const projectCols = `id, area_id, name, color, icon, cover_document_id, description_md, sort_order, archived_at, created_at, updated_at, deleted_at, version, server_seq, start_at, due_at, someday, completed_at, repeat_rule, repeat_after`
 
 var projectHandler = &entityHandler{
 	typ:   protocol.EntityProject,
@@ -460,25 +461,33 @@ var projectHandler = &entityHandler{
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return err
 		}
-		var deletedAt, archivedAt any
-		if p.DeletedAt != nil {
-			deletedAt = p.DeletedAt.UTC().Format(timeFormat)
+		// The repeat definition is scheduling metadata the spawner reads (PLAN-scheduling.md §3):
+		// validated with the rules every client writes by, so a bad one can't wedge a sweep.
+		if err := domain.ValidateRepeatRule(p.RepeatRule); err != nil {
+			return err
 		}
-		if p.ArchivedAt != nil {
-			archivedAt = p.ArchivedAt.UTC().Format(timeFormat)
+		if p.RepeatAfter != nil {
+			if _, err := domain.ParseRepeatAfter(*p.RepeatAfter); err != nil {
+				return err
+			}
 		}
 		_, err := tx.Exec(s.rebind(
-			`INSERT INTO projects (id, user_id, area_id, name, color, icon, cover_document_id, description_md, sort_order, archived_at, created_at, updated_at, deleted_at, version, server_seq)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO projects (id, user_id, area_id, name, color, icon, cover_document_id, description_md, sort_order, archived_at,
+			   start_at, due_at, someday, completed_at, repeat_rule, repeat_after, created_at, updated_at, deleted_at, version, server_seq)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT (id) DO UPDATE SET
 			   area_id = excluded.area_id, name = excluded.name, color = excluded.color,
 			   icon = excluded.icon, cover_document_id = excluded.cover_document_id,
 			   description_md = excluded.description_md,
 			   sort_order = excluded.sort_order, archived_at = excluded.archived_at,
+			   start_at = excluded.start_at, due_at = excluded.due_at, someday = excluded.someday,
+			   completed_at = excluded.completed_at, repeat_rule = excluded.repeat_rule,
+			   repeat_after = excluded.repeat_after,
 			   updated_at = excluded.updated_at, deleted_at = excluded.deleted_at,
 			   version = excluded.version, server_seq = excluded.server_seq;`),
-			p.ID, uid, p.AreaID, p.Name, p.Color, p.Icon, p.CoverDocumentID, p.DescriptionMd, p.SortOrder, archivedAt,
-			p.CreatedAt.UTC().Format(timeFormat), updatedAt.Format(timeFormat), deletedAt, version, seq)
+			p.ID, uid, p.AreaID, p.Name, p.Color, p.Icon, p.CoverDocumentID, p.DescriptionMd, p.SortOrder, fmtTime(p.ArchivedAt),
+			fmtTime(p.StartAt), fmtTime(p.DueAt), boolInt(p.Someday), fmtTime(p.CompletedAt), p.RepeatRule, p.RepeatAfter,
+			p.CreatedAt.UTC().Format(timeFormat), updatedAt.Format(timeFormat), fmtTime(p.DeletedAt), version, seq)
 		return err
 	},
 	loadRaw: func(s *Server, tx *sql.Tx, uid, id string) ([]byte, error) {
@@ -515,11 +524,31 @@ func scanServerProject(sc rowScanner) (*domain.Project, int64, error) {
 	var (
 		p                                         domain.Project
 		color, icon, cover, deletedAt, archivedAt sql.NullString
+		startAt, dueAt, completedAt               sql.NullString
+		repeatRule, repeatAfter                   sql.NullString
 		createdAt, updatedAt                      string
-		seq                                       int64
+		seq, someday                              int64
 	)
-	if err := sc.Scan(&p.ID, &p.AreaID, &p.Name, &color, &icon, &cover, &p.DescriptionMd, &p.SortOrder, &archivedAt, &createdAt, &updatedAt, &deletedAt, &p.Version, &seq); err != nil {
+	if err := sc.Scan(&p.ID, &p.AreaID, &p.Name, &color, &icon, &cover, &p.DescriptionMd, &p.SortOrder, &archivedAt, &createdAt, &updatedAt, &deletedAt, &p.Version, &seq,
+		&startAt, &dueAt, &someday, &completedAt, &repeatRule, &repeatAfter); err != nil {
 		return nil, 0, err
+	}
+	p.Someday = someday != 0
+	var err error
+	if p.StartAt, err = parseServerTime(startAt); err != nil {
+		return nil, 0, err
+	}
+	if p.DueAt, err = parseServerTime(dueAt); err != nil {
+		return nil, 0, err
+	}
+	if p.CompletedAt, err = parseServerTime(completedAt); err != nil {
+		return nil, 0, err
+	}
+	if repeatRule.Valid && repeatRule.String != "" {
+		p.RepeatRule = &repeatRule.String
+	}
+	if repeatAfter.Valid && repeatAfter.String != "" {
+		p.RepeatAfter = &repeatAfter.String
 	}
 	if color.Valid {
 		p.Color = &color.String

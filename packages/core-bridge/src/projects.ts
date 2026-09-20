@@ -29,6 +29,22 @@ export interface UpdateProjectInput extends PageFields {
   color?: string | null;
   sortOrder?: number;
   archived?: boolean;
+  /** Scheduling (PLAN-scheduling.md §2), with the task conventions: ISO timestamps to set, or
+   *  clearStartAt / clearDueAt to remove them; Someday and a start exclude each other. */
+  startAt?: string | null;
+  clearStartAt?: boolean;
+  dueAt?: string | null;
+  clearDueAt?: boolean;
+  someday?: boolean;
+  /** Complete (true) or reopen (false) the project. With `completeTasks`, completing also
+   *  finishes every task still open in it. */
+  completed?: boolean;
+  completeTasks?: boolean;
+  /** Set one kind of repeat — an RRULE schedule, or an after-completion interval ("P3D",
+   *  "P2W", "P1M", "P1Y") — which replaces the other; clearRepeat stops it repeating. */
+  repeatRule?: string | null;
+  repeatAfter?: string | null;
+  clearRepeat?: boolean;
 }
 
 /** What a project can hold (PLAN §6.6): content, and calendars — one calendar (a CalDAV calendar
@@ -92,6 +108,9 @@ export function projectsApi(core: CoreBridge) {
      *  lists subtract to offer "Unsorted" vs "All" (PLAN §6.6). */
     memberEntityIds: (entityType: MemberEntityType) =>
       core.invoke<string[]>("projects.memberEntityIds", { entityType }),
+    /** Ids of the tasks filed in a Someday project: filed away with it, so the task lists show
+     *  them only under the Someday filter (PLAN-scheduling.md §1). */
+    somedayTaskIds: () => core.invoke<string[]>("projects.somedayTaskIds"),
 
     // Sidebar (area headings + project indicators, computed in core)
     sidebar: () => core.invoke<SidebarData>("nav.sidebar"),

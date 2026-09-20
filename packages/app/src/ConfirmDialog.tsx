@@ -24,6 +24,9 @@ export interface ConfirmDialogProps {
    *  in-place scrim would squeeze this one into it. Portals to the document root on web (see
    *  Overlay); a transparent native Modal elsewhere, which also stacks above an open Dialog. */
   portal?: boolean;
+  /** The confirm button's weight: "danger" (the default — most confirmations here destroy
+   *  something) or "primary" for one that doesn't, like completing a project. */
+  tone?: "danger" | "primary";
 }
 
 /** Wires ⏎ / esc for a dialog while it is open, and reports whether the hints should show.
@@ -96,6 +99,7 @@ export function ConfirmDialog({
   onConfirm,
   onClose,
   portal,
+  tone = "danger",
 }: ConfirmDialogProps) {
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
@@ -154,7 +158,7 @@ export function ConfirmDialog({
           ) : null}
           <View style={styles.actions}>
             <Button label={cancelLabel} variant="ghost" kbd={hints ? "esc" : undefined} onPress={onClose} />
-            <Button label={confirmLabel} variant="danger" kbd={hints ? "⏎" : undefined} disabled={!canConfirm} onPress={() => void confirm()} />
+            <Button label={confirmLabel} variant={tone} kbd={hints ? "⏎" : undefined} disabled={!canConfirm} onPress={() => void confirm()} />
           </View>
         </View>
       </View>

@@ -44,8 +44,8 @@ export function BulkAssignPicker({
     }
   };
 
-  const noun = entityType === "task" ? "task" : "note";
-  const label = entityIds.length === 1 ? noun : `${noun}s`;
+  const noun = entityType === "task" ? "task" : entityType === "canvas" ? "canvas" : "note";
+  const label = entityIds.length === 1 ? noun : noun === "canvas" ? "canvases" : `${noun}s`;
   const shown = filterProjects(projects, query);
   const q = query.trim().toLowerCase();
   const shownAreas = areaType ? areas.filter((a) => !q || a.name.toLowerCase().includes(q)) : [];

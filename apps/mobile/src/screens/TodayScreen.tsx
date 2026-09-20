@@ -94,9 +94,11 @@ export function TodayScreen() {
                 date={selected}
                 onOpenItem={(item) => {
                   if (item.kind === 'task') nav.push('TaskEditor', { id: item.sourceId });
+                  else if (item.kind === 'project') nav.push('Project', { projectId: item.sourceId });
                   else if (item.kind === 'note') nav.push('NoteEditor', { id: item.sourceId });
                   else nav.push('CalendarEvent', { item });
                 }}
+                creatable
               />
             </View>
           ) : null}

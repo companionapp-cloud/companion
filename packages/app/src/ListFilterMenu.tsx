@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, View } from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
 import { Icon, Text, colors, control, font, icon, radius, row, shadow, space, transition, motion, useDensity, type PressState } from "@companion/design-system";
 
 export interface FilterOption<T extends string> {
@@ -77,12 +77,23 @@ export function ListFilterTabs<T extends string>({
   value,
   options,
   onChange,
+  scroll,
 }: {
   value: T;
   options: FilterOption<T>[];
   onChange: (value: T) => void;
+  /** More segments than a phone is wide (the task lists' six): keep them full size and let the
+   *  track scroll sideways instead of squeezing every label. */
+  scroll?: boolean;
 }) {
   const touch = useDensity() === "touch";
+  if (scroll) {
+    return (
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={tabStyles.scroller}>
+        <ListFilterTabs value={value} options={options} onChange={onChange} />
+      </ScrollView>
+    );
+  }
   return (
     <View style={tabStyles.track}>
       {options.map((o) => {
@@ -111,6 +122,7 @@ export function ListFilterTabs<T extends string>({
 // A sunken track with hairline; the selected segment is the one raised card in it. Sized by
 // its content (alignSelf) and free to shrink, so it sits inside a mobile nav bar.
 const tabStyles = {
+  scroller: { flexGrow: 0, maxWidth: "100%" as const },
   track: {
     flexDirection: "row" as const,
     alignItems: "center" as const,

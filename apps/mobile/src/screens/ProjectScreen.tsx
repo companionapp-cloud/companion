@@ -30,8 +30,8 @@ const TAB: Record<keyof ProjectTabParamList, { label: string; icon: IconName }> 
 export function ProjectScreen({ route }: NativeStackScreenProps<RootStackParamList, 'Project'>) {
   const { projectId } = route.params;
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { projects, areas } = useProjects();
-  const project = projects.find((p) => p.id === projectId);
+  const { projectById, areas } = useProjects();
+  const project = projectById(projectId);
   const areaName = project ? areas.find((a) => a.id === project.areaId)?.name : undefined;
 
   // A two-line title (project name + its area in mono) and the settings action.

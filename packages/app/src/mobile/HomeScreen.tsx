@@ -19,7 +19,7 @@ import { BottomSheet, Card, CardRow, CountPill, FAB_CLEARANCE, Fab, IconTile, NA
 // tree as a label + grouped card per area. A quick-add FAB opens the capture sheet.
 // (Reorder/edit mode stays native-only for now; section order still follows Settings › Tools.)
 
-type SectionView = Extract<ViewId, "today" | "chat" | "notes" | "tasks" | "canvases" | "habits" | "calendar" | "graph" | "trash">;
+type SectionView = Extract<ViewId, "today" | "chat" | "notes" | "tasks" | "canvases" | "habits" | "calendar" | "graph" | "logbook" | "trash">;
 const SECTIONS: { view: SectionView; label: string; subtitle: string; icon: IconName; accent?: boolean }[] = [
   { view: "today", label: "Today", subtitle: "Today's note and your month", icon: "today" },
   { view: "chat", label: "Chat", subtitle: "Ask, capture, recall — anything", icon: "chat", accent: true },
@@ -29,6 +29,7 @@ const SECTIONS: { view: SectionView; label: string; subtitle: string; icon: Icon
   { view: "habits", label: "Habits", subtitle: "Streaks and daily builders", icon: "habits" },
   { view: "calendar", label: "Calendar", subtitle: "Events, tasks, and notes", icon: "calendar" },
   { view: "graph", label: "Graph", subtitle: "See how everything connects", icon: "graph" },
+  { view: "logbook", label: "Logbook", subtitle: "Completed tasks and projects", icon: "logbook" },
   { view: "trash", label: "Trash", subtitle: "Recently deleted, kept 30 days", icon: "trash" },
 ];
 
@@ -94,6 +95,12 @@ export function HomeScreen() {
   const store = useNotes();
   const tasks = useTasks();
   const { sidebar, createArea, createProject, deleteArea } = useProjects();
+  // Someday projects are filed away (PLAN-scheduling.md §1): off this list, shown on their area's
+  // overview. `empty` still counts them — an area holding one can't be deleted.
+  const areas = useMemo(
+    () => sidebar.areas.map((a) => ({ ...a, empty: a.projects.length === 0, projects: a.projects.filter((p) => !p.someday) })),
+    [sidebar.areas],
+  );
 
   const [addingArea, setAddingArea] = useState(false);
   const [areaName, setAreaName] = useState("");
@@ -170,14 +177,14 @@ export function HomeScreen() {
           ))}
         </Card>
 
-        {sidebar.areas.map((area) => (
+        {areas.map((area) => (
           <View key={area.id}>
             <SectionLabel
               onPress={() => nav.openArea(area.id)}
               trailing={
                 <>
                   {/* Areas are only deletable once empty (PLAN §6.6). */}
-                  {area.projects.length === 0 ? (
+                  {area.empty ? (
                     <IconButton label={`Delete area ${area.name}`} onPress={() => setDeletingArea(area)}>
                       <Icon name="trash" size={15} color={colors.textTertiary} />
                     </IconButton>

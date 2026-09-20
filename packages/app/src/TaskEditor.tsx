@@ -37,6 +37,7 @@ import { ArchetypeChip, ObjectMetadataPanel, MetadataSidePanel } from "./Archety
 import { ConfirmDialog } from "./ConfirmDialog";
 import { NavContext } from "./nav-context";
 import { timeAgo } from "./NotificationRow";
+import { isOverdue } from "./taskSchedule";
 
 export interface TaskEditorProps {
   task: Task;
@@ -167,10 +168,12 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
           <MetaChip
             icon="calendar"
             label="Add start"
-            display={task.startAt ? `starts ${formatWhen(task.startAt)}` : null}
+            display={task.someday ? "someday" : task.startAt ? `starts ${formatWhen(task.startAt)}` : null}
             active={expanded === "start"}
             onPress={() => toggle("start")}
-            onClear={task.startAt ? () => save(task.id, { clearStartAt: true }) : undefined}
+            onClear={
+              task.someday ? () => save(task.id, { someday: false }) : task.startAt ? () => save(task.id, { clearStartAt: true }) : undefined
+            }
           />
           <MetaChip
             icon="flag"
@@ -213,6 +216,7 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
               onSet={(iso) => save(task.id, { startAt: iso })}
               onClear={() => save(task.id, { clearStartAt: true })}
               presets={startPresets()}
+              someday={{ active: task.someday, onToggle: () => save(task.id, { someday: !task.someday }) }}
               nlPlaceholder="Type a start, e.g. monday 9am"
             />
           </View>
@@ -409,7 +413,7 @@ export function Checkbox({ checked, onPress, size, label }: { checked: boolean; 
 /** A metadata chip under the task title. Empty shows a ghost "Add …" affordance; set shows
  *  the value (mono — it is a date or a rule) with a clear (✕) button. Tapping the body
  *  expands the field's full editor upstream. */
-function MetaChip({
+export function MetaChip({
   icon,
   label,
   display,
@@ -516,6 +520,11 @@ export function TaskRow({
             <Text variant="mono" tone="quaternary">
               starts {formatDueShort(task.startAt!)}
             </Text>
+          ) : isOverdue(task) ? (
+            // No deadline, and its start date has passed (PLAN-scheduling.md §5).
+            <Text variant="mono" tone="danger">
+              started {formatDueShort(task.startAt!)}
+            </Text>
           ) : null}
           {trailing ? <View style={{ opacity: hovered || !canHover ? 1 : 0 }}>{trailing}</View> : null}
           {handle ? <View style={{ opacity: hovered || !canHover ? 1 : 0 }}>{handle}</View> : null}
@@ -573,7 +582,7 @@ function formatEcho(iso: string): string {
 /** Chip label for a start or deadline — "Jul 5, 5:00 PM", or just "Jul 5" at midnight (a
  *  date typed without a time). Relative reminders count back from the deadline's time, so
  *  the chip shows it. */
-function formatWhen(iso: string): string {
+export function formatWhen(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   if (d.getHours() === 0 && d.getMinutes() === 0) return formatDue(iso);
@@ -582,18 +591,22 @@ function formatWhen(iso: string): string {
 
 /** The full date control: current value, a natural-language field (parsed in core via
  *  olebedev/when), a concrete date/time picker (web), and quick-set presets. */
-function DateRow({
+export function DateRow({
   value,
   presets,
   onSet,
   onClear,
   nlPlaceholder,
+  someday,
 }: {
   value?: string | null;
   presets: { label: string; at: () => Date }[];
   onSet: (iso: string) => void;
   onClear: () => void;
   nlPlaceholder: string;
+  /** Start fields only: "Someday" stands in for a start date (PLAN-scheduling.md §1), so it
+   *  sits with the presets. Picking a date takes the item back out of Someday. */
+  someday?: { active: boolean; onToggle: () => void };
 }) {
   const { dates } = useCore();
   const touch = useDensity() === "touch";
@@ -660,6 +673,7 @@ function DateRow({
         {presets.map((p) => (
           <PresetChip key={p.label} label={p.label} active={false} onPress={() => onSet(p.at().toISOString())} />
         ))}
+        {someday ? <PresetChip label="Someday" active={someday.active} onPress={someday.onToggle} /> : null}
       </View>
     </View>
   );
@@ -667,7 +681,7 @@ function DateRow({
 
 /** A quick-set preset under a metadata editor: a squared 22px chip (30px on touch); the
  *  fill steps on hover/press and the chosen repeat cadence takes the soft accent. */
-function PresetChip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+export function PresetChip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   const touch = useDensity() === "touch";
   return (
     <Pressable
@@ -957,14 +971,14 @@ function atDaysFrom(days: number, hour: number): Date {
   return d;
 }
 
-function startPresets() {
+export function startPresets() {
   return [
     { label: "Today", at: () => atToday(9) },
     { label: "Tomorrow", at: () => atDaysFrom(1, 9) },
     { label: "In a week", at: () => atDaysFrom(7, 9) },
   ];
 }
-function deadlinePresets() {
+export function deadlinePresets() {
   return [
     { label: "Today", at: () => atToday(17) },
     { label: "Tomorrow", at: () => atDaysFrom(1, 17) },

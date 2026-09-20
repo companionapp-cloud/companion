@@ -142,16 +142,63 @@ func (c *Core) projectsUpdate(payload []byte) ([]byte, error) {
 	var args struct {
 		ID string `json:"id"`
 		store.UpdateProjectInput
+		// CompleteTasks, sent alongside completed:true, finishes the project's open tasks with
+		// it (PLAN-scheduling.md §2): the UI confirms first, then the whole project lands in
+		// the Logbook together.
+		CompleteTasks bool `json:"completeTasks"`
 	}
 	if err := unmarshal(payload, &args); err != nil {
 		return nil, err
 	}
-	p, err := c.store.Projects.Update(args.ID, args.UpdateProjectInput)
+	completing := args.Completed != nil && *args.Completed && args.CompleteTasks
+	var p *domain.Project
+	err := c.store.Batch(func() error {
+		if completing {
+			if err := c.completeProjectTasks(args.ID); err != nil {
+				return err
+			}
+		}
+		var err error
+		p, err = c.store.Projects.Update(args.ID, args.UpdateProjectInput)
+		return err
+	})
 	if err != nil {
 		return nil, mapStoreErr(err)
 	}
+	if completing {
+		c.emit(tasksChangedEvent, nil)
+	}
 	c.emitNavChanged("project", p.ID)
 	return json.Marshal(p)
+}
+
+// completeProjectTasks marks every open task filed in the project done. Repeating seeds are
+// definitions, not to-dos, and are left alone.
+func (c *Core) completeProjectTasks(projectID string) error {
+	members, err := c.store.ProjectMembers.ListForProject(projectID)
+	if err != nil {
+		return err
+	}
+	done := domain.TaskDone
+	for _, m := range members {
+		if m.EntityType != domain.NodeTask {
+			continue
+		}
+		t, err := c.store.Tasks.Get(m.EntityID)
+		if errors.Is(err, store.ErrNotFound) {
+			continue // trashed or gone: nothing to finish
+		}
+		if err != nil {
+			return err
+		}
+		if t.Status != domain.TaskOpen || t.IsRepeatSeed() {
+			continue
+		}
+		if _, err := c.store.Tasks.Update(t.ID, store.UpdateTaskInput{Status: &done}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // projectsReorder persists a new top-to-bottom order for a single area's projects (PLAN
@@ -525,4 +572,14 @@ func (c *Core) navSidebar() ([]byte, error) {
 		return nil, err
 	}
 	return json.Marshal(data)
+}
+
+// projectsSomedayTaskIds lists the tasks filed in a Someday project, which the task lists hide
+// along with it (PLAN-scheduling.md §1).
+func (c *Core) projectsSomedayTaskIds() ([]byte, error) {
+	ids, err := c.store.ProjectMembers.SomedayTaskIDs()
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(ids)
 }

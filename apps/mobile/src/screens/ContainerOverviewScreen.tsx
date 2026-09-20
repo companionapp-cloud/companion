@@ -39,7 +39,7 @@ export function ContainerOverviewScreen() {
     () => (projectId ? { kind: 'project', id: projectId } : areaId ? { kind: 'area', id: areaId } : null),
     [projectId, areaId],
   );
-  const { areas, projects } = useProjects();
+  const { areas, projectById } = useProjects();
   const { hidden } = useToolVisibility();
   const content = useContainerContent(container);
   const documentSource = useNativeDocumentSource();
@@ -81,7 +81,7 @@ export function ContainerOverviewScreen() {
   }, [nav]);
 
   if (!container) return null;
-  const page = container.kind === 'area' ? areas.find((a) => a.id === container.id) : projects.find((p) => p.id === container.id);
+  const page = container.kind === 'area' ? areas.find((a) => a.id === container.id) : projectById(container.id);
   if (!page) return null;
   const sections = (['notes', 'tasks', 'canvases'] as const).filter((s) => !hidden.has(s));
 

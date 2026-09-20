@@ -1,9 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { GestureResponderEvent } from "react-native";
 
-/** The kind of item a list holds; selection is homogeneous (a list is all notes or all
- *  tasks), so bulk actions know which store to call. */
-export type MultiSelectKind = "note" | "task";
+/** The kind of item a list holds; selection is homogeneous (a list is all notes, all tasks or
+ *  all canvases), so bulk actions know which store to call. */
+export type MultiSelectKind = "note" | "task" | "canvas";
 
 /** Keyboard modifiers read off a row press, normalized across platforms. */
 export interface PressMods {
@@ -135,6 +135,12 @@ export function MultiSelectProvider({ children }: { children: ReactNode }) {
   }, [clear]);
 
   return <MultiSelectCtx.Provider value={value}>{children}</MultiSelectCtx.Provider>;
+}
+
+/** The store, or null where no provider is mounted: the mobile shells host some of the same
+ *  lists (canvases, the Logbook) and keep single-select. */
+export function useOptionalMultiSelect(): MultiSelectStore | null {
+  return useContext(MultiSelectCtx);
 }
 
 export function useMultiSelect(): MultiSelectStore {

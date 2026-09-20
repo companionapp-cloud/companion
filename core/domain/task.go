@@ -27,6 +27,9 @@ type Task struct {
 	Status  string `json:"status"` // open | done | cancelled
 	// StartAt is when the task starts: the moment it becomes something to work on.
 	StartAt *time.Time `json:"startAt,omitempty"`
+	// Someday stands in for a start: the task is filed away under the Someday filter and out
+	// of every other list (PLAN-scheduling.md §1). It never coexists with a StartAt.
+	Someday bool `json:"someday"`
 	// DueAt is the task's deadline. The field keeps its original "due" name (column, wire and
 	// TS) but is presented as "Deadline". It places the task on the calendar, anchors relative
 	// reminders, and anchors a repeat's schedule.
@@ -66,6 +69,9 @@ func (t *Task) Validate() error {
 	}
 	if !validTaskStatus(t.Status) {
 		return errors.Join(ErrInvalidTask, errors.New("status must be open, done, or cancelled"))
+	}
+	if t.Someday && t.StartAt != nil {
+		return errors.Join(ErrInvalidTask, errors.New("a someday task has no start"))
 	}
 	if err := ValidateRepeatRule(t.RepeatRule); err != nil {
 		return errors.Join(ErrInvalidTask, err)

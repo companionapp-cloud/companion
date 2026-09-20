@@ -3,7 +3,9 @@ import { ScrollView, View, type GestureResponderEvent } from "react-native";
 import { Center, Icon, IconButton, Input, Kbd, ListRow, Row, SplitView, Spinner, Text, colors, icon, layout, space } from "@companion/design-system";
 import { docOfRef, SECTION_OF, useNav, type DocRef } from "./nav-context";
 import { useNotes } from "./NotesProvider";
-import { useTasks } from "./TasksProvider";
+import { useTasks, type TaskFilter } from "./TasksProvider";
+import { ScheduledTasks } from "./TaskGroups";
+import { newTaskDefaults, scheduleGroups } from "./taskSchedule";
 import { NoteEditor } from "./NoteEditor";
 import { TaskEditor, TaskRow } from "./TaskEditor";
 import { DragHandle } from "./DndContext";
@@ -109,6 +111,8 @@ function SelectionStackBody() {
   } else if (id && ms.kind === "task") {
     const task = tasks.byId(id) ?? tasks.seedById(id);
     if (task) body = <TaskEditor key={task.id} task={task} save={tasks.update} />;
+  } else if (id && ms.kind === "canvas") {
+    body = <CanvasPane key={id} canvasId={id} onDeleted={ms.clear} />;
   }
   return (
     <View style={styles.detail}>
@@ -267,6 +271,15 @@ function NotesList() {
   );
 }
 
+const EMPTY_TASKS: Record<TaskFilter, string> = {
+  unsorted: "Nothing to do. Add a task above.",
+  all: "Nothing to do. Add a task above.",
+  anytime: "No tasks without a start or a deadline.",
+  upcoming: "Nothing coming up.",
+  overdue: "Nothing overdue.",
+  someday: "Nothing filed under Someday. Set a task’s start to Someday to put it here.",
+};
+
 /** The tasks browse list (left column). Selecting a task fills the active tab. */
 function TasksList() {
   const store = useTasks();
@@ -277,10 +290,12 @@ function TasksList() {
   const activeId = activeDoc?.kind === "task" ? activeDoc.id : null;
 
   const { open, done } = useMemo(() => {
-    const open = store.visible.filter((t) => t.status !== "done");
+    const openTasks = store.visible.filter((t) => t.status !== "done");
+    // In the order shown (grouped views sort by date), so a range-select matches the screen.
+    const open = scheduleGroups(openTasks, store.filter)?.flatMap((g) => g.items) ?? openTasks;
     const done = store.visible.filter((t) => t.status === "done");
     return { open, done };
-  }, [store.visible]);
+  }, [store.visible, store.filter]);
 
   // Multiselect covers the actionable tasks (open + done); repeating seeds stay single-select.
   // Gated on visibility (see NotesList) so a background tab doesn't clobber the scope.
@@ -297,7 +312,8 @@ function TasksList() {
   const add = async () => {
     const title = draft.trim();
     setDraft("");
-    const t = await store.create({ title: title || "Untitled task" });
+    // A task typed into a schedule view lands in it: Someday, tomorrow (Upcoming), today (Overdue).
+    const t = await store.create({ title: title || "Untitled task", ...newTaskDefaults(store.filter) });
     nav.openTask(t.id);
   };
 
@@ -313,8 +329,10 @@ function TasksList() {
             options={[
               { value: "unsorted", label: "Unsorted tasks" },
               { value: "all", label: "All tasks" },
+              { value: "anytime", label: "Anytime tasks" },
               { value: "upcoming", label: "Upcoming tasks" },
               { value: "overdue", label: "Overdue tasks" },
+              { value: "someday", label: "Someday tasks" },
             ]}
           />
         </View>
@@ -333,23 +351,28 @@ function TasksList() {
         />
       </View>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll}>
-        {open.length ? (
-          open.map((t) => (
-            <TaskRow
-              key={t.id}
-              task={t}
-              selected={selectFor(t.id)}
-              onPress={(e) => pressTask(t.id, e)}
-              onToggle={() => void store.setStatus(t.id, "done")}
-              handle={<DragHandle payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }} />}
-            />
-          ))
+        {open.length || store.filter === "upcoming" ? (
+          <ScheduledTasks
+            tasks={open}
+            mode={store.filter}
+            renderTask={(t) => (
+              <TaskRow
+                key={t.id}
+                task={t}
+                selected={selectFor(t.id)}
+                onPress={(e) => pressTask(t.id, e)}
+                onToggle={() => void store.setStatus(t.id, "done")}
+                handle={<DragHandle payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }} />}
+              />
+            )}
+          />
         ) : (
           <Text tone="tertiary" variant="caption" style={styles.empty}>
-            Nothing to do. Add a task above.
+            {EMPTY_TASKS[store.filter]}
           </Text>
         )}
-        {store.seeds.length ? (
+        {/* Repeating definitions have no dates of their own, so they sit under the membership scopes only. */}
+        {store.seeds.length && (store.filter === "all" || store.filter === "unsorted") ? (
           <ListSectionFold label={`Repeating · ${store.seeds.length}`} storageKey="tasks.repeating" defaultOpen>
             {store.seeds.map((s) => (
               <ListRow

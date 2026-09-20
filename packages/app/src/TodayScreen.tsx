@@ -95,8 +95,10 @@ export function TodayScreen() {
           visible={nav.visible}
           onSelect={setSelected}
           onOpenItem={(item) => {
-            // A dated note is a daily note: select its day here instead of opening a tab.
+            // Agenda items open in a new tab, so the day's note stays where it is — except a
+            // dated note, which is a daily note: its day is selected here instead.
             if (item.kind === "task") nav.openInNewTab({ kind: "task", id: item.sourceId });
+            else if (item.kind === "project") nav.openInNewTab({ kind: "project", projectId: item.sourceId });
             else if (item.kind === "note") setSelected(itemDay(item));
           }}
         />
@@ -352,7 +354,7 @@ function CalendarPane(props: {
   return (
     <ScrollView style={styles.aside} contentContainerStyle={styles.asideContent}>
       <TodayCalendar selected={props.selected} today={props.today} onSelect={props.onSelect} />
-      <Agenda date={props.selected} onOpenItem={props.onOpenItem} />
+      <Agenda date={props.selected} onOpenItem={props.onOpenItem} creatable />
       <SyncSection visible={props.visible} />
     </ScrollView>
   );

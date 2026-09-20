@@ -196,3 +196,41 @@ func TestAreaMembersOverBridge(t *testing.T) {
 		t.Errorf("note should survive its area's deletion: %v", err)
 	}
 }
+
+// Completing a project with completeTasks finishes its open tasks alongside it, so the whole
+// project lands in the Logbook together; tasks filed elsewhere are untouched.
+func TestCompleteProjectCompletesItsOpenTasks(t *testing.T) {
+	c, _ := newTestCore(t)
+	areaID := createArea(t, c, "Work")
+	projectID := createProject(t, c, areaID, "Launch")
+
+	open := invoke[domain.Task](t, c, "tasks.create", map[string]any{"title": "Ship"})
+	cancelled := invoke[domain.Task](t, c, "tasks.create", map[string]any{"title": "Skip", "status": "cancelled"})
+	elsewhere := invoke[domain.Task](t, c, "tasks.create", map[string]any{"title": "Unrelated"})
+	for _, id := range []string{open.ID, cancelled.ID} {
+		invoke[domain.ProjectMember](t, c, "projects.addMember", map[string]any{"projectId": projectID, "entityType": "task", "entityId": id})
+	}
+
+	p := invoke[domain.Project](t, c, "projects.update", map[string]any{"id": projectID, "completed": true, "completeTasks": true})
+	if p.CompletedAt == nil {
+		t.Fatal("project not completed")
+	}
+	status := func(id string) string {
+		return invoke[domain.Task](t, c, "tasks.get", map[string]any{"id": id}).Status
+	}
+	if got := status(open.ID); got != domain.TaskDone {
+		t.Errorf("open member = %s, want done", got)
+	}
+	if got := status(cancelled.ID); got != domain.TaskCancelled {
+		t.Errorf("cancelled member = %s, want it left cancelled", got)
+	}
+	if got := status(elsewhere.ID); got != domain.TaskOpen {
+		t.Errorf("unrelated task = %s, want open", got)
+	}
+
+	// Reopening the project does not reopen its tasks.
+	p = invoke[domain.Project](t, c, "projects.update", map[string]any{"id": projectID, "completed": false})
+	if p.CompletedAt != nil || status(open.ID) != domain.TaskDone {
+		t.Errorf("reopened: completedAt %v, task %s", p.CompletedAt, status(open.ID))
+	}
+}

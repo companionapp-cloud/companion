@@ -16,6 +16,9 @@ type SidebarProject struct {
 	Icon         *string  `json:"icon,omitempty"` // emoji shown in place of the folder glyph
 	TaskProgress *float64 `json:"taskProgress"`   // 0..1: done / (open+done) member tasks; null if none
 	HabitHealth  *float64 `json:"habitHealth"`    // 0..1: mean member-habit streak health; null if none
+	// Someday projects ride along so an area's overview can list them (labelled); the
+	// sidebar itself leaves them out (PLAN-scheduling.md §1).
+	Someday bool `json:"someday"`
 }
 
 // SidebarArea is one heading and its projects, in sort order.
@@ -59,7 +62,10 @@ func (s *Store) Sidebar() (*SidebarData, error) {
 	// Always non-nil so it marshals to [] not null (the UI maps/reads .length on it).
 	unsorted := []SidebarProject{}
 	for _, p := range projects {
-		sp := SidebarProject{ID: p.ID, Name: p.Name, Color: p.Color, Icon: p.Icon, TaskProgress: progress[p.ID]}
+		if p.CompletedAt != nil {
+			continue // a completed project lives in the Logbook only (PLAN-scheduling.md §2)
+		}
+		sp := SidebarProject{ID: p.ID, Name: p.Name, Color: p.Color, Icon: p.Icon, TaskProgress: progress[p.ID], Someday: p.Someday}
 		if live[p.AreaID] {
 			byArea[p.AreaID] = append(byArea[p.AreaID], sp)
 		} else {

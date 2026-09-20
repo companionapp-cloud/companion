@@ -3,30 +3,22 @@ import type { CreateTaskInput, RepeatingTask, Task, TaskStatus, UpdateTaskInput 
 import { useCore } from "./CoreContext";
 import { useSync } from "./SyncProvider";
 import type { MembershipFilter } from "./NotesProvider";
+import { filterBySchedule, isSomeday, withoutSomeday, type ScheduleFilter } from "./taskSchedule";
 
-/** The task browse-list filter: the two membership scopes (PLAN §6.6) plus two due-date
- *  views — "upcoming" (due now or later) and "overdue" (due in the past). */
-export type TaskFilter = MembershipFilter | "upcoming" | "overdue";
-
-/** Narrow a task list to its upcoming or overdue members. A task counts only when it's not
- *  done and carries a valid due date: "overdue" = due before now, "upcoming" = due now or
- *  later. Shared by the global list and per-project task views so the semantics never drift. */
-export function filterTasksByDue(tasks: Task[], mode: "upcoming" | "overdue"): Task[] {
-  const now = Date.now();
-  return tasks.filter((t) => {
-    if (t.status === "done" || !t.dueAt) return false;
-    const due = new Date(t.dueAt).getTime();
-    if (Number.isNaN(due)) return false;
-    return mode === "overdue" ? due < now : due >= now;
-  });
-}
+/** The task browse-list filter: the two membership scopes (PLAN §6.6) plus the schedule views
+ *  — Anytime, Upcoming, Overdue, Someday (PLAN-scheduling.md §5, see taskSchedule.ts). */
+export type TaskFilter = MembershipFilter | ScheduleFilter;
 
 export interface TasksStore {
   tasks: Task[];
   /** The list the global browse view shows: `tasks` narrowed by `filter` (PLAN §6.6). */
   visible: Task[];
-  /** Open (not done) tasks in no project, regardless of `filter` — what the sidebar badge counts. */
+  /** Open (not done) tasks in no project, regardless of `filter` — what the sidebar badge counts.
+   *  Someday tasks are filed away, so they don't count. */
   openUnsorted: Task[];
+  /** Ids of the tasks filed in a Someday project: filed away with it, so every list outside
+   *  that project shows them only under Someday (PLAN-scheduling.md §1). */
+  somedayIds: ReadonlySet<string>;
   filter: TaskFilter;
   setFilter: (f: TaskFilter) => void;
   /** Repeating-task definitions (seeds), each with its next occurrence. Seeds are excluded
@@ -57,15 +49,22 @@ export function TasksProvider({ children }: { children: ReactNode }) {
   const [seeds, setSeeds] = useState<RepeatingTask[]>([]);
   // Ids of tasks that belong to ≥1 project, so `filter: "unsorted"` can subtract them.
   const [memberIds, setMemberIds] = useState<Set<string>>(new Set());
+  const [somedayIds, setSomedayIds] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<TaskFilter>("unsorted");
   const [loading, setLoading] = useState(true);
   const mutating = useRef(0); // suppress refresh clobber while an optimistic write is in flight
 
   const refresh = useCallback(async () => {
-    const [list, seedList, sorted] = await Promise.all([api.list(), api.listSeeds(), projectsApi.memberEntityIds("task")]);
+    const [list, seedList, sorted, filedAway] = await Promise.all([
+      api.list(),
+      api.listSeeds(),
+      projectsApi.memberEntityIds("task"),
+      projectsApi.somedayTaskIds(),
+    ]);
     setTasks(list);
     setSeeds(seedList);
     setMemberIds(new Set(sorted));
+    setSomedayIds(new Set(filedAway ?? []));
     setLoading(false);
   }, [api, projectsApi]);
 
@@ -80,9 +79,12 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     void refresh();
     const offTasks = core.on("tasks.changed", scheduleRefresh);
     const offData = core.on("data.changed", scheduleRefresh);
+    // A project going to (or coming back from) Someday files its tasks away with it.
+    const offNav = core.on("nav.changed", scheduleRefresh);
     return () => {
       offTasks();
       offData();
+      offNav();
       if (debounce.current) clearTimeout(debounce.current);
     };
   }, [core, refresh, scheduleRefresh]);
@@ -145,26 +147,26 @@ export function TasksProvider({ children }: { children: ReactNode }) {
   );
 
   const openUnsorted = useMemo(
-    () => tasks.filter((t) => t.status !== "done" && !memberIds.has(t.id)),
-    [tasks, memberIds],
+    () => tasks.filter((t) => t.status !== "done" && !memberIds.has(t.id) && !isSomeday(t, somedayIds)),
+    [tasks, memberIds, somedayIds],
   );
   const visible = useMemo(() => {
     switch (filter) {
       case "all":
-        return tasks;
+        return withoutSomeday(tasks, somedayIds);
       case "unsorted":
-        return tasks.filter((t) => !memberIds.has(t.id));
-      case "upcoming":
-      case "overdue":
-        return filterTasksByDue(tasks, filter);
+        return withoutSomeday(tasks, somedayIds).filter((t) => !memberIds.has(t.id));
+      default:
+        return filterBySchedule(tasks, filter, somedayIds);
     }
-  }, [tasks, memberIds, filter]);
+  }, [tasks, memberIds, somedayIds, filter]);
 
   const value = useMemo<TasksStore>(
     () => ({
       tasks,
       visible,
       openUnsorted,
+      somedayIds,
       filter,
       setFilter,
       seeds,
@@ -177,7 +179,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
       remove,
       removeMany,
     }),
-    [tasks, visible, openUnsorted, filter, seeds, loading, create, update, setStatus, remove, removeMany],
+    [tasks, visible, openUnsorted, somedayIds, filter, seeds, loading, create, update, setStatus, remove, removeMany],
   );
 
   return <TasksCtx.Provider value={value}>{children}</TasksCtx.Provider>;

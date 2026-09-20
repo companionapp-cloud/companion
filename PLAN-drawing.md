@@ -86,6 +86,13 @@ Writes emit `noteInk.changed {noteId}` and deliberately skip `data.changed` (not
 shows ink). Pulled ink arrives with the bulk `data.changed` every sync emits. Trashing a
 note keeps its ink; "Delete forever" and the server's retention sweep tombstone it.
 
+The host (`useNoteInk`) holds the editor's ink writes until inking has stopped for 3 s, then
+writes once and nudges a sync; it writes at once when the note closes or the app goes to the
+background. A write landing while a sync is pushing the group's previous version is marked
+clean by that push and overwritten by the pull after it, which lost handwriting. While ink
+is held, reads of the note's ink are overlaid with it, so a reload mid-handwriting can't
+replace what was just drawn.
+
 ## 3. Editor
 
 `packages/editor/src/ink/`: `types.ts` (payload + tools), `stroke.ts` (codec, outlines,

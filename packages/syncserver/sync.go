@@ -24,6 +24,16 @@ func isSeedRow(raw json.RawMessage) bool {
 	return t.IsRepeatSeed()
 }
 
+// isRepeatingProjectRow reports whether a pushed project row carries a repeat definition, so
+// its next copy is checked for at once. A decode failure is treated as "doesn't repeat".
+func isRepeatingProjectRow(raw json.RawMessage) bool {
+	var p domain.Project
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return false
+	}
+	return projectRepeats(&p)
+}
+
 const defaultPullLimit = 500
 
 // entityHandler describes how one syncable table is stored on the server and echoed on
@@ -134,7 +144,8 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 	handlers := s.handlers()
 	results := make([]protocol.PushResult, 0, len(req.Changes))
 	var maxSeq int64
-	seedIDs := map[string]bool{} // repeating-task seeds touched by this push
+	seedIDs := map[string]bool{}    // repeating-task seeds touched by this push
+	projectIDs := map[string]bool{} // repeating projects touched by this push
 	for _, ch := range req.Changes {
 		e := handlers[ch.EntityType]
 		if e == nil {
@@ -153,6 +164,9 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 		if res.Status == protocol.StatusAccepted && ch.EntityType == protocol.EntityTask && isSeedRow(ch.Row) {
 			seedIDs[ch.ID] = true
 		}
+		if res.Status == protocol.StatusAccepted && ch.EntityType == protocol.EntityProject && isRepeatingProjectRow(ch.Row) {
+			projectIDs[ch.ID] = true
+		}
 		results = append(results, res)
 	}
 	// Calendar feeds and events are now fetched and pushed by the client (PLAN §E2EE), so the
@@ -166,6 +180,18 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 		n, seq, err := s.materializeSeed(uid, id)
 		if err != nil {
 			log.Printf("push: materialize seed %s: %v", id, err)
+			continue
+		}
+		if n > 0 && seq > maxSeq {
+			maxSeq = seq
+		}
+	}
+	// A pushed repeating project — just completed, or given a schedule whose turn has already
+	// come — gets its next copy on the same sync (PLAN-scheduling.md §3).
+	for id := range projectIDs {
+		n, seq, err := s.spawnProject(uid, id)
+		if err != nil {
+			log.Printf("push: spawn project %s: %v", id, err)
 			continue
 		}
 		if n > 0 && seq > maxSeq {

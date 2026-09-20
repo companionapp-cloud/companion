@@ -103,10 +103,13 @@ func (s *Server) MaterializeAllRepeats() (int, error) {
 			maxSeqByUser[sr.uid] = seq
 		}
 	}
+	// Repeating projects ride the same sweep (PLAN-scheduling.md §3).
+	n, err := s.spawnAllProjects(maxSeqByUser)
+	written += n
 	for uid, seq := range maxSeqByUser {
 		s.hub.publish(uid, seq)
 	}
-	return written, nil
+	return written, err
 }
 
 // serverSeed is a seed's fields needed to shape its occurrences.

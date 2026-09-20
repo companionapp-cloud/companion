@@ -139,10 +139,13 @@ func TestRunImportsTheLibrary(t *testing.T) {
 		t.Errorf("Home's own to-dos = %v, want them filed in the area", got)
 	}
 
-	// What a project can't hold becomes a note in it.
+	// What a project can't hold becomes a note in it; its deadline is the project's own.
 	note := projectNote(t, st, launch.ID)
-	if note.Title != "Launch" || note.ContentMD != "Ship the thing.\n\nDeadline Fri, Oct 30, 2026\n\nTags: Errand" {
+	if note.Title != "Launch" || note.ContentMD != "Ship the thing.\n\nTags: Errand" {
 		t.Errorf("Launch note = %q / %q", note.Title, note.ContentMD)
+	}
+	if launch.DueAt == nil || !launch.DueAt.Equal(halifax(t, 2026, 10, 30, dueHour, 0)) {
+		t.Errorf("Launch deadline = %v, want Oct 30 2026", launch.DueAt)
 	}
 
 	tasks := tasksByTitle(t, st)

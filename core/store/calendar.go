@@ -835,30 +835,73 @@ func (r *CalendarEventsRepo) rangeItems(from, to time.Time, projectID string) ([
 	}
 	rows.Close()
 
-	// Tasks due within the window (not trashed/tombstoned/cancelled).
-	tasksIn, taskArgs := "", []any{fromTS, toTS}
+	// Tasks (not trashed/tombstoned/cancelled). An open task with both a start and a deadline
+	// is a span over every day between them (PLAN-scheduling.md §4); any other task with a
+	// deadline sits on it, as a point.
+	const taskSpans = `status = 'open' AND start_at IS NOT NULL AND due_at IS NOT NULL AND start_at <= due_at`
+	tasksIn, taskArgs := "", []any{fromTS, toTS, toTS, fromTS}
 	if projectID != "" {
 		tasksIn = ` AND id IN (` + projectMemberIDs + `)`
 		taskArgs = append(taskArgs, projectID, domain.NodeTask)
 	}
 	rows, err = r.db.Query(
-		`SELECT id, title, due_at FROM tasks
-		  WHERE due_at IS NOT NULL AND due_at >= ? AND due_at < ?
+		`SELECT id, title, start_at, due_at, (`+taskSpans+`) AS span FROM tasks
+		  WHERE ((NOT (`+taskSpans+`) AND due_at IS NOT NULL AND due_at >= ? AND due_at < ?)
+		      OR ((`+taskSpans+`) AND start_at < ? AND due_at >= ?))
 		    AND deleted_at IS NULL AND deleting_at IS NULL AND status != 'cancelled'`+tasksIn+`
 		  ORDER BY due_at ASC;`, taskArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("range tasks: %w", err)
 	}
 	for rows.Next() {
-		var id, title, dueAt string
-		if err := rows.Scan(&id, &title, &dueAt); err != nil {
+		var (
+			id, title, dueAt string
+			startAt          sql.NullString
+			span             int
+		)
+		if err := rows.Scan(&id, &title, &startAt, &dueAt, &span); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("scan range task: %w", err)
 		}
-		item := &domain.CalendarItem{ID: "task:" + id, Kind: domain.ItemTask, Title: title, SourceID: id}
-		if item.StartsAt, err = time.Parse(timeFormat, dueAt); err != nil {
+		item, err := scheduledItem(domain.ItemTask, id, title, startAt.String, dueAt, span != 0)
+		if err != nil {
 			rows.Close()
-			return nil, fmt.Errorf("parse task due_at: %w", err)
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	// Open projects with both a start and a deadline span their days the same way. A project's
+	// own calendar shows the project itself.
+	projectsIn, projectArgs := "", []any{toTS, fromTS}
+	if projectID != "" {
+		projectsIn = ` AND id = ?`
+		projectArgs = append(projectArgs, projectID)
+	}
+	rows, err = r.db.Query(
+		`SELECT id, name, start_at, due_at FROM projects
+		  WHERE start_at IS NOT NULL AND due_at IS NOT NULL AND start_at <= due_at
+		    AND start_at < ? AND due_at >= ?
+		    AND deleted_at IS NULL AND completed_at IS NULL`+projectsIn+`
+		  ORDER BY start_at ASC;`, projectArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("range projects: %w", err)
+	}
+	for rows.Next() {
+		var id, name, startAt, dueAt string
+		if err := rows.Scan(&id, &name, &startAt, &dueAt); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan range project: %w", err)
+		}
+		item, err := scheduledItem(domain.ItemProject, id, name, startAt, dueAt, true)
+		if err != nil {
+			rows.Close()
+			return nil, err
 		}
 		out = append(out, item)
 	}
@@ -915,4 +958,23 @@ func sortItemsByStart(items []*domain.CalendarItem) {
 		}
 		return items[i].StartsAt.Before(items[j].StartsAt)
 	})
+}
+
+// scheduledItem builds the calendar item of a task or project: a span from its start to its
+// deadline, or a point on the deadline.
+func scheduledItem(kind domain.ItemKind, id, title, startAt, dueAt string, span bool) (*domain.CalendarItem, error) {
+	item := &domain.CalendarItem{ID: string(kind) + ":" + id, Kind: kind, Title: title, SourceID: id, Span: span}
+	due, err := time.Parse(timeFormat, dueAt)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s due_at: %w", kind, err)
+	}
+	if !span {
+		item.StartsAt = due
+		return item, nil
+	}
+	if item.StartsAt, err = time.Parse(timeFormat, startAt); err != nil {
+		return nil, fmt.Errorf("parse %s start_at: %w", kind, err)
+	}
+	item.EndsAt = &due
+	return item, nil
 }

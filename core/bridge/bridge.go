@@ -294,6 +294,8 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.projectsForEntity(payload)
 	case "projects.memberEntityIds":
 		return c.projectsMemberEntityIds(payload)
+	case "projects.somedayTaskIds":
+		return c.projectsSomedayTaskIds()
 	case "import.thingsScan":
 		return c.importThingsScan(payload)
 	case "import.thingsRun":

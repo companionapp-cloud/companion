@@ -75,6 +75,7 @@ import { GraphScreen } from "./GraphScreen";
 import { CalendarScreen } from "./CalendarScreen";
 import { CalendarProvider } from "./CalendarProvider";
 import { TrashScreen } from "./TrashScreen";
+import { LogbookScreen } from "./LogbookScreen";
 import { ChatsScreen } from "./ChatScreen";
 import { DndProvider, useDnd } from "./DndContext";
 import { MultiSelectProvider } from "./MultiSelectProvider";
@@ -140,6 +141,7 @@ function webLinking(): LinkingOptions<ParamListBase> | undefined {
         canvases: "canvases/:id?",
         habits: "habits",
         graph: "graph",
+        logbook: "logbook",
         trash: "trash",
         // The open section rides in the URL (/settings/ai) — the same path the mobile shell
         // uses for its pushed section screen, so a shell swap lands on the same section.
@@ -521,6 +523,7 @@ function ShellRoutes({ topInset, windowControls }: { topInset: number; windowCon
         <Nav.Screen name="canvases" component={RouteAnchor} />
         <Nav.Screen name="habits" component={RouteAnchor} />
         <Nav.Screen name="graph" component={RouteAnchor} />
+        <Nav.Screen name="logbook" component={RouteAnchor} />
         <Nav.Screen name="trash" component={RouteAnchor} />
         <Nav.Screen name="settings" component={RouteAnchor} />
         <Nav.Screen name="notifications" component={RouteAnchor} />
@@ -545,13 +548,14 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
   const [deletingArea, setDeletingArea] = useState<SidebarArea | null>(null);
   const [captureOpen, setCaptureOpen] = useState(false);
   // Per-device tool hiding (Settings › Tools): only the rail entry disappears — the view
-  // itself stays reachable. Trash sits with Settings at the foot of the rail.
+  // itself stays reachable. The Logbook and the Trash sit with Settings at the foot of the rail.
   const { tools, hidden } = useToolVisibility();
   const visibleTools = tools.filter((t) => !hidden.has(t.id));
-  const rail = visibleTools.filter((t) => t.id !== "trash");
+  const rail = visibleTools.filter((t) => t.id !== "trash" && t.id !== "logbook");
   const showTrash = visibleTools.some((t) => t.id === "trash");
+  const showLogbook = visibleTools.some((t) => t.id === "logbook");
   const [open, setOpen] = useState(false);
-  const [pinned, setPinned] = usePersistentBoolean("companion.sidebar.pinned", false);
+  const [pinned, setPinned] = usePersistentBoolean("companion.sidebar.pinned", true);
   // Reveal the rail while a dragged document approaches it, so projects become drop
   // targets — but not on every drag: a note dragged onto a board in the content area
   // shouldn't shove the layout sideways. Hysteresis: expand within the collapsed rail's
@@ -680,6 +684,15 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
           </ScrollView>
 
           <View style={{ gap: 1, paddingTop: space.sm }}>
+            {showLogbook ? (
+              <RailItem
+                icon={railIcon("logbook", "logbook")}
+                label="Logbook"
+                active={nav.activeView === "logbook"}
+                expanded={expanded}
+                onPress={() => nav.goView("logbook")}
+              />
+            ) : null}
             {showTrash ? (
               <RailItem
                 icon={railIcon("trash", "trash")}
@@ -755,6 +768,7 @@ const VIEW_SCREENS: Partial<Record<SurfaceViewId, ComponentType>> = {
   chat: ChatsScreen,
   calendar: CalendarScreen,
   graph: GraphScreen,
+  logbook: LogbookScreen,
   trash: TrashScreen,
   settings: SettingsScreen,
   notifications: NotificationsRouteScreen,

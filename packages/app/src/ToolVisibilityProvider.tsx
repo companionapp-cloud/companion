@@ -24,6 +24,7 @@ export const TOOLS: ToolDef[] = [
   { id: "canvases", label: "Canvases", icon: "canvas" },
   { id: "habits", label: "Habits", icon: "habits" },
   { id: "graph", label: "Graph", icon: "graph" },
+  { id: "logbook", label: "Logbook", icon: "logbook" },
   { id: "trash", label: "Trash", icon: "trash" },
 ];
 
@@ -70,8 +71,9 @@ const ToolVisibilityCtx = createContext<ToolVisibilityStore | null>(null);
 const KNOWN: ReadonlySet<ToolId> = new Set(TOOLS.map((t) => t.id));
 const isTool = (id: unknown): id is ToolId => typeof id === "string" && KNOWN.has(id as ToolId);
 
-/** Drop unknown/duplicate ids, then append any known tool the list is missing (in default
- *  order) so a saved order stays complete even as TOOLS grows. */
+/** Drop unknown/duplicate ids, then slot in any known tool the list is missing so a saved
+ *  order stays complete even as TOOLS grows: a new tool goes just ahead of the tool it precedes
+ *  by default (the Logbook lands above the Trash), or at the end when nothing follows it. */
 function canonicalOrder(ids: ToolId[]): ToolId[] {
   const seen = new Set<ToolId>();
   const out: ToolId[] = [];
@@ -81,9 +83,13 @@ function canonicalOrder(ids: ToolId[]): ToolId[] {
       out.push(id);
     }
   }
-  for (const t of TOOLS) {
-    if (!seen.has(t.id)) out.push(t.id);
-  }
+  TOOLS.forEach((t, i) => {
+    if (seen.has(t.id)) return;
+    seen.add(t.id);
+    const next = TOOLS.slice(i + 1).find((later) => out.includes(later.id));
+    if (next) out.splice(out.indexOf(next.id), 0, t.id);
+    else out.push(t.id);
+  });
   return out;
 }
 

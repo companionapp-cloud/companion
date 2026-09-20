@@ -5,20 +5,22 @@ import type { DocumentSource } from "@companion/editor";
 import { Button, Icon, ListRow, Text, colors, control, icon, radius, space, type PressState } from "@companion/design-system";
 import { useNav, type ContainerRef, type ProjectSection } from "./nav-context";
 import { useProjects } from "./ProjectsProvider";
-import { useTasks, filterTasksByDue } from "./TasksProvider";
+import { useTasks } from "./TasksProvider";
+import { filterBySchedule, scheduleDate, withoutSomeday, type ScheduleFilter } from "./taskSchedule";
 import { TaskRow } from "./TaskEditor";
 import { DeleteProjectDialog } from "./DeleteProjectDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { timeAgo } from "./NotificationRow";
 import { ContainerOverview, OverviewCard, OVERVIEW_LIMIT } from "./ContainerOverview";
 import { DragHandle } from "./DndContext";
+import { ProjectSchedule } from "./ProjectSchedule";
 
 /** A container's tasks-list filter. "unsorted" exists only in an area: the tasks filed directly
  *  in it, in none of its projects. */
-export type TaskListFilter = "all" | "unsorted" | "upcoming" | "overdue";
+export type TaskListFilter = "all" | "unsorted" | ScheduleFilter;
 
 const byUpdated = <T extends { updatedAt: string }>(items: T[]) => [...items].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-const byDue = (items: Task[]) => [...items].sort((a, b) => (a.dueAt ?? "").localeCompare(b.dueAt ?? ""));
+const bySchedule = (items: Task[]) => [...items].sort((a, b) => (scheduleDate(a)?.getTime() ?? 0) - (scheduleDate(b)?.getTime() ?? 0));
 
 /** The overview a project or an area opens on (PLAN-areas.md §3): its page — cover, emoji, name,
  * description — then up to ten rows each of what matters in it, with "View all" into the
@@ -37,6 +39,7 @@ export function ContainerHome({
   projectOf,
   sections,
   onViewTasks,
+  onOpenTask,
   documentSource,
 }: {
   container: ContainerRef;
@@ -49,27 +52,42 @@ export function ContainerHome({
   /** The sections on offer (a tool hidden in Settings drops its cards too). */
   sections: ProjectSection[];
   onViewTasks: (filter: TaskListFilter) => void;
+  /** Where a task row opens, for a host that isn't the container's own page (the Logbook's
+   *  split view keeps it in its pane). Defaults to the container's tasks section. */
+  onOpenTask?: (id: string) => void;
   /** The mobile shell's document source, where the context has none. */
   documentSource?: DocumentSource;
 }) {
   const nav = useNav();
   const tasksStore = useTasks();
-  const { sidebar, areas, updateProject, updateArea, deleteProject, deleteArea } = useProjects();
+  const { sidebar, areas, projectById, updateProject, updateArea, deleteProject, deleteArea } = useProjects();
+  const project = container.kind === "project" ? projectById(container.id) : undefined;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const inArea = container.kind === "area";
   const update = (fields: Parameters<typeof updateArea>[1]) =>
     void (inArea ? updateArea(container.id, fields) : updateProject(container.id, fields));
 
-  const openTasks = useMemo(() => tasks.filter((t) => t.status !== "done"), [tasks]);
-  const upcoming = useMemo(() => byDue(filterTasksByDue(tasks, "upcoming")), [tasks]);
+  // An area rolls up its projects' tasks; the ones in a Someday project are filed away with it.
+  const filedAway = inArea ? tasksStore.somedayIds : undefined;
+  const openTasks = useMemo(() => withoutSomeday(tasks, filedAway).filter((t) => t.status !== "done"), [tasks, filedAway]);
+  const upcoming = useMemo(() => bySchedule(filterBySchedule(tasks, "upcoming", filedAway)), [tasks, filedAway]);
   const recentTasks = useMemo(() => byUpdated(openTasks), [openTasks]);
+  const completed = !!project?.completedAt;
+  const doneTasks = useMemo(
+    () => tasks.filter((t) => t.status === "done").sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? "")),
+    [tasks],
+  );
   const unsorted = useMemo(() => {
     const direct = new Set(members.filter((m) => m.containerType === "area").map((m) => m.entityId));
     return byUpdated(openTasks.filter((t) => direct.has(t.id)));
   }, [members, openTasks]);
   const recentNotes = useMemo(() => byUpdated(notes), [notes]);
   const recentCanvases = useMemo(() => byUpdated(canvases), [canvases]);
-  const areaProjects = inArea ? (sidebar.areas.find((a) => a.id === container.id)?.projects ?? []) : [];
+  // Active projects first, the Someday ones after them.
+  const areaProjects = useMemo(() => {
+    const all = inArea ? (sidebar.areas.find((a) => a.id === container.id)?.projects ?? []) : [];
+    return [...all.filter((p) => !p.someday), ...all.filter((p) => p.someday)];
+  }, [sidebar, inArea, container.id]);
   const has = (s: ProjectSection) => sections.includes(s);
 
   const taskRows = (rows: Task[]) =>
@@ -79,8 +97,8 @@ export function ContainerHome({
         key={t.id}
         handle={<DragHandle payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }} />}
         task={t}
-        onPress={() => nav.openContainer(container, "tasks", t.id)}
-        onToggle={() => void tasksStore.setStatus(t.id, "done")}
+        onPress={() => (onOpenTask ? onOpenTask(t.id) : nav.openContainer(container, "tasks", t.id))}
+        onToggle={() => void tasksStore.setStatus(t.id, t.status === "done" ? "open" : "done")}
         trailing={projectOf.has(t.id) ? <Text variant="mono" tone="quaternary" numberOfLines={1}>{projectOf.get(t.id)}</Text> : undefined}
       />
     ));
@@ -98,6 +116,7 @@ export function ContainerHome({
         onRename={(name) => update({ name })}
         onUpdatePage={update}
         documentSource={documentSource}
+        meta={project ? <ProjectSchedule project={project} openTasks={tasks.filter((t) => t.status === "open").length} /> : undefined}
         onOpenRef={(ref) => {
           // A chip opens its target in a new tab, leaving the page put.
           if (ref.type === "task" || ref.type === "note") nav.openInNewTab({ kind: ref.type, id: ref.id });
@@ -153,7 +172,8 @@ export function ContainerHome({
                 key={p.id}
                 icon={p.icon ? <Text style={styles.rowEmoji}>{p.icon}</Text> : <Icon name="folder" size={icon.sm} color={p.color ?? colors.textQuaternary} />}
                 title={p.name}
-                trailing={p.taskProgress != null ? `${Math.round(p.taskProgress * 100)}%` : undefined}
+                // A Someday project is off the sidebar; this card is where it lives (PLAN-scheduling.md §1).
+                trailing={p.someday ? "Someday" : p.taskProgress != null ? `${Math.round(p.taskProgress * 100)}%` : undefined}
                 onPress={() => nav.openProject(p.id)}
               />
             ))}
@@ -169,12 +189,19 @@ export function ContainerHome({
             {taskRows(unsorted)}
           </OverviewCard>
         ) : null}
-        {has("tasks") && !inArea ? (
+        {/* A completed project (open from the Logbook) has nothing left to do: its page looks
+            back at what was done instead (PLAN-scheduling.md §6). */}
+        {has("tasks") && completed ? (
+          <OverviewCard title="Completed tasks" count={doneTasks.length} empty="No tasks were completed in this project." onViewAll={() => onViewTasks("all")}>
+            {taskRows(doneTasks)}
+          </OverviewCard>
+        ) : null}
+        {has("tasks") && !inArea && !completed ? (
           <OverviewCard title="Recently updated tasks" count={recentTasks.length} empty="No open tasks in this project." onViewAll={() => onViewTasks("all")}>
             {taskRows(recentTasks)}
           </OverviewCard>
         ) : null}
-        {has("tasks") ? (
+        {has("tasks") && !completed ? (
           <OverviewCard
             title="Upcoming tasks"
             count={upcoming.length}

@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Platform, Pressable, View } from "react-native";
 import type { CalendarItem, CalendarItemKind } from "@companion/core-bridge";
 import {
   Button,
   Icon,
+  Input,
   Text,
   colors,
+  control,
   icon,
   motion,
   radius,
@@ -16,8 +18,9 @@ import {
   type IconName,
   type PressState,
 } from "@companion/design-system";
-import { CalendarItemInfo } from "./CalendarItemInfo";
 import { useCalendar } from "./CalendarProvider";
+import { EventEditorDialog, type EventEditorTarget } from "./EventEditorDialog";
+import { useTasks } from "./TasksProvider";
 
 /** The local calendar day ('YYYY-MM-DD') an item falls on. All-day items (dated notes,
  *  all-day events) carry a date-only marker stored as midnight UTC; converting that instant
@@ -25,9 +28,29 @@ import { useCalendar } from "./CalendarProvider";
  *  Timed items use their instant in the user's timezone. */
 export function itemDay(item: CalendarItem): string {
   if (item.allDay) return item.startsAt.slice(0, 10);
-  const d = new Date(item.startsAt);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return localDay(new Date(item.startsAt));
+}
+
+/** Whether an item belongs in a day's all-day band: an all-day event or dated note, or a span
+ *  — a task or project running from its start to its deadline (PLAN-scheduling.md §4). */
+export function isAllDay(item: CalendarItem): boolean {
+  return item.allDay || !!item.span;
+}
+
+/** Every local day ('YYYY-MM-DD') a span covers, first to last: from the day it starts to the
+ *  day of its deadline, in the viewer's timezone. Any other item covers just its `itemDay`. */
+export function itemDays(item: CalendarItem): string[] {
+  if (!item.span || !item.endsAt) return [itemDay(item)];
+  const start = new Date(item.startsAt);
+  const last = localDay(new Date(item.endsAt));
+  const days: string[] = [];
+  // Bounded: a project can run for years, and no caller looks further than a few weeks.
+  for (let i = 0; i < 3660; i++) {
+    const day = localDay(new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
+    days.push(day);
+    if (day >= last) break;
+  }
+  return days;
 }
 
 // Per-kind accent for the touch agenda dot (PLAN §6.7). Events lean neutral, tasks read blue,
@@ -36,6 +59,7 @@ const KIND_COLOR: Record<CalendarItemKind, string> = {
   event: colors.textTertiary,
   task: colors.info,
   note: colors.success,
+  project: colors.accent,
 };
 // The pointer agenda swaps the dot for a quiet 12px glyph: the shape says what a line is, and
 // colour is left for a feed's own swatch.
@@ -43,6 +67,7 @@ const KIND_ICON: Record<CalendarItemKind, IconName> = {
   event: "calendar",
   task: "tasks",
   note: "notes",
+  project: "folder",
 };
 
 const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -59,7 +84,7 @@ export function dayBounds(iso: string): { from: string; to: string } {
 
 /** 'HH:mm' local time for a timed item; used by the agenda and week grid. */
 export function timeLabel(item: CalendarItem): string {
-  if (item.allDay) return "all day";
+  if (isAllDay(item)) return "all day";
   const t = new Date(item.startsAt);
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(t.getHours())}:${p(t.getMinutes())}`;
@@ -83,11 +108,15 @@ const TIME_W_TOUCH = 56;
 export function Agenda({
   date,
   onOpenItem,
+  creatable = false,
 }: {
   date: string;
   onOpenItem?: (item: CalendarItem) => void;
+  /** Makes the agenda a place to add to the day (the Today view): a quick-add field for a task
+   *  due on `date`, and — once a writable calendar is connected — an "Add event" button. */
+  creatable?: boolean;
 }) {
-  const { range, revision } = useCalendar();
+  const { range, revision, writableFeeds } = useCalendar();
   const [items, setItems] = useState<CalendarItem[] | null>(null);
   const touch = useDensity() === "touch";
 
@@ -95,20 +124,25 @@ export function Agenda({
     let alive = true;
     const { from, to } = dayBounds(date);
     void range(from, to).then((list) => {
-      if (alive) setItems(list);
+      // All-day lines lead the day: a span that starts mid-morning still reads "all day".
+      if (alive) setItems([...list.filter(isAllDay), ...list.filter((it) => !isAllDay(it))]);
     });
     return () => {
       alive = false;
     };
   }, [date, range, revision]);
 
-  const timeWidth = touch ? TIME_W_TOUCH : (items ?? []).some((it) => it.allDay) ? TIME_W_ALL_DAY : TIME_W;
+  const timeWidth = touch ? TIME_W_TOUCH : (items ?? []).some(isAllDay) ? TIME_W_ALL_DAY : TIME_W;
 
   return (
     <View>
-      <Text variant="eyebrow" tone="quaternary" style={styles.header}>
-        Agenda · {shortDate(date)}
-      </Text>
+      <View style={styles.headerRow}>
+        <Text variant="eyebrow" tone="quaternary" style={styles.headerLabel}>
+          Agenda · {shortDate(date)}
+        </Text>
+        {creatable && writableFeeds.length > 0 ? <AgendaAddEvent date={date} /> : null}
+      </View>
+      {creatable ? <AgendaTaskInput date={date} /> : null}
       {items && items.length === 0 ? (
         <Text variant="caption" tone="tertiary" style={styles.empty}>
           Clear day. Enjoy the whitespace.
@@ -121,6 +155,58 @@ export function Agenda({
         </View>
       )}
     </View>
+  );
+}
+
+// A task added from the agenda is due at the end of the working day, like the task editor's
+// "Today" deadline preset — a deadline is what puts a task on the calendar. A new event starts
+// at the next full hour when the day is today, else at nine.
+const TASK_DUE_HOUR = 17;
+const EVENT_START_HOUR = 9;
+
+/** Quick-add for the day, like the input over the task list: type a title, press Enter, and the
+ *  task lands in the agenda, due on `date`. Focus stays in the field, so a run of tasks can be
+ *  typed one after another. */
+function AgendaTaskInput({ date }: { date: string }) {
+  const tasks = useTasks();
+  const [draft, setDraft] = useState("");
+  const add = () => {
+    const title = draft.trim();
+    if (!title) return;
+    setDraft("");
+    const [y, m, d] = date.split("-").map(Number);
+    void tasks.create({ title, dueAt: new Date(y, m - 1, d, TASK_DUE_HOUR).toISOString() });
+  };
+  return (
+    <View style={styles.quickAdd}>
+      <Input
+        size="sm"
+        placeholder="Add a task, press Enter"
+        value={draft}
+        onChangeText={setDraft}
+        onSubmitEditing={add}
+        keepFocusOnSubmit
+        leadingIcon={<Icon name="plus" size={icon.sm} color={colors.textQuaternary} />}
+      />
+    </View>
+  );
+}
+
+/** "Add event", in the agenda's header once a writable calendar is connected: opens the event
+ *  editor on `date`. */
+function AgendaAddEvent({ date }: { date: string }) {
+  const [editor, setEditor] = useState<EventEditorTarget | null>(null);
+  const open = () => {
+    const [y, m, d] = date.split("-").map(Number);
+    const now = new Date();
+    const hour = date === localDay(now) ? Math.min(now.getHours() + 1, 23) : EVENT_START_HOUR;
+    setEditor({ mode: "create", startsAt: new Date(y, m - 1, d, hour) });
+  };
+  return (
+    <>
+      <Button variant="ghost" size="sm" label="Add event" onPress={open} icon={<Icon name="plus" size={icon.sm} color={colors.textTertiary} />} />
+      {editor ? <EventEditorDialog target={editor} onClose={() => setEditor(null)} /> : null}
+    </>
   );
 }
 
@@ -188,7 +274,7 @@ export function UpcomingAgenda({
     return [...byDay.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   }, [items, today]);
 
-  const timeWidth = touch ? TIME_W_TOUCH : (items ?? []).some((it) => it.allDay) ? TIME_W_ALL_DAY : TIME_W;
+  const timeWidth = touch ? TIME_W_TOUCH : (items ?? []).some(isAllDay) ? TIME_W_ALL_DAY : TIME_W;
 
   return (
     <View>
@@ -227,14 +313,7 @@ export function UpcomingAgenda({
   );
 }
 
-// The hover card: how tall it may get, and how much room below a row it needs before it flips
-// above instead (rows at the bottom of the aside would otherwise push it off-screen).
-const CARD_MAX_H = 220;
-const CARD_ROOM = CARD_MAX_H + 12;
-
-/** One agenda line: time · kind · title. With a pointer, hovering highlights the row and floats
- *  the same detail card the week grid uses — kind, title, when, and an event's location and
- *  notes — for every kind of item (native has no hover; it taps through to a subview). Tapping
+/** One agenda line: time · kind · title. With a pointer, hovering highlights the row. Tapping
  *  opens the item when the host wired `onOpenItem`. Pointer rows are 24px; touch rows 44px. */
 function AgendaRow({
   item,
@@ -247,43 +326,24 @@ function AgendaRow({
   timeWidth: number;
   touch: boolean;
 }) {
-  const [hovered, setHovered] = useState(false);
-  // Whether the card opens above the row. Decided on hover from where the row sits in the window.
-  const [above, setAbove] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rowRef = useRef<any>(null);
-  const hoverIn = () => {
-    setHovered(true);
-    if (touch || typeof window === "undefined") return;
-    rowRef.current?.measureInWindow?.((_x: number, y: number, _w: number, h: number) => {
-      setAbove(y + h + CARD_ROOM > window.innerHeight && y > CARD_ROOM);
-    });
-  };
   // Tasks/notes open everywhere. Feed events open to a detail subview on native, but on web
-  // they aren't linkable (no local entity) — the hover reveal shows their detail instead.
+  // they aren't linkable (no local entity).
   const openable = !!onOpenItem && (item.kind !== "event" || Platform.OS !== "web");
   const gap = touch ? space.ml : space.md;
   return (
     <Pressable
       disabled={!openable}
       onPress={() => onOpenItem?.(item)}
-      onHoverIn={hoverIn}
-      onHoverOut={() => setHovered(false)}
-      style={({ pressed }: PressState) => [
+      style={({ hovered, pressed }: PressState) => [
         styles.row,
         transition("background-color", motion.instant),
         {
           minHeight: touch ? row.touch : row.h,
           backgroundColor: pressed && openable ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent",
         },
-        // react-native-web gives every View its own stacking context, so the rows after this one
-        // would paint over the card; lifting the hovered ROW is what raises it above them.
-        hovered && !touch ? styles.rowLifted : null,
       ]}
     >
-      {/* The ref lives here: this trimmed RN typing has no ref on Pressable, and the row's main
-          line is the same box for measuring purposes. */}
-      <View ref={rowRef} style={[styles.rowMain, { gap }]}>
+      <View style={[styles.rowMain, { gap }]}>
         <Text variant="mono" tone="quaternary" style={{ width: timeWidth, flexShrink: 0 }} numberOfLines={1}>
           {timeLabel(item)}
         </Text>
@@ -296,15 +356,24 @@ function AgendaRow({
           {item.title || "Untitled"}
         </Text>
       </View>
-      {hovered && !touch ? (
-        <CalendarItemInfo item={item} maxHeight={CARD_MAX_H} style={[styles.card, above ? styles.cardAbove : styles.cardBelow]} />
-      ) : null}
     </Pressable>
   );
 }
 
 const styles = {
   header: { paddingHorizontal: space.sm, paddingTop: space.md, paddingBottom: 3 },
+  // The day agenda's header: the same eyebrow, with room for the plus on its right.
+  headerRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    paddingHorizontal: space.sm,
+    paddingTop: space.md,
+    paddingBottom: 3,
+    // Holds its height whether or not the "Add event" button is there.
+    minHeight: control.sm + space.md + 3,
+  },
+  headerLabel: { flex: 1 },
+  quickAdd: { paddingHorizontal: space.sm, paddingTop: space.xs, paddingBottom: space.sm },
   empty: { paddingHorizontal: space.sm, paddingVertical: space.md },
   dayHeading: { paddingHorizontal: space.sm, paddingTop: space.md, paddingBottom: 3 },
   more: { flexDirection: "row" as const, paddingTop: space.md },
@@ -314,12 +383,7 @@ const styles = {
     paddingHorizontal: space.sm,
     borderRadius: radius.sm,
   },
-  rowLifted: { zIndex: 20 },
   rowMain: { flexDirection: "row" as const, alignItems: "center" as const },
-  // Spans the row's width, so it stays inside the (narrow, clipped) aside the agenda lives in.
-  card: { position: "absolute" as const, left: 0, right: 0, zIndex: 30 },
-  cardBelow: { top: "100%" as const, marginTop: 2 },
-  cardAbove: { bottom: "100%" as const, marginBottom: 2 },
   dot: { width: 7, height: 7, flexShrink: 0, borderRadius: radius.full },
   title: { flex: 1, minWidth: 0 },
 };

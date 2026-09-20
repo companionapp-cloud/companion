@@ -35,7 +35,7 @@ import { NoteEditorScreen, TaskEditorScreen } from "./EditorScreens";
 import { AreaScreen, ProjectScreen } from "./ProjectScreen";
 import { SettingsListScreen, SettingsSectionScreen } from "./SettingsScreens";
 import { GraphScreen } from "./GraphScreen";
-import { HabitsScreen, NotificationsRouteScreen, TrashRouteScreen } from "./UtilityScreens";
+import { HabitsScreen, LogbookRouteScreen, NotificationsRouteScreen, TrashRouteScreen } from "./UtilityScreens";
 import { ThingsImportHost } from "../ThingsImport";
 
 // ---------------------------------------------------------------------------
@@ -85,6 +85,7 @@ function mobileLinking(): LinkingOptions<ParamListBase> | undefined {
         canvas: "canvases/:id",
         habits: "habits",
         graph: "graph",
+        logbook: "logbook",
         trash: "trash",
         settings: "settings",
         settingsSection: "settings/:section",
@@ -398,7 +399,8 @@ export function MobileWebShell({ topInset = 0, notificationScheduler, toolsStora
                         <Nav.Screen name="canvas" component={CanvasScreen} />
                         <Nav.Screen name="habits" component={HabitsScreen} />
                         <Nav.Screen name="graph" component={GraphScreen} />
-                        <Nav.Screen name="trash" component={TrashRouteScreen} />
+                        <Nav.Screen name="logbook" component={LogbookRouteScreen} />
+      <Nav.Screen name="trash" component={TrashRouteScreen} />
                         <Nav.Screen name="settings" component={SettingsListScreen} />
                         <Nav.Screen name="settingsSection" component={SettingsSectionScreen} />
                         <Nav.Screen name="notifications" component={NotificationsRouteScreen} />

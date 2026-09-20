@@ -5,7 +5,9 @@ import { Icon, Input, Spinner, Text, colors, space } from "@companion/design-sys
 import { useNav } from "../nav-context";
 import { useCore } from "../CoreContext";
 import { useNotes } from "../NotesProvider";
-import { useTasks, filterTasksByDue } from "../TasksProvider";
+import { useTasks } from "../TasksProvider";
+import { DateGroupHeading } from "../TaskGroups";
+import { filterBySchedule, newTaskDefaults, scheduleGroups, withoutSomeday, type ScheduleFilter } from "../taskSchedule";
 import { useProjects } from "../ProjectsProvider";
 import { ListFilterTabs } from "../ListFilterMenu";
 import { CHECKBOX_INSET, CardRow, Checkbox, EmptyCaption, FAB_CLEARANCE, Fab, GroupedItem, NavAction, NavBar, ROW_ICON_INSET, RowIcon } from "./ui";
@@ -154,18 +156,33 @@ export function TasksListScreen({ projectId, areaId }: { projectId?: string; are
   const scoped = !!(projectId || areaId);
 
   // Project-scoped lists don't use the global Unsorted/All filter; they carry their own
-  // due-date filter (all / upcoming / overdue) instead.
-  const [dueFilter, setDueFilter] = useState<"all" | "upcoming" | "overdue">("all");
+  // schedule filter (all / anytime / upcoming / overdue / someday) instead.
+  const [dueFilter, setDueFilter] = useState<"all" | ScheduleFilter>("all");
+  const mode = scoped ? dueFilter : store.filter;
 
   const tasks = useMemo(() => {
-    if (!scoped) return store.visible; // global list honours the Unsorted/All/Upcoming/Overdue filter
+    if (!scoped) return store.visible; // the global list honours the store's filter
     if (!memberIds) return [];
     const members = store.tasks.filter((t) => memberIds.has(t.id));
-    return dueFilter === "all" ? members : filterTasksByDue(members, dueFilter);
-  }, [store.visible, store.tasks, scoped, memberIds, dueFilter]);
+    // An area rolls up its projects' tasks, so the ones in a Someday project are filed away
+    // with it; a project's own list shows its tasks whatever the project's state.
+    const filedAway = areaId ? store.somedayIds : undefined;
+    return dueFilter === "all" ? withoutSomeday(members, filedAway) : filterBySchedule(members, dueFilter, filedAway);
+  }, [store.visible, store.tasks, store.somedayIds, scoped, memberIds, dueFilter, areaId]);
+
+  // Upcoming and Overdue read as date groups (PLAN-scheduling.md §5): each a heading over its
+  // own card of rows. Every other view is one card.
+  const rows = useMemo<TaskListRow[]>(() => {
+    const groups = scheduleGroups(tasks, mode) ?? [{ key: "all", label: "", items: tasks }];
+    return groups.flatMap((g) => [
+      ...(g.label ? [{ kind: "heading" as const, key: g.key, label: g.label, count: g.items.length }] : []),
+      ...g.items.map((task, index) => ({ kind: "task" as const, key: task.id, task, index, count: g.items.length })),
+    ]);
+  }, [tasks, mode]);
 
   const createTask = async () => {
-    const task = await store.create({ title: "Untitled task" });
+    // A task added from a schedule view lands in it: Someday, tomorrow (Upcoming), today (Overdue).
+    const task = await store.create({ title: "Untitled task", ...newTaskDefaults(mode) });
     if (projectId) await addMember(projectId, "task", task.id);
     else if (areaId) await addAreaMember(areaId, "task", task.id);
     nav.openTask(task.id);
@@ -176,12 +193,15 @@ export function TasksListScreen({ projectId, areaId }: { projectId?: string; are
     // continues that bar as a second segmented row.
     <View style={styles.subBar}>
       <ListFilterTabs
+        scroll
         value={dueFilter}
         onChange={setDueFilter}
         options={[
           { value: "all", label: "All" },
+          { value: "anytime", label: "Anytime" },
           { value: "upcoming", label: "Upcoming" },
           { value: "overdue", label: "Overdue" },
+          { value: "someday", label: "Someday" },
         ]}
       />
     </View>
@@ -191,17 +211,39 @@ export function TasksListScreen({ projectId, areaId }: { projectId?: string; are
       right={<NavAction icon="plus" label="New task" onPress={() => void createTask()} />}
       segments={
         <ListFilterTabs
+          scroll
           value={store.filter}
           onChange={store.setFilter}
           options={[
             { value: "unsorted", label: "Unsorted" },
             { value: "all", label: "All" },
+            { value: "anytime", label: "Anytime" },
             { value: "upcoming", label: "Upcoming" },
             { value: "overdue", label: "Overdue" },
+            { value: "someday", label: "Someday" },
           ]}
         />
       }
     />
+  );
+
+  const taskRow = ({ task: item, index, count }: Extract<TaskListRow, { kind: "task" }>) => (
+    <GroupedItem index={index} count={count}>
+      <CardRow
+        leading={
+          <Checkbox
+            checked={item.status === "done"}
+            onPress={() => void store.setStatus(item.id, item.status === "done" ? "open" : "done")}
+          />
+        }
+        separatorInset={CHECKBOX_INSET}
+        title={item.title || "Untitled task"}
+        subtitle={dueLabel(item)}
+        showChevron={false}
+        isLast={index === count - 1}
+        onPress={() => nav.openTask(item.id)}
+      />
+    </GroupedItem>
   );
 
   if (store.loading) {
@@ -217,42 +259,36 @@ export function TasksListScreen({ projectId, areaId }: { projectId?: string; are
     <View style={styles.container}>
       {bar}
       <FlatList
-        data={tasks}
-        keyExtractor={(t) => t.id}
+        data={rows}
+        keyExtractor={(r) => r.key}
         contentContainerStyle={[styles.list, styles.listTop]}
-        ListEmptyComponent={
-          <EmptyCaption>
-            {scoped
-              ? dueFilter === "upcoming"
-                ? `No upcoming tasks in this ${areaId ? "area" : "project"}.`
-                : dueFilter === "overdue"
-                  ? `No overdue tasks in this ${areaId ? "area" : "project"}.`
-                  : `No tasks in this ${areaId ? "area" : "project"} yet. Tap + to add one.`
-              : "Nothing to do. Tap + to add a task."}
-          </EmptyCaption>
-        }
-        renderItem={({ item, index }) => (
-          <GroupedItem index={index} count={tasks.length}>
-            <CardRow
-              leading={
-                <Checkbox
-                  checked={item.status === "done"}
-                  onPress={() => void store.setStatus(item.id, item.status === "done" ? "open" : "done")}
-                />
-              }
-              separatorInset={CHECKBOX_INSET}
-              title={item.title || "Untitled task"}
-              subtitle={dueLabel(item)}
-              showChevron={false}
-              isLast={index === tasks.length - 1}
-              onPress={() => nav.openTask(item.id)}
-            />
-          </GroupedItem>
-        )}
+        ListEmptyComponent={<EmptyCaption>{emptyTasksCaption(mode, areaId ? "area" : projectId ? "project" : null)}</EmptyCaption>}
+        renderItem={({ item: row }) => (row.kind === "heading" ? <DateGroupHeading label={row.label} count={row.count} /> : taskRow(row))}
       />
       <Fab label="New task" onPress={() => void createTask()} />
     </View>
   );
+}
+
+/** One row of the task list: a date-group heading, or a task with its place in its card. */
+type TaskListRow =
+  | { kind: "heading"; key: string; label: string; count: number }
+  | { kind: "task"; key: string; task: Task; index: number; count: number };
+
+function emptyTasksCaption(mode: string, where: "area" | "project" | null): string {
+  const here = where ? ` in this ${where}` : "";
+  switch (mode) {
+    case "anytime":
+      return `No tasks without a start or a deadline${here}.`;
+    case "upcoming":
+      return where ? `No upcoming tasks${here}.` : "Nothing coming up.";
+    case "overdue":
+      return where ? `No overdue tasks${here}.` : "Nothing overdue.";
+    case "someday":
+      return `Nothing filed under Someday${here}.`;
+    default:
+      return where ? `No tasks${here} yet. Tap + to add one.` : "Nothing to do. Tap + to add a task.";
+  }
 }
 
 function notePreview(n: Note): string {
@@ -263,6 +299,7 @@ function notePreview(n: Note): string {
 // The row subtitle: the deadline, else a start still ahead, else nothing to show.
 function dueLabel(task: Task): string {
   if (task.status === "done") return "Completed";
+  if (task.someday) return "Someday";
   const short = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
   if (task.dueAt && !Number.isNaN(new Date(task.dueAt).getTime())) return "Due " + short(task.dueAt);
   if (task.startAt && new Date(task.startAt).getTime() > Date.now()) return "Starts " + short(task.startAt);

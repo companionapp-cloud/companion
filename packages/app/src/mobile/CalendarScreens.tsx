@@ -24,6 +24,7 @@ export function useCalendarItemSheet(): { openItem: (item: CalendarItem) => void
   const [item, setItem] = useState<CalendarItem | null>(null);
   const openItem = (it: CalendarItem) => {
     if (it.kind === "task") nav.openInNewTab({ kind: "task", id: it.sourceId });
+    else if (it.kind === "project") nav.openProject(it.sourceId);
     else if (it.kind === "note") nav.openInNewTab({ kind: "view", view: "today", date: itemDay(it) });
     else setItem(it);
   };

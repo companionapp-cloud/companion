@@ -55,12 +55,18 @@ type planProject struct {
 	thingsID string
 	name     string
 	archived bool
-	note     string      // its notes, dates and tags, kept as a note in the project
-	members  []*planTask // every task in the project: open, completed and repeating
-	list     []listEntry // the "To-dos" list: headings and open to-dos, in Things' order
-	outline  *ProjectOutline
-	id       string
-	noteID   string
+	// Its schedule (PLAN-scheduling.md §2): when it starts, its deadline, Someday, and — for a
+	// finished project — when it was completed, so it lands in the Logbook on the right day.
+	startAt   *time.Time
+	dueAt     *time.Time
+	someday   bool
+	completed *time.Time
+	note      string      // its notes and tags, kept as a note in the project
+	members   []*planTask // every task in the project: open, completed and repeating
+	list      []listEntry // the "To-dos" list: headings and open to-dos, in Things' order
+	outline   *ProjectOutline
+	id        string
+	noteID    string
 }
 
 // listEntry is one row of a project's list: a heading, or a task.
@@ -75,6 +81,7 @@ type planTask struct {
 	notes      string
 	status     string
 	startAt    *time.Time
+	someday    bool // filed under Someday in Things, with no start date (PLAN-scheduling.md §1)
 	dueAt      *time.Time
 	completed  *time.Time
 	reminders  []domain.Reminder
@@ -129,15 +136,23 @@ func (b *builder) build() {
 			continue
 		}
 		if it.rule != nil {
-			b.warn(it.id, "“%s” repeats in Things, but Companion can’t repeat projects — only its current copy is imported.", orDefault(it.title, "Untitled project"))
+			b.warn(it.id, "“%s” repeats in Things; repeating projects aren’t imported yet — only its current copy is.", orDefault(it.title, "Untitled project"))
 			continue
 		}
 		pp := &planProject{
 			thingsID: it.id,
 			name:     orDefault(it.title, "Untitled project"),
 			archived: it.status != statusOpen,
+			startAt:  at(it.startDate, startHour, 0, b.loc),
+			someday:  it.start == startSomeday && at(it.startDate, startHour, 0, b.loc) == nil,
 			note:     b.projectNote(it),
 			outline:  &ProjectOutline{ID: it.id, Name: orDefault(it.title, "Untitled project"), Finished: it.status != statusOpen},
+		}
+		if !isSentinelDate(it.deadline) {
+			pp.dueAt = at(it.deadline, dueHour, 0, b.loc)
+		}
+		if pp.archived {
+			pp.completed = fromUnix(it.stopDate)
 		}
 		b.projects[it.id] = pp
 		pa := b.areas[it.area]
@@ -357,6 +372,7 @@ func (b *builder) task(it *item) *planTask {
 		hour = eveningHour
 	}
 	t.startAt = at(it.startDate, hour, 0, b.loc)
+	t.someday = it.start == startSomeday && t.startAt == nil
 	if !isSentinelDate(it.deadline) {
 		t.dueAt = at(it.deadline, dueHour, 0, b.loc)
 	}
@@ -395,7 +411,7 @@ func (b *builder) seed(it *item, container string) *planTask {
 	startDay := time.Date(y, m, d, 0, 0, 0, 0, b.loc)
 	occurrence := startDay.AddDate(0, 0, -r.startOffset) // ts ≤ 0: the date the instance is for
 	t := b.task(it)
-	t.status, t.completed = domain.TaskOpen, nil
+	t.status, t.completed, t.someday = domain.TaskOpen, nil, false
 	rule := r.rule
 	t.repeatRule = &rule
 	hour := startHour
@@ -427,18 +443,10 @@ func (b *builder) catchAllArea() *planArea {
 	return b.catchAll
 }
 
-// projectNote keeps what a Companion project can't hold — notes, dates, tags — as a note in
+// projectNote keeps what a Companion project can't hold — notes and tags — as a note in
 // it. Empty when there's nothing to keep.
 func (b *builder) projectNote(it *item) string {
 	var meta []string
-	if when := at(it.startDate, 0, 0, b.loc); when != nil {
-		meta = append(meta, "Starts "+when.Format("Mon, Jan 2, 2006"))
-	}
-	if !isSentinelDate(it.deadline) {
-		if due := at(it.deadline, 0, 0, b.loc); due != nil {
-			meta = append(meta, "Deadline "+due.Format("Mon, Jan 2, 2006"))
-		}
-	}
 	if tags := b.lib.taskTags[it.id]; len(tags) > 0 {
 		meta = append(meta, "Tags: "+strings.Join(tags, ", "))
 	}

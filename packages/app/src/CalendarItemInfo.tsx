@@ -8,6 +8,7 @@ const KIND_META: Record<CalendarItemKind, { color: string; label: string }> = {
   event: { color: colors.textTertiary, label: "event" },
   task: { color: colors.info, label: "task" },
   note: { color: colors.success, label: "note" },
+  project: { color: colors.accent, label: "project" },
 };
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -33,6 +34,11 @@ export function formatWhen(item: CalendarItem): string {
   }
   const start = new Date(item.startsAt);
   const date = `${WEEKDAYS[start.getDay()]}, ${MONTHS_SHORT[start.getMonth()]} ${start.getDate()}`;
+  // A span runs from its start to its deadline: "Thu, Oct 1 – Fri, Oct 9".
+  if (item.span && item.endsAt) {
+    const due = new Date(item.endsAt);
+    return `${date} – ${WEEKDAYS[due.getDay()]}, ${MONTHS_SHORT[due.getMonth()]} ${due.getDate()}`;
+  }
   const end = item.endsAt ? new Date(item.endsAt) : null;
   const time = end ? `${clockLabel(start)} – ${clockLabel(end)}` : clockLabel(start);
   return `${date} · ${time}`;

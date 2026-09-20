@@ -85,6 +85,9 @@ export interface Task {
   status: TaskStatus;
   /** When the task starts: the moment it becomes something to work on (ISO timestamp). */
   startAt?: string | null;
+  /** Filed under Someday in place of a start (PLAN-scheduling.md §1): out of every task list
+   *  but the Someday filter. Never set together with `startAt`. */
+  someday: boolean;
   /** The task's deadline (ISO timestamp). Keeps its original "due" name on the wire. */
   dueAt?: string | null;
   /** The task's reminders, normalized by core: leads (longest first), then instants. */
@@ -281,7 +284,7 @@ export interface CalendarEvent {
 }
 
 /** Origin of a merged calendar entry. Habit occurrences will join this when habits land. */
-export type CalendarItemKind = "event" | "task" | "note";
+export type CalendarItemKind = "event" | "task" | "note" | "project";
 
 /** One entry in the merged, read-only calendar view produced by `calendar.range` — feed
  *  events, due tasks, and dated notes on one timeline (PLAN §6.7). */
@@ -292,7 +295,11 @@ export interface CalendarItem {
   startsAt: string;
   endsAt?: string | null;
   allDay: boolean;
-  /** Id of the backing row (event/task/note) so the UI can open it. */
+  /** An open task or project with both a start and a deadline (PLAN-scheduling.md §4):
+   *  `startsAt`/`endsAt` are those instants, and it belongs in the all-day band of every local
+   *  day from one to the other. Not `allDay` (no UTC date markers) — place it with `itemDays`. */
+  span?: boolean;
+  /** Id of the backing row (event/task/note/project) so the UI can open it. */
   sourceId: string;
   /** Event location/description (shown on hover / in the mobile detail view); null otherwise. */
   location?: string | null;
@@ -346,6 +353,20 @@ export interface Project {
   descriptionMd: string;
   sortOrder: number;
   archivedAt?: string | null;
+  /** The project's schedule, shaped like a task's (PLAN-scheduling.md §2): ISO timestamps;
+   *  `dueAt` is presented as "Deadline". With both, the project spans those days on the calendar. */
+  startAt?: string | null;
+  dueAt?: string | null;
+  /** Filed under Someday in place of a start: off the sidebar, listed (labelled) only on its
+   *  area's overview. Never set together with `startAt`. */
+  someday: boolean;
+  /** Set once the project is completed: hidden everywhere but the Logbook. */
+  completedAt?: string | null;
+  /** How the project repeats — at most one: an RRULE schedule, or an interval after it is
+   *  completed ("P3D", "P2W", "P1M", "P1Y"). The server spawns the next copy and moves the
+   *  definition onto it (PLAN-scheduling.md §3). */
+  repeatRule?: string | null;
+  repeatAfter?: string | null;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;
@@ -409,6 +430,9 @@ export interface SidebarProject {
   icon?: string | null;
   taskProgress: number | null; // 0..1 done/(open+done) member tasks; null if none
   habitHealth: number | null; // 0..1 mean member-habit streak health; null if none
+  /** A Someday project: left off the sidebar, labelled on its area's overview. (Completed
+   *  projects never appear in the tree at all.) */
+  someday: boolean;
 }
 
 /** One area heading and its projects. */

@@ -148,6 +148,22 @@
       ],
       "port": 5352,
       "autoPort": false
+    },
+    {
+      "name": "web-scheduling",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@companion/web",
+        "--",
+        "--port",
+        "5363",
+        "--strictPort"
+      ],
+      "port": 5363,
+      "autoPort": false
     }
   ]
 }

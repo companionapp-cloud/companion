@@ -27,7 +27,7 @@ type NavLike = any;
 export function ProjectScreen() {
   const navigation = useNavigation<NavLike>();
   const params = (useRoute().params ?? {}) as { projectId?: string; section?: string; itemId?: string };
-  const { projects } = useProjects();
+  const { projectById } = useProjects();
   // Hiding the Calendar tool in Settings › Tools drops the tab, as it drops the desktop chip.
   const calendarShown = !useToolVisibility().hidden.has("calendar");
   const projectId = params.projectId ?? "";
@@ -58,7 +58,7 @@ export function ProjectScreen() {
   return (
     <View style={styles.root}>
       <NavBar
-        title={projects.find((p) => p.id === projectId)?.name ?? "Project"}
+        title={projectById(projectId)?.name ?? "Project"}
         segments={
           <ListFilterTabs
             value={section}
@@ -142,10 +142,10 @@ const AREA_TABS: { value: AreaTab; label: string; tool?: ToolId }[] = [
 /** The Overview tab: the same page the desktop shows, at touch density. */
 function ContainerOverviewTab({ container }: { container: ContainerRef }) {
   const nav = useNav();
-  const { areas, projects } = useProjects();
+  const { areas, projectById } = useProjects();
   const { hidden } = useToolVisibility();
   const content = useContainerContent(container);
-  const page = container.kind === "area" ? areas.find((a) => a.id === container.id) : projects.find((p) => p.id === container.id);
+  const page = container.kind === "area" ? areas.find((a) => a.id === container.id) : projectById(container.id);
   if (!page) return null;
   const sections = (["notes", "tasks", "canvases"] as ProjectSection[]).filter((s) => !hidden.has(s as ToolId));
   return (

@@ -24,6 +24,8 @@ export interface InputProps {
   onBlur?: () => void;
   /** Fired when the user presses Enter/Return. */
   onSubmitEditing?: () => void;
+  /** Keep focus after Enter — a quick-add field that takes one entry after another. */
+  keepFocusOnSubmit?: boolean;
 }
 
 /** Bordered single-line field with an optional leading icon, trailing slot and focus
@@ -43,6 +45,7 @@ export function Input({
   autoFocus,
   onBlur,
   onSubmitEditing,
+  keepFocusOnSubmit,
 }: InputProps) {
   const [focused, setFocused] = useState(false);
   const density = useDensity();
@@ -74,6 +77,7 @@ export function Input({
         autoFocus={autoFocus}
         editable={!disabled}
         onSubmitEditing={onSubmitEditing}
+        blurOnSubmit={keepFocusOnSubmit ? false : undefined}
         onFocus={() => setFocused(true)}
         onBlur={() => {
           setFocused(false);
