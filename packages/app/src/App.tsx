@@ -9,6 +9,7 @@ import { NotesProvider } from "./NotesProvider";
 import { TasksProvider } from "./TasksProvider";
 import { ProjectsProvider } from "./ProjectsProvider";
 import { ObjectTypesProvider } from "./ObjectTypesProvider";
+import { CanvasesProvider } from "./canvas/CanvasesProvider";
 import { AppShell, type WindowControls } from "./AppShell";
 import { MobileWebShell } from "./mobile/MobileShell";
 import { useMobileWebShell } from "./mobile/shellMode";
@@ -93,9 +94,11 @@ export function App({
           <NotesProvider>
             <TasksProvider>
               <ProjectsProvider>
-                <ObjectTypesProvider>
-                  <CaptureView />
-                </ObjectTypesProvider>
+                <CanvasesProvider>
+                  <ObjectTypesProvider>
+                    <CaptureView />
+                  </ObjectTypesProvider>
+                </CanvasesProvider>
               </ProjectsProvider>
             </TasksProvider>
           </NotesProvider>

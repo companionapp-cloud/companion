@@ -10,6 +10,7 @@ import {
   setExternalUrlOpener,
   setFocusWindowOpener,
   setCaptureWindowCloser,
+  setCaptureResultOpener,
   setTableMenuPresenter,
   setShortcutStore,
   setThingsSourcePicker,
@@ -41,7 +42,7 @@ if (typeof window !== "undefined" && (window as unknown as { _wails?: unknown })
 
 // Quick-capture window (main.go opens /?capture=1 in a frameless, transparent window on the
 // global Option/Alt+Space shortcut). The page's default body/#root background (index.html)
-// is opaque; clear it so the window is see-through and CaptureView's rounded card + shadow
+// is opaque; clear it so the window is see-through and CaptureView's palette card + shadow
 // read against it. Harmless on the main window, which never carries ?capture.
 const isCaptureWindow = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("capture");
 if (isCaptureWindow) {
@@ -64,6 +65,13 @@ setFocusWindowOpener(({ kind, id }) => {
 // Cancel / Esc / post-save dismiss through here.
 setCaptureWindowCloser(() => {
   void Window.Close();
+});
+
+// Quick-capture results: that window's palette can find things but has no navigator to show
+// them in, so the Go side brings the main window forward and relays the ref to it as a
+// `palette.open` event (apps/desktop/palette.go → AppShell's PaletteNavigationBridge).
+setCaptureResultOpener((ref) => {
+  void fetch("/palette/open", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(ref) });
 });
 
 // Global shortcuts: only the Go process can register an OS-wide hotkey, so Settings ›

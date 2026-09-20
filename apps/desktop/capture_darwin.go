@@ -4,10 +4,10 @@ package main
 
 // Spotlight-style presentation for the quick-capture window on macOS.
 //
-// The goal: a panel that floats in over whatever you're doing, is immediately typable, and
-// disturbs nothing when it opens or closes — it must NOT activate Companion (which would pull
-// the Dock icon, app menu, and the main window forward) and must NOT change window focus when
-// it goes away.
+// The goal: a panel that floats in where Spotlight would, over whatever you're doing, is
+// immediately typable, and disturbs nothing when it opens or closes — it must NOT activate
+// Companion (which would pull the Dock icon, app menu, and the main window forward) and must
+// NOT change window focus when it goes away.
 //
 // macOS only lets a window become key (accept keystrokes) while its app is INACTIVE if that
 // window is a non-activating NSPanel (NSWindowStyleMaskNonactivatingPanel). Wails creates a
@@ -69,7 +69,26 @@ static void presentCapturePanel(void *ptr) {
 			| NSWindowCollectionBehaviorFullScreenAuxiliary];
 	}
 
-	[w center];
+	// Where Spotlight sits: centred on the screen the pointer is on, its top edge about a fifth
+	// of the way down. The palette card hangs from the top of the (transparent) window, so
+	// placing the window by its top keeps the input still while the results grow beneath it.
+	NSPoint mouse = [NSEvent mouseLocation];
+	NSScreen *screen = [NSScreen mainScreen];
+	for (NSScreen *s in [NSScreen screens]) {
+		if (NSMouseInRect(mouse, s.frame, NO)) {
+			screen = s;
+			break;
+		}
+	}
+	if (screen != nil) {
+		NSRect area = screen.visibleFrame;
+		NSSize size = w.frame.size;
+		CGFloat x = NSMidX(area) - size.width / 2;
+		CGFloat top = NSMaxY(area) - area.size.height * 0.2;
+		[w setFrameOrigin:NSMakePoint(round(x), round(top - size.height))];
+	} else {
+		[w center];
+	}
 	// orderFrontRegardless + makeKeyWindow on a non-activating panel shows it and gives it
 	// keyboard focus WITHOUT activating Companion, so the main window is never disturbed.
 	[w orderFrontRegardless];

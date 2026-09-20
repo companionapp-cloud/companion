@@ -23,6 +23,7 @@ declare module "react-native" {
     pointerEvents?: "auto" | "none" | "box-none" | "box-only";
     onPointerEnter?: () => void;
     onPointerLeave?: () => void;
+    onPointerMove?: () => void;
     onPointerDown?: (event: { clientX?: number; nativeEvent?: { clientX?: number } }) => void;
     "aria-label"?: string;
   }
@@ -84,7 +85,10 @@ declare module "react-native" {
     children?: ReactNode | ((state: PressableState) => ReactNode);
     "aria-label"?: string;
     "aria-selected"?: boolean;
+    "aria-checked"?: boolean;
     role?: string;
+    onFocus?: () => void;
+    onBlur?: () => void;
   }
   interface ModalProps extends ViewProps {
     visible?: boolean;

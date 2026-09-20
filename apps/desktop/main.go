@@ -41,6 +41,13 @@ var assets embed.FS
 // (update_window.go).
 const captureWindowName = "capture"
 
+// The quick-capture window: the palette card (660 wide, up to ~460 tall) plus the transparent
+// margin CaptureView leaves for its shadow.
+const (
+	captureWindowWidth  = 720
+	captureWindowHeight = 520
+)
+
 // version is the release this binary was built as, stamped by the release workflow
 // (-ldflags "-X main.version=1.2.3"). Empty in dev builds, which never self-update and keep
 // their data apart from the installed release's (see databasePath).
@@ -134,23 +141,28 @@ func main() {
 	}
 
 	// Quick capture (Option+Space on macOS, Option+Shift+Space elsewhere — rebindable in
-	// Settings › Shortcuts): a small, frameless panel for jotting a note or task.
+	// Settings › Shortcuts): a frameless panel holding the command palette — capture a task, note
+	// or canvas, or find something and open it in the main window (palette.go).
 	// It's presented Spotlight-style — floating in over whatever you're doing without pulling
 	// Companion (or its main window) to the foreground, and dismissed by just closing that one
-	// window. Reused if already open so repeated presses resurface it; nilled on close so the
-	// next press builds a fresh one. Frameless + transparent lets the webview draw its own
+	// window: Esc, a click outside it, another app taking focus, or the shortcut again. Nilled
+	// on close so the next press builds a fresh one. Frameless + transparent lets the webview draw its own
 	// rounded, shadowed card (packages/app CaptureView) — see the ?capture=1 route in App.tsx.
+	// The card hangs from the top of the window and grows with its results, so the window is
+	// sized for the palette at its tallest; the rest of it stays see-through.
 	var captureWindow *application.WebviewWindow
 	openCaptureWindow := func() {
+		// The shortcut is a toggle, like Spotlight's: pressed while the palette is up, it puts it
+		// away again (the WindowClosing listener below forgets it).
 		if captureWindow != nil {
-			presentCapturePanel(captureWindow)
+			captureWindow.Close()
 			return
 		}
 		win := app.Window.NewWithOptions(application.WebviewWindowOptions{
 			Name:          captureWindowName,
 			Title:         "Quick Capture",
-			Width:         560,
-			Height:        480,
+			Width:         captureWindowWidth,
+			Height:        captureWindowHeight,
 			DisableResize: true,
 			Frameless:     true,
 			// Created hidden: Wails' own show activates the whole app. We surface it ourselves
@@ -160,9 +172,10 @@ func main() {
 			BackgroundColour: application.NewRGBA(0, 0, 0, 0),
 			InitialPosition:  application.WindowCentered,
 			URL:              "/?capture=1",
-			// Esc dismisses via a capture-phase keydown handler in CaptureView (which also
-			// cleans up an empty draft). A native Wails keybinding can't do that — it's
-			// swallowed by the focused ProseMirror editor — so it's intentionally not set here.
+			// Esc is the palette's: it steps back out of a command before it closes, via a
+			// capture-phase keydown handler (packages/app CommandPalette). A native Wails
+			// keybinding can't do that — and is swallowed by a focused ProseMirror editor — so
+			// it's intentionally not set here.
 			Mac: application.MacWindow{
 				Backdrop: application.MacBackdropTransparent,
 				// The window content is transparent except for the CaptureView card, which
@@ -173,8 +186,8 @@ func main() {
 				DisableShadow: true,
 			},
 		})
-		// Just forget the window on close (Esc / Cancel / after save) so the next shortcut
-		// press builds a fresh one. Nothing else to do: because presenting it never activated
+		// Just forget the window on close (Esc / the shortcut / after a save) so the next
+		// shortcut press builds a fresh one. Nothing else to do: because presenting it never activated
 		// the app, closing it doesn't promote the main window or otherwise disturb focus.
 		win.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
 			captureWindow = nil
@@ -226,7 +239,8 @@ func main() {
 			Handler: rootHandler(handler, notifHandler, openFocusWindow, func(w http.ResponseWriter, r *http.Request) {
 				tableCtxMenu.handleOpen(w, r)
 			}, shortcuts.handleShortcuts, windowChromeHandler(func() *application.WebviewWindow { return mainWindow }), updates.handleState,
-				pickThingsHandler(func() *application.App { return app })),
+				pickThingsHandler(func() *application.App { return app }),
+				paletteOpenHandler(updates.openApp, handler.OnEvent)),
 		},
 	})
 
@@ -313,7 +327,7 @@ func main() {
 // (/invoke, /events) to the bridge handler. /window spawns a focus-mode window for a
 // document (the workspace's expand/pop-out action) — browser window.open can't create a
 // real app window in the Wails webview, so the frontend asks the Go side here.
-func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusWindow func(url string), openTableMenu http.HandlerFunc, shortcuts http.HandlerFunc, chrome http.HandlerFunc, updates http.HandlerFunc, pickThings http.HandlerFunc) http.Handler {
+func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusWindow func(url string), openTableMenu http.HandlerFunc, shortcuts http.HandlerFunc, chrome http.HandlerFunc, updates http.HandlerFunc, pickThings http.HandlerFunc, paletteOpen http.HandlerFunc) http.Handler {
 	frontend, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {
 		log.Fatalf("mount frontend assets: %v", err)
@@ -345,6 +359,8 @@ func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusW
 	mux.HandleFunc("/update", updates)
 	// The native open panel for choosing a Things database to import (import_things.go).
 	mux.HandleFunc("/import/things/pick", pickThings)
+	// The quick-capture palette opening a result in the main window (palette.go).
+	mux.HandleFunc("/palette/open", paletteOpen)
 	mux.Handle("/", files)
 	return mux
 }

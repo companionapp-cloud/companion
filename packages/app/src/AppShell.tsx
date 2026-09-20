@@ -82,7 +82,8 @@ import { MultiSelectProvider } from "./MultiSelectProvider";
 import { SettingsScreen } from "./SettingsScreen";
 import { useSync } from "./SyncProvider";
 import { SyncHealthBanner } from "./SyncHealthBanner";
-import { CaptureForm } from "./CaptureForm";
+import { CommandPalette, paletteEnter } from "./CommandPalette";
+import { PALETTE_OPEN_EVENT } from "./capture";
 import { ThingsImportHost } from "./ThingsImport";
 
 // Monotonic tab uid so React keys are stable across reorders/overwrites even when two
@@ -132,7 +133,8 @@ function webLinking(): LinkingOptions<ParamListBase> | undefined {
         // Today takes an optional day (/today/2026-07-08) so a dated note can deep-link.
         today: "today/:date?",
         chat: "chat",
-        calendar: "calendar",
+        // The calendar takes an optional day too (/calendar/2026-07-08): the week to show.
+        calendar: "calendar/:date?",
         // notes/tasks are the workspace browse lists; the active tab's open document is
         // carried in the URL (/notes/:id, /tasks/:id) so it's bookmarkable. Other open tabs
         // stay session-only.
@@ -206,7 +208,7 @@ function refOfRoute(route: RouteLike): TabRef {
   return {
     kind: "view",
     view: route.name as SurfaceViewId,
-    date: route.name === "today" ? p.date : undefined,
+    date: route.name === "today" || route.name === "calendar" ? p.date : undefined,
     section: route.name === "settings" ? p.section : undefined,
   };
 }
@@ -444,6 +446,7 @@ function NavBridge({
   return (
     <NavContext.Provider value={nav}>
       <ReminderNavigationBridge />
+      <PaletteNavigationBridge />
       <ThingsImportHost />
       <MultiSelectProvider>
         <DndProvider>
@@ -476,6 +479,30 @@ function ReminderNavigationBridge() {
       off();
     };
   }, [nav, core]);
+  return null;
+}
+
+/** Show a palette result: the tab already holding it if there is one, else the active tab. */
+function revealRef(nav: Navigator, ref: TabRef) {
+  const held = nav.tabs.findIndex((t) => keyOfRef(t.ref) === keyOfRef(ref));
+  if (held >= 0) nav.selectTab(held);
+  else nav.openRef(ref);
+}
+
+/** Shows what the quick-capture window's palette asked for. That window is a webview of its
+ *  own, so the desktop shell brings this one forward and relays the chosen TabRef as a
+ *  `palette.open` event on the core's event stream. */
+function PaletteNavigationBridge() {
+  const nav = useNav();
+  const { core } = useCore();
+  useEffect(
+    () =>
+      core.on(PALETTE_OPEN_EVENT, (payload) => {
+        const ref = payload as TabRef | null;
+        if (ref && typeof ref === "object" && "kind" in ref) revealRef(nav, ref);
+      }),
+    [nav, core],
+  );
   return null;
 }
 
@@ -851,21 +878,16 @@ function ShellStatusBar({ tabCount }: { tabCount: number }) {
   );
 }
 
-/** Quick capture (⌥⇧Space): a 460px overlay on the scrim, 14vh from the top. Esc closes. */
+/** Quick capture (⌥⇧Space, or the toolbar's Capture): the command palette on the scrim, 14vh
+ *  from the top. The palette owns its keys (Esc steps back, then closes); results open in the
+ *  tab already holding them, else the active one. */
 function QuickCapture({ onClose }: { onClose: () => void }) {
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.addEventListener) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const nav = useNav();
   return (
     <View style={styles.captureLayer}>
       <Pressable style={styles.captureScrim} onPress={onClose} aria-label="Close quick capture" />
-      <View style={styles.capturePanel}>
-        <CaptureForm onClose={onClose} />
+      <View style={[styles.capturePanel, paletteEnter]}>
+        <CommandPalette onClose={onClose} onOpen={(ref) => revealRef(nav, ref)} />
       </View>
     </View>
   );
@@ -908,10 +930,11 @@ const styles = StyleSheet.create({
   captureLayer: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, alignItems: "center", zIndex: 100 },
   captureScrim: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: colors.scrim },
   capturePanel: {
-    width: 460,
+    width: 600,
     maxWidth: "92%",
+    maxHeight: "72vh" as unknown as number,
     marginTop: "14vh" as unknown as number,
-    padding: space.lg,
+    overflow: "hidden",
     backgroundColor: colors.surfaceOverlay,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
