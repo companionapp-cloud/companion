@@ -2,7 +2,6 @@ import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Animated,
   PanResponder,
-  Platform,
   View,
   type GestureResponderHandlers,
   type LayoutChangeEvent,
@@ -10,11 +9,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
-import { colors, noDragRegion, radius, shadow } from "@companion/design-system";
-
-// On web a mouse-drag would otherwise start a native text selection that fights the
-// PanResponder; disabling user-select on the rows keeps drags clean. No-op on native.
-const NO_SELECT = Platform.OS === "web" ? ({ userSelect: "none" } as const) : null;
+import { colors, noDragRegion, noSelect, radius, shadow } from "@companion/design-system";
 
 // An opaque fill so the shadow reads as one floating row rather than bleeding through it.
 const FLOATING = { backgroundColor: colors.surfaceCard, borderRadius: radius.sm, ...shadow.md } as const;
@@ -230,7 +225,7 @@ function SortableRow({
       // opt out or a drag would move the window instead of reordering.
       // The dragged row floats above the document, so it alone earns `shadow.md`; it follows
       // the pointer 1:1 — no scale, no lift, no spring.
-      style={{ transform: [{ translateY: translate }], zIndex: active ? 2 : 0, ...(active ? FLOATING : null), ...NO_SELECT, ...noDragRegion }}
+      style={{ transform: [{ translateY: translate }], zIndex: active ? 2 : 0, ...(active ? FLOATING : null), ...noSelect, ...noDragRegion }}
     >
       {children(responder.panHandlers)}
     </Animated.View>

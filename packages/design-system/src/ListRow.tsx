@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
-import { Pressable, StyleSheet, View, type GestureResponderEvent } from "react-native";
+import { Platform, Pressable, StyleSheet, View, type GestureResponderEvent } from "react-native";
 import { useDensity } from "./Density";
 import { Icon } from "./Icon";
-import { transition, type PressState } from "./platform";
+import { noSelect, transition, type PressState } from "./platform";
 import { Text } from "./Text";
 import { colors, icon as iconSize, motion, radius, row, space } from "./tokens";
 
@@ -13,6 +13,9 @@ export interface ListRowProps {
   icon?: ReactNode;
   /** Trailing mono metadata (relative time, a count). */
   trailing?: string;
+  /** A control pinned to the row's far right (a drag handle). Shown only while the row is
+   *  hovered, so a list doesn't read as a wall of grips; always visible without hover. */
+  accessory?: ReactNode;
   selected?: boolean;
   hasChildren?: boolean;
   /** Tree depth; each level indents 12px. */
@@ -22,7 +25,7 @@ export interface ListRowProps {
 
 /** Selectable row for browse lists (notes, tasks, boards, projects). 24px single-line,
  * 38px only when a subtitle earns it; touch surfaces never drop below 44px. */
-export function ListRow({ title, subtitle, icon, trailing, selected, hasChildren, indent = 0, onPress }: ListRowProps) {
+export function ListRow({ title, subtitle, icon, trailing, accessory, selected, hasChildren, indent = 0, onPress }: ListRowProps) {
   const density = useDensity();
   const minHeight = density === "touch" ? row.touch : subtitle ? row.twoLine : row.h;
   return (
@@ -30,6 +33,7 @@ export function ListRow({ title, subtitle, icon, trailing, selected, hasChildren
       onPress={onPress}
       style={({ hovered, pressed }: PressState) => [
         styles.row,
+        noSelect,
         transition("background-color", motion.fast),
         {
           minHeight,
@@ -44,23 +48,28 @@ export function ListRow({ title, subtitle, icon, trailing, selected, hasChildren
         },
       ]}
     >
-      {icon ? <View style={styles.icon}>{icon}</View> : null}
-      <View style={styles.body}>
-        <Text variant="label" tone={selected ? "accent" : "default"} numberOfLines={1}>
-          {title}
-        </Text>
-        {subtitle ? (
-          <Text variant="caption" tone="tertiary" numberOfLines={1}>
-            {subtitle}
-          </Text>
-        ) : null}
-      </View>
-      {trailing ? (
-        <Text variant="mono" tone="quaternary" style={styles.trailing}>
-          {trailing}
-        </Text>
-      ) : null}
-      {hasChildren ? <Icon name="chevronRight" size={iconSize.sm} color={colors.textQuaternary} /> : null}
+      {(({ hovered }: PressState) => (
+        <>
+          {icon ? <View style={styles.icon}>{icon}</View> : null}
+          <View style={styles.body}>
+            <Text variant="label" tone={selected ? "accent" : "default"} numberOfLines={1}>
+              {title}
+            </Text>
+            {subtitle ? (
+              <Text variant="caption" tone="tertiary" numberOfLines={1}>
+                {subtitle}
+              </Text>
+            ) : null}
+          </View>
+          {trailing ? (
+            <Text variant="mono" tone="quaternary" style={styles.trailing}>
+              {trailing}
+            </Text>
+          ) : null}
+          {hasChildren ? <Icon name="chevronRight" size={iconSize.sm} color={colors.textQuaternary} /> : null}
+          {accessory ? <View style={[styles.accessory, { opacity: hovered || !canHover ? 1 : 0 }]}>{accessory}</View> : null}
+        </>
+      )) as unknown as ReactNode}
     </Pressable>
   );
 }
@@ -76,4 +85,8 @@ const styles = StyleSheet.create({
   icon: { flexShrink: 0 },
   body: { flex: 1, minWidth: 0, justifyContent: "center", gap: 1 },
   trailing: { flexShrink: 0 },
+  accessory: { flexShrink: 0 },
 });
+
+// Hover only exists with a pointer; touch platforms keep hover-revealed controls visible.
+const canHover = Platform.OS === "web" && typeof window !== "undefined" && !!window.matchMedia?.("(hover: hover)").matches;

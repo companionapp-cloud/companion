@@ -38,6 +38,7 @@ import { EmptyDetail } from "./WorkspaceScreen";
 import { timeAgo } from "./NotificationRow";
 import { useProjectLists } from "./ListsProvider";
 import { useCanvases } from "./canvas/CanvasesProvider";
+import { DragHandle } from "./DndContext";
 import { CanvasesList } from "./canvas/CanvasesList";
 import { CanvasPane } from "./canvas/CanvasPane";
 import { CalendarScreen } from "./CalendarScreen";
@@ -415,9 +416,11 @@ function ListColumn({
           filteredNotes.length ? (
             filteredNotes.map((n) => {
               const selected = ms.active ? ms.isSelected(n.id) : n.id === itemId;
+              // The grip drags the note onto another project/area in the sidebar, as in the root lists.
               return (
                 <ListRow
                   key={n.id}
+                  accessory={<DragHandle payload={{ kind: "note", id: n.id, label: n.title || "Untitled" }} />}
                   icon={<Icon name={n.date ? "today" : "file"} size={icon.sm} color={selected ? colors.textAccent : colors.textQuaternary} />}
                   title={n.title || "Untitled"}
                   subtitle={projectOf.get(n.id)}
@@ -442,6 +445,7 @@ function ListColumn({
               {openTasks.map((t) => (
                 <TaskRow
                   key={t.id}
+                  handle={<DragHandle payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }} />}
                   task={t}
                   selected={ms.active ? ms.isSelected(t.id) : t.id === itemId}
                   onPress={(e) => {
@@ -470,6 +474,7 @@ function ListColumn({
                   {doneTasks.map((t) => (
                     <TaskRow
                       key={t.id}
+                      handle={<DragHandle payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }} />}
                       task={t}
                       selected={ms.active ? ms.isSelected(t.id) : t.id === itemId}
                       onPress={(e) => {

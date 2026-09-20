@@ -4,7 +4,8 @@ import type { SidebarArea, SidebarProject } from "@companion/core-bridge";
 import { Icon, Input, ProgressRing, Text, colors, icon, motion, noDragRegion, radius, space, transition, type IconName, type PressState } from "@companion/design-system";
 import { useProjects } from "./ProjectsProvider";
 import { SortableList } from "./SortableList";
-import { useDropTarget } from "./DndContext";
+import { useDropTarget, type DragPayload } from "./DndContext";
+import { SECTION_OF, containerOfLocation, useNav, type ContainerRef } from "./nav-context";
 
 /** The areas → projects tree in the expanded rail (PLAN §6.6): area headings that open the
  * area's page, project nav items with a task-completion ring (hidden until member tasks
@@ -72,7 +73,7 @@ export function ProjectsSidebar({
           onReorder={(ids) => void reorderProjects(area.id, ids)}
           renderItem={({ item: p, isActive, drag }) => (
             <View {...drag}>
-              <ProjectRow project={p} active={p.id === activeProjectId} dragging={isActive} onPress={() => onSelectProject?.(p.id)} />
+              <ProjectRow project={p} areaId={area.id} active={p.id === activeProjectId} dragging={isActive} onPress={() => onSelectProject?.(p.id)} />
             </View>
           )}
         />
@@ -192,6 +193,23 @@ function MiniButton({ label, icon: name, onPress }: { label: string; icon: IconN
  *  opens its page (PLAN-areas.md §3). An empty area additionally reveals a delete button on
  *  hover — areas are only deletable once they hold no projects (PLAN §6.6). The whole header
  *  is the area's drag handle, and a drop target: a dragged note or task is filed in the area. */
+/** After a drop moves a document into `target`: if the active tab has that document selected
+ *  inside the project/area page it just left, clear the selection rather than leaving it open
+ *  under a container that no longer lists it. `targetAreaId` is the area a target project
+ *  sits in — an area page rolls up its projects, so it still lists the item. */
+function useClearMovedSelection() {
+  const nav = useNav();
+  return (target: ContainerRef, targetAreaId: string | null, p: DragPayload) => {
+    const here = containerOfLocation(nav.current);
+    const section = SECTION_OF[p.kind];
+    if (!here || here.section !== section || here.itemId !== p.id) return;
+    if (here.kind === target.kind && here.id === target.id) return;
+    if (here.kind === "area" && target.kind === "project" && targetAreaId === here.id) return;
+    // Replace, not push: Back shouldn't return to the item under the container it left.
+    nav.replaceRef(here.kind === "project" ? { kind: "project", projectId: here.id, section } : { kind: "area", areaId: here.id, section });
+  };
+}
+
 function AreaHeader({
   area,
   open,
@@ -213,7 +231,10 @@ function AreaHeader({
 }) {
   const [hovered, setHovered] = useState(false);
   const { addAreaMember } = useProjects();
-  const { ref, isOver } = useDropTarget(`area:${area.id}`, (p) => void addAreaMember(area.id, p.kind, p.id));
+  const clearMoved = useClearMovedSelection();
+  const { ref, isOver } = useDropTarget(`area:${area.id}`, (p) => {
+    void addAreaMember(area.id, p.kind, p.id).then(() => clearMoved({ kind: "area", id: area.id }, null, p));
+  });
   const on = isOver || !!active;
   const deletable = area.projects.length === 0 && !!onDeleteArea;
   let trailing: ReactNode = null;
@@ -249,18 +270,24 @@ function AreaHeader({
 
 function ProjectRow({
   project,
+  areaId,
   active,
   dragging,
   onPress,
 }: {
   project: SidebarProject;
+  /** The area this project sits under (none in the "Unsorted" bucket). */
+  areaId?: string;
   active?: boolean;
   dragging?: boolean;
   onPress?: () => void;
 }) {
   const { addMember } = useProjects();
   // A project is a drop target: dropping a dragged note/task adds it to this project.
-  const { ref, isOver } = useDropTarget(project.id, (p) => void addMember(project.id, p.kind, p.id));
+  const clearMoved = useClearMovedSelection();
+  const { ref, isOver } = useDropTarget(project.id, (p) => {
+    void addMember(project.id, p.kind, p.id).then(() => clearMoved({ kind: "project", id: project.id }, areaId ?? null, p));
+  });
   const on = isOver || !!active;
   return (
     <View ref={ref} style={styles.projectSlot}>

@@ -4,6 +4,7 @@ import type { Canvas } from "@companion/core-bridge";
 import { Icon, IconButton, Input, ListRow, Spinner, Text, colors, icon, space } from "@companion/design-system";
 import { ListFilterMenu } from "../ListFilterMenu";
 import { timeAgo } from "../NotificationRow";
+import { DragHandle } from "../DndContext";
 import { useCanvases } from "./CanvasesProvider";
 
 /** The canvases browse column, shared by the root Canvases view and a project's Canvases
@@ -76,9 +77,11 @@ export function CanvasesList({
         {filtered.length ? (
           filtered.map((c) => {
             const selected = c.id === selectedId;
+            // The grip drags the board onto a project/area in the sidebar, like the note and task rows.
             return (
               <ListRow
                 key={c.id}
+                accessory={<DragHandle payload={{ kind: "canvas", id: c.id, label: c.name || "Untitled canvas" }} />}
                 icon={<Icon name="canvas" size={icon.sm} color={selected ? colors.textAccent : colors.textQuaternary} />}
                 title={c.name || "Untitled canvas"}
                 trailing={timeAgo(c.updatedAt)}

@@ -6,7 +6,7 @@ import { useNotes } from "./NotesProvider";
 import { useTasks } from "./TasksProvider";
 import { NoteEditor } from "./NoteEditor";
 import { TaskEditor, TaskRow } from "./TaskEditor";
-import { Draggable } from "./DndContext";
+import { DragHandle } from "./DndContext";
 import { repeatSubtitle } from "./repeat";
 import { ListFilterMenu } from "./ListFilterMenu";
 import { ListSectionFold } from "./ListSectionFold";
@@ -244,17 +244,17 @@ function NotesList() {
           filtered.map((n) => {
             const selected = ms.active ? ms.isSelected(n.id) : n.id === activeId;
             return (
-              <Draggable key={n.id} payload={{ kind: "note", id: n.id, label: n.title || "Untitled" }}>
-                <ListRow
-                  icon={<Icon name={n.date ? "today" : "file"} size={icon.sm} color={selected ? colors.textAccent : colors.textQuaternary} />}
-                  title={n.title || "Untitled"}
-                  trailing={timeAgo(n.updatedAt)}
-                  selected={selected}
-                  onPress={(e) => {
-                    if (!ms.press(n.id, pressMods(e))) nav.openNote(n.id);
-                  }}
-                />
-              </Draggable>
+              <ListRow
+                key={n.id}
+                accessory={<DragHandle payload={{ kind: "note", id: n.id, label: n.title || "Untitled" }} />}
+                icon={<Icon name={n.date ? "today" : "file"} size={icon.sm} color={selected ? colors.textAccent : colors.textQuaternary} />}
+                title={n.title || "Untitled"}
+                trailing={timeAgo(n.updatedAt)}
+                selected={selected}
+                onPress={(e) => {
+                  if (!ms.press(n.id, pressMods(e))) nav.openNote(n.id);
+                }}
+              />
             );
           })
         ) : (
@@ -335,9 +335,14 @@ function TasksList() {
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll}>
         {open.length ? (
           open.map((t) => (
-            <Draggable key={t.id} payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }}>
-              <TaskRow task={t} selected={selectFor(t.id)} onPress={(e) => pressTask(t.id, e)} onToggle={() => void store.setStatus(t.id, "done")} />
-            </Draggable>
+            <TaskRow
+              key={t.id}
+              task={t}
+              selected={selectFor(t.id)}
+              onPress={(e) => pressTask(t.id, e)}
+              onToggle={() => void store.setStatus(t.id, "done")}
+              handle={<DragHandle payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }} />}
+            />
           ))
         ) : (
           <Text tone="tertiary" variant="caption" style={styles.empty}>
@@ -361,9 +366,14 @@ function TasksList() {
         {done.length ? (
           <ListSectionFold label={`Completed · ${done.length}`} storageKey="tasks.completed" defaultOpen={false}>
             {done.map((t) => (
-              <Draggable key={t.id} payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }}>
-                <TaskRow task={t} selected={selectFor(t.id)} onPress={(e) => pressTask(t.id, e)} onToggle={() => void store.setStatus(t.id, "open")} />
-              </Draggable>
+              <TaskRow
+                key={t.id}
+                task={t}
+                selected={selectFor(t.id)}
+                onPress={(e) => pressTask(t.id, e)}
+                onToggle={() => void store.setStatus(t.id, "open")}
+                handle={<DragHandle payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }} />}
+              />
             ))}
           </ListSectionFold>
         ) : null}

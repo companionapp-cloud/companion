@@ -91,7 +91,7 @@ export { ObjectTypeSettings } from "./ObjectTypeSettings";
 export { ProjectsSidebar } from "./ProjectsSidebar";
 export { SortableList } from "./SortableList";
 export type { SortableListProps, SortableRenderInfo } from "./SortableList";
-export { DndProvider, Draggable, useDraggable, useDropTarget } from "./DndContext";
+export { DndProvider, DragHandle, Draggable, useDraggable, useDropTarget } from "./DndContext";
 export type { DragPayload } from "./DndContext";
 export { MembershipPicker } from "./MembershipPicker";
 export { ConfirmDialog } from "./ConfirmDialog";

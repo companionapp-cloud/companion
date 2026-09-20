@@ -120,8 +120,9 @@ export function AppToolbar({
               onClose={() => nav.closeTab(i)}
             />
           );
-          // A tab holding a note/task can be dragged onto a project (or a board) to add it there.
-          return doc && doc.kind !== "canvas" ? (
+          // A tab holding a document can be dragged onto a project or area to move it there
+          // (a note/task also onto a board, to add it as a card).
+          return doc ? (
             <Draggable key={tab.uid} payload={{ kind: doc.kind, id: doc.id, label }}>
               {el}
             </Draggable>

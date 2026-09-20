@@ -16,6 +16,7 @@ import {
   radius,
   row,
   space,
+  noSelect,
   transition,
   useDensity,
   type IconName,
@@ -469,6 +470,7 @@ export function TaskRow({
   onPress,
   onToggle,
   trailing,
+  handle,
 }: {
   task: Task;
   selected?: boolean;
@@ -478,6 +480,8 @@ export function TaskRow({
    *  only while the row is hovered, so a list of rows doesn't read as a wall of buttons;
    *  on touch (no hover) they stay visible. */
   trailing?: ReactNode;
+  /** A drag handle pinned to the row's far right; hover-revealed like `trailing`. */
+  handle?: ReactNode;
 }) {
   const touch = useDensity() === "touch";
   const done = task.status === "done";
@@ -486,6 +490,7 @@ export function TaskRow({
       onPress={onPress}
       style={({ hovered, pressed }: PressState) => [
         styles.taskRow,
+        noSelect,
         touch ? styles.taskRowTouch : null,
         transition("background-color", motion.instant),
         { backgroundColor: selected ? colors.surfaceSelected : pressed ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent" },
@@ -513,6 +518,7 @@ export function TaskRow({
             </Text>
           ) : null}
           {trailing ? <View style={{ opacity: hovered || !canHover ? 1 : 0 }}>{trailing}</View> : null}
+          {handle ? <View style={{ opacity: hovered || !canHover ? 1 : 0 }}>{handle}</View> : null}
         </>
       )) as unknown as ReactNode}
     </Pressable>

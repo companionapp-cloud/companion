@@ -1,9 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Animated, PanResponder, Platform, View, type GestureResponderHandlers, type PanResponderGestureState } from "react-native";
-import { Icon, Text, colors, radius, shadow, space } from "@companion/design-system";
+import { Animated, PanResponder, View, type GestureResponderHandlers, type PanResponderGestureState } from "react-native";
+import { Icon, Text, colors, noDragRegion, noSelect, radius, shadow, space } from "@companion/design-system";
 
-/** What is being dragged (a note or task), plus a label for the drag ghost. */
-export type DragPayload = { kind: "note" | "task"; id: string; label: string };
+/** What is being dragged (a note, task or canvas), plus a label for the drag ghost. */
+export type DragPayload = { kind: "note" | "task" | "canvas"; id: string; label: string };
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type Target = { measure: () => Promise<Bounds | null>; onDrop: (p: DragPayload, x: number, y: number) => void; bounds: Bounds | null };
@@ -24,11 +24,6 @@ interface DndValue {
 }
 
 const DndCtx = createContext<DndValue | null>(null);
-
-// A drag is only claimed after a few px of movement, by which point a mouse-down on a row's
-// text has already begun a native selection that then fights the PanResponder (the body-level
-// suppression below kicks in too late). Sources opt out of selection up front. No-op on native.
-const NO_SELECT = Platform.OS === "web" ? ({ userSelect: "none" } as const) : null;
 
 /** A tiny drag-and-drop layer for "drop a document onto a project" (web/desktop). A source
  *  (`useDraggable`) starts a ghost drag on pointer move; targets (`useDropTarget`) register
@@ -160,8 +155,9 @@ export function useDnd(): DndValue {
 
 /** Spread the returned handlers onto a source element to make it draggable. A drag starts
  *  only after real movement, so taps still fire the element's onPress. `getPayload` is read
- *  lazily at drag start. */
-export function useDraggable(getPayload: () => DragPayload): GestureResponderHandlers {
+ *  lazily at drag start. `fromStart` claims the gesture on touch-down instead — for a
+ *  dedicated handle, where nothing else (a press, a text selection) should get a look in. */
+export function useDraggable(getPayload: () => DragPayload, { fromStart = false }: { fromStart?: boolean } = {}): GestureResponderHandlers {
   const dnd = useDnd();
   // Read the payload and the (stable-but-fresh) dnd handlers through refs so the responder
   // is created exactly once. If it depended on `dnd` directly it would be rebuilt whenever
@@ -170,28 +166,70 @@ export function useDraggable(getPayload: () => DragPayload): GestureResponderHan
   payloadRef.current = getPayload;
   const dndRef = useRef(dnd);
   dndRef.current = dnd;
+  // The ghost appears on the first movement, not on touch-down: a plain click on a handle
+  // that claimed the gesture at the start shouldn't flash a drag.
+  const started = useRef(false);
   const responder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
+    () => {
+      const finish = () => {
+        if (started.current) dndRef.current.end();
+        started.current = false;
+      };
+      return PanResponder.create({
+        onStartShouldSetPanResponder: () => fromStart,
         onMoveShouldSetPanResponder: (_e: unknown, g: PanResponderGestureState) => Math.abs(g.dx) > 6 || Math.abs(g.dy) > 6,
-        onPanResponderGrant: (_e: unknown, g: PanResponderGestureState) => dndRef.current.begin(payloadRef.current(), g.moveX, g.moveY),
-        onPanResponderMove: (_e: unknown, g: PanResponderGestureState) => dndRef.current.move(g.moveX, g.moveY),
-        onPanResponderRelease: () => dndRef.current.end(),
-        onPanResponderTerminate: () => dndRef.current.end(),
+        onPanResponderMove: (_e: unknown, g: PanResponderGestureState) => {
+          if (!started.current) {
+            started.current = true;
+            dndRef.current.begin(payloadRef.current(), g.moveX, g.moveY);
+          }
+          dndRef.current.move(g.moveX, g.moveY);
+        },
+        onPanResponderRelease: finish,
+        onPanResponderTerminate: finish,
         onPanResponderTerminationRequest: () => false,
-      }),
-    [],
+      });
+    },
+    [fromStart],
   );
   return responder.panHandlers;
 }
 
-/** A convenience wrapper: makes its children a draggable source with the given payload. */
+/** A convenience wrapper: makes its children a draggable source with the given payload.
+ *  Shells without a drag layer (the mobile shells) render the children untouched. */
 export function Draggable({ payload, children }: { payload: DragPayload; children: ReactNode }) {
+  const dnd = useContext(DndCtx);
+  return dnd ? <DragSource payload={payload}>{children}</DragSource> : <>{children}</>;
+}
+
+function DragSource({ payload, children }: { payload: DragPayload; children: ReactNode }) {
   const handlers = useDraggable(() => payload);
   return (
-    <View {...handlers} style={NO_SELECT}>
+    // A drag is only claimed after a few px of movement, by which point a mouse-down on text
+    // has already begun a native selection (the body-level suppression above kicks in too
+    // late) — so sources opt out of selection up front.
+    <View {...handlers} style={noSelect}>
       {children}
+    </View>
+  );
+}
+
+/** A grip for a list row's far right: press and drag it to carry the row's document onto a
+ *  project, area or board. The row itself stays a plain press target. Renders nothing in
+ *  shells without a drag layer (the mobile shells). */
+export function DragHandle({ payload }: { payload: DragPayload }) {
+  const dnd = useContext(DndCtx);
+  return dnd ? <Grip payload={payload} /> : null;
+}
+
+// A click on the grip must not bubble to the row's Pressable and open the item.
+const SWALLOW_CLICK = { onClick: (e: { stopPropagation: () => void }) => e.stopPropagation() } as object;
+
+function Grip({ payload }: { payload: DragPayload }) {
+  const handlers = useDraggable(() => payload, { fromStart: true });
+  return (
+    <View {...handlers} {...SWALLOW_CLICK} aria-label="Drag to a project or area" style={[styles.grip, noSelect, noDragRegion]}>
+      <Icon name="grip" size={12} color={colors.textTertiary} strokeWidth={2.5} />
     </View>
   );
 }
@@ -246,7 +284,7 @@ function DragGhost({ payload, position }: { payload: DragPayload; position: { x:
       }}
     >
       <View style={styles.ghost}>
-        <Icon name={payload.kind === "task" ? "tasks" : "file"} size={14} color={colors.textSecondary} />
+        <Icon name={payload.kind === "task" ? "tasks" : payload.kind === "canvas" ? "canvas" : "file"} size={14} color={colors.textSecondary} />
         <Text variant="caption" numberOfLines={1} style={{ maxWidth: 200 }}>
           {payload.label || "Untitled"}
         </Text>
@@ -256,6 +294,15 @@ function DragGhost({ payload, position }: { payload: DragPayload; position: { x:
 }
 
 const styles = {
+  grip: {
+    width: 16,
+    alignSelf: "stretch" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    // Sit flush with the row's right edge (rows pad their right side by space.sm).
+    marginRight: -space.xs,
+    cursor: "grab",
+  },
   ghost: {
     flexDirection: "row" as const,
     alignItems: "center" as const,

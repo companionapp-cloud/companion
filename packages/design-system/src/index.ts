@@ -1,7 +1,7 @@
 export * from "./tokens";
 export { DensityProvider, useDensity, type Density } from "./Density";
 export { getTheme, setTheme, toggleTheme, useTheme, themeSwitchable } from "./theme";
-export { dragRegion, noDragRegion, opensInNewTab, transition, type PressState } from "./platform";
+export { dragRegion, noDragRegion, noSelect, opensInNewTab, transition, type PressState } from "./platform";
 export { Icon } from "./Icon";
 export type { IconProps, IconName } from "./iconPaths";
 export { BrandMark } from "./BrandMark";

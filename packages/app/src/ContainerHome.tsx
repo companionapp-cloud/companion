@@ -11,6 +11,7 @@ import { DeleteProjectDialog } from "./DeleteProjectDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { timeAgo } from "./NotificationRow";
 import { ContainerOverview, OverviewCard, OVERVIEW_LIMIT } from "./ContainerOverview";
+import { DragHandle } from "./DndContext";
 
 /** A container's tasks-list filter. "unsorted" exists only in an area: the tasks filed directly
  *  in it, in none of its projects. */
@@ -73,8 +74,10 @@ export function ContainerHome({
 
   const taskRows = (rows: Task[]) =>
     rows.slice(0, OVERVIEW_LIMIT).map((t) => (
+      // The grip drags the task onto another project/area in the sidebar (absent on mobile).
       <TaskRow
         key={t.id}
+        handle={<DragHandle payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }} />}
         task={t}
         onPress={() => nav.openContainer(container, "tasks", t.id)}
         onToggle={() => void tasksStore.setStatus(t.id, "done")}
@@ -191,6 +194,7 @@ export function ContainerHome({
             {recentNotes.slice(0, OVERVIEW_LIMIT).map((n) => (
               <ListRow
                 key={n.id}
+                accessory={<DragHandle payload={{ kind: "note", id: n.id, label: n.title || "Untitled" }} />}
                 icon={<Icon name={n.date ? "today" : "file"} size={icon.sm} color={colors.textQuaternary} />}
                 title={n.title || "Untitled"}
                 subtitle={projectOf.get(n.id)}
@@ -210,6 +214,7 @@ export function ContainerHome({
             {recentCanvases.slice(0, OVERVIEW_LIMIT).map((c) => (
               <ListRow
                 key={c.id}
+                accessory={<DragHandle payload={{ kind: "canvas", id: c.id, label: c.name || "Untitled canvas" }} />}
                 icon={<Icon name="canvas" size={icon.sm} color={colors.textQuaternary} />}
                 title={c.name || "Untitled canvas"}
                 trailing={timeAgo(c.updatedAt)}

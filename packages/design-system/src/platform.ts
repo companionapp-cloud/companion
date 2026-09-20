@@ -1,4 +1,4 @@
-import type { GestureResponderEvent, ViewStyle } from "react-native";
+import { Platform, type GestureResponderEvent, type ViewStyle } from "react-native";
 
 // Wails v3 window-drag hints. Applying `--wails-draggable: drag` to an element makes
 // it a window drag handle on desktop; `no-drag` opts an interactive child back out.
@@ -7,6 +7,11 @@ import type { GestureResponderEvent, ViewStyle } from "react-native";
 // they're not real ViewStyle keys, hence the cast — they no-op there too.
 export const dragRegion = { "--wails-draggable": "drag" } as unknown as ViewStyle;
 export const noDragRegion = { "--wails-draggable": "no-drag" } as unknown as ViewStyle;
+
+// Opt an element's text out of native selection on web (it inherits, so set it on the row).
+// List rows are for pressing and dragging: a mouse-drag that starts on selectable text begins
+// a selection that fights the drag gesture. No-op on native.
+export const noSelect = (Platform.OS === "web" ? { userSelect: "none" } : {}) as unknown as ViewStyle;
 
 // Pressable's callback state. react-native-web adds `hovered`; real react-native
 // omits it (so it's optional here). Annotate Pressable style/children callbacks with
