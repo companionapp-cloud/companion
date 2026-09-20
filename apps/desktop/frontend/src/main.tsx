@@ -70,8 +70,10 @@ setCaptureWindowCloser(() => {
 // Quick-capture results: that window's palette can find things but has no navigator to show
 // them in, so the Go side brings the main window forward and relays the ref to it as a
 // `palette.open` event (apps/desktop/palette.go → AppShell's PaletteNavigationBridge).
-setCaptureResultOpener((ref) => {
-  void fetch("/palette/open", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(ref) });
+setCaptureResultOpener((ref, opts) => {
+  // `newTab` (⇧⏎) rides beside the ref's own fields; the Go side relays the body unread.
+  const body = JSON.stringify(opts?.newTab ? { ...ref, newTab: true } : ref);
+  void fetch("/palette/open", { method: "POST", headers: { "Content-Type": "application/json" }, body });
 });
 
 // Global shortcuts: only the Go process can register an OS-wide hotkey, so Settings ›

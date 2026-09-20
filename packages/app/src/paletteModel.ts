@@ -1,6 +1,7 @@
 import type { Area, CalendarItem, Canvas, Note, Project, Task } from "@companion/core-bridge";
 import type { IconName } from "@companion/design-system";
 import type { TabRef } from "./nav-context";
+import { isMacPlatform } from "./shortcuts";
 
 // The command palette's model (PLAN §6.4): what it can do, how a query is matched against
 // titles and dates, and how a hit becomes a row. Pure — the hook (useCommandPalette) feeds it
@@ -40,14 +41,16 @@ export interface PaletteCommand {
   keywords: string;
   icon: IconName;
   mode: PaletteMode;
+  /** The letter of the command's own shortcut (⌥⇧ + it), shown beside it in the list. */
+  shortcutKey?: string;
 }
 
 /** Every command, in the order the empty palette lists them: capture first — the palette is
  *  still quick capture, so ⏎ on open starts a task. */
 export const PALETTE_COMMANDS: PaletteCommand[] = [
-  { id: "new-task", label: "New task", keywords: "create add todo capture", icon: "tasks", mode: { kind: "create", what: "task" } },
-  { id: "new-note", label: "New note", keywords: "create add write capture", icon: "file", mode: { kind: "create", what: "note" } },
-  { id: "new-canvas", label: "New canvas", keywords: "create add board", icon: "canvas", mode: { kind: "create", what: "canvas" } },
+  { id: "new-task", label: "New task", keywords: "create add todo capture", icon: "tasks", mode: { kind: "create", what: "task" }, shortcutKey: "T" },
+  { id: "new-note", label: "New note", keywords: "create add write capture", icon: "file", mode: { kind: "create", what: "note" }, shortcutKey: "N" },
+  { id: "new-canvas", label: "New canvas", keywords: "create add board", icon: "canvas", mode: { kind: "create", what: "canvas" }, shortcutKey: "C" },
   { id: "find-all", label: "Find anything", keywords: "search open go to title", icon: "search", mode: { kind: "find", scope: "all" } },
   { id: "find-note", label: "Find a note", keywords: "search open notes title", icon: "file", mode: { kind: "find", scope: "note" } },
   { id: "find-task", label: "Find a task", keywords: "search open tasks todo title", icon: "tasks", mode: { kind: "find", scope: "task" } },
@@ -346,7 +349,8 @@ export function rootItems(query: string, data: PaletteData, events: CalendarItem
 }
 
 function commandItem(c: PaletteCommand): PaletteItem {
-  return { key: c.id, section: SECTION_COMMANDS, icon: c.icon, title: c.label, action: { type: "mode", mode: c.mode } };
+  const trailing = c.shortcutKey ? (isMacPlatform() ? `⌥⇧${c.shortcutKey}` : `alt ⇧ ${c.shortcutKey}`) : undefined;
+  return { key: c.id, section: SECTION_COMMANDS, icon: c.icon, title: c.label, trailing, action: { type: "mode", mode: c.mode } };
 }
 
 // ---------------------------------------------------------------------------

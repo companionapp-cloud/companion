@@ -13,7 +13,8 @@ import { useCommandPalette, type CommandPaletteController, type CommandPaletteHo
  * task's project chips and due / reminder questions, or the note's body, beneath it.
  *
  * Keyboard-first: ↑↓ move, ⏎ runs, ⌫ on an empty input or Esc steps back out, Esc at the root
- * closes. A new task's projects are a Tab away: each chip is a stop (←→ also walk them), and ⏎
+ * closes. ⇧⏎ is ⏎ into a new tab: a result opens in a tab of its own, and a new task, note or
+ * canvas is saved and then opened in one (a shift-click on a result does the same). A new task's projects are a Tab away: each chip is a stop (←→ also walk them), and ⏎
  * on one saves the task into it; Space picks one to keep while you Tab on to the dates. The host draws the surface around it — the quick-capture window's floating card, or
  * the in-app overlay — and says what opening a result means (see CommandPaletteHost).
  */
@@ -62,7 +63,7 @@ export function CommandPalette(host: CommandPaletteHost) {
       } else if (e.key === "Enter") {
         if (e.isComposing || (inBody && !(e.metaKey || e.ctrlKey))) return;
         take();
-        submit();
+        submit(e.shiftKey);
       } else if (e.key === "Escape") {
         take();
         if (!back()) onClose();
@@ -131,7 +132,7 @@ export function CommandPalette(host: CommandPaletteHost) {
                   if (p.selected !== i) p.setSelected(i);
                 }}
               >
-                <PaletteRow item={item} selected={i === p.selected} onPress={() => p.run(item)} />
+                <PaletteRow item={item} selected={i === p.selected} onPress={(newTab) => p.run(item, newTab)} />
               </View>
             </View>
           ))}
@@ -148,8 +149,9 @@ export function CommandPalette(host: CommandPaletteHost) {
           <>
             <Hint
               keys="⏎"
-              label={p.mode.kind === "create" && p.mode.what === "canvas" ? "create and open" : p.targetProject ? `save to ${p.targetProject.name}` : "save"}
+              label={p.mode.kind === "create" && p.mode.what === "canvas" ? (p.target ? `create in ${p.target.name}` : "create and open") : p.target ? `save to ${p.target.name}` : "save"}
             />
+            <Hint keys="⇧⏎" label={p.mode.kind === "create" && p.mode.what === "canvas" ? "open in new tab" : "save and open"} />
             {p.mode.kind === "create" && p.mode.what === "task" && p.projectChoices.length > 0 ? (
               p.focusedProjectId ? <Hint keys="space" label={p.focusedProjectId === p.projectId ? "unpick" : "pick"} /> : <Hint keys="tab" label="project" />
             ) : null}
@@ -159,6 +161,7 @@ export function CommandPalette(host: CommandPaletteHost) {
           <>
             <Hint keys="↑↓" label="move" />
             <Hint keys="⏎" label={p.items[p.selected]?.action.type === "open" ? "open" : "select"} />
+            {p.items[p.selected]?.action.type === "open" ? <Hint keys="⇧⏎" label="new tab" /> : null}
           </>
         )}
         <View style={{ flex: 1 }} />
@@ -209,7 +212,7 @@ function ProjectChips({ p }: { p: CommandPaletteController }) {
 // The chips are the palette's only radios.
 const CHIP_SELECTOR = '[role="radio"]';
 
-function PaletteRow({ item, selected, onPress }: { item: PaletteItem; selected: boolean; onPress: () => void }) {
+function PaletteRow({ item, selected, onPress }: { item: PaletteItem; selected: boolean; onPress: (newTab: boolean) => void }) {
   return (
     <ListRow
       title={item.title}
@@ -218,7 +221,8 @@ function PaletteRow({ item, selected, onPress }: { item: PaletteItem; selected: 
       selected={selected}
       hasChildren={item.action.type === "mode"}
       icon={<Icon name={item.icon} size={icon.sm} color={selected ? colors.textAccent : colors.textQuaternary} />}
-      onPress={onPress}
+      // A shift-click is ⇧⏎: the press carries the DOM event's modifiers on web.
+      onPress={(e) => onPress(!!(e?.nativeEvent as { shiftKey?: boolean } | undefined)?.shiftKey)}
     />
   );
 }

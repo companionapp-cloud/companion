@@ -1,11 +1,12 @@
 import { useMemo, useRef, useState } from "react";
-import type { Task, TaskReminder } from "@companion/core-bridge";
+import type { TaskReminder } from "@companion/core-bridge";
 import type { DocumentSource, LinkSource } from "@companion/editor";
 import { useNotes } from "./NotesProvider";
 import { useTasks } from "./TasksProvider";
 import { useCore } from "./CoreContext";
 import { useLinkSource } from "./useLinkSource";
 import { useDocumentSource } from "./DocumentSourceContext";
+import type { DocRef } from "./nav-context";
 import { reminderLabel } from "./reminders";
 
 export type CaptureKind = "note" | "task";
@@ -51,15 +52,16 @@ export interface CaptureController {
 }
 
 export interface CaptureOptions {
-  /** Runs once a task is saved, before the surface closes — how a host files the new task
-   *  somewhere (the command palette's project chips). A failure here never loses the task. */
-  onTaskCreated?: (task: Task) => Promise<void> | void;
+  /** Runs once the note or task is saved, before the surface closes — how a host files it
+   *  somewhere (the command palette's project chips, or the project on screen) and follows it
+   *  into the app (its ⇧⏎). A failure here never loses what was saved. */
+  onCreated?: (doc: DocRef) => Promise<void> | void;
 }
 
 export function useCaptureController(onClose: () => void, options?: CaptureOptions): CaptureController {
   // Read at save time: `submit` is memoized below and would otherwise hold a stale callback.
-  const onTaskCreated = useRef(options?.onTaskCreated);
-  onTaskCreated.current = options?.onTaskCreated;
+  const onCreated = useRef(options?.onCreated);
+  onCreated.current = options?.onCreated;
 
   const notes = useNotes();
   const tasks = useTasks();
@@ -117,12 +119,21 @@ export function useCaptureController(onClose: () => void, options?: CaptureOptio
     }
   };
 
+  const created = async (doc: DocRef) => {
+    try {
+      await onCreated.current?.(doc);
+    } catch (err) {
+      console.warn(`capture: the ${doc.kind} was saved, but the host's follow-up failed`, err);
+    }
+  };
+
   const saveNote = async () => {
     const text = noteDraft.trim();
     const title = noteTitle.trim() || text.split("\n")[0].slice(0, 60);
     if (!title || busy) return;
     setBusy(true);
-    await notes.create({ title, contentMd: text });
+    const note = await notes.create({ title, contentMd: text });
+    await created({ kind: "note", id: note.id });
     onClose();
   };
 
@@ -143,11 +154,7 @@ export function useCaptureController(onClose: () => void, options?: CaptureOptio
       return;
     }
     const task = await tasks.create({ title, dueAt: dueAt ?? undefined, reminders: reminder ? [reminder] : undefined });
-    try {
-      await onTaskCreated.current?.(task);
-    } catch (err) {
-      console.warn("capture: the task was saved, but not filed", err);
-    }
+    await created({ kind: "task", id: task.id });
     onClose();
   };
 

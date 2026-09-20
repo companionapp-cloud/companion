@@ -300,9 +300,13 @@ func main() {
 
 	installMenuBar(app, updates.openApp, checkForUpdates)
 
-	// File › Import › Things 3… (PLAN §6.12): bring the window forward and have the app open
-	// its import modal.
-	app.Menu.Set(applicationMenu(func() {
+	// File › New Note / Task / Canvas: bring the window forward and have the app open the
+	// palette on that command (palette.go). File › Import › Things 3… (PLAN §6.12): likewise,
+	// for its import modal.
+	app.Menu.Set(applicationMenu(func(what string) {
+		updates.openApp()
+		handler.OnEvent(captureNewEvent, captureNewPayload(what))
+	}, func() {
 		updates.openApp()
 		handler.OnEvent(importThingsEvent, nil)
 	}))

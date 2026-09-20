@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 func TestPaletteOpenRelaysTheRef(t *testing.T) {
@@ -42,6 +44,18 @@ func TestPaletteOpenRejectsWhatIsNotARef(t *testing.T) {
 		h(rec, httptest.NewRequest(tc.method, "/palette/open", strings.NewReader(tc.body)))
 		if rec.Code < 400 {
 			t.Errorf("%s %.20q: status = %d, want an error", tc.method, tc.body, rec.Code)
+		}
+	}
+}
+
+func TestCaptureNewItemsHaveValidAccelerators(t *testing.T) {
+	for _, item := range captureNewItems {
+		if got, want := string(captureNewPayload(item.what)), `{"what":"`+item.what+`"}`; got != want {
+			t.Errorf("%s: payload = %s, want %s", item.label, got, want)
+		}
+		// SetAccelerator drops a malformed accelerator rather than returning an error.
+		if application.NewMenuItem(item.label).SetAccelerator(item.accelerator).GetAccelerator() == "" {
+			t.Errorf("%s: accelerator %q did not parse", item.label, item.accelerator)
 		}
 	}
 }

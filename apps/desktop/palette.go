@@ -11,6 +11,25 @@ import (
 // which the Go side relays without reading (packages/app PaletteNavigationBridge consumes it).
 const paletteOpenEvent = "palette.open"
 
+// captureNewEvent tells the main window to open the palette straight on New note / task /
+// canvas; its payload is {"what": …} (packages/app AppShell consumes it).
+const captureNewEvent = "capture.new"
+
+// captureNewItems are File › New Note / Task / Canvas. The accelerators are the webview's own
+// in-app shortcuts (packages/app CAPTURE_NEW_KEYS): as menu key equivalents the OS takes them
+// before the webview sees the key, so on the desktop they arrive as captureNewEvent instead.
+var captureNewItems = []struct{ what, label, accelerator string }{
+	{"note", "New Note", "OptionOrAlt+Shift+N"},
+	{"task", "New Task", "OptionOrAlt+Shift+T"},
+	{"canvas", "New Canvas", "OptionOrAlt+Shift+C"},
+}
+
+// captureNewPayload is captureNewEvent's payload for one of captureNewItems.
+func captureNewPayload(what string) []byte {
+	payload, _ := json.Marshal(map[string]string{"what": what})
+	return payload
+}
+
 // A TabRef is a few short fields; anything much larger isn't one.
 const paletteOpenMaxBytes = 4 << 10
 

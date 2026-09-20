@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CalendarItem, Task } from "@companion/core-bridge";
+import type { CalendarItem } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
 import { useNotes } from "./NotesProvider";
 import { useTasks } from "./TasksProvider";
 import { useProjects } from "./ProjectsProvider";
 import { useCanvases } from "./canvas/CanvasesProvider";
 import { useCaptureController, type CaptureController } from "./useCaptureController";
-import type { TabRef } from "./nav-context";
+import type { ContainerRef, DocRef, TabRef } from "./nav-context";
 import {
   dayBounds,
   eventsOnDay,
@@ -24,8 +24,19 @@ export interface CommandPaletteHost {
   /** Dismiss the palette (Esc at the root, after a capture, after opening a result). */
   onClose: () => void;
   /** Show a result in the app. The in-app overlay navigates; the quick-capture window asks the
-   *  desktop shell to bring the main window forward on it. */
-  onOpen: (ref: TabRef) => void;
+   *  desktop shell to bring the main window forward on it. `newTab` (⇧⏎) asks for a tab of its
+   *  own rather than the one already holding it, or the active one. */
+  onOpen: (ref: TabRef, opts?: PaletteOpenOptions) => void;
+  /** Open straight into a command — how New note / task / canvas (⌥⇧N / T / C, the File menu)
+   *  skip the list. Read once, when the palette mounts. */
+  initialMode?: PaletteMode;
+  /** The project or area on screen, if any: what is created is filed there rather than left
+   *  unsorted. The quick-capture window, which has no screen behind it, leaves it out. */
+  container?: ContainerRef | null;
+}
+
+export interface PaletteOpenOptions {
+  newTab?: boolean;
 }
 
 export interface PaletteProject {
@@ -43,9 +54,11 @@ export interface CommandPaletteController {
   selected: number;
   setSelected: (i: number) => void;
   move: (delta: number) => void;
-  run: (item: PaletteItem) => void;
-  /** ⏎: run the selected row, or save the new item. */
-  submit: () => void;
+  /** `newTab` opens a result in a tab of its own; a command ignores it. */
+  run: (item: PaletteItem, newTab?: boolean) => void;
+  /** ⏎: run the selected row, or save the new item. ⇧⏎ (`newTab`): open the row in a new tab,
+   *  or save the new item and open *it* in one. */
+  submit: (newTab?: boolean) => void;
   /** One step out: from a command to the list, from a query to empty. False at the bottom, where
    *  the host should close instead. */
   back: () => boolean;
@@ -62,8 +75,9 @@ export interface CommandPaletteController {
    *  chip and saving is all it takes. */
   focusedProjectId: string | null;
   setFocusedProject: (id: string | null) => void;
-  /** The project ⏎ would file the task in right now. */
-  targetProject: PaletteProject | null;
+  /** Where ⏎ would file the new item right now: the focused or picked project chip, else the
+   *  project or area on screen. Null leaves it unsorted. */
+  target: (ContainerRef & { name: string }) | null;
   busy: boolean;
 }
 
@@ -75,7 +89,7 @@ const UPCOMING_DAYS = 14;
 /** State and behaviour of the command palette (PLAN §6.4): a list of commands that narrows as
  *  you type, find commands scoped to one kind of thing (by title, or by day), and create commands
  *  that turn the input into the new item's title. Presentation lives in CommandPalette. */
-export function useCommandPalette({ onClose, onOpen }: CommandPaletteHost): CommandPaletteController {
+export function useCommandPalette({ onClose, onOpen, initialMode, container = null }: CommandPaletteHost): CommandPaletteController {
   const { calendar, dates } = useCore();
   const notes = useNotes();
   const tasks = useTasks();
@@ -85,18 +99,42 @@ export function useCommandPalette({ onClose, onOpen }: CommandPaletteHost): Comm
   // --- the new task's project ---------------------------------------------------------------
   const [projectId, setProjectId] = useState<string | null>(null);
   const [focusedProjectId, setFocusedProject] = useState<string | null>(null);
-  const targetProjectId = focusedProjectId ?? projectId;
+  const [mode, setModeState] = useState<PaletteMode>({ kind: "root" });
+  // A new task goes where its chips say — the project on screen starts out picked, and can be
+  // unpicked. Notes and canvases have no chips, and an area is never one: those follow the screen.
+  const chipProjectId = focusedProjectId ?? projectId;
+  const targetContainer = useMemo<ContainerRef | null>(() => {
+    if (mode.kind !== "create") return null;
+    if (mode.what === "task" && chipProjectId) return { kind: "project", id: chipProjectId };
+    return mode.what === "task" && container?.kind === "project" ? null : container;
+  }, [mode, chipProjectId, container]);
   // Read when the save lands, by which time this render's closure is history.
-  const targetRef = useRef(targetProjectId);
-  targetRef.current = targetProjectId;
-  const { addMember } = projects;
-  const onTaskCreated = useCallback(
-    async (task: Task) => {
-      if (targetRef.current) await addMember(targetRef.current, "task", task.id);
+  const targetRef = useRef(targetContainer);
+  targetRef.current = targetContainer;
+  const { addMember, addAreaMember } = projects;
+  const file = useCallback(
+    async (doc: DocRef) => {
+      const to = targetRef.current;
+      if (!to) return;
+      try {
+        if (to.kind === "project") await addMember(to.id, doc.kind, doc.id);
+        else await addAreaMember(to.id, doc.kind, doc.id);
+      } catch (err) {
+        console.warn(`palette: the ${doc.kind} was saved, but not filed`, err);
+      }
     },
-    [addMember],
+    [addMember, addAreaMember],
   );
-  const capture = useCaptureController(onClose, { onTaskCreated });
+  // ⇧⏎ on a new task or note: set as the save starts, read when it lands.
+  const openCreated = useRef(false);
+  const onCreated = useCallback(
+    async (doc: DocRef) => {
+      await file(doc);
+      if (openCreated.current) onOpen(doc, { newTab: true });
+    },
+    [file, onOpen],
+  );
+  const capture = useCaptureController(onClose, { onCreated });
   const projectChoices = useMemo<PaletteProject[]>(() => {
     const areaOrder = new Map(projects.areas.map((a) => [a.id, a.sortOrder]));
     return projects.projects
@@ -104,9 +142,14 @@ export function useCommandPalette({ onClose, onOpen }: CommandPaletteHost): Comm
       .sort((a, b) => (areaOrder.get(a.areaId) ?? 0) - (areaOrder.get(b.areaId) ?? 0) || a.sortOrder - b.sortOrder)
       .map((p) => ({ id: p.id, name: p.name.trim() || "Untitled project", icon: p.icon }));
   }, [projects.projects, projects.areas]);
+  const target = useMemo(() => {
+    if (!targetContainer) return null;
+    const { kind, id } = targetContainer;
+    const held = kind === "project" ? [...projects.projects, ...projects.completedProjects].find((p) => p.id === id) : projects.areas.find((a) => a.id === id);
+    return { kind, id, name: held?.name.trim() || (kind === "project" ? "Untitled project" : "Untitled area") };
+  }, [targetContainer, projects.projects, projects.completedProjects, projects.areas]);
   const toggleProject = useCallback((id: string) => setProjectId((cur) => (cur === id ? null : id)), []);
 
-  const [mode, setModeState] = useState<PaletteMode>({ kind: "root" });
   const [query, setQueryState] = useState("");
   const [selected, setSelected] = useState(0);
   const [creating, setCreating] = useState(false);
@@ -129,7 +172,7 @@ export function useCommandPalette({ onClose, onOpen }: CommandPaletteHost): Comm
       setModeState(next);
       setQueryState(seed);
       setSelected(0);
-      setProjectId(null);
+      setProjectId(next.kind === "create" && next.what === "task" && container?.kind === "project" ? container.id : null);
       setFocusedProject(null);
       if (next.kind !== "create") return;
       if (next.what === "task") {
@@ -140,8 +183,15 @@ export function useCommandPalette({ onClose, onOpen }: CommandPaletteHost): Comm
         setNoteTitle(seed);
       }
     },
-    [setKind, setTaskTitle, setNoteTitle],
+    [setKind, setTaskTitle, setNoteTitle, container],
   );
+  // Opened on a command (see `initialMode`): step into it once.
+  const entered = useRef(false);
+  useEffect(() => {
+    if (entered.current || !initialMode) return;
+    entered.current = true;
+    enter(initialMode);
+  }, [initialMode, enter]);
 
   // --- events, for title search: one wide window, fetched when first needed ----------------
   const [events, setEvents] = useState<CalendarItem[]>([]);
@@ -242,40 +292,44 @@ export function useCommandPalette({ onClose, onOpen }: CommandPaletteHost): Comm
 
   // --- actions ------------------------------------------------------------------------------
   const run = useCallback(
-    (item: PaletteItem) => {
+    (item: PaletteItem, newTab = false) => {
       if (item.action.type === "mode") {
         enter(item.action.mode, item.action.seed);
         return;
       }
-      onOpen(item.action.ref);
+      onOpen(item.action.ref, { newTab });
       onClose();
     },
     [enter, onOpen, onClose],
   );
 
   // A canvas has no fields to capture and is nothing until it is drawn on: create it and open it.
-  const createCanvas = useCallback(async () => {
+  const createCanvas = useCallback(async (newTab: boolean) => {
     const name = query.trim();
     if (!name || creating) return;
     setCreating(true);
     try {
       const canvas = await canvases.create(name);
-      onOpen({ kind: "canvas", id: canvas.id });
+      await file({ kind: "canvas", id: canvas.id });
+      onOpen({ kind: "canvas", id: canvas.id }, { newTab });
       onClose();
     } finally {
       setCreating(false);
     }
-  }, [query, creating, canvases, onOpen, onClose]);
+  }, [query, creating, canvases, file, onOpen, onClose]);
 
   const { canSubmit, busy: captureBusy, submit: captureSubmit } = capture;
-  const submit = useCallback(() => {
+  const submit = useCallback((newTab = false) => {
     if (mode.kind === "create") {
-      if (mode.what === "canvas") void createCanvas();
-      else if (canSubmit && !captureBusy) void captureSubmit();
+      if (mode.what === "canvas") void createCanvas(newTab);
+      else if (canSubmit && !captureBusy) {
+        openCreated.current = newTab;
+        void captureSubmit();
+      }
       return;
     }
     const item = items[selected];
-    if (item) run(item);
+    if (item) run(item, newTab);
   }, [mode, createCanvas, canSubmit, captureBusy, captureSubmit, items, selected, run]);
 
   const move = useCallback(
@@ -314,7 +368,7 @@ export function useCommandPalette({ onClose, onOpen }: CommandPaletteHost): Comm
     toggleProject,
     focusedProjectId,
     setFocusedProject,
-    targetProject: projectChoices.find((c) => c.id === targetProjectId) ?? null,
+    target,
     busy: creating || captureBusy,
   };
 }

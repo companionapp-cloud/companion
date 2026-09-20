@@ -38,6 +38,7 @@ import type { SidebarArea } from "@companion/core-bridge";
 import {
   NavContext,
   SECTION_OF,
+  containerOfLocation,
   docOfRef,
   keyOfRef,
   locationOfRef,
@@ -83,7 +84,8 @@ import { SettingsScreen } from "./SettingsScreen";
 import { useSync } from "./SyncProvider";
 import { SyncHealthBanner } from "./SyncHealthBanner";
 import { CommandPalette, paletteEnter } from "./CommandPalette";
-import { PALETTE_OPEN_EVENT } from "./capture";
+import { CAPTURE_NEW_EVENT, CAPTURE_NEW_KEYS, PALETTE_OPEN_EVENT } from "./capture";
+import type { PaletteCreateKind } from "./paletteModel";
 import { ThingsImportHost } from "./ThingsImport";
 
 // Monotonic tab uid so React keys are stable across reorders/overwrites even when two
@@ -482,8 +484,10 @@ function ReminderNavigationBridge() {
   return null;
 }
 
-/** Show a palette result: the tab already holding it if there is one, else the active tab. */
-function revealRef(nav: Navigator, ref: TabRef) {
+/** Show a palette result: the tab already holding it if there is one, else the active tab —
+ *  or, asked for a new tab (⇧⏎), one of its own. */
+function revealRef(nav: Navigator, ref: TabRef, newTab = false) {
+  if (newTab) return nav.openInNewTab(ref);
   const held = nav.tabs.findIndex((t) => keyOfRef(t.ref) === keyOfRef(ref));
   if (held >= 0) nav.selectTab(held);
   else nav.openRef(ref);
@@ -498,8 +502,9 @@ function PaletteNavigationBridge() {
   useEffect(
     () =>
       core.on(PALETTE_OPEN_EVENT, (payload) => {
-        const ref = payload as TabRef | null;
-        if (ref && typeof ref === "object" && "kind" in ref) revealRef(nav, ref);
+        // The ref, with the capture window's `newTab` (⇧⏎) riding along beside its own fields.
+        const { newTab, ...ref } = (payload ?? {}) as TabRef & { newTab?: boolean };
+        if ("kind" in ref) revealRef(nav, ref as TabRef, newTab === true);
       }),
     [nav, core],
   );
@@ -573,7 +578,18 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
   // The area pending deletion — its confirm dialog is rendered at the shell root, outside
   // the clipped (overflow:hidden) rail so the scrim can cover the whole window.
   const [deletingArea, setDeletingArea] = useState<SidebarArea | null>(null);
-  const [captureOpen, setCaptureOpen] = useState(false);
+  // Quick capture: closed, open on its command list ("list"), or open straight on New note /
+  // task / canvas (⌥⇧N / T / C, or the desktop File menu).
+  const [capture, setCapture] = useState<PaletteCreateKind | "list" | null>(null);
+  const { core } = useCore();
+  useEffect(
+    () =>
+      core.on(CAPTURE_NEW_EVENT, (payload) => {
+        const what = (payload as { what?: string } | null)?.what;
+        if (what === "note" || what === "task" || what === "canvas") setCapture(what);
+      }),
+    [core],
+  );
   // Per-device tool hiding (Settings › Tools): only the rail entry disappears — the view
   // itself stays reachable. The Logbook and the Trash sit with Settings at the foot of the rail.
   const { tools, hidden } = useToolVisibility();
@@ -630,15 +646,19 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
     syncTrigger();
   }, [locKey, syncTrigger]);
 
-  // Window-level shortcuts: ⌘T new tab, ⌥⇧Space quick capture. (A browser keeps ⌘T for
-  // itself; the desktop shell delivers it.)
+  // Window-level shortcuts: ⌘T new tab, ⌥⇧Space quick capture, ⌥⇧N / T / C a new note / task /
+  // canvas. (A browser keeps ⌘T for itself; the desktop shell delivers it — and its File menu
+  // owns the ⌥⇧ letters there, arriving as CAPTURE_NEW_EVENT instead.)
   const addTab = nav.addTab;
   useEffect(() => {
     if (typeof window === "undefined" || !window.addEventListener) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.code === "Space" && e.altKey && e.shiftKey) {
         e.preventDefault();
-        setCaptureOpen((c) => !c);
+        setCapture((c) => (c ? null : "list"));
+      } else if (e.altKey && e.shiftKey && !e.metaKey && !e.ctrlKey && CAPTURE_NEW_KEYS[e.code]) {
+        e.preventDefault();
+        setCapture(CAPTURE_NEW_KEYS[e.code]);
       } else if ((e.key === "t" || e.key === "T") && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         addTab();
@@ -742,7 +762,7 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
         <View style={{ flex: 1, minWidth: 0 }}>
           {/* Sync health: prompts re-auth / unlock in Settings when sync is blocked (§7). */}
           <SyncHealthBanner onOpenSettings={() => nav.openRef({ kind: "view", view: "settings", section: "sync" })} leftInset={chromeInset} />
-          <Frame toolbar={<AppToolbar onCapture={() => setCaptureOpen(true)} leftInset={chromeInset} verticalInset={toolbarInset} />}>
+          <Frame toolbar={<AppToolbar onCapture={() => setCapture("list")} leftInset={chromeInset} verticalInset={toolbarInset} />}>
             {/* Every tab's surface stays mounted and only the active one is shown, so an
                 editor's draft, a chat's scroll or a graph's layout survives a tab switch. */}
             {nav.tabs.map((tab, i) => (
@@ -754,7 +774,7 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
 
       <ShellStatusBar tabCount={nav.tabs.length} />
 
-      {captureOpen ? <QuickCapture onClose={() => setCaptureOpen(false)} /> : null}
+      {capture ? <QuickCapture key={capture} what={capture === "list" ? null : capture} onClose={() => setCapture(null)} /> : null}
 
       {deletingArea ? (
         <ConfirmDialog
@@ -880,14 +900,19 @@ function ShellStatusBar({ tabCount }: { tabCount: number }) {
 
 /** Quick capture (⌥⇧Space, or the toolbar's Capture): the command palette on the scrim, 14vh
  *  from the top. The palette owns its keys (Esc steps back, then closes); results open in the
- *  tab already holding them, else the active one. */
-function QuickCapture({ onClose }: { onClose: () => void }) {
+ *  tab already holding them, else the active one — or, on ⇧⏎, a new one. `what` opens it
+ *  straight on New note / task / canvas. Whatever is created is filed in the project or area
+ *  the active tab is showing, if it is showing one. */
+function QuickCapture({ what, onClose }: { what: PaletteCreateKind | null; onClose: () => void }) {
   const nav = useNav();
+  const initialMode = useMemo(() => (what ? ({ kind: "create", what } as const) : undefined), [what]);
+  const shown = containerOfLocation(nav.current);
+  const container = useMemo(() => (shown ? { kind: shown.kind, id: shown.id } : null), [shown?.kind, shown?.id]);
   return (
     <View style={styles.captureLayer}>
       <Pressable style={styles.captureScrim} onPress={onClose} aria-label="Close quick capture" />
       <View style={[styles.capturePanel, paletteEnter]}>
-        <CommandPalette onClose={onClose} onOpen={(ref) => revealRef(nav, ref)} />
+        <CommandPalette onClose={onClose} onOpen={(ref, opts) => revealRef(nav, ref, opts?.newTab)} initialMode={initialMode} container={container} />
       </View>
     </View>
   );

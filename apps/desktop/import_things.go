@@ -21,14 +21,20 @@ const importThingsEvent = "import.things"
 // thingsGroupContainer is where Things 3 for Mac keeps its data (Cultured Code's team id).
 const thingsGroupContainer = "JLMPQHK86H.com.culturedcode.ThingsMac"
 
-// applicationMenu is the macOS default menu (app, File, Edit, View, Window, Help) with an
-// Import submenu in File. openImport shows the window and opens the import modal.
-func applicationMenu(openImport func()) *application.Menu {
+// applicationMenu is the macOS default menu (app, File, Edit, View, Window, Help) with New
+// Note / Task / Canvas (palette.go) and an Import submenu in File. newItem shows the window and
+// opens the palette on that command; openImport shows it and opens the import modal.
+func applicationMenu(newItem func(what string), openImport func()) *application.Menu {
 	menu := application.NewMenu()
 	if runtime.GOOS == "darwin" {
 		menu.AddRole(application.AppMenu)
 	}
 	file := menu.AddSubmenu("File")
+	for _, item := range captureNewItems {
+		what := item.what
+		file.Add(item.label).SetAccelerator(item.accelerator).OnClick(func(*application.Context) { newItem(what) })
+	}
+	file.AddSeparator()
 	file.AddSubmenu("Import").Add("Things 3…").OnClick(func(*application.Context) { openImport() })
 	file.AddSeparator()
 	if runtime.GOOS == "darwin" {

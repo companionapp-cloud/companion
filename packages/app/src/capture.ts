@@ -4,6 +4,7 @@
 // (apps/desktop/main.go). Web/native ignore it.
 
 import type { TabRef } from "./nav-context";
+import type { PaletteCreateKind } from "./paletteModel";
 
 function browserLocation(): Location | null {
   return typeof window !== "undefined" && window.location ? window.location : null;
@@ -37,14 +38,24 @@ export function closeCaptureWindow(): void {
   if (typeof window !== "undefined" && typeof window.close === "function") window.close();
 }
 
+/** The event the desktop shell's File › New Note / Task / Canvas sends the main window; its
+ *  payload is `{ what }`. AppShell opens the palette on that command. */
+export const CAPTURE_NEW_EVENT = "capture.new";
+
+/** The in-app shortcuts for the same three: ⌥⇧ and a letter (the palette lists them, see
+ *  PALETTE_COMMANDS' `shortcutKey`), beside ⌥⇧Space for the palette itself. Matched on `code`,
+ *  since ⌥ changes the character a key types. */
+export const CAPTURE_NEW_KEYS: Record<string, PaletteCreateKind> = { KeyN: "note", KeyT: "task", KeyC: "canvas" };
+
 /** The event the desktop shell relays to the main window when the capture window asks for
- *  something to be opened; its payload is the TabRef. AppShell listens for it. */
+ *  something to be opened; its payload is the TabRef, plus `newTab: true` when it should get a
+ *  tab of its own (⇧⏎). AppShell listens for it. */
 export const PALETTE_OPEN_EVENT = "palette.open";
 
 /** A shell-provided way to show something in the *main* window from the capture window, which
  *  is a webview of its own with no navigator. The desktop shell injects one that posts the ref
  *  to the Go side, which surfaces the main window and relays PALETTE_OPEN_EVENT to it. */
-type CaptureResultOpener = (ref: TabRef) => void;
+type CaptureResultOpener = (ref: TabRef, opts?: { newTab?: boolean }) => void;
 let injectedOpener: CaptureResultOpener | null = null;
 
 /** Register the platform opener for capture-window results (called once by the desktop shell). */
@@ -53,6 +64,6 @@ export function setCaptureResultOpener(opener: CaptureResultOpener | null): void
 }
 
 /** Open a palette result in the main window. No-op where no shell set an opener. */
-export function openCaptureResult(ref: TabRef): void {
-  injectedOpener?.(ref);
+export function openCaptureResult(ref: TabRef, opts?: { newTab?: boolean }): void {
+  injectedOpener?.(ref, opts);
 }
