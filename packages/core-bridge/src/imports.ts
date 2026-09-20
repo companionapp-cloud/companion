@@ -15,11 +15,13 @@ export interface ImportCounts {
   repeating: number;
 }
 
-/** A Things project as a scan found it. `finished` marks one completed or canceled in Things. */
+/** A Things project as a scan found it. `finished` marks one completed or canceled in Things;
+ *  `repeats` the newest copy of a repeating project, which keeps repeating once imported. */
 export interface ThingsProjectOutline extends ImportCounts {
   id: string;
   name: string;
   finished: boolean;
+  repeats: boolean;
   headings: number;
 }
 
@@ -56,6 +58,8 @@ export interface ThingsSummary {
   headings: number;
   tasks: number;
   repeating: number;
+  /** How many of `projects` carry a repeat. */
+  repeatingProjects: number;
   notes: number;
   warnings: string[];
   /** Stopped part-way; what was written stays. */

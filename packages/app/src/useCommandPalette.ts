@@ -33,6 +33,9 @@ export interface CommandPaletteHost {
   /** The project or area on screen, if any: what is created is filed there rather than left
    *  unsorted. The quick-capture window, which has no screen behind it, leaves it out. */
   container?: ContainerRef | null;
+  /** Whether the new note's formatting bar offers to attach a file. The quick-capture window
+   *  turns it off: a file picker takes focus from the panel, which dismisses it. Default on. */
+  attachments?: boolean;
 }
 
 export interface PaletteOpenOptions {

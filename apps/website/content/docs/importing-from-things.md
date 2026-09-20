@@ -12,7 +12,7 @@ updated: Sep 2026
 related: [creating-and-linking-tasks, your-first-project]
 ---
 
-Companion can read the database Things 3 keeps and bring your work over: the Inbox, your areas and projects, and their headings, notes, checklists, dates, reminders and repeating to-dos. It works in the desktop app, the web app and on your phone — the database is read on your device, so nothing passes through our servers unencrypted, and nothing talks to Things Cloud.
+Companion can read the database Things 3 keeps and bring your work over: the Inbox, your areas and projects, and their headings, notes, checklists, dates, reminders and repeats. It works in the desktop app, the web app and on your phone — the database is read on your device, so nothing passes through our servers unencrypted, and nothing talks to Things Cloud.
 
 ## Open the importer
 
@@ -47,11 +47,13 @@ Areas and projects come over whole; you can't pick single to-dos.
 | Reminder | A reminder at the same time |
 | Checklist | A checklist in the task's notes |
 | Tags | A **Tags:** line in the notes |
-| A project's notes and deadline | A note inside the project |
+| A project's When date and deadline | The project's start and deadline (Someday stays Someday) |
+| A project's notes and tags | A note inside the project |
 | Repeating to-do | A repeating task, on the same schedule |
+| Repeating project | The newest open copy keeps repeating — on the same schedule, or the same time after completion. If Things has no open copy, the next one is imported, starting on its next date |
 
 Things' own links between to-dos become Companion links.
 
-Two honest caveats. Repeating tasks need [Companion Cloud](/docs/using-our-cloud) or [your own server](/docs/self-hosting) to keep repeating. And Companion can only repeat on a schedule: a Things to-do that repeats "after completion" becomes a fixed schedule, and repeating projects come over once. The importer tells you when this happens.
+Two honest caveats. Repeating tasks and projects need [Companion Cloud](/docs/using-our-cloud) or [your own server](/docs/self-hosting) to keep repeating. And a Companion task can only repeat on a schedule: a Things to-do that repeats "after completion" becomes a fixed schedule (a project keeps repeating after completion, as it did). A few project schedules can't be carried over — say, one that starts a few days before the first Monday of each month — and those projects come over once. The importer tells you when any of this happens.
 
 > **Tip:** Importing is one-way. Import the same area twice and you'll get two copies, so choose carefully the first time.

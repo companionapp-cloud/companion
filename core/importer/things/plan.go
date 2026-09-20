@@ -61,12 +61,16 @@ type planProject struct {
 	dueAt     *time.Time
 	someday   bool
 	completed *time.Time
-	note      string      // its notes and tags, kept as a note in the project
-	members   []*planTask // every task in the project: open, completed and repeating
-	list      []listEntry // the "To-dos" list: headings and open to-dos, in Things' order
-	outline   *ProjectOutline
-	id        string
-	noteID    string
+	// Its repeat, when it is the newest copy of a repeating project: a schedule, or an interval
+	// after completion — never both.
+	repeatRule  *string
+	repeatAfter *string
+	note        string      // its notes and tags, kept as a note in the project
+	members     []*planTask // every task in the project: open, completed and repeating
+	list        []listEntry // the "To-dos" list: headings and open to-dos, in Things' order
+	outline     *ProjectOutline
+	id          string
+	noteID      string
 }
 
 // listEntry is one row of a project's list: a heading, or a task.
@@ -130,13 +134,19 @@ func (b *builder) build() {
 	}
 
 	// Projects, in Things' order. Finished ones are listed either way, and imported only with
-	// the Logbook.
+	// the Logbook. A repeating project's template stands in for its next copy when Things has
+	// no open one (projectrepeat.go); otherwise the newest open copy carries the repeat.
+	heads := b.repeatHeads()
 	for _, it := range lib.ordered {
 		if it.kind != kindProject || it.trashed {
 			continue
 		}
 		if it.rule != nil {
-			b.warn(it.id, "“%s” repeats in Things; repeating projects aren’t imported yet — only its current copy is.", orDefault(it.title, "Untitled project"))
+			if heads[it.id] == nil {
+				if pp := b.upcomingCopy(it); pp != nil {
+					b.addProject(it, pp)
+				}
+			}
 			continue
 		}
 		pp := &planProject{
@@ -154,12 +164,12 @@ func (b *builder) build() {
 		if pp.archived {
 			pp.completed = fromUnix(it.stopDate)
 		}
-		b.projects[it.id] = pp
-		pa := b.areas[it.area]
-		if pa == nil {
-			pa = b.catchAllArea()
+		b.addProject(it, pp)
+	}
+	for _, it := range lib.ordered {
+		if head := heads[it.id]; head != nil {
+			b.carryRepeat(it, b.projects[head.id])
 		}
-		pa.projects = append(pa.projects, pp)
 	}
 
 	// To-dos, in Things' order (index order is each container's order), then the lists.
@@ -314,7 +324,8 @@ func (b *builder) prune() {
 // placement finds where a to-do goes: its project (directly, or through its heading), else its
 // area, else nowhere (the Inbox, or a to-do in no area). ok is false when it shouldn't be
 // imported at all: its project or heading is in the Trash, or it's inside a repeating project's
-// template. A reference to a heading or project that doesn't exist is ignored rather than
+// template that isn't imported (one standing in for its next copy is a project like any other).
+// A reference to a heading or project that doesn't exist is ignored rather than
 // losing the to-do: it files by what it does have (its project, its area, or nothing).
 func (b *builder) placement(it *item) (pp *planProject, pa *planArea, ok bool) {
 	projectID := it.project
@@ -327,11 +338,14 @@ func (b *builder) placement(it *item) (pp *planProject, pa *planArea, ok bool) {
 		}
 	}
 	if p := b.lib.items[projectID]; projectID != "" && p != nil {
-		if p.trashed || p.rule != nil {
+		if p.trashed {
 			return nil, nil, false
 		}
 		if pp = b.projects[projectID]; pp != nil {
 			return pp, nil, true
+		}
+		if p.rule != nil {
+			return nil, nil, false
 		}
 	}
 	if pa = b.areas[it.area]; it.area != "" && pa != nil {
@@ -433,6 +447,118 @@ func (b *builder) seed(it *item, container string) *planTask {
 		b.warn(container, "“%s” repeats after completion in Things; Companion repeats it on a fixed schedule instead.", title)
 	}
 	return t
+}
+
+// addProject files a project's plan in its area (the catch-all, when it has none).
+func (b *builder) addProject(it *item, pp *planProject) {
+	b.projects[it.id] = pp
+	pa := b.areas[it.area]
+	if pa == nil {
+		pa = b.catchAllArea()
+	}
+	pa.projects = append(pa.projects, pp)
+}
+
+// repeatHeads finds, for each repeating project's template, the copy that carries the repeat
+// on: the open copy with the latest start (Things' order breaks a tie). A template with no
+// open copy has none.
+func (b *builder) repeatHeads() map[string]*item {
+	heads := map[string]*item{}
+	for _, it := range b.lib.ordered {
+		if it.kind != kindProject || it.trashed || it.template == "" || it.status != statusOpen {
+			continue
+		}
+		if tpl := b.lib.items[it.template]; tpl == nil || tpl.kind != kindProject || tpl.trashed || tpl.rule == nil {
+			continue
+		}
+		if head := heads[it.template]; head == nil || it.startDate >= head.startDate {
+			heads[it.template] = it
+		}
+	}
+	return heads
+}
+
+// templateRule converts a live template's rule. Nil — with a warning, unless the series is
+// simply finished — when there is no repeat to carry on.
+func (b *builder) templateRule(tpl *item, title string) *repeat {
+	if tpl.status != statusOpen {
+		return nil
+	}
+	if tpl.paused {
+		b.warn(tpl.id, "“%s” is paused in Things, so it wasn’t imported as a repeating project.", title)
+		return nil
+	}
+	r, reason, ok := convertRule(tpl.rule, tpl.instanceCount, b.loc, b.now)
+	if !ok {
+		b.warn(tpl.id, "“%s”: %s, so it wasn’t imported as a repeating project.", title, reason)
+		return nil
+	}
+	return &r
+}
+
+// carryRepeat puts a template's repeat on the newest open copy Things made of it. The
+// schedule hangs off the copy's start, else its deadline, else (as on the server) the moment
+// it is created here.
+func (b *builder) carryRepeat(tpl *item, head *planProject) {
+	if head == nil {
+		return
+	}
+	r := b.templateRule(tpl, head.name)
+	if r == nil {
+		return
+	}
+	anchor, onStart := b.now, true
+	switch {
+	case head.startAt != nil:
+		anchor = *head.startAt
+	case head.dueAt != nil:
+		anchor, onStart = *head.dueAt, false
+	}
+	b.setRepeat(head, tpl.id, *r, anchor, onStart, true)
+}
+
+// upcomingCopy imports a template with no open copy as the project's next one: it starts on
+// the template's next date — with its deadline on the date that copy is for, when the series
+// has deadlines — holds the template's to-dos, and carries the repeat. Nil when the series is
+// over, paused, or has no next date.
+func (b *builder) upcomingCopy(tpl *item) *planProject {
+	title := orDefault(tpl.title, "Untitled project")
+	r := b.templateRule(tpl, title)
+	if r == nil {
+		return nil
+	}
+	y, m, d, ok := unpackDate(tpl.nextStart)
+	if !ok {
+		b.warn(tpl.id, "“%s” has no next date in Things, so it wasn’t imported as a repeating project.", title)
+		return nil
+	}
+	start := time.Date(y, m, d, startHour, 0, 0, 0, b.loc)
+	pp := &planProject{
+		thingsID: tpl.id,
+		name:     title,
+		startAt:  &start,
+		note:     b.projectNote(tpl),
+		outline:  &ProjectOutline{ID: tpl.id, Name: title},
+	}
+	if tpl.deadline != 0 {
+		due := time.Date(y, m, d-r.startOffset, dueHour, 0, 0, 0, b.loc) // ts ≤ 0: the date the copy is for
+		pp.dueAt = &due
+	}
+	b.setRepeat(pp, tpl.id, *r, start, true, false)
+	return pp
+}
+
+func (b *builder) setRepeat(pp *planProject, container string, r repeat, anchor time.Time, onStart, made bool) {
+	pr, reason, ok := projectRepeatFor(r, anchor, onStart, made, b.loc)
+	if !ok {
+		b.warn(container, "“%s”: %s, so it wasn’t imported as a repeating project.", pp.name, reason)
+		return
+	}
+	pp.repeatRule, pp.repeatAfter = pr.rule, pr.after
+	pp.outline.Repeats = pr.rule != nil || pr.after != nil
+	if pr.endless {
+		b.warn(container, "“%s” stops repeating at some point in Things; Companion keeps repeating it until you turn that off.", pp.name)
+	}
 }
 
 func (b *builder) catchAllArea() *planArea {

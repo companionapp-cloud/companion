@@ -34,7 +34,14 @@ var errBinaryPlist = errors.New("binary property list")
 type repeat struct {
 	rule            string // an RRULE body, validated by core/domain
 	startOffset     int    // ts: days an instance starts before its date (≤ 0)
-	afterCompletion bool   // tp=1: approximated as a fixed schedule
+	afterCompletion bool   // tp=1: a to-do approximates it as a fixed schedule
+	// The pieces of the rule, for a repeating project (projectRepeat), which places its
+	// schedule on start dates and can't count turns.
+	parts     []string   // the rule without its end (COUNT / UNTIL)
+	remaining int64      // instances Things has yet to make, when it ends after a number
+	until     *time.Time // the end of its last day, when it ends on a date
+	unit      domain.RepeatAfterUnit
+	interval  int64
 }
 
 var weekdays = [7]string{"SU", "MO", "TU", "WE", "TH", "FR", "SA"}
@@ -56,18 +63,20 @@ func convertRule(raw []byte, created int64, loc *time.Location, now time.Time) (
 	var freq string
 	switch num(d["fu"]) {
 	case 16:
-		freq = "DAILY"
+		freq, r.unit = "DAILY", domain.RepeatAfterDays
 	case 256:
-		freq = "WEEKLY"
+		freq, r.unit = "WEEKLY", domain.RepeatAfterWeeks
 	case 8:
-		freq = "MONTHLY"
+		freq, r.unit = "MONTHLY", domain.RepeatAfterMonths
 	case 4:
-		freq = "YEARLY"
+		freq, r.unit = "YEARLY", domain.RepeatAfterYears
 	default:
 		return r, "its repeat unit isn’t one Companion knows", false
 	}
 	parts = append(parts, "FREQ="+freq)
+	r.interval = 1
 	if n := num(d["fa"]); n > 1 {
+		r.interval = n
 		parts = append(parts, "INTERVAL="+strconv.FormatInt(n, 10))
 	}
 
@@ -118,11 +127,13 @@ func convertRule(raw []byte, created int64, loc *time.Location, now time.Time) (
 		parts = append(parts, "BYMONTHDAY="+strings.Join(byMonthDay, ","))
 	}
 
+	r.parts = append([]string{}, parts...)
 	if total := num(d["rc"]); total > 0 {
 		remaining := total - created
 		if remaining <= 0 {
 			return r, "its repeat has already ended", false
 		}
+		r.remaining = remaining
 		parts = append(parts, "COUNT="+strconv.FormatInt(remaining, 10))
 	} else if end := num(d["ed"]); end > 0 && end < 32503680000 { // before year 3000
 		// The last day is inclusive: repeat until the end of that day where the user is.
@@ -131,15 +142,19 @@ func convertRule(raw []byte, created int64, loc *time.Location, now time.Time) (
 		if until.Before(now) {
 			return r, "its repeat has already ended", false
 		}
-		parts = append(parts, "UNTIL="+until.Format("20060102T150405Z"))
+		r.until = &until
+		parts = append(parts, "UNTIL="+until.Format(untilFormat))
 	}
 
 	rule := strings.Join(parts, ";")
 	if err := domain.ValidateRepeatRule(&rule); err != nil {
 		return r, "its repeat rule couldn’t be converted", false
 	}
-	return repeat{rule: rule, startOffset: int(num(d["ts"])), afterCompletion: num(d["tp"]) == 1}, "", true
+	r.rule, r.startOffset, r.afterCompletion = rule, int(num(d["ts"])), num(d["tp"]) == 1
+	return r, "", true
 }
+
+const untilFormat = "20060102T150405Z"
 
 func weekdayOrder(byDay string) int {
 	code := strings.TrimLeft(byDay, "-0123456789")

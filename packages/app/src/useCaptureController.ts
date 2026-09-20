@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { Platform } from "react-native";
 import type { TaskReminder } from "@companion/core-bridge";
 import type { DocumentSource, LinkSource } from "@companion/editor";
 import { useNotes } from "./NotesProvider";
@@ -71,7 +72,14 @@ export function useCaptureController(onClose: () => void, options?: CaptureOptio
 
   const [kind, setKind] = useState<CaptureKind>("note");
   const [noteTitle, setNoteTitle] = useState("");
-  const [noteDraft, setNoteDraft] = useState("");
+  const [noteDraft, setNoteDraftState] = useState("");
+  // The body as last reported, read at save time: ⌘⏎ flushes the editor (below), and that
+  // report lands after this render's `noteDraft` was captured.
+  const noteDraftRef = useRef("");
+  const setNoteDraft = useCallback((md: string) => {
+    noteDraftRef.current = md;
+    setNoteDraftState(md);
+  }, []);
   const [taskTitle, setTaskTitle] = useState("");
   const [due, setDue] = useState("");
   const [dueResolved, setDueResolved] = useState<string | null>(null);
@@ -128,7 +136,13 @@ export function useCaptureController(onClose: () => void, options?: CaptureOptio
   };
 
   const saveNote = async () => {
-    const text = noteDraft.trim();
+    // The editor reports edits on a debounce, and at once on blur: blur it, so a save straight
+    // after typing keeps the last words. (Web; the native WebView reports on its own clock.)
+    if (Platform.OS === "web" && typeof document !== "undefined") {
+      const active = document.activeElement as HTMLElement | null;
+      if (active?.closest?.(".ProseMirror")) active.blur();
+    }
+    const text = noteDraftRef.current.trim();
     const title = noteTitle.trim() || text.split("\n")[0].slice(0, 60);
     if (!title || busy) return;
     setBusy(true);

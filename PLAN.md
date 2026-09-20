@@ -1186,11 +1186,13 @@ would need a server relay).
   | Checklist | A markdown task list appended to the notes (`- [x]` done; canceled struck through) — the §6.10 checkbox policy |
   | Tags (to-do/project/area) | A `Tags: #a #b` line at the end of the notes (Companion has no tags) |
   | Notes | Markdown as-is (Things notes are Markdown since 3.14); a legacy `<note>` XML wrapper is stripped; `things:///show?id=…` links to imported items become `[[task:…]]` / `[[project:…]]` wikilinks |
-  | Project notes / deadline | A note in the project, titled after it |
-  | Someday | An open task with no start (no Someday in Companion) |
+  | Project When / deadline | The project's `start_at` / `due_at`; a finished project keeps its completion date (PLAN-scheduling.md §5) |
+  | Project notes / tags | A note in the project, titled after it |
+  | Someday | The `someday` flag, on to-dos and projects alike |
   | Completed / canceled (Logbook) | Skipped by default. Opt-in imports them done/cancelled with their completion dates, and archives completed/canceled projects |
   | Trash | Skipped |
-  | Repeating to-do | A seed with the rule converted to an RRULE (daily/weekly/monthly/yearly, interval, weekdays, nth weekday, day of month, count, end date), anchored on the **next** instance — its deadline when the series has deadlines, else its start (start-anchored, §6.4) — so the server never regenerates an instance Things already made; Things' open instances import as ordinary tasks. "After completion" repeats become fixed schedules and paused ones one-offs (both warned); repeating projects import once (warned) |
+  | Repeating to-do | A seed with the rule converted to an RRULE (daily/weekly/monthly/yearly, interval, weekdays, nth weekday, day of month, count, end date), anchored on the **next** instance — its deadline when the series has deadlines, else its start (start-anchored, §6.4) — so the server never regenerates an instance Things already made; Things' open instances import as ordinary tasks. "After completion" repeats become fixed schedules and paused ones one-offs (both warned) |
+  | Repeating project | The newest open copy carries the repeat (`repeat_after`, or an RRULE moved onto its start dates); with no open copy the template imports as the upcoming copy — PLAN-scheduling.md §5 |
 
 - **Writing**: the normal store write path (areas, projects, lists, tasks, memberships,
   notes), so link extraction runs, `data.changed` fires, rows are born dirty and sync pushes

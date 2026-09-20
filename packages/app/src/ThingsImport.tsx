@@ -178,7 +178,7 @@ function ChooseStep({ error }: { error?: string }) {
     <View style={styles.stack}>
       <SettingsNote tone="secondary">
         Companion reads Things’ own database and brings over your Inbox, areas and projects — with their headings, notes,
-        checklists, dates, reminders and repeating to-dos. You choose what to import next.
+        checklists, dates, reminders and repeats. You choose what to import next.
       </SettingsNote>
       {kind === "panel" ? (
         <SettingsNote>
@@ -346,7 +346,8 @@ function ProgressStep({ progress }: { progress?: ImportProgress }) {
 function DoneStep({ summary }: { summary: ThingsSummary }) {
   const lines = [
     summary.areas && plural(summary.areas, "area"),
-    summary.projects && plural(summary.projects, "project"),
+    summary.projects &&
+      plural(summary.projects, "project") + (summary.repeatingProjects ? ` (${summary.repeatingProjects} repeating)` : ""),
     summary.tasks && plural(summary.tasks, "to-do"),
     summary.repeating && plural(summary.repeating, "repeating to-do"),
     summary.headings && plural(summary.headings, "heading"),
@@ -368,7 +369,7 @@ function DoneStep({ summary }: { summary: ThingsSummary }) {
           ))}
         </View>
       ) : null}
-      <SettingsNote>Repeating to-dos need a connected sync server to keep repeating (Settings › Sync).</SettingsNote>
+      <SettingsNote>Repeating to-dos and projects need a connected sync server to keep repeating (Settings › Sync).</SettingsNote>
     </View>
   );
 }
@@ -447,6 +448,7 @@ function areaDetail(a: ThingsAreaOutline, includeCompleted: boolean): string {
 function projectDetail(p: ThingsProjectOutline, includeCompleted: boolean): string {
   const parts = [countText(p, includeCompleted)];
   if (p.headings) parts.push(plural(p.headings, "heading"));
+  if (p.repeats) parts.push("repeats");
   if (p.finished) parts.push("finished");
   return parts.join(" · ");
 }

@@ -43,7 +43,7 @@ export function CaptureView() {
     <View style={styles.root}>
       <Pressable style={styles.outside} onPress={close} aria-label="Close quick capture" />
       <View style={[styles.card, paletteEnter]}>
-        <CommandPalette onClose={close} onOpen={openCaptureResult} />
+        <CommandPalette onClose={close} onOpen={openCaptureResult} attachments={false} />
       </View>
     </View>
   );

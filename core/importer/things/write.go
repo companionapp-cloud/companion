@@ -92,6 +92,16 @@ func write(ctx context.Context, st *store.Store, p *plan, progress Progress) (*S
 				}
 				pp.id = created.ID
 				sum.Projects++
+				if pp.repeatRule != nil || pp.repeatAfter != nil {
+					_, err := st.Projects.Update(pp.id, store.UpdateProjectInput{RepeatRule: pp.repeatRule, RepeatAfter: pp.repeatAfter})
+					if err != nil {
+						if err = skip(fmt.Sprintf("The repeat of “%s”", pp.name), err); err != nil {
+							return err
+						}
+					} else {
+						sum.RepeatingProjects++
+					}
+				}
 				if pp.archived {
 					archived := true
 					if _, err := st.Projects.Update(pp.id, store.UpdateProjectInput{Archived: &archived}); err != nil {

@@ -57,6 +57,8 @@ type ProjectOutline struct {
 	Name string `json:"name"`
 	// Finished is set for a completed or canceled project (in Things' Logbook).
 	Finished bool `json:"finished"`
+	// Repeats is set for the newest copy of a repeating project, which keeps repeating here.
+	Repeats bool `json:"repeats"`
 	Headings  int  `json:"headings"`
 	Counts
 }
@@ -80,7 +82,9 @@ type Summary struct {
 	Headings  int      `json:"headings"`
 	Tasks     int      `json:"tasks"`
 	Repeating int      `json:"repeating"`
-	Notes     int      `json:"notes"`
+	// RepeatingProjects counts the projects (among Projects) that carry a repeat.
+	RepeatingProjects int      `json:"repeatingProjects"`
+	Notes             int      `json:"notes"`
 	Warnings  []string `json:"warnings"`
 	// Cancelled is set when the run was stopped part-way; what was written stays.
 	Cancelled bool `json:"cancelled"`

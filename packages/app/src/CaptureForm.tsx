@@ -1,7 +1,8 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Platform, StyleSheet, View } from "react-native";
 import { Button, Icon, Input, Text, colors, icon, radius, space, useDensity } from "@companion/design-system";
-import { Editor } from "@companion/editor";
+import { Editor, type EditorController, type FormatState } from "@companion/editor";
+import { FormattingBar } from "./FormattingBar";
 import { useCaptureController, type CaptureController } from "./useCaptureController";
 import { Segmented } from "./settingsUi";
 import { isMacPlatform } from "./shortcuts";
@@ -14,8 +15,9 @@ export interface CaptureFormProps {
 
 /**
  * The quick-capture form (PLAN §6.4): a two-question flow — a note/task segment row, then the
- * entry for that kind. The note body is the simple ProseMirror editor (so `[[` links and `![[`
- * embeds work); tasks take a title plus natural-language due / reminder fields, each echoing
+ * entry for that kind. The note body is the full note editor, hugging its content (headings,
+ * lists, todos, tables, `[[` links and `![[` embeds — what is captured is already the note);
+ * tasks take a title plus natural-language due / reminder fields, each echoing
  * what it parsed to. Hosted by the desktop shell's 460px overlay and the mobile bottom sheet;
  * behaviour lives in {@link useCaptureController}, and the global-shortcut window renders the
  * same pieces (see CaptureView). With a pointer, ⌘⏎ saves.
@@ -104,28 +106,12 @@ export function CaptureKindSwitch({ c, fill = false }: { c: CaptureController; f
   );
 }
 
-/** The entry for the chosen kind: a ~4-row prose editor, or the task questions. `hideTitle`
- *  drops the task's title question, for a host whose own input is the title (the command
- *  palette). */
-export function CaptureFields({ c, hideTitle = false }: { c: CaptureController; hideTitle?: boolean }) {
+/** The entry for the chosen kind: the note's body, or the task questions. `hideTitle` drops
+ *  the task's title question, for a host whose own input is the title (the command palette).
+ *  `attachments` is off where a file picker can't be shown (see CaptureNoteBody). */
+export function CaptureFields({ c, hideTitle = false, attachments = true }: { c: CaptureController; hideTitle?: boolean; attachments?: boolean }) {
   const touch = useDensity() === "touch";
-  if (c.kind === "note") {
-    return (
-      <View style={[styles.noteBox, { minHeight: NOTE_MIN_HEIGHT + 2 * space.md }]}>
-        <Editor
-          variant="simple"
-          markdown={c.noteDraft}
-          onChangeMarkdown={c.setNoteDraft}
-          placeholder="Type anything. Use [[ to link or ![[ to embed."
-          linkSource={c.linkSource}
-          documentSource={c.documentSource}
-          linkRevision={c.linkRevision}
-          minHeight={NOTE_MIN_HEIGHT}
-          maxHeight={touch ? 220 : 280}
-        />
-      </View>
-    );
-  }
+  if (c.kind === "note") return <CaptureNoteBody c={c} attachments={attachments} />;
   const leading = (name: "calendar" | "bell") => <Icon name={name} size={touch ? icon.md : icon.sm} color={colors.textQuaternary} />;
   return (
     <View style={styles.fields}>
@@ -158,8 +144,59 @@ export function CaptureFields({ c, hideTitle = false }: { c: CaptureController; 
   );
 }
 
-// Four rows of 14/22 prose.
-const NOTE_MIN_HEIGHT = 88;
+/** The note's body: the full editor in a box that hugs what is written, up to a cap where it
+ *  scrolls, over the formatting bar (web; with a pointer always there, on touch while the body
+ *  has focus). Markdown shortcuts format as they do in a note. Two things a captured note
+ *  leaves for the note itself: drawing, and creating the target of an empty `[[link]]` (it
+ *  stays text until then). Tables use the editor's own menu — the desktop's native one belongs
+ *  to the main window. `attachments` hides the bar's attach button for the quick-capture
+ *  window, which a file picker would blur and so dismiss; a pasted image still embeds. */
+function CaptureNoteBody({ c, attachments }: { c: CaptureController; attachments: boolean }) {
+  const touch = useDensity() === "touch";
+  const editorRef = useRef<EditorController>(null);
+  const [formatState, setFormatState] = useState<FormatState | null>(null);
+  // A bar button briefly blurs the editor before its action refocuses it, so hiding waits a beat.
+  const [focused, setFocused] = useState(false);
+  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onFocusChange = useCallback((on: boolean) => {
+    if (blurTimer.current) clearTimeout(blurTimer.current);
+    blurTimer.current = null;
+    if (on) setFocused(true);
+    else blurTimer.current = setTimeout(() => setFocused(false), 200);
+  }, []);
+  useEffect(
+    () => () => {
+      if (blurTimer.current) clearTimeout(blurTimer.current);
+    },
+    [],
+  );
+  return (
+    <View style={styles.noteBox}>
+      <View style={[styles.noteBody, { minHeight: NOTE_MIN_HEIGHT + 2 * space.md }]}>
+        <Editor
+          ref={editorRef}
+          inline
+          markdown={c.noteDraft}
+          onChangeMarkdown={c.setNoteDraft}
+          placeholder="Type anything. Markdown formats as you go; [[ links, ![[ embeds."
+          linkSource={c.linkSource}
+          documentSource={c.documentSource}
+          linkRevision={c.linkRevision}
+          onFormatStateChange={setFormatState}
+          onFocusChange={onFocusChange}
+          // Prompt reports, so Save enables as soon as there is something to save.
+          debounceMs={150}
+          minHeight={NOTE_MIN_HEIGHT}
+          maxHeight={touch ? 220 : 280}
+        />
+      </View>
+      {Platform.OS === "web" && (!touch || focused) ? <FormattingBar state={formatState} editorRef={editorRef} canAttach={attachments && !!c.documentSource} /> : null}
+    </View>
+  );
+}
+
+// Five rows of 14/22 prose.
+const NOTE_MIN_HEIGHT = 110;
 
 /** A labelled field that echoes what a natural-language phrase parsed to as mono `→ …`, or
  *  says why it couldn't be read. */
@@ -188,9 +225,9 @@ const styles = StyleSheet.create({
     borderColor: colors.borderDefault,
     backgroundColor: colors.surfaceCard,
     borderRadius: radius.md,
-    paddingHorizontal: space.ml,
-    paddingVertical: space.md,
+    overflow: "hidden",
   },
+  noteBody: { paddingHorizontal: space.ml, paddingVertical: space.md },
   fields: { gap: space.ml },
   field: { gap: space.xs },
   actions: { flexDirection: "row", alignItems: "center", gap: space.sm },

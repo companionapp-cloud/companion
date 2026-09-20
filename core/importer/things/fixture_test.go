@@ -129,6 +129,7 @@ func rule(body string) []byte { return []byte(plistHead + "<dict>" + body + "</d
 var (
 	weeklyFriday = rule(`<key>ed</key><real>64092211200</real><key>fa</key><integer>1</integer><key>fu</key><integer>256</integer><key>of</key><array><dict><key>wd</key><integer>5</integer></dict></array><key>rc</key><integer>0</integer><key>rrv</key><integer>4</integer><key>tp</key><integer>0</integer><key>ts</key><integer>-2</integer>`)
 	every3DaysAfter = rule(`<key>ed</key><real>64092211200</real><key>fa</key><integer>3</integer><key>fu</key><integer>16</integer><key>rc</key><integer>0</integer><key>rrv</key><integer>4</integer><key>tp</key><integer>1</integer><key>ts</key><integer>0</integer>`)
+	every2WeeksAfter = rule(`<key>ed</key><real>64092211200</real><key>fa</key><integer>2</integer><key>fu</key><integer>256</integer><key>of</key><array><dict><key>wd</key><integer>1</integer></dict></array><key>rc</key><integer>0</integer><key>tp</key><integer>1</integer><key>ts</key><integer>0</integer>`)
 	monthlyFirst    = rule(`<key>fa</key><integer>1</integer><key>fu</key><integer>8</integer><key>of</key><array><dict><key>dy</key><integer>0</integer></dict></array><key>rc</key><integer>5</integer><key>tp</key><integer>0</integer><key>ts</key><integer>0</integer>`)
 )
 
@@ -156,7 +157,9 @@ const (
 	projGarden = "ProjGarden" // completed
 	projSide   = "ProjSide"   // no area
 	projTrash  = "ProjTrash"  // trashed
-	projClose  = "ProjClose"  // a repeating project template
+	projClose  = "ProjClose"  // a repeating project's template, with no open copy
+	tplSprint  = "TplSprint"  // a repeating project's template...
+	projSprint = "ProjSprint" // ...and the newest open copy Things made of it
 	headMkt    = "HeadMarketing"
 	headOld    = "HeadOld" // archived, only finished to-dos
 )
@@ -185,13 +188,22 @@ var fixtureTasks = []taskRow{
 		notes: "<note xml:space=\"preserve\">Ask about &lt;the&gt; trip</note>"},
 	{uuid: "TodoDonePaint", kind: kindTodo, title: "Paint fence", area: areaHome, status: statusCompleted, stopDate: 1751000000, index: 2, reminder: -1},
 
-	// A project with no area; a trashed project with a to-do; a repeating project template
-	// with its content.
+	// Work › Sprint repeats two weeks after completion: the template (whose to-do stays behind)
+	// and two open copies — the newer one carries the repeat on.
+	{uuid: tplSprint, kind: kindProject, title: "Sprint", area: areaWork, start: startSomeday, rule: every2WeeksAfter, instanceCount: 2, index: 8, reminder: -1},
+	{uuid: "TodoSprintTpl", kind: kindTodo, title: "Plan sprint (template)", project: tplSprint, index: 1, reminder: -1},
+	{uuid: "ProjSprintOld", kind: kindProject, title: "Sprint (old)", area: areaWork, start: startAnytime, startDate: pd(2026, 9, 1), template: tplSprint, index: 2, reminder: -1},
+	{uuid: projSprint, kind: kindProject, title: "Sprint", area: areaWork, start: startAnytime, startDate: pd(2026, 9, 14), template: tplSprint, index: 3, reminder: -1},
+	{uuid: "TodoSprintPlan", kind: kindTodo, title: "Plan sprint", project: projSprint, start: startAnytime, index: 1, reminder: -1},
+
+	// A project with no area; a trashed project with a to-do; a repeating project (the 1st of
+	// each month, five times, two made and finished) with no open copy: its template stands in
+	// for the next one, with its content.
 	{uuid: projSide, kind: kindProject, title: "Side quest", index: 5, reminder: -1},
 	{uuid: "TodoSide", kind: kindTodo, title: "Find the map", project: projSide, start: startAnytime, index: 1, reminder: -1},
 	{uuid: projTrash, kind: kindProject, title: "Abandoned", trashed: true, index: 6, reminder: -1},
 	{uuid: "TodoInTrash", kind: kindTodo, title: "In a trashed project", project: projTrash, index: 1, reminder: -1},
-	{uuid: projClose, kind: kindProject, title: "Monthly close", rule: monthlyFirst, index: 7, reminder: -1},
+	{uuid: projClose, kind: kindProject, title: "Monthly close", start: startSomeday, rule: monthlyFirst, instanceCount: 2, nextStart: pd(2026, 10, 1), index: 7, reminder: -1},
 	{uuid: "TodoCloseStep", kind: kindTodo, title: "Reconcile", project: projClose, index: 1, reminder: -1},
 
 	// References to things that no longer exist don't lose the to-do: it files by what it has.

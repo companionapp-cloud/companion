@@ -64,6 +64,8 @@ func TestScanOutline(t *testing.T) {
 		}},
 		{ID: areaWork, Name: "Work", Projects: []ProjectOutline{
 			{ID: projLaunch, Name: "Launch", Headings: 1, Counts: Counts{Tasks: 4, Completed: 3, Repeating: 1}},
+			{ID: "ProjSprintOld", Name: "Sprint (old)"},
+			{ID: projSprint, Name: "Sprint", Repeats: true, Counts: Counts{Tasks: 1}},
 		}},
 	}
 	if !reflect.DeepEqual(pv.Areas, want) {
@@ -71,13 +73,19 @@ func TestScanOutline(t *testing.T) {
 		t.Errorf("areas =\n%s", got)
 	}
 	// The wire shape keeps every count alongside the finished flag.
-	if b, _ := json.Marshal(pv.Areas[0].Projects[0]); string(b) != `{"id":"ProjGarden","name":"Garden","finished":true,"headings":0,"tasks":0,"completed":1,"repeating":0}` {
+	if b, _ := json.Marshal(pv.Areas[0].Projects[0]); string(b) != `{"id":"ProjGarden","name":"Garden","finished":true,"repeats":false,"headings":0,"tasks":0,"completed":1,"repeating":0}` {
 		t.Errorf("project outline JSON = %s", b)
 	}
-	if len(pv.NoArea) != 1 || pv.NoArea[0].ID != projSide || pv.NoArea[0].Tasks != 1 {
-		t.Errorf("projects in no area = %+v, want just Side quest", pv.NoArea)
+	// A repeating project with no open copy is listed by its template, which stands in for the
+	// next one.
+	wantNoArea := []ProjectOutline{
+		{ID: projSide, Name: "Side quest", Counts: Counts{Tasks: 1}},
+		{ID: projClose, Name: "Monthly close", Repeats: true, Counts: Counts{Tasks: 1}},
 	}
-	for _, w := range []string{"Tags on 1 area", "“Monthly close” repeats", "“Water plants” repeats after completion", "“Stretch” is paused", "“Pay installment”: its repeat has already ended"} {
+	if !reflect.DeepEqual(pv.NoArea, wantNoArea) {
+		t.Errorf("projects in no area = %+v, want %+v", pv.NoArea, wantNoArea)
+	}
+	for _, w := range []string{"Tags on 1 area", "“Water plants” repeats after completion", "“Stretch” is paused", "“Pay installment”: its repeat has already ended"} {
 		if !containsText(pv.Warnings, w) {
 			t.Errorf("warnings %q lack %q", pv.Warnings, w)
 		}
@@ -96,7 +104,7 @@ func TestRunImportsTheLibrary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Summary{Areas: 3, Projects: 2, Lists: 2, Headings: 1, Tasks: 10, Repeating: 2, Notes: 1}
+	want := Summary{Areas: 3, Projects: 5, RepeatingProjects: 2, Lists: 4, Headings: 1, Tasks: 12, Repeating: 2, Notes: 1}
 	got := *sum
 	got.Warnings = nil
 	if !reflect.DeepEqual(got, want) {
@@ -184,7 +192,7 @@ func TestRunImportsTheLibrary(t *testing.T) {
 			t.Errorf("%q should be in no project", title)
 		}
 	}
-	for _, title := range []string{"Gone", "In a trashed project", "Reconcile", "Prune roses", "Paint fence", "Ship v1"} {
+	for _, title := range []string{"Gone", "In a trashed project", "Plan sprint (template)", "Prune roses", "Paint fence", "Ship v1"} {
 		if tasks[title] != nil {
 			t.Errorf("%q shouldn't be imported", title)
 		}
@@ -212,7 +220,33 @@ func TestRunImportsTheLibrary(t *testing.T) {
 	if len(seeds) != 2 {
 		t.Errorf("seeds = %v, want only the review and the watering", keys(seeds))
 	}
+
+	// A repeating project's newest open copy carries the repeat on — after completion, as in
+	// Things; an older copy is an ordinary project, and the template's own to-dos stay behind.
+	sprint := projects["Sprint"]
+	if sprint == nil || sprint.RepeatAfter == nil || *sprint.RepeatAfter != "P2W" || sprint.RepeatRule != nil {
+		t.Fatalf("Sprint = %+v, want it to repeat 2 weeks after completion", sprint)
+	}
+	sameTime(t, "Sprint start", sprint.StartAt, halifax(t, 2026, 9, 14, 0, 0))
+	if got := listRows(t, st, sprint.ID); !reflect.DeepEqual(got, []string{"Plan sprint"}) {
+		t.Errorf("Sprint list = %v", got)
+	}
+	if old := projects["Sprint (old)"]; old == nil || old.Repeats() {
+		t.Errorf("Sprint (old) = %+v, want an ordinary project", old)
+	}
+	// With no open copy, the template is the next one: it starts on the series' next date with
+	// the template's to-dos, and "five times" (two made) ends on the day of the last — the
+	// server reads the rule in UTC, where Dec 1 comes an hour early once the clocks go back.
+	monthly := projects["Monthly close"]
+	if monthly == nil || monthly.RepeatRule == nil || *monthly.RepeatRule != "FREQ=MONTHLY;BYMONTHDAY=1;UNTIL=20261201T035959Z" {
+		t.Fatalf("Monthly close = %+v", monthly)
+	}
+	sameTime(t, "Monthly close start", monthly.StartAt, halifax(t, 2026, 10, 1, 0, 0))
+	if got := listRows(t, st, monthly.ID); !reflect.DeepEqual(got, []string{"Reconcile"}) {
+		t.Errorf("Monthly close list = %v", got)
+	}
 }
+
 
 func TestRunWithTheLogbook(t *testing.T) {
 	st := newStore(t)
@@ -220,8 +254,8 @@ func TestRunWithTheLogbook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sum.Projects != 3 || sum.Tasks != 15 {
-		t.Errorf("summary = %+v, want 3 projects and 15 tasks", sum)
+	if sum.Projects != 6 || sum.Tasks != 17 {
+		t.Errorf("summary = %+v, want 6 projects and 17 tasks", sum)
 	}
 	projects := projectsByName(t, st)
 	if g := projects["Garden"]; g == nil || g.ArchivedAt == nil {
@@ -450,6 +484,97 @@ func TestConvertRule(t *testing.T) {
 	}
 	if r, _, _ := convertRule(every3DaysAfter, 0, loc, now); !r.afterCompletion {
 		t.Error("tp=1 is after completion")
+	}
+}
+
+func TestShiftRule(t *testing.T) {
+	cases := []struct {
+		rule string
+		days int
+		want string // "" when it can't be moved
+	}{
+		{"FREQ=DAILY;INTERVAL=3", -2, "FREQ=DAILY;INTERVAL=3"},
+		{"FREQ=WEEKLY;BYDAY=MO,FR", -2, "FREQ=WEEKLY;BYDAY=WE,SA"},
+		{"FREQ=WEEKLY;BYDAY=SU", 1, "FREQ=WEEKLY;BYDAY=MO"},
+		{"FREQ=WEEKLY;INTERVAL=2;BYDAY=MO", -3, "FREQ=WEEKLY;INTERVAL=2;BYDAY=FR"},
+		{"FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,FR", -3, ""}, // Friday and Tuesday: different weeks
+		{"FREQ=MONTHLY;BYMONTHDAY=1,15", -3, "FREQ=MONTHLY;BYMONTHDAY=-3,12"},
+		{"FREQ=MONTHLY;BYMONTHDAY=-1", -1, "FREQ=MONTHLY;BYMONTHDAY=-2"},
+		{"FREQ=MONTHLY;BYMONTHDAY=-1", 1, "FREQ=MONTHLY;BYMONTHDAY=1"},
+		{"FREQ=MONTHLY;BYMONTHDAY=28", 1, ""}, // the 29th isn't in every month
+		{"FREQ=MONTHLY;BYDAY=1MO", -1, ""},
+		{"FREQ=YEARLY;BYMONTH=12;BYMONTHDAY=25", -5, "FREQ=YEARLY;BYMONTH=12;BYMONTHDAY=20"},
+		{"FREQ=YEARLY;BYMONTH=1;BYMONTHDAY=1", -1, ""}, // into December
+	}
+	for _, c := range cases {
+		got, ok := shiftRule(strings.Split(c.rule, ";"), c.days)
+		if joined := strings.Join(got, ";"); ok != (c.want != "") || joined != c.want {
+			t.Errorf("%s by %d = %q (%v), want %q", c.rule, c.days, joined, ok, c.want)
+		}
+	}
+}
+
+func TestProjectRepeat(t *testing.T) {
+	halifaxLoc, _ := time.LoadLocation(zone)
+	berlin, _ := time.LoadLocation("Europe/Berlin")
+	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	convert := func(body string, created int64, loc *time.Location) repeat {
+		t.Helper()
+		r, reason, ok := convertRule(rule(body), created, loc, now)
+		if !ok {
+			t.Fatal(reason)
+		}
+		return r
+	}
+	const fridays = `<key>fu</key><integer>256</integer><key>of</key><array><dict><key>wd</key><integer>5</integer></dict></array>`
+
+	// A copy that starts two days before each Friday repeats on Wednesdays, where its start is —
+	// and its last day moves with it.
+	start := time.Date(2026, 9, 23, 0, 0, 0, 0, halifaxLoc) // a Wednesday
+	r := convert(fridays+`<key>ts</key><integer>-2</integer><key>ed</key><real>1798761600</real>`, 0, halifaxLoc)
+	pr, reason, ok := projectRepeatFor(r, start, true, true, halifaxLoc)
+	if !ok || pr.rule == nil || *pr.rule != "FREQ=WEEKLY;BYDAY=WE;UNTIL=20261231T035959Z" {
+		t.Errorf("start-anchored = %v (%s)", pr.rule, reason)
+	}
+	// Hung off its deadline instead, the rule names the Fridays themselves.
+	due := time.Date(2026, 9, 25, dueHour, 0, 0, 0, halifaxLoc)
+	if pr, _, ok = projectRepeatFor(r, due, false, true, halifaxLoc); !ok || *pr.rule != "FREQ=WEEKLY;BYDAY=FR;UNTIL=20270102T035959Z" {
+		t.Errorf("deadline-anchored = %v", pr.rule)
+	}
+	// East of UTC, local midnight is the evening before in UTC, where the server reads the rule.
+	r = convert(fridays, 0, berlin)
+	friday := time.Date(2026, 9, 25, 0, 0, 0, 0, berlin)
+	if pr, _, ok = projectRepeatFor(r, friday, true, true, berlin); !ok || *pr.rule != "FREQ=WEEKLY;BYDAY=TH" {
+		t.Errorf("Berlin = %v", pr.rule)
+	}
+	if next, err := domain.NextOccurrence(*pr.rule, friday, friday); err != nil || next == nil || !next.Equal(time.Date(2026, 10, 2, 0, 0, 0, 0, berlin)) {
+		t.Errorf("the next Berlin copy = %v (%v), want Friday Oct 2 at midnight there", next, err)
+	}
+	// What can't be moved isn't repeated, with the reason.
+	r = convert(`<key>fu</key><integer>8</integer><key>of</key><array><dict><key>wd</key><integer>1</integer><key>wdo</key><integer>1</integer></dict></array><key>ts</key><integer>-3</integer>`, 0, halifaxLoc)
+	if _, reason, ok = projectRepeatFor(r, start, true, true, halifaxLoc); ok || !strings.Contains(reason, "3 days before") {
+		t.Errorf("first Monday less 3 days: ok %v, %q", ok, reason)
+	}
+
+	// "Ends after N": a copy Things made has been counted already; the template standing in
+	// for the next one is itself one of those left. The last of them carries no repeat.
+	const daily4 = `<key>fu</key><integer>16</integer><key>rc</key><integer>4</integer>`
+	r = convert(daily4, 2, halifaxLoc)
+	if pr, _, ok = projectRepeatFor(r, start, true, true, halifaxLoc); !ok || *pr.rule != "FREQ=DAILY;UNTIL=20260926T025959Z" {
+		t.Errorf("two more after a made copy = %v", pr.rule)
+	}
+	if pr, _, ok = projectRepeatFor(r, start, true, false, halifaxLoc); !ok || *pr.rule != "FREQ=DAILY;UNTIL=20260925T025959Z" {
+		t.Errorf("one more after the upcoming copy = %v", pr.rule)
+	}
+	r = convert(daily4, 3, halifaxLoc)
+	if pr, _, ok = projectRepeatFor(r, start, true, false, halifaxLoc); !ok || pr.rule != nil || pr.after != nil {
+		t.Errorf("the last copy = %+v, want no repeat", pr)
+	}
+
+	// After completion is an interval, which has no end in Companion.
+	r = convert(`<key>fu</key><integer>8</integer><key>fa</key><integer>3</integer><key>tp</key><integer>1</integer><key>rc</key><integer>9</integer>`, 0, halifaxLoc)
+	if pr, _, ok = projectRepeatFor(r, start, true, true, halifaxLoc); !ok || pr.after == nil || *pr.after != "P3M" || !pr.endless {
+		t.Errorf("after completion = %+v", pr)
 	}
 }
 

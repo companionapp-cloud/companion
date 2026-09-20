@@ -10,7 +10,8 @@ import { useCommandPalette, type CommandPaletteController, type CommandPaletteHo
  * new task / note / canvas, then the find commands; typing narrows them and searches every
  * title at once. A find command scopes the search (the chip in the input) to one kind of thing,
  * by title or by day; a create command turns the input into the new item's title, with the
- * task's project chips and due / reminder questions, or the note's body, beneath it.
+ * task's project chips and due / reminder questions, or the note's body — the full note editor,
+ * with its formatting bar — beneath it.
  *
  * Keyboard-first: ↑↓ move, ⏎ runs, ⌫ on an empty input or Esc steps back out, Esc at the root
  * closes. ⇧⏎ is ⏎ into a new tab: a result opens in a tab of its own, and a new task, note or
@@ -20,7 +21,7 @@ import { useCommandPalette, type CommandPaletteController, type CommandPaletteHo
  */
 export function CommandPalette(host: CommandPaletteHost) {
   const p = useCommandPalette(host);
-  const { onClose } = host;
+  const { onClose, attachments = true } = host;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const inputRef = useRef<any>(null);
   const creating = p.mode.kind === "create";
@@ -65,6 +66,8 @@ export function CommandPalette(host: CommandPaletteHost) {
         take();
         submit(e.shiftKey);
       } else if (e.key === "Escape") {
+        // The note body's `[[` picker or table menu is up: Esc is theirs, and closes only that.
+        if (editorPopupOpen()) return;
         take();
         if (!back()) onClose();
       } else if (e.key === "Backspace" && query === "" && target === inputNode(inputRef.current)) {
@@ -111,7 +114,7 @@ export function CommandPalette(host: CommandPaletteHost) {
         p.mode.kind === "create" && p.mode.what !== "canvas" ? (
           <View style={styles.fields}>
             {p.mode.what === "task" ? <ProjectChips p={p} /> : null}
-            <CaptureFields c={p.capture} hideTitle />
+            <CaptureFields c={p.capture} hideTitle attachments={attachments} />
           </View>
         ) : null
       ) : (
@@ -264,6 +267,13 @@ export const paletteEnter =
         } as Record<string, unknown>,
       }).enter
     : null;
+
+/** Whether one of the editor's own popups is showing: the `[[` picker (kept in the DOM, hidden
+ *  while closed) or the table menu (there only while open). */
+function editorPopupOpen(): boolean {
+  const picker = document.querySelector<HTMLElement>(".pm-wikilink-menu");
+  return (!!picker && picker.style.display !== "none") || !!document.querySelector(".pm-table-menu");
+}
 
 /** The DOM input behind a react-native-web TextInput ref (which is the node itself). */
 const inputNode = (ref: unknown) => ref as EventTarget | null;

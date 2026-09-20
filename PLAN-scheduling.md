@@ -127,8 +127,18 @@ span into every day it covers; the day agenda lists all-day lines first; the hov
 
 Things' Someday (no start date) maps to the flag on to-dos and projects; a project's start and
 deadline become real fields (they used to be written into its note); a finished project keeps
-its completion date, so it lands in the Logbook on the right day. Repeating projects are still
-not imported (only the current copy).
+its completion date, so it lands in the Logbook on the right day.
+
+A repeating project (`projectrepeat.go`) is a hidden template plus the copies Things made of it.
+The **newest open copy carries the repeat**; with no open copy, the **template is imported as
+the upcoming copy** — starting on its next date, holding the template's to-dos. "After
+completion" maps exactly onto `repeat_after`. A schedule becomes an RRULE *moved onto the days
+the project's anchor falls on*, because the server reads the rule from that anchor in UTC: by
+Things' start offset (a copy that starts 2 days before each Friday repeats on Wednesdays) and by
+the UTC date of a local-midnight start. "Ends after N" becomes `UNTIL` the day of the last copy
+(a rule read afresh from each copy can't count down). A schedule that can't be moved (an n-th
+weekday, a yearly date pushed into another month) imports the copy without its repeat, warned;
+an after-completion repeat that ends in Things never ends here, warned.
 
 ---
 
