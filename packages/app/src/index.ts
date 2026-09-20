@@ -119,5 +119,6 @@ export { focusTarget, focusUrl, openFocusWindow, setFocusWindowOpener } from "./
 export type { FocusTarget, FocusKind } from "./focus";
 export { CaptureView } from "./CaptureView";
 export { CaptureForm } from "./CaptureForm";
-export { captureRequested, closeCaptureWindow, setCaptureWindowCloser } from "./capture";
+export { captureRequested, closeCaptureWindow, setCaptureWindowCloser, setCaptureResultOpener } from "./capture";
+export { CommandPalette } from "./CommandPalette";
 export { setTableMenuPresenter, tableMenuPresenter } from "./tableMenu";

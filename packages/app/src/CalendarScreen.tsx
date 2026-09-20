@@ -174,6 +174,14 @@ export function CalendarScreen({ projectId }: { projectId?: string } = {}) {
     const saved = getViewState().anchorMs;
     return saved != null ? new Date(saved) : new Date();
   });
+  // A day asked for by the tab itself (/calendar/2026-07-08 — the command palette opening an
+  // event) wins over the remembered week. Not inside a project, whose location is its own.
+  const askedDay = !projectId && nav.current.kind === "view" && nav.current.view === "calendar" ? nav.current.date : undefined;
+  useEffect(() => {
+    if (!askedDay) return;
+    const [y, m, d] = askedDay.split("-").map(Number);
+    if (y && m && d) setAnchor(new Date(y, m - 1, d));
+  }, [askedDay]);
   const [items, setItems] = useState<CalendarItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   // The all-day band holds two chips per day; "+N more" opens it up for the visible week.

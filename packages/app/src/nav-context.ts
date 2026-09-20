@@ -28,7 +28,8 @@ export type TabRef =
   | DocRef
   | { kind: "browse"; section: WorkspaceSection }
   /** A view. `date` (YYYY-MM-DD) asks the Today view to open on that day — how a dated
-   *  note is followed from the calendar into the daily-notes tool. `section` is the Settings
+   *  note is followed from the calendar into the daily-notes tool — or the Calendar to show
+   *  that day's week (how the command palette opens an event). `section` is the Settings
    *  section on show, carried in the URL (/settings/:section) so it survives a shell swap. */
   | { kind: "view"; view: SurfaceViewId; date?: string; section?: string }
   | { kind: "project"; projectId: string; section?: ProjectSection; itemId?: string; subItemId?: string }
@@ -107,7 +108,7 @@ export function viewOfRef(ref: TabRef | null): ViewId | "project" | "area" | nul
 export type NavLocation =
   /** A fresh tab holding nothing yet. */
   | { kind: "empty" }
-  /** A view; `date` is the day the Today view was asked to open on, `section` the Settings
+  /** A view; `date` is the day the Today or Calendar view was asked to open on, `section` the Settings
    *  section on show (see TabRef). */
   | { kind: "view"; view: SurfaceViewId; date?: string; section?: string }
   | { kind: "notes" }

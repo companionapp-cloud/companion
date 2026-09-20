@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import type { TaskReminder } from "@companion/core-bridge";
+import { useMemo, useRef, useState } from "react";
+import type { Task, TaskReminder } from "@companion/core-bridge";
 import type { DocumentSource, LinkSource } from "@companion/editor";
 import { useNotes } from "./NotesProvider";
 import { useTasks } from "./TasksProvider";
@@ -17,6 +17,10 @@ export interface CaptureController {
   kind: CaptureKind;
   setKind: (k: CaptureKind) => void;
 
+  /** The note's title. Optional — hosts without a title field (the mobile sheet) leave it
+   *  empty and the body's first line stands in. */
+  noteTitle: string;
+  setNoteTitle: (t: string) => void;
   noteDraft: string;
   setNoteDraft: (md: string) => void;
 
@@ -46,7 +50,17 @@ export interface CaptureController {
   linkRevision: unknown;
 }
 
-export function useCaptureController(onClose: () => void): CaptureController {
+export interface CaptureOptions {
+  /** Runs once a task is saved, before the surface closes — how a host files the new task
+   *  somewhere (the command palette's project chips). A failure here never loses the task. */
+  onTaskCreated?: (task: Task) => Promise<void> | void;
+}
+
+export function useCaptureController(onClose: () => void, options?: CaptureOptions): CaptureController {
+  // Read at save time: `submit` is memoized below and would otherwise hold a stale callback.
+  const onTaskCreated = useRef(options?.onTaskCreated);
+  onTaskCreated.current = options?.onTaskCreated;
+
   const notes = useNotes();
   const tasks = useTasks();
   const { dates, tasks: tasksApi } = useCore();
@@ -54,6 +68,7 @@ export function useCaptureController(onClose: () => void): CaptureController {
   const documentSource = useDocumentSource();
 
   const [kind, setKind] = useState<CaptureKind>("note");
+  const [noteTitle, setNoteTitle] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
   const [due, setDue] = useState("");
@@ -104,9 +119,9 @@ export function useCaptureController(onClose: () => void): CaptureController {
 
   const saveNote = async () => {
     const text = noteDraft.trim();
-    if (!text || busy) return;
+    const title = noteTitle.trim() || text.split("\n")[0].slice(0, 60);
+    if (!title || busy) return;
     setBusy(true);
-    const title = text.split("\n")[0].slice(0, 60);
     await notes.create({ title, contentMd: text });
     onClose();
   };
@@ -127,17 +142,24 @@ export function useCaptureController(onClose: () => void): CaptureController {
       setBusy(false);
       return;
     }
-    await tasks.create({ title, dueAt: dueAt ?? undefined, reminders: reminder ? [reminder] : undefined });
+    const task = await tasks.create({ title, dueAt: dueAt ?? undefined, reminders: reminder ? [reminder] : undefined });
+    try {
+      await onTaskCreated.current?.(task);
+    } catch (err) {
+      console.warn("capture: the task was saved, but not filed", err);
+    }
     onClose();
   };
 
-  const canSubmit = kind === "note" ? noteDraft.trim().length > 0 : taskTitle.trim().length > 0;
+  const canSubmit = kind === "note" ? (noteTitle + noteDraft).trim().length > 0 : taskTitle.trim().length > 0;
   const submit = kind === "note" ? saveNote : saveTask;
 
   return useMemo(
     () => ({
       kind,
       setKind,
+      noteTitle,
+      setNoteTitle,
       noteDraft,
       setNoteDraft,
       taskTitle,
@@ -160,7 +182,7 @@ export function useCaptureController(onClose: () => void): CaptureController {
       linkRevision: tasks.tasks,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [kind, noteDraft, taskTitle, due, dueResolved, dueFailed, remind, remindResolved, remindFailed, busy, canSubmit, tasks.tasks, linkSource, documentSource],
+    [kind, noteTitle, noteDraft, taskTitle, due, dueResolved, dueFailed, remind, remindResolved, remindFailed, busy, canSubmit, tasks.tasks, linkSource, documentSource],
   );
 }
 

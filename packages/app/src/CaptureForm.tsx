@@ -104,8 +104,10 @@ export function CaptureKindSwitch({ c, fill = false }: { c: CaptureController; f
   );
 }
 
-/** The entry for the chosen kind: a ~4-row prose editor, or the task questions. */
-export function CaptureFields({ c }: { c: CaptureController }) {
+/** The entry for the chosen kind: a ~4-row prose editor, or the task questions. `hideTitle`
+ *  drops the task's title question, for a host whose own input is the title (the command
+ *  palette). */
+export function CaptureFields({ c, hideTitle = false }: { c: CaptureController; hideTitle?: boolean }) {
   const touch = useDensity() === "touch";
   if (c.kind === "note") {
     return (
@@ -127,9 +129,11 @@ export function CaptureFields({ c }: { c: CaptureController }) {
   const leading = (name: "calendar" | "bell") => <Icon name={name} size={touch ? icon.md : icon.sm} color={colors.textQuaternary} />;
   return (
     <View style={styles.fields}>
-      <Field label="What do you need to do?">
-        <Input value={c.taskTitle} onChangeText={c.setTaskTitle} placeholder="e.g. Email the design draft" autoFocus />
-      </Field>
+      {hideTitle ? null : (
+        <Field label="What do you need to do?">
+          <Input value={c.taskTitle} onChangeText={c.setTaskTitle} placeholder="e.g. Email the design draft" autoFocus />
+        </Field>
+      )}
       <Field label="When is this due?" hint={c.dueResolved} error={c.dueFailed ? "Couldn’t read a date — try “next friday”." : null}>
         <Input
           value={c.due}

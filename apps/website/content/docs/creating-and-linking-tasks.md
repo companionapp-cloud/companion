@@ -17,7 +17,7 @@ related: [your-first-task, linking-notes]
 
 - **The Tasks list.** Type into **Add a task, press Enter**. The task lands in **Unsorted tasks** until you file it.
 - **Inside a project.** A project's **Tasks** section has the same field, and anything added there is filed in that project from the start.
-- **Quick capture.** On the desktop app, [quick capture](/docs/capture-and-focus) takes a task, with a deadline and a reminder, without leaving what you're doing.
+- **Quick capture.** On the desktop app, the [quick capture](/docs/capture-and-focus) palette takes a task, with a deadline and a reminder, without leaving what you're doing.
 - **Chat.** Ask the AI to make tasks from a conversation and it writes them into your list — see [chat into tasks](/docs/chat-into-tasks).
 - **From a link.** Type `[[Call the plumber]]` in a note and close the brackets without picking a result. Double-click that unresolved link and choose **Create task**: the task is made with that title, and the text becomes a real link to it.
 

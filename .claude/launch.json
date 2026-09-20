@@ -164,6 +164,22 @@
       ],
       "port": 5363,
       "autoPort": false
+    },
+    {
+      "name": "web-palette",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@companion/web",
+        "--",
+        "--port",
+        "5374",
+        "--strictPort"
+      ],
+      "port": 5374,
+      "autoPort": false
     }
   ]
 }
