@@ -1,18 +1,19 @@
 import { useCallback, useContext } from "react";
 import type { MemberEntityType, Note, Project, ProjectMember } from "@companion/core-bridge";
-import { NavContext, type ProjectSection, type TabRef } from "./nav-context";
+import { NavContext, type AreaSection, type TabRef } from "./nav-context";
 import { useNotes } from "./NotesProvider";
 import { useProjects } from "./ProjectsProvider";
 
 // Where following a node out of the graph lands. An item opens where it lives, not as a
 // loose document: a daily note in the daily-notes view on its day, and a note, task or
-// canvas that belongs to a project inside that project's view with the item selected.
+// canvas that belongs to a project (or is filed in an area) inside that project's or
+// area's view with the item selected.
 // Anything else opens as a plain document. The answer is a TabRef (what a tab holds), so
 // each shell maps it onto its own navigation: the active tab on desktop, a pushed route on
 // mobile.
 
 /** The project section each member kind is listed in. */
-const PROJECT_SECTION: Record<"note" | "task" | "canvas", ProjectSection> = { note: "notes", task: "tasks", canvas: "canvases" };
+const PROJECT_SECTION: Record<"note" | "task" | "canvas", AreaSection> = { note: "notes", task: "tasks", canvas: "canvases" };
 
 export interface GraphNodeLookups {
   /** A loaded note, for its `date` (a dated note is a daily note). */
@@ -38,6 +39,9 @@ export async function graphNodeRef(type: string, id: string, lookups: GraphNodeL
   const projectIds = members.map((m) => m.projectId).filter((pid) => open.has(pid));
   const projectId = projectIds.find((pid) => pid === lookups.currentProjectId) ?? projectIds[0];
   if (projectId) return { kind: "project", projectId, section: PROJECT_SECTION[type], itemId: id };
+  // Filed directly in an area (PLAN-areas.md §2): it opens in the area's page.
+  const inArea = members.find((m) => m.containerType === "area");
+  if (inArea) return { kind: "area", areaId: inArea.projectId, section: PROJECT_SECTION[type], itemId: id };
   return { kind: type, id };
 }
 

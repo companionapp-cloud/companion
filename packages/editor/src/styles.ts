@@ -73,9 +73,10 @@ export const EDITOR_CSS = `
 
 /* Simple variant (task notes, chat composer): an inline field, not a full page. Drop the
    tall min-height and the roomy document column; the field hugs its content. .pm-simple
-   is the web wrapper; .pm-compact is the native WebView mount. */
-.pm-simple .ProseMirror, .pm-compact .ProseMirror { min-height: 22px; }
-.pm-simple .ProseMirror > :last-child, .pm-compact .ProseMirror > :last-child { margin-bottom: 0; }
+   is the web wrapper; .pm-compact is the native WebView mount. .pm-inline is the FULL editor
+   hugging its content (EditorProps.inline) — same document styles, no page min-height. */
+.pm-simple .ProseMirror, .pm-compact .ProseMirror, .pm-inline .ProseMirror { min-height: 22px; }
+.pm-simple .ProseMirror > :last-child, .pm-compact .ProseMirror > :last-child, .pm-inline .ProseMirror > :last-child { margin-bottom: 0; }
 .pm-compact { padding: 4px 0; }
 
 /* Placeholder over an empty document: the placeholder plugin tags the empty paragraph with

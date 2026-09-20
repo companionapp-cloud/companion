@@ -75,13 +75,15 @@ func (c *Core) areasReorder(payload []byte) ([]byte, error) {
 func (c *Core) areasDelete(payload []byte) ([]byte, error) {
 	var args struct {
 		ID string `json:"id"`
+		// DeleteContent trashes the notes/tasks filed directly in the area too; otherwise they
+		// keep living and fall back to "Unsorted", like a deleted project's (PLAN-areas.md §2).
+		DeleteContent bool `json:"deleteContent"`
 	}
 	if err := unmarshal(payload, &args); err != nil {
 		return nil, err
 	}
-	// An area is only deletable once empty, so its projects aren't silently orphaned into
-	// "Unsorted". The client hides the affordance until the area is empty; this is the
-	// backstop (PLAN §6.6).
+	// An area is only deletable once empty of projects, so they aren't silently orphaned into
+	// "Unsorted". The client hides the affordance until then; this is the backstop (PLAN §6.6).
 	n, err := c.store.Projects.CountForArea(args.ID)
 	if err != nil {
 		return nil, err
@@ -89,10 +91,27 @@ func (c *Core) areasDelete(payload []byte) ([]byte, error) {
 	if n > 0 {
 		return nil, store.ErrAreaNotEmpty
 	}
+	members, err := c.store.ProjectMembers.ListForArea(args.ID)
+	if err != nil {
+		return nil, err
+	}
+	if args.DeleteContent {
+		if err := c.trashProjectMembers(members); err != nil {
+			return nil, err
+		}
+	}
+	if err := c.store.ProjectMembers.DeleteForProject(args.ID); err != nil {
+		return nil, err
+	}
 	if err := c.store.Areas.Delete(args.ID); err != nil {
 		return nil, mapStoreErr(err)
 	}
 	c.emitNavChanged("area", args.ID)
+	if args.DeleteContent && len(members) > 0 {
+		c.emit(notesChangedEvent, nil)
+		c.emit(tasksChangedEvent, nil)
+		c.emitDataChanged("", "")
+	}
 	return json.Marshal(map[string]bool{"ok": true})
 }
 
@@ -250,6 +269,40 @@ func (c *Core) checkMemberTarget(entityType, entityID string) error {
 	return mapStoreErr(err)
 }
 
+// taskListProjects snapshots the projects the given tasks are filed in, before a move. Filing
+// a task somewhere else takes it out of those projects' lists (the store does that), so the
+// caller announces lists.changed for each afterwards.
+func (c *Core) taskListProjects(entityType string, entityIDs []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	if entityType != domain.NodeTask {
+		return out, nil
+	}
+	for _, id := range entityIDs {
+		members, err := c.store.ProjectMembers.ListForEntity(entityType, id)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range members {
+			if !m.InArea() {
+				out[m.ProjectID] = true
+			}
+		}
+	}
+	return out, nil
+}
+
+// emitMoved announces the lists a move emptied a task out of; keepID is the project the task
+// now lives in (its lists are untouched).
+func (c *Core) emitMoved(left map[string]bool, keepID string) {
+	for projectID := range left {
+		if projectID != keepID {
+			c.emitListsChanged(projectID, "")
+		}
+	}
+}
+
+// projectsAddMember files an entity in a project. Content lives in one place, so this MOVES a
+// note/task/habit/canvas out of whatever project or area held it (PLAN-areas.md §2.1).
 func (c *Core) projectsAddMember(payload []byte) ([]byte, error) {
 	var args memberArgs
 	if err := unmarshal(payload, &args); err != nil {
@@ -258,10 +311,15 @@ func (c *Core) projectsAddMember(payload []byte) ([]byte, error) {
 	if err := c.checkMemberTarget(args.EntityType, args.EntityID); err != nil {
 		return nil, err
 	}
+	left, err := c.taskListProjects(args.EntityType, []string{args.EntityID})
+	if err != nil {
+		return nil, err
+	}
 	m, err := c.store.ProjectMembers.Add(args.ProjectID, args.EntityType, args.EntityID)
 	if err != nil {
 		return nil, err
 	}
+	c.emitMoved(left, args.ProjectID)
 	c.emitNavChanged(args.EntityType, args.EntityID)
 	return json.Marshal(m)
 }
@@ -283,10 +341,15 @@ func (c *Core) projectsAddMembers(payload []byte) ([]byte, error) {
 			return nil, err
 		}
 	}
+	left, err := c.taskListProjects(args.EntityType, args.EntityIDs)
+	if err != nil {
+		return nil, err
+	}
 	members, err := c.store.ProjectMembers.AddMany(args.ProjectID, args.EntityType, args.EntityIDs)
 	if err != nil {
 		return nil, err
 	}
+	c.emitMoved(left, args.ProjectID)
 	c.emit(navChangedEvent, nil)
 	c.emitDataChanged("", "")
 	return json.Marshal(members)
@@ -300,11 +363,9 @@ func (c *Core) projectsRemoveMember(payload []byte) ([]byte, error) {
 	if err := c.store.ProjectMembers.Remove(args.ProjectID, args.EntityType, args.EntityID); err != nil {
 		return nil, mapStoreErr(err)
 	}
-	// A list only holds its project's tasks, so a task leaving the project leaves its lists.
+	// A list only holds its project's tasks, so a task leaving the project left its lists
+	// (ProjectMembersRepo.Remove).
 	if args.EntityType == domain.NodeTask {
-		if err := c.store.ListItems.RemoveTaskFromProject(args.ProjectID, args.EntityID); err != nil {
-			return nil, err
-		}
 		c.emitListsChanged(args.ProjectID, "")
 	}
 	c.emitNavChanged(args.EntityType, args.EntityID)
@@ -362,6 +423,98 @@ func (c *Core) projectsMemberEntityIds(payload []byte) ([]byte, error) {
 		return nil, err
 	}
 	return json.Marshal(ids)
+}
+
+// ---- area membership (PLAN-areas.md §2) -----------------------------------
+
+// areaMemberArgs identifies a membership filed directly in an area.
+type areaMemberArgs struct {
+	AreaID     string `json:"areaId"`
+	EntityType string `json:"entityType"`
+	EntityID   string `json:"entityId"`
+}
+
+// areasAddMember files a note, task or canvas directly in an area, moving it out of whatever
+// project or area held it.
+func (c *Core) areasAddMember(payload []byte) ([]byte, error) {
+	var args areaMemberArgs
+	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	if _, err := c.store.Areas.Get(args.AreaID); err != nil {
+		return nil, mapStoreErr(err)
+	}
+	left, err := c.taskListProjects(args.EntityType, []string{args.EntityID})
+	if err != nil {
+		return nil, err
+	}
+	m, err := c.store.ProjectMembers.AddToArea(args.AreaID, args.EntityType, args.EntityID)
+	if err != nil {
+		return nil, err
+	}
+	c.emitMoved(left, "")
+	c.emitNavChanged(args.EntityType, args.EntityID)
+	return json.Marshal(m)
+}
+
+// areasAddMembers is the bulk form (multiselect "move to area").
+func (c *Core) areasAddMembers(payload []byte) ([]byte, error) {
+	var args struct {
+		AreaID     string   `json:"areaId"`
+		EntityType string   `json:"entityType"`
+		EntityIDs  []string `json:"entityIds"`
+	}
+	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	if _, err := c.store.Areas.Get(args.AreaID); err != nil {
+		return nil, mapStoreErr(err)
+	}
+	left, err := c.taskListProjects(args.EntityType, args.EntityIDs)
+	if err != nil {
+		return nil, err
+	}
+	members, err := c.store.ProjectMembers.AddManyToArea(args.AreaID, args.EntityType, args.EntityIDs)
+	if err != nil {
+		return nil, err
+	}
+	c.emitMoved(left, "")
+	c.emit(navChangedEvent, nil)
+	c.emitDataChanged("", "")
+	return json.Marshal(members)
+}
+
+func (c *Core) areasRemoveMember(payload []byte) ([]byte, error) {
+	var args areaMemberArgs
+	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	if err := c.store.ProjectMembers.Remove(args.AreaID, args.EntityType, args.EntityID); err != nil {
+		return nil, mapStoreErr(err)
+	}
+	c.emitNavChanged(args.EntityType, args.EntityID)
+	return json.Marshal(map[string]bool{"ok": true})
+}
+
+// areasMembers lists what is filed directly in an area, or — with tree — that plus the content
+// of every project in it, which is what the area's overview rolls up (PLAN-areas.md §3).
+func (c *Core) areasMembers(payload []byte) ([]byte, error) {
+	var args struct {
+		AreaID string `json:"areaId"`
+		Tree   bool   `json:"tree"`
+	}
+	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	list := c.store.ProjectMembers.ListForArea
+	if args.Tree {
+		list = c.store.ProjectMembers.ListForAreaTree
+	}
+	members, err := list(args.AreaID)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(members)
 }
 
 // ---- sidebar -------------------------------------------------------------

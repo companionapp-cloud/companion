@@ -8,6 +8,7 @@ import { Icon, Text, colors, font, type IconName } from '@companion/design-syste
 import type { ProjectTabParamList, RootStackParamList } from '../MobileShell';
 import { ProjectContext } from '../ProjectContext';
 import { NavAction } from '../ui/native';
+import { ContainerOverviewScreen } from './ContainerOverviewScreen';
 import { NotesListScreen } from './NotesListScreen';
 import { TasksListScreen } from './TasksListScreen';
 import { CanvasesListScreen } from './CanvasesListScreen';
@@ -16,13 +17,14 @@ import { ProjectCalendarScreen } from './ProjectCalendarScreen';
 const Tabs = createBottomTabNavigator<ProjectTabParamList>();
 
 const TAB: Record<keyof ProjectTabParamList, { label: string; icon: IconName }> = {
+  ProjectOverview: { label: 'Overview', icon: 'folder' },
   ProjectNotes: { label: 'Notes', icon: 'notes' },
   ProjectTasks: { label: 'Tasks', icon: 'tasks' },
   ProjectCanvases: { label: 'Canvases', icon: 'canvas' },
   ProjectCalendar: { label: 'Calendar', icon: 'calendar' },
 };
 
-/** A project's scoped view: a bottom tab bar (Notes / Tasks / Canvases / Calendar) filtered
+/** A project's scoped view: a bottom tab bar (Overview / Notes / Tasks / Canvases / Calendar) filtered
  * to this project via ProjectContext (PLAN §6.6). The nav bar shows the project name over
  * its area in mono; the tab screens themselves render headerless. */
 export function ProjectScreen({ route }: NativeStackScreenProps<RootStackParamList, 'Project'>) {
@@ -38,7 +40,7 @@ export function ProjectScreen({ route }: NativeStackScreenProps<RootStackParamLi
       headerTitle: () => (
         <View>
           <Text variant="title" numberOfLines={1}>
-            {project?.name ?? 'Project'}
+            {project ? (project.icon ? `${project.icon} ${project.name}` : project.name) : 'Project'}
           </Text>
           {areaName ? (
             <Text variant="mono" tone="tertiary" numberOfLines={1}>
@@ -51,7 +53,7 @@ export function ProjectScreen({ route }: NativeStackScreenProps<RootStackParamLi
         <NavAction icon="settings" label="Project settings" onPress={() => nav.navigate('ProjectSettings', { projectId })} />
       ),
     });
-  }, [nav, project?.name, areaName, projectId]);
+  }, [nav, project, areaName, projectId]);
 
   return (
     <ProjectContext.Provider value={projectId}>
@@ -69,6 +71,7 @@ export function ProjectScreen({ route }: NativeStackScreenProps<RootStackParamLi
           ),
         })}
       >
+        <Tabs.Screen name="ProjectOverview" component={ContainerOverviewScreen} />
         <Tabs.Screen name="ProjectNotes" component={NotesListScreen} />
         <Tabs.Screen name="ProjectTasks" component={TasksListScreen} />
         <Tabs.Screen name="ProjectCanvases" component={CanvasesListScreen} />

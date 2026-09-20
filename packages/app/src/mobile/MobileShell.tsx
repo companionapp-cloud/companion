@@ -10,7 +10,7 @@ import {
   type ParamListBase,
 } from "@react-navigation/native";
 import { DensityProvider, colors } from "@companion/design-system";
-import { NavContext, useNav, type NavLocation, type Navigator, type ProjectSection, type Tab, type TabRef, type ViewId } from "../nav-context";
+import { NavContext, useNav, type AreaSection, type NavLocation, type Navigator, type ProjectSection, type Tab, type TabRef, type ViewId } from "../nav-context";
 import { useCore } from "../CoreContext";
 import { setReminderActivationHandler } from "../reminderNav";
 import { NotesProvider } from "../NotesProvider";
@@ -32,7 +32,7 @@ import { CalendarScreen } from "./CalendarScreens";
 import { ChatListScreen, ChatConversationScreen } from "./ChatScreens";
 import { NotesListScreen, TasksListScreen } from "./ListScreens";
 import { NoteEditorScreen, TaskEditorScreen } from "./EditorScreens";
-import { ProjectScreen } from "./ProjectScreen";
+import { AreaScreen, ProjectScreen } from "./ProjectScreen";
 import { SettingsListScreen, SettingsSectionScreen } from "./SettingsScreens";
 import { GraphScreen } from "./GraphScreen";
 import { HabitsScreen, NotificationsRouteScreen, TrashRouteScreen } from "./UtilityScreens";
@@ -90,6 +90,7 @@ function mobileLinking(): LinkingOptions<ParamListBase> | undefined {
         settingsSection: "settings/:section",
         notifications: "notifications",
         project: "project/:projectId/:section?/:itemId?/:subItemId?",
+        area: "area/:areaId/:section?",
       },
     },
   };
@@ -100,6 +101,7 @@ interface RouteParams {
   date?: string;
   chatId?: string;
   projectId?: string;
+  areaId?: string;
   section?: string;
   itemId?: string;
   subItemId?: string;
@@ -156,14 +158,20 @@ const BACK_FALLBACK: Record<string, string> = {
   settingsSection: "settings",
 };
 
+/** An area holds only notes, tasks and canvases; anything else in the URL is its overview. */
+function asAreaSection(section: string | undefined): AreaSection | undefined {
+  return section === "notes" || section === "tasks" || section === "canvases" ? section : undefined;
+}
+
 // Route → rail-equivalent view id, for the shared Navigator's activeView field.
-const ACTIVE_VIEW: Record<string, ViewId | "project"> = {
+const ACTIVE_VIEW: Record<string, ViewId | "project" | "area"> = {
   note: "notes",
   task: "tasks",
   canvas: "canvases",
   chatConversation: "chat",
   settingsSection: "settings",
   project: "project",
+  area: "area",
   home: "today",
 };
 
@@ -213,6 +221,7 @@ function MobileNavBridge({
       switch (ref.kind) {
         case "view":
           if (ref.view === "today") navigation.navigate("today", ref.date ? { date: ref.date } : undefined);
+          else if (ref.view === "settings" && ref.section) navigation.navigate("settingsSection", { section: ref.section });
           else if (routeName !== ref.view) navigation.navigate(ref.view);
           return;
         case "browse":
@@ -224,6 +233,11 @@ function MobileNavBridge({
           else if (ref.section && ref.itemId) openProjectItem(ref.projectId, ref.section, ref.itemId);
           else push("project", { projectId: ref.projectId, section: ref.section });
           return;
+        case "area":
+          // An item in an area opens as its full-screen editor, like a project's.
+          if (ref.section && ref.itemId) openProjectItem("", ref.section, ref.itemId);
+          else push("area", { areaId: ref.areaId, section: ref.section });
+          return;
         case "note":
           return openNote(ref.id);
         case "task":
@@ -234,7 +248,9 @@ function MobileNavBridge({
     };
 
     const current: NavLocation =
-      routeName === "project"
+      routeName === "area"
+        ? { kind: "area", areaId: params.areaId ?? "", section: asAreaSection(params.section) }
+        : routeName === "project"
         ? {
             kind: "project",
             projectId: params.projectId ?? "",
@@ -252,6 +268,7 @@ function MobileNavBridge({
                   kind: "view",
                   view: (ACTIVE_VIEW[routeName] ?? routeName) as Exclude<ViewId, "notes" | "tasks" | "canvases">,
                   date: routeName === "today" ? params.date : undefined,
+                  section: routeName === "settingsSection" ? params.section : undefined,
                 };
 
     return {
@@ -295,12 +312,23 @@ function MobileNavBridge({
       openProjectItem,
       // A task inside a list opens as the full-screen task editor on this shell.
       openProjectSubItem: (_projectId, _section, _itemId, subItemId) => openTask(subItemId),
+      openArea: (areaId) => push("area", { areaId }),
+      // An item opens as its full-screen editor; a section is a tab of the project's or the
+      // area's screen, so from that screen it is a param change, not another pushed copy.
+      openContainer: (container, section, itemId) => {
+        if (section && itemId) return openProjectItem(container.kind === "project" ? container.id : "", section, itemId);
+        const name = container.kind;
+        const next = container.kind === "area" ? { areaId: container.id, section: asAreaSection(section) } : { projectId: container.id, section };
+        const here = routeName === name && (container.kind === "area" ? params.areaId : params.projectId) === container.id;
+        if (here) navigation.setParams({ section: next.section });
+        else push(name, next);
+      },
     };
-  }, [routeName, params.id, params.projectId, params.section, params.itemId, params.subItemId, state.index, navigation]);
+  }, [routeName, params.id, params.areaId, params.projectId, params.section, params.itemId, params.subItemId, state.index, navigation]);
 
   // Sync on navigation (§5.4), same contract as the desktop Shell. Depend on the stable
   // `trigger`, not the whole `sync` memo (see AppShell for the loop this avoids).
-  const locKey = routeName + (params.id ?? "") + (params.projectId ?? "") + (params.chatId ?? "") + (params.section ?? "");
+  const locKey = routeName + (params.id ?? "") + (params.areaId ?? "") + (params.projectId ?? "") + (params.chatId ?? "") + (params.section ?? "");
   const syncTrigger = useSync().trigger;
   useEffect(() => {
     syncTrigger();
@@ -311,7 +339,7 @@ function MobileNavBridge({
       <MobileReminderBridge />
       <ThingsImportHost />
       <View style={[styles.root, { paddingTop: topInset }]}>
-        <SyncHealthBanner onOpenSettings={() => nav.goView("settings")} />
+        <SyncHealthBanner onOpenSettings={() => nav.openRef({ kind: "view", view: "settings", section: "sync" })} />
         <View style={styles.content}>{children}</View>
       </View>
     </NavContext.Provider>
@@ -375,6 +403,7 @@ export function MobileWebShell({ topInset = 0, notificationScheduler, toolsStora
                         <Nav.Screen name="settingsSection" component={SettingsSectionScreen} />
                         <Nav.Screen name="notifications" component={NotificationsRouteScreen} />
                         <Nav.Screen name="project" component={ProjectScreen} />
+                        <Nav.Screen name="area" component={AreaScreen} />
                       </Nav.Navigator>
                     </NavigationContainer>
                   </CalendarProvider>

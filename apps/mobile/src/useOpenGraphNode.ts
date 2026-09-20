@@ -23,6 +23,10 @@ export function useOpenGraphNode(): (type: string, id: string) => void {
           nav.push('Project', { projectId: ref.projectId });
           return;
         }
+        if (ref.kind === 'area' && !ref.itemId) {
+          nav.push('Area', { areaId: ref.areaId });
+          return;
+        }
         const doc = docOfRef(ref);
         if (doc?.kind === 'note') nav.push('NoteEditor', { id: doc.id });
         else if (doc?.kind === 'task') nav.push('TaskEditor', { id: doc.id });

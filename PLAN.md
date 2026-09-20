@@ -843,24 +843,30 @@ Areas and projects are the app's organizational layer, distinct from archetypes
 (objects say what something *is*; projects say what it's *for*).
 
 - **Areas** are a flat, ordered list ("Health", "Work", "Family"). They render as
-  category headings in the sidebar — they are not nodes, pages, or containers of
-  content, only of projects.
+  category headings in the sidebar and are not graph nodes. An area is a page, and holds
+  notes, tasks and canvases directly as well as projects — see `PLAN-areas.md`, which
+  amends this section.
 - **Projects** render as navigation items under their area's heading, each with two
   live indicators:
   - a **circular progress ring** — fraction of the project's member tasks completed;
   - a **fire icon** that fills bottom-up with color — how well the project's member
     habits' streaks are doing.
-- Membership is edited from either end: a project screen has "add note/task/habit"
-  pickers, and each entity's detail view has a project selector (multi-select).
-  Member entities also appear as `member` edges in the graph view.
+- Membership is edited from either end: a project (or area) page creates content in
+  place, and each entity's detail view has a **Move to** picker. Content lives in ONE
+  container — a project or an area — so filing it moves it (`PLAN-areas.md` §2.1);
+  calendars can still sit in several projects. A project's members also appear as
+  `member` edges in the graph view; an area's don't (areas aren't nodes).
+- Areas and projects open on an **overview** — cover, emoji, description, then cards of
+  their tasks, notes, canvases (and an area's projects) — with their sections as a
+  toolbar beside it (`PLAN-areas.md` §3).
 
 **Sidebar data is one bridge call, computed in core** so every client renders
 identical numbers:
 
 ```
 nav.sidebar -> {
-  areas: [{ id, name, color, projects: [{
-    id, name, color,
+  areas: [{ id, name, color, icon, projects: [{
+    id, name, color, icon,
     taskProgress,   // 0..1: done / (open + done) member tasks, cancelled excluded;
                     //        null if the project has no tasks (ring hidden)
     habitHealth     // 0..1: mean streak-health of member habits; null if none
@@ -883,7 +889,8 @@ nav.sidebar -> {
 **Deletion semantics**: areas and projects delete *immediately* — they never go to the
 Trash (§4.3) and have no `deleting_at`. Deleting an area does not cascade — its projects
 keep their dangling `area_id` and render under an implicit "Unsorted" heading until
-reassigned (same philosophy as dangling wikilinks: tolerate, don't destroy). Deleting a
+reassigned (same philosophy as dangling wikilinks: tolerate, don't destroy); the content
+filed directly in it has its memberships tombstoned, like a deleted project's. Deleting a
 project tombstones its `project_members` rows but never touches the member entities.
 Deleting a **note, task, or habit**, by contrast, moves it to the Trash for 30 days (§4.3);
 its `project_members` rows are left intact so restoring returns it to its projects.
@@ -1170,7 +1177,7 @@ would need a server relay).
   | Area | Area, in Things' order, after existing areas |
   | Project in an area | Project in that area, in Things' order |
   | Project with no area | Project in a **"Things"** area created for them (Companion projects need an area) |
-  | To-dos directly in an area | A project named after the area, inside it (tasks belong to projects, not areas) |
+  | To-dos directly in an area | Tasks filed directly in the area (`PLAN-areas.md` §2) — no project is generated. An area holds no lists, so they keep no manual order |
   | A project's to-dos and headings | One list per project, **"To-dos"**: loose to-dos first, then each heading as a sublist heading with its to-dos, in Things' order (tasks have no order outside lists) |
   | Inbox to-do | Task in no project (**Unsorted tasks**) |
   | When date | `start_at` at local midnight (shows as a date); This Evening → 6pm |

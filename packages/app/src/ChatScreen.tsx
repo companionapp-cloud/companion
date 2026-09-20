@@ -32,6 +32,7 @@ import { OpenEntityContext, OpenEventContext, ThreadLayoutContext } from "./chat
 import { ChatPreview } from "./chat/previews";
 import { previewOf, type Preview } from "./chat/renderTools";
 import { WikiText } from "./chat/WikiText";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { useCore } from "./CoreContext";
 import { useLinkSource } from "./useLinkSource";
 import { useNav } from "./nav-context";
@@ -52,6 +53,7 @@ export function ChatView({
   onOpenEntity,
   onOpenEvent,
   onConfigure,
+  onDelete,
   composer = "bar",
   bottomInset = 0,
 }: {
@@ -63,6 +65,8 @@ export function ChatView({
   /** Called from the empty state's "Set up in Settings" button; each shell routes to its own
    *  Settings → AI screen. When omitted, the empty state shows guidance only. */
   onConfigure?: () => void;
+  /** Deletes this chat, from the trash button in the desktop thread header (after a confirm). */
+  onDelete?: () => void | Promise<void>;
   composer?: "bar" | "floating";
   bottomInset?: number;
 }) {
@@ -86,6 +90,7 @@ export function ChatView({
   const [sendTick, setSendTick] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const floating = composer === "floating";
 
   const scrollRef = useRef<{ scrollToEnd: (o?: { animated?: boolean }) => void } | null>(null);
@@ -105,6 +110,7 @@ export function ChatView({
   }, [chats, chatId]);
   useEffect(() => {
     setLive(null);
+    setConfirmDelete(false);
     reload();
   }, [reload]);
 
@@ -281,6 +287,11 @@ export function ChatView({
                   <Icon name="settings" size={13} color={colors.textSecondary} />
                 </IconButton>
               ) : null}
+              {onDelete ? (
+                <IconButton label="Delete chat" size="sm" disabled={working} onPress={() => setConfirmDelete(true)}>
+                  <Icon name="trash" size={13} color={colors.textSecondary} />
+                </IconButton>
+              ) : null}
             </View>
           ) : null}
 
@@ -362,6 +373,19 @@ export function ChatView({
                 )}
               </View>
             ))}
+
+          {onDelete && confirmDelete ? (
+            <ConfirmDialog
+              title="Delete chat?"
+              message={`“${title || "New chat"}” and its messages will be deleted. This can’t be undone.`}
+              confirmLabel="Delete chat"
+              onConfirm={async () => {
+                await onDelete();
+                setConfirmDelete(false);
+              }}
+              onClose={() => setConfirmDelete(false)}
+            />
+          ) : null}
         </View>
       </ThreadLayoutContext.Provider>
       </OpenEventContext.Provider>
@@ -412,10 +436,12 @@ export function ChatList({
   selectedId?: string | null;
   onSelect: (id: string) => void;
   onNew: () => void;
+  /** Only the "full" variant deletes from its rows; the desktop deletes the selected chat
+   *  from the thread header (ChatView's `onDelete`). */
   onDelete?: (id: string) => void;
-  /** "sidebar" is the desktop list column (dense 24px rows, mono time, hover-revealed
-   *  delete); "full" fills a mobile screen as one grouped card of 60px rows and drops the
-   *  internal header (the stack header already titles it). */
+  /** "sidebar" is the desktop list column (dense 24px rows, mono time); "full" fills a
+   *  mobile screen as one grouped card of 60px rows and drops the internal header (the
+   *  stack header already titles it). */
   variant?: "sidebar" | "full";
 }) {
   if (variant === "full") {
@@ -480,7 +506,7 @@ export function ChatList({
             No chats yet. Start one with ＋.
           </Text>
         ) : (
-          chats.map((c) => <ChatRow key={c.id} chat={c} selected={c.id === selectedId} onSelect={onSelect} onDelete={onDelete} />)
+          chats.map((c) => <ChatRow key={c.id} chat={c} selected={c.id === selectedId} onSelect={onSelect} />)
         )}
       </ScrollView>
     </View>
@@ -488,18 +514,8 @@ export function ChatList({
 }
 
 /** One dense list row. ListRow's trailing slot is text-only, and this row swaps its mono
- *  time for a spinner while a reply generates and for a delete button on hover. */
-function ChatRow({
-  chat,
-  selected,
-  onSelect,
-  onDelete,
-}: {
-  chat: Chat;
-  selected: boolean;
-  onSelect: (id: string) => void;
-  onDelete?: (id: string) => void;
-}) {
+ *  time for a spinner while a reply generates. */
+function ChatRow({ chat, selected, onSelect }: { chat: Chat; selected: boolean; onSelect: (id: string) => void }) {
   const touch = useDensity() === "touch";
   return (
     <Pressable
@@ -512,24 +528,16 @@ function ChatRow({
         selected ? styles.rowSelected : pressed ? styles.rowPressed : hovered ? styles.rowHover : null,
       ]}
     >
-      {({ hovered }: PressState) => (
-        <>
-          <Icon name="chat" size={iconSize.sm} color={selected ? colors.textAccent : colors.textQuaternary} />
-          <Text variant="label" tone={selected ? "accent" : "default"} numberOfLines={1} style={styles.listRowTitle}>
-            {chat.title || "New chat"}
-          </Text>
-          {chat.working ? (
-            <Spinner inline size={iconSize.sm} />
-          ) : onDelete && (hovered || touch) ? (
-            <IconButton label="Delete chat" size={touch ? undefined : "sm"} onPress={() => onDelete(chat.id)}>
-              <Icon name="trash" size={touch ? iconSize.md : iconSize.sm} color={colors.textTertiary} />
-            </IconButton>
-          ) : (
-            <Text variant="mono" tone="quaternary" numberOfLines={1}>
-              {timeAgo(chat.updatedAt)}
-            </Text>
-          )}
-        </>
+      <Icon name="chat" size={iconSize.sm} color={selected ? colors.textAccent : colors.textQuaternary} />
+      <Text variant="label" tone={selected ? "accent" : "default"} numberOfLines={1} style={styles.listRowTitle}>
+        {chat.title || "New chat"}
+      </Text>
+      {chat.working ? (
+        <Spinner inline size={iconSize.sm} />
+      ) : (
+        <Text variant="mono" tone="quaternary" numberOfLines={1}>
+          {timeAgo(chat.updatedAt)}
+        </Text>
       )}
     </Pressable>
   );
@@ -597,7 +605,7 @@ export function ChatsScreen() {
     setCalendarView({ anchorMs: new Date(y, m - 1, d).getTime() });
     nav.goView("calendar");
   };
-  const openSettings = () => nav.goView("settings");
+  const openSettings = () => nav.openRef({ kind: "view", view: "settings", section: "ai" });
 
   // Rendered directly (no Frame) — the AppShell already wraps every screen in a Frame card,
   // so self-wrapping here would produce a card-inside-a-card (double border + gray inset).
@@ -605,7 +613,7 @@ export function ChatsScreen() {
     <EmptyState onConfigure={openSettings} />
   ) : (
     <SplitView
-      aside={<ChatList chats={chats} selectedId={selectedId} onSelect={setSelectedId} onNew={newChat} onDelete={removeChat} />}
+      aside={<ChatList chats={chats} selectedId={selectedId} onSelect={setSelectedId} onNew={newChat} />}
       storageKey="companion.chat.listWidth"
       defaultWidth={220}
       minWidth={180}
@@ -613,7 +621,13 @@ export function ChatsScreen() {
     >
       <View style={styles.detail}>
         {selectedId ? (
-          <ChatView chatId={selectedId} onOpenEntity={onOpen} onOpenEvent={openEvent} onConfigure={openSettings} />
+          <ChatView
+            chatId={selectedId}
+            onOpenEntity={onOpen}
+            onOpenEvent={openEvent}
+            onConfigure={openSettings}
+            onDelete={() => removeChat(selectedId)}
+          />
         ) : (
           <View style={styles.center}>
             <Text variant="caption" tone="tertiary" style={styles.hint}>

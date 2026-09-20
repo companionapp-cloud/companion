@@ -13,8 +13,9 @@ type SidebarProject struct {
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
 	Color        *string  `json:"color,omitempty"`
-	TaskProgress *float64 `json:"taskProgress"` // 0..1: done / (open+done) member tasks; null if none
-	HabitHealth  *float64 `json:"habitHealth"`  // 0..1: mean member-habit streak health; null if none
+	Icon         *string  `json:"icon,omitempty"` // emoji shown in place of the folder glyph
+	TaskProgress *float64 `json:"taskProgress"`   // 0..1: done / (open+done) member tasks; null if none
+	HabitHealth  *float64 `json:"habitHealth"`    // 0..1: mean member-habit streak health; null if none
 }
 
 // SidebarArea is one heading and its projects, in sort order.
@@ -22,6 +23,7 @@ type SidebarArea struct {
 	ID       string           `json:"id"`
 	Name     string           `json:"name"`
 	Color    *string          `json:"color,omitempty"`
+	Icon     *string          `json:"icon,omitempty"`
 	Projects []SidebarProject `json:"projects"`
 }
 
@@ -57,7 +59,7 @@ func (s *Store) Sidebar() (*SidebarData, error) {
 	// Always non-nil so it marshals to [] not null (the UI maps/reads .length on it).
 	unsorted := []SidebarProject{}
 	for _, p := range projects {
-		sp := SidebarProject{ID: p.ID, Name: p.Name, Color: p.Color, TaskProgress: progress[p.ID]}
+		sp := SidebarProject{ID: p.ID, Name: p.Name, Color: p.Color, Icon: p.Icon, TaskProgress: progress[p.ID]}
 		if live[p.AreaID] {
 			byArea[p.AreaID] = append(byArea[p.AreaID], sp)
 		} else {
@@ -71,7 +73,7 @@ func (s *Store) Sidebar() (*SidebarData, error) {
 		if ps == nil {
 			ps = []SidebarProject{} // non-nil for the same reason
 		}
-		out.Areas = append(out.Areas, SidebarArea{ID: a.ID, Name: a.Name, Color: a.Color, Projects: ps})
+		out.Areas = append(out.Areas, SidebarArea{ID: a.ID, Name: a.Name, Color: a.Color, Icon: a.Icon, Projects: ps})
 	}
 	return out, nil
 }

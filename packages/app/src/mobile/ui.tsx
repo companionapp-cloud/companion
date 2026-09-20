@@ -38,19 +38,30 @@ export function Card({ children }: { children: ReactNode }) {
 
 /** A small uppercase mono section label (e.g. an area's name), sitting above a card.
  * `trailing` hosts the section's own actions across from the label. */
-export function SectionLabel({ children, trailing }: { children: ReactNode; trailing?: ReactNode }) {
-  if (!trailing) {
+export function SectionLabel({ children, trailing, onPress }: { children: ReactNode; trailing?: ReactNode; onPress?: () => void }) {
+  if (!trailing && !onPress) {
     return (
       <Text variant="eyebrow" tone="tertiary" numberOfLines={1} style={styles.sectionLabel}>
         {children}
       </Text>
     );
   }
+  const label = (
+    <Text variant="eyebrow" tone="tertiary" numberOfLines={1} style={onPress ? undefined : styles.sectionRowLabel}>
+      {children}
+    </Text>
+  );
   return (
     <View style={styles.sectionRow}>
-      <Text variant="eyebrow" tone="tertiary" numberOfLines={1} style={styles.sectionRowLabel}>
-        {children}
-      </Text>
+      {/* A tappable heading opens what it names (an area's page); the chevron says so. */}
+      {onPress ? (
+        <Pressable onPress={onPress} aria-label={typeof children === "string" ? `Open ${children}` : "Open"} style={styles.sectionRowPress}>
+          {label}
+          <Icon name="chevronRight" size={12} color={colors.textQuaternary} />
+        </Pressable>
+      ) : (
+        label
+      )}
       {trailing}
     </View>
   );
@@ -295,6 +306,7 @@ const styles = StyleSheet.create({
     minHeight: 38,
   },
   sectionRowLabel: { flex: 1, minWidth: 0 },
+  sectionRowPress: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: space.xs, alignSelf: "stretch" },
   tile: { width: TILE, height: TILE, borderRadius: radius.lg, alignItems: "center", justifyContent: "center", flexShrink: 0 },
   tileAccent: { backgroundColor: colors.accentSoft },
   tileNeutral: { backgroundColor: colors.surfaceSunken },

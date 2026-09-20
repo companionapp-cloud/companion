@@ -173,6 +173,7 @@ export function HomeScreen() {
         {sidebar.areas.map((area) => (
           <View key={area.id}>
             <SectionLabel
+              onPress={() => nav.openArea(area.id)}
               trailing={
                 <>
                   {/* Areas are only deletable once empty (PLAN §6.6). */}
@@ -194,7 +195,7 @@ export function HomeScreen() {
                 </>
               }
             >
-              {area.name}
+              {area.icon ? `${area.icon} ${area.name}` : area.name}
             </SectionLabel>
             {area.projects.length > 0 || addingProjectFor === area.id ? (
               <Card>

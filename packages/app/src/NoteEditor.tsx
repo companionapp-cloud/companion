@@ -180,7 +180,7 @@ export function NoteEditor({
           edited {timeAgo(note.updatedAt)}
         </Text>
         <View style={{ flex: 1 }} />
-        <IconButton label="Add to projects" size={btn} onPress={() => setShowProjects(true)}>
+        <IconButton label="Move to an area or project" size={btn} onPress={() => setShowProjects(true)}>
           <Icon name="folder" size={glyph} color={colors.textSecondary} />
         </IconButton>
         <IconButton

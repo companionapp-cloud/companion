@@ -126,3 +126,73 @@ func TestProjectDeleteContentMode(t *testing.T) {
 		}
 	})
 }
+
+// Content filed directly in an area is reachable over the bridge, moves when filed elsewhere,
+// and falls back to Unsorted when its area is deleted (PLAN-areas.md §2).
+func TestAreaMembersOverBridge(t *testing.T) {
+	c, _ := newTestCore(t)
+	areaID := createArea(t, c, "Health")
+	projectID := createProject(t, c, areaID, "Run a 10k")
+	noteOut, err := c.Invoke("notes.create", []byte(`{"title":"Training log"}`))
+	if err != nil {
+		t.Fatalf("notes.create: %v", err)
+	}
+	var note domain.Note
+	if err := json.Unmarshal(noteOut, &note); err != nil {
+		t.Fatalf("decode note: %v", err)
+	}
+	member := `{"areaId":"` + areaID + `","entityType":"note","entityId":"` + note.ID + `"}`
+	if _, err := c.Invoke("areas.addMember", []byte(member)); err != nil {
+		t.Fatalf("areas.addMember: %v", err)
+	}
+	if _, err := c.Invoke("areas.addMember", []byte(`{"areaId":"`+areaID+`","entityType":"calendar","entityId":"x"}`)); err == nil {
+		t.Error("an area accepted a calendar over the bridge")
+	}
+
+	members := func(method, payload string) []domain.ProjectMember {
+		t.Helper()
+		out, err := c.Invoke(method, []byte(payload))
+		if err != nil {
+			t.Fatalf("%s: %v", method, err)
+		}
+		var ms []domain.ProjectMember
+		if err := json.Unmarshal(out, &ms); err != nil {
+			t.Fatalf("decode members: %v", err)
+		}
+		return ms
+	}
+	if ms := members("areas.members", `{"areaId":"`+areaID+`"}`); len(ms) != 1 || ms[0].ContainerType != domain.ContainerArea {
+		t.Fatalf("area members = %+v", ms)
+	}
+
+	// Filing it in the project moves it out of the area; the tree still rolls it up.
+	if _, err := c.Invoke("projects.addMember", []byte(`{"projectId":"`+projectID+`","entityType":"note","entityId":"`+note.ID+`"}`)); err != nil {
+		t.Fatalf("projects.addMember: %v", err)
+	}
+	if ms := members("areas.members", `{"areaId":"`+areaID+`"}`); len(ms) != 0 {
+		t.Errorf("area still holds the note after it moved: %+v", ms)
+	}
+	if ms := members("areas.members", `{"areaId":"`+areaID+`","tree":true}`); len(ms) != 1 || ms[0].ProjectID != projectID {
+		t.Errorf("area tree = %+v, want the project's note", ms)
+	}
+	if ms := members("projects.forEntity", `{"entityType":"note","entityId":"`+note.ID+`"}`); len(ms) != 1 {
+		t.Errorf("note memberships = %+v, want exactly one", ms)
+	}
+
+	// Back in the area; deleting the (project-less) area unfiles it without trashing it.
+	if _, err := c.Invoke("areas.addMember", []byte(member)); err != nil {
+		t.Fatalf("areas.addMember (back): %v", err)
+	}
+	if _, err := c.Invoke("projects.delete", []byte(`{"id":"`+projectID+`"}`)); err != nil {
+		t.Fatalf("projects.delete: %v", err)
+	}
+	if _, err := c.Invoke("areas.delete", []byte(`{"id":"`+areaID+`"}`)); err != nil {
+		t.Fatalf("areas.delete: %v", err)
+	}
+	if ms := members("projects.forEntity", `{"entityType":"note","entityId":"`+note.ID+`"}`); len(ms) != 0 {
+		t.Errorf("note still filed after its area was deleted: %+v", ms)
+	}
+	if _, err := c.Invoke("notes.get", []byte(`{"id":"`+note.ID+`"}`)); err != nil {
+		t.Errorf("note should survive its area's deletion: %v", err)
+	}
+}

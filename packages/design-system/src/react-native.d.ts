@@ -137,6 +137,13 @@ declare module "react-native" {
   export const Pressable: ComponentType<PressableProps>;
   export const ActivityIndicator: ComponentType<{ size?: "small" | "large"; color?: string }>;
   export const Modal: ComponentType<ModalProps>;
+  // Cover images on area/project pages (PLAN-areas.md §1): a URL (blob:, data: or file).
+  export const Image: ComponentType<{
+    source: { uri: string };
+    style?: StyleProp<ImageStyle>;
+    resizeMode?: "cover" | "contain" | "stretch" | "center";
+    accessibilityLabel?: string;
+  }>;
   export function FlatList<T>(props: FlatListProps<T>): ReactNode;
 
   export function useWindowDimensions(): { width: number; height: number; scale: number; fontScale: number };

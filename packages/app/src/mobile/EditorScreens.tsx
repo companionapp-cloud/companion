@@ -67,7 +67,7 @@ export function NoteEditorScreen() {
           title={note.title || "Untitled"}
           right={
             <>
-              <NavAction icon="folder" label="Add to projects" onPress={() => setShowProjects(true)} />
+              <NavAction icon="folder" label="Move to an area or project" onPress={() => setShowProjects(true)} />
               <NavAction
                 icon="pen"
                 label={drawing ? "Stop drawing" : "Draw on note"}
@@ -161,7 +161,7 @@ export function TaskEditorScreen() {
           title="Task"
           right={
             <>
-              <NavAction icon="folder" label="Add to projects" onPress={() => setShowProjects(true)} />
+              <NavAction icon="folder" label="Move to an area or project" onPress={() => setShowProjects(true)} />
               <NavAction icon="graph" label={showGraph ? "Show task" : "Show task graph"} active={showGraph} onPress={() => setShowGraph((v) => !v)} />
               <NavAction icon="trash" label="Delete task" onPress={() => setConfirmDelete(true)} />
             </>
@@ -184,7 +184,7 @@ export function TaskEditorScreen() {
             if (ref.type === "task" || ref.type === "note") nav.openInNewTab({ kind: ref.type, id: ref.id });
             else if (ref.type === "canvas") nav.openCanvas(ref.id);
           }}
-          onConnectSync={() => nav.goView("settings")}
+          onConnectSync={() => nav.openRef({ kind: "view", view: "settings", section: "sync" })}
         />
       )}
       {showProjects ? <MembershipPicker entityType="task" entityId={task.id} onClose={() => setShowProjects(false)} /> : null}

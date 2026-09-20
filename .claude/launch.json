@@ -132,6 +132,22 @@
       ],
       "port": 5341,
       "autoPort": false
+    },
+    {
+      "name": "web-areas",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@companion/web",
+        "--",
+        "--port",
+        "5352",
+        "--strictPort"
+      ],
+      "port": 5352,
+      "autoPort": false
     }
   ]
 }

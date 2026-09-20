@@ -38,7 +38,9 @@ func write(ctx context.Context, st *store.Store, p *plan, progress Progress) (*S
 		}
 		return err
 	}
-	createTask := func(t *planTask, projectID string) error {
+	// createTask creates a to-do and files it where it lived in Things: in a project, directly
+	// in an area (an area's own to-dos — PLAN-areas.md §2), or nowhere (the Inbox).
+	createTask := func(t *planTask, projectID, areaID string) error {
 		created, err := st.Tasks.Create(store.CreateTaskInput{
 			Title: t.title, NotesMD: t.notes, Status: t.status, StartAt: t.startAt, DueAt: t.dueAt,
 			Reminders: t.reminders, RepeatRule: t.repeatRule, CompletedAt: t.completed,
@@ -52,8 +54,13 @@ func write(ctx context.Context, st *store.Store, p *plan, progress Progress) (*S
 		} else {
 			sum.Tasks++
 		}
-		if projectID != "" {
+		switch {
+		case projectID != "":
 			if _, err := st.ProjectMembers.Add(projectID, domain.NodeTask, t.id); err != nil {
+				return err
+			}
+		case areaID != "":
+			if _, err := st.ProjectMembers.AddToArea(areaID, domain.NodeTask, t.id); err != nil {
 				return err
 			}
 		}
@@ -72,6 +79,9 @@ func write(ctx context.Context, st *store.Store, p *plan, progress Progress) (*S
 			sum.Areas++
 			return nil
 		})
+		for _, t := range a.own {
+			add("tasks", func() error { return createTask(t, "", a.id) })
+		}
 		for _, pp := range a.projects {
 			add("projects", func() error {
 				created, err := st.Projects.Create(store.CreateProjectInput{AreaID: a.id, Name: pp.name})
@@ -99,7 +109,7 @@ func write(ctx context.Context, st *store.Store, p *plan, progress Progress) (*S
 				return err
 			})
 			for _, t := range pp.members {
-				add("tasks", func() error { return createTask(t, pp.id) })
+				add("tasks", func() error { return createTask(t, pp.id, "") })
 			}
 			if len(pp.list) > 0 {
 				add("lists", func() error {
@@ -127,12 +137,15 @@ func write(ctx context.Context, st *store.Store, p *plan, progress Progress) (*S
 		}
 	}
 	for _, t := range p.unfiled {
-		add("tasks", func() error { return createTask(t, "") })
+		add("tasks", func() error { return createTask(t, "", "") })
 	}
 	// Links between to-dos and projects (things:///show?id=…) become wikilinks once every
 	// target has a Companion id.
 	targets := linkTargets(p)
 	for _, pa := range p.areas {
+		for _, t := range pa.own {
+			addLinkStep(add, st, t, targets, skip)
+		}
 		for _, pp := range pa.projects {
 			if strings.Contains(pp.note, "things:///") {
 				add("links", func() error {
@@ -206,6 +219,9 @@ func linkTargets(p *plan) map[string]linkTarget {
 		out[t.thingsID] = linkTarget{typ: domain.NodeTask, title: orDefault(t.title, "Untitled to-do"), id: &t.id}
 	}
 	for _, pa := range p.areas {
+		for _, t := range pa.own {
+			addTask(t)
+		}
 		for _, pp := range pa.projects {
 			if pp.thingsID != "" {
 				out[pp.thingsID] = linkTarget{typ: domain.NodeProject, title: pp.name, id: &pp.id}

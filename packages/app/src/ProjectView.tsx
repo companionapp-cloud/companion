@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Pressable, ScrollView, View } from "react-native";
-import type { Canvas, Note, ProjectMember, RepeatingTask, Task } from "@companion/core-bridge";
+import type { Area, Canvas, Note, Project, ProjectMember, RepeatingTask, Task } from "@companion/core-bridge";
 import {
-  Button,
   Center,
   Icon,
   IconButton,
@@ -11,7 +10,6 @@ import {
   ProgressRing,
   SplitView,
   Text,
-  TextField,
   colors,
   control,
   icon,
@@ -22,16 +20,15 @@ import {
   transition,
   type PressState,
 } from "@companion/design-system";
-import { useNav, type ProjectSection } from "./nav-context";
+import { containerOfLocation, useNav, type ContainerRef, type ProjectSection } from "./nav-context";
 import { useToolVisibility, type ToolId } from "./ToolVisibilityProvider";
-import { useCore } from "./CoreContext";
 import { useProjects } from "./ProjectsProvider";
 import { useNotes } from "./NotesProvider";
 import { useTasks, filterTasksByDue } from "./TasksProvider";
 import { ListFilterMenu } from "./ListFilterMenu";
+import { ListSectionFold } from "./ListSectionFold";
 import { NoteEditor } from "./NoteEditor";
 import { TaskEditor, TaskRow } from "./TaskEditor";
-import { DeleteProjectDialog } from "./DeleteProjectDialog";
 import { repeatSubtitle } from "./repeat";
 import { useMultiSelect, pressMods } from "./MultiSelectProvider";
 import { SelectionStack } from "./SelectionStack";
@@ -45,6 +42,8 @@ import { CanvasesList } from "./canvas/CanvasesList";
 import { CanvasPane } from "./canvas/CanvasPane";
 import { CalendarScreen } from "./CalendarScreen";
 import { ProjectCalendarsColumn } from "./ProjectCalendars";
+import { ContainerHome, type TaskListFilter } from "./ContainerHome";
+import { useContainerContent } from "./useContainerContent";
 
 const SECTIONS: { id: ProjectSection; label: string; tool: ToolId }[] = [
   { id: "notes", label: "Notes", tool: "notes" },
@@ -56,91 +55,56 @@ const SECTIONS: { id: ProjectSection; label: string; tool: ToolId }[] = [
   { id: "habits", label: "Habits", tool: "habits" },
 ];
 const SECTION_LABEL: Record<ProjectSection, string> = { notes: "Notes", tasks: "Tasks", lists: "Lists", canvases: "Canvases", calendars: "Calendars", habits: "Habits" };
+/** An area holds notes, tasks and canvases — never lists or calendars (PLAN-areas.md §2). */
+const AREA_SECTIONS = new Set<ProjectSection>(["notes", "tasks", "canvases"]);
 
-/** The project content-details view (PLAN §6.6), rendered in the main content area (not a
- * modal): a 32px header (name, task progress, settings), a row of section chips, then a
- * split of that section's dense list beside the selected item's editor. Nothing is selected
- * on the user's behalf — a section opens on the empty state, and switching section drops
- * the selection. Every level is a deep-linkable URL: /project/<id>[/<section>[/<itemId>]];
- * the bare project URL shows its first section. */
+/** The page a project — or an area — opens on (PLAN §6.6, PLAN-areas.md §3), rendered in the
+ * main content area (not a modal): a 32px header (icon, name, task progress), a toolbar of
+ * chips — Overview, then the container's sections — and under it either the full-width
+ * overview page or a split of that section's dense list beside the selected item's editor.
+ * Nothing is selected on the user's behalf — a section opens on the empty state, and
+ * switching section drops the selection. Every level is a deep-linkable URL:
+ * /project/<id>[/<section>[/<itemId>]] and /area/<id>[/<section>[/<itemId>]]; the bare URL is
+ * the overview.
+ *
+ * An area's sections roll up: they list what is filed directly in the area AND what its
+ * projects hold (each such row names its project), the same set its overview summarizes. */
 export function ProjectView() {
   const nav = useNav();
-  const { core } = useCore();
-  const { projects, membershipsForProject } = useProjects();
-  const notesStore = useNotes();
-  const tasksStore = useTasks();
-  // Hiding a tool in Settings › Tools also drops its project section from the chips.
+  const { projects, areas } = useProjects();
+  // Hiding a tool in Settings › Tools also drops its section from the chips.
   const { hidden } = useToolVisibility();
   const loc = nav.current;
-  // The project's settings page (name, area, delete) takes over the body while open.
-  const [showSettings, setShowSettings] = useState(false);
+  const container = containerOfLocation(loc);
+  const containerKind = container?.kind;
+  const containerId = container?.id ?? "";
+  // Lives here, not in the list column, so an overview card's "View all" can open the tasks
+  // section already narrowed (unsorted, upcoming).
+  const [taskFilter, setTaskFilter] = useState<TaskListFilter>("all");
 
-  // A project's live memberships, kept fresh as they change locally or via sync.
-  const projectId = loc.kind === "project" ? loc.projectId : "";
-  const [members, setMembers] = useState<ProjectMember[]>([]);
-  useEffect(() => {
-    if (!projectId) return;
-    let cancelled = false;
-    const load = () => membershipsForProject(projectId).then((rows) => !cancelled && setMembers(rows));
-    void load();
-    const offNav = core.on("nav.changed", () => void load());
-    const offData = core.on("data.changed", () => void load());
-    return () => {
-      cancelled = true;
-      offNav();
-      offData();
-    };
-  }, [projectId, membershipsForProject, core]);
+  const { members, notes, tasks, seeds, canvases, projectOf } = useContainerContent(container);
 
-  const noteMembers = useMemo(() => members.filter((m) => m.entityType === "note"), [members]);
-  const notes = useMemo(
-    () => noteMembers.map((m) => notesStore.byId(m.entityId)).filter((n): n is Note => !!n),
-    [noteMembers, notesStore],
-  );
-  const taskMembers = useMemo(() => members.filter((m) => m.entityType === "task"), [members]);
-  // Actionable member tasks. Repeating-task seeds are members too but live in `seeds`
-  // (excluded from the actionable list), so they're resolved separately below and shown in
-  // their own "Repeating" section — matching the root task list (§6.4).
-  const tasks = useMemo(
-    () => taskMembers.map((m) => tasksStore.byId(m.entityId)).filter((t): t is Task => !!t),
-    [taskMembers, tasksStore],
-  );
-  const seeds = useMemo(
-    () => taskMembers.map((m) => tasksStore.seedById(m.entityId)).filter((s): s is RepeatingTask => !!s),
-    [taskMembers, tasksStore],
-  );
-  const canvasesStore = useCanvases();
-  const canvasMembers = useMemo(() => members.filter((m) => m.entityType === "canvas"), [members]);
-  const canvases = useMemo(
-    () => canvasMembers.map((m) => canvasesStore.byId(m.entityId)).filter((c): c is Canvas => !!c),
-    [canvasMembers, canvasesStore],
-  );
-
-  const projectLists = useProjectLists(projectId);
+  const projectLists = useProjectLists(containerKind === "project" ? containerId : "");
   // Calendars filed in the project: single calendars and whole accounts.
   const calendarCount = useMemo(
     () => members.filter((m) => m.entityType === "calendar" || m.entityType === "calendar_account").length,
     [members],
   );
 
-  // Navigating anywhere inside the project (a chip, a row, another project) leaves settings.
-  const locSection = loc.kind === "project" ? loc.section : undefined;
-  const locItem = loc.kind === "project" ? loc.itemId : undefined;
-  useEffect(() => setShowSettings(false), [projectId, locSection, locItem]);
-
-  if (loc.kind !== "project") return null;
-  const project = projects.find((p) => p.id === loc.projectId);
-  if (!project) {
+  if (!container) return null;
+  const page: Project | Area | undefined =
+    container.kind === "area" ? areas.find((a) => a.id === container.id) : projects.find((p) => p.id === container.id);
+  if (!page) {
     return (
       <Center>
-        <Text tone="tertiary">This project is gone.</Text>
+        <Text tone="tertiary">This {container.kind} is gone.</Text>
       </Center>
     );
   }
 
-  const sections = SECTIONS.filter((s) => !hidden.has(s.tool));
-  // The bare project URL lands on the first section's list (with nothing selected).
-  const section: ProjectSection | undefined = loc.section ?? sections[0]?.id;
+  const sections = SECTIONS.filter((s) => !hidden.has(s.tool) && (container.kind === "project" || AREA_SECTIONS.has(s.id)));
+  // No section in the URL is the overview page.
+  const section: ProjectSection | undefined = sections.some((s) => s.id === container.section) ? container.section : undefined;
   const doneCount = tasks.filter((t) => t.status === "done").length;
   // The tasks chip counts what's left to do, not everything ever added to the project.
   const counts: Partial<Record<ProjectSection, number>> = {
@@ -154,9 +118,13 @@ export function ProjectView() {
   return (
     <View style={styles.root}>
       <View style={styles.header}>
-        <Icon name="folder" size={icon.md} color={project.color ?? colors.textSecondary} />
+        {page.icon ? (
+          <Text style={styles.headerEmoji}>{page.icon}</Text>
+        ) : (
+          <Icon name="folder" size={icon.md} color={page.color ?? colors.textSecondary} />
+        )}
         <Text variant="title" numberOfLines={1} style={{ flexShrink: 1 }}>
-          {project.name}
+          {page.name}
         </Text>
         {tasks.length ? (
           <>
@@ -166,41 +134,63 @@ export function ProjectView() {
             </Text>
           </>
         ) : null}
-        <View style={{ flex: 1 }} />
-        <IconButton label="Project settings" size="sm" active={showSettings || !section} onPress={() => setShowSettings((v) => !v)}>
-          <Icon name="settings" size={13} color={showSettings ? colors.textAccent : colors.textSecondary} />
-        </IconButton>
       </View>
 
-      {sections.length ? (
-        <View style={styles.chipRow}>
-          {sections.map((s) => (
-            <SectionChip
-              key={s.id}
-              label={s.label}
-              count={counts[s.id]}
-              selected={!showSettings && s.id === section}
-              onPress={() => {
-                setShowSettings(false);
-                // Re-picking the open section keeps its selection; a different one clears it.
-                if (s.id !== section || !loc.section) nav.openProjectSection(project.id, s.id);
-              }}
-            />
-          ))}
-        </View>
-      ) : null}
+      <View style={styles.chipRow}>
+        <SectionChip label="Overview" selected={!section} onPress={() => section && nav.openContainer(container)} />
+        {sections.map((s) => (
+          <SectionChip
+            key={s.id}
+            label={s.label}
+            count={counts[s.id]}
+            selected={s.id === section}
+            onPress={() => {
+              // Re-picking the open section keeps its selection; a different one clears it.
+              if (s.id === section) return;
+              setTaskFilter("all");
+              nav.openContainer(container, s.id);
+            }}
+          />
+        ))}
+      </View>
 
-      {showSettings || !section ? (
-        <ProjectHome notes={notes} />
+      {!section ? (
+        <ContainerHome
+          container={container}
+          page={page}
+          notes={notes}
+          tasks={tasks}
+          canvases={canvases}
+          members={members}
+          projectOf={projectOf}
+          sections={sections.map((s) => s.id)}
+          onViewTasks={(filter) => {
+            setTaskFilter(filter);
+            nav.openContainer(container, "tasks");
+          }}
+        />
       ) : (
         <SplitView
           storageKey="companion.project.listWidth"
           defaultWidth={layout.listW}
           minWidth={200}
           maxWidth={440}
-          aside={<ListColumn section={section} notes={notes} tasks={tasks} seeds={seeds} canvases={canvases} />}
+          aside={
+            <ListColumn
+              container={container}
+              section={section}
+              notes={notes}
+              tasks={tasks}
+              seeds={seeds}
+              canvases={canvases}
+              members={members}
+              projectOf={projectOf}
+              taskFilter={taskFilter}
+              onTaskFilter={setTaskFilter}
+            />
+          }
         >
-          <DetailPane section={section} />
+          <DetailPane container={container} section={section} />
         </SplitView>
       )}
     </View>
@@ -233,31 +223,63 @@ function SectionChip({ label, count, selected, onPress }: { label: string; count
 }
 
 /** The list column: the open section's dense browse list (the chips above pick which). */
-function ListColumn({ section, notes, tasks, seeds, canvases }: { section: ProjectSection; notes: Note[]; tasks: Task[]; seeds: RepeatingTask[]; canvases: Canvas[] }) {
+function ListColumn({
+  container,
+  section,
+  notes,
+  tasks,
+  seeds,
+  canvases,
+  members,
+  projectOf,
+  taskFilter,
+  onTaskFilter: setTaskFilter,
+}: {
+  container: ContainerRef & { itemId?: string; subItemId?: string };
+  section: ProjectSection;
+  notes: Note[];
+  tasks: Task[];
+  seeds: RepeatingTask[];
+  canvases: Canvas[];
+  members: ProjectMember[];
+  /** In an area: the project each rolled-up item lives in, by entity id. */
+  projectOf: Map<string, string>;
+  taskFilter: TaskListFilter;
+  onTaskFilter: (filter: TaskListFilter) => void;
+}) {
   const nav = useNav();
   const notesStore = useNotes();
   const tasksStore = useTasks();
   const canvasesStore = useCanvases();
-  const { addMember } = useProjects();
+  const { addMember, addAreaMember } = useProjects();
   const ms = useMultiSelect();
-  const loc = nav.current;
+  const inArea = container.kind === "area";
+  const where = inArea ? "area" : "project";
+  // New content is filed where it was made: in the project, or directly in the area.
+  const file = (entityType: "note" | "task" | "canvas", id: string) =>
+    inArea ? addAreaMember(container.id, entityType, id) : addMember(container.id, entityType, id);
 
-  // Per-section list controls: a search box narrows the notes list, a due-date filter
-  // narrows the tasks list (all / upcoming / overdue). Local to this column.
+  // Per-section list controls: a search box narrows the notes list, a filter narrows the
+  // tasks list (all / unsorted / upcoming / overdue).
   const [noteQuery, setNoteQuery] = useState("");
-  const [taskFilter, setTaskFilter] = useState<"all" | "upcoming" | "overdue">("all");
   // The project's lists, so the tasks header dropdown can jump straight into one.
-  const projectLists = useProjectLists(loc.kind === "project" ? loc.projectId : "");
+  const projectLists = useProjectLists(inArea ? "" : container.id);
   const [taskDraft, setTaskDraft] = useState("");
+  // The tasks filed directly in the area — in none of its projects (PLAN-areas.md §3).
+  const directIds = useMemo(
+    () => new Set(members.filter((m) => m.containerType === "area").map((m) => m.entityId)),
+    [members],
+  );
   const filteredNotes = useMemo(() => {
     const q = noteQuery.trim().toLowerCase();
     if (!q) return notes;
     return notes.filter((n) => n.title.toLowerCase().includes(q) || n.contentMd.toLowerCase().includes(q));
   }, [notes, noteQuery]);
-  const filteredTasks = useMemo(
-    () => (taskFilter === "all" ? tasks : filterTasksByDue(tasks, taskFilter)),
-    [tasks, taskFilter],
-  );
+  const filteredTasks = useMemo(() => {
+    if (taskFilter === "all") return tasks;
+    if (taskFilter === "unsorted") return tasks.filter((t) => directIds.has(t.id));
+    return filterTasksByDue(tasks, taskFilter);
+  }, [tasks, taskFilter, directIds]);
   // Completed tasks drop to their own section at the bottom, as in the root task list (§6.4).
   const openTasks = useMemo(() => filteredTasks.filter((t) => t.status !== "done"), [filteredTasks]);
   const doneTasks = useMemo(() => filteredTasks.filter((t) => t.status === "done"), [filteredTasks]);
@@ -266,16 +288,17 @@ function ListColumn({ section, notes, tasks, seeds, canvases }: { section: Proje
   // stay single-select). Scoped per project+section so switching lists drops the selection.
   // Registers the filtered order so range-select matches what's shown. Only while this tab
   // is the one on screen — background tabs stay mounted and would fight for the scope.
-  const secProjectId = loc.kind === "project" ? loc.projectId : "";
+  const scope = `${container.kind}:${container.id}`;
   const secSection = section;
   useEffect(() => {
     if (!nav.visible) return;
-    if (secSection === "notes") ms.register(`project:${secProjectId}:notes`, "note", filteredNotes.map((n) => n.id));
-    else if (secSection === "tasks") ms.register(`project:${secProjectId}:tasks`, "task", [...openTasks, ...doneTasks].map((t) => t.id));
-  }, [ms.register, secProjectId, secSection, filteredNotes, openTasks, doneTasks, nav.visible]);
+    if (secSection === "notes") ms.register(`${scope}:notes`, "note", filteredNotes.map((n) => n.id));
+    else if (secSection === "tasks") ms.register(`${scope}:tasks`, "task", [...openTasks, ...doneTasks].map((t) => t.id));
+  }, [ms.register, scope, secSection, filteredNotes, openTasks, doneTasks, nav.visible]);
 
-  if (loc.kind !== "project") return null;
-  const { projectId, itemId, subItemId } = loc;
+  const projectId = container.id;
+  const { itemId, subItemId } = container;
+  const openItem = (sec: ProjectSection, id: string) => nav.openContainer(container, sec, id);
 
   // The lists section has its own column (index of lists → one list's rows).
   if (section === "lists") {
@@ -291,12 +314,12 @@ function ListColumn({ section, notes, tasks, seeds, canvases }: { section: Proje
       <CanvasesList
         canvases={canvases}
         selectedId={itemId ?? null}
-        onSelect={(id) => nav.openProjectItem(projectId, "canvases", id)}
+        onSelect={(id) => openItem("canvases", id)}
         onCreate={() => {
           void (async () => {
             const c = await canvasesStore.create();
-            await addMember(projectId, "canvas", c.id);
-            nav.openProjectItem(projectId, "canvases", c.id);
+            await file("canvas", c.id);
+            openItem("canvases", c.id);
           })();
         }}
       />
@@ -305,13 +328,13 @@ function ListColumn({ section, notes, tasks, seeds, canvases }: { section: Proje
 
   const createNoteInProject = async () => {
     const note = await notesStore.create();
-    await addMember(projectId, "note", note.id);
-    nav.openProjectItem(projectId, "notes", note.id);
+    await file("note", note.id);
+    openItem("notes", note.id);
   };
   const createTaskInProject = async (title?: string) => {
     const task = await tasksStore.create({ title: title?.trim() || "Untitled task" });
-    await addMember(projectId, "task", task.id);
-    nav.openProjectItem(projectId, "tasks", task.id);
+    await file("task", task.id);
+    openItem("tasks", task.id);
   };
   const addTaskFromDraft = async () => {
     const title = taskDraft;
@@ -328,15 +351,17 @@ function ListColumn({ section, notes, tasks, seeds, canvases }: { section: Proje
             root task list; other sections keep the plain label. */}
         {section === "tasks" ? (
           <View style={{ flex: 1 }}>
-            <ListFilterMenu<"all" | "upcoming" | "overdue" | `list:${string}`>
+            <ListFilterMenu<TaskListFilter | `list:${string}`>
               value={taskFilter}
               onChange={(v) => {
                 // List entries jump into that list's ordered view; the rest filter in place.
                 if (v.startsWith("list:")) nav.openProjectItem(projectId, "lists", v.slice(5));
-                else setTaskFilter(v as "all" | "upcoming" | "overdue");
+                else setTaskFilter(v as TaskListFilter);
               }}
               options={[
                 { value: "all", label: "All tasks" },
+                // An area's own tasks, as opposed to the ones its projects hold.
+                ...(inArea ? [{ value: "unsorted" as const, label: "Unsorted tasks" }] : []),
                 { value: "upcoming", label: "Upcoming tasks" },
                 { value: "overdue", label: "Overdue tasks" },
                 ...projectLists.map((l) => ({ value: `list:${l.id}` as const, label: `List: ${l.name}` })),
@@ -395,10 +420,11 @@ function ListColumn({ section, notes, tasks, seeds, canvases }: { section: Proje
                   key={n.id}
                   icon={<Icon name={n.date ? "today" : "file"} size={icon.sm} color={selected ? colors.textAccent : colors.textQuaternary} />}
                   title={n.title || "Untitled"}
+                  subtitle={projectOf.get(n.id)}
                   trailing={timeAgo(n.updatedAt)}
                   selected={selected}
                   onPress={(e) => {
-                    if (!ms.press(n.id, pressMods(e))) nav.openProjectItem(projectId, "notes", n.id);
+                    if (!ms.press(n.id, pressMods(e))) openItem("notes", n.id);
                   }}
                 />
               );
@@ -407,7 +433,7 @@ function ListColumn({ section, notes, tasks, seeds, canvases }: { section: Proje
             <Text tone="tertiary" variant="caption" style={styles.empty}>
               {noteQuery
                 ? "No notes match that."
-                : "No notes yet. Add one with ＋, or add existing notes from a note’s “Projects” menu."}
+                : "No notes yet. Add one with ＋, or move existing notes here from a note’s “Move to” menu."}
             </Text>
           )
         ) : section === "tasks" ? (
@@ -419,17 +445,14 @@ function ListColumn({ section, notes, tasks, seeds, canvases }: { section: Proje
                   task={t}
                   selected={ms.active ? ms.isSelected(t.id) : t.id === itemId}
                   onPress={(e) => {
-                    if (!ms.press(t.id, pressMods(e))) nav.openProjectItem(projectId, "tasks", t.id);
+                    if (!ms.press(t.id, pressMods(e))) openItem("tasks", t.id);
                   }}
                   onToggle={() => void tasksStore.setStatus(t.id, "done")}
                 />
               ))}
               {/* Repeating definitions have no concrete due date, so hide them under a due filter. */}
               {taskFilter === "all" && seeds.length ? (
-                <>
-                  <Text variant="eyebrow" tone="quaternary" style={styles.sectionLabel}>
-                    Repeating · {seeds.length}
-                  </Text>
+                <ListSectionFold label={`Repeating · ${seeds.length}`} storageKey="tasks.repeating" defaultOpen>
                   {seeds.map((s) => (
                     <ListRow
                       key={s.id}
@@ -437,42 +460,41 @@ function ListColumn({ section, notes, tasks, seeds, canvases }: { section: Proje
                       title={s.title || "Untitled task"}
                       subtitle={repeatSubtitle(s.repeatRule, s.nextOccurrence)}
                       selected={s.id === itemId}
-                      onPress={() => nav.openProjectItem(projectId, "tasks", s.id)}
+                      onPress={() => openItem("tasks", s.id)}
                     />
                   ))}
-                </>
+                </ListSectionFold>
               ) : null}
               {doneTasks.length ? (
-                <>
-                  <Text variant="eyebrow" tone="quaternary" style={styles.sectionLabel}>
-                    Completed · {doneTasks.length}
-                  </Text>
+                <ListSectionFold label={`Completed · ${doneTasks.length}`} storageKey="tasks.completed" defaultOpen={false}>
                   {doneTasks.map((t) => (
                     <TaskRow
                       key={t.id}
                       task={t}
                       selected={ms.active ? ms.isSelected(t.id) : t.id === itemId}
                       onPress={(e) => {
-                        if (!ms.press(t.id, pressMods(e))) nav.openProjectItem(projectId, "tasks", t.id);
+                        if (!ms.press(t.id, pressMods(e))) openItem("tasks", t.id);
                       }}
                       onToggle={() => void tasksStore.setStatus(t.id, "open")}
                     />
                   ))}
-                </>
+                </ListSectionFold>
               ) : null}
             </>
           ) : (
             <Text tone="tertiary" variant="caption" style={styles.empty}>
               {taskFilter === "upcoming"
-                ? "No upcoming tasks in this project."
+                ? `No upcoming tasks in this ${where}.`
                 : taskFilter === "overdue"
-                  ? "No overdue tasks in this project."
-                  : "No tasks yet. Add one with ＋, or add existing tasks from a task’s “Projects” menu."}
+                  ? `No overdue tasks in this ${where}.`
+                  : taskFilter === "unsorted"
+                    ? "Every task in this area belongs to one of its projects."
+                    : "No tasks yet. Add one with ＋, or move existing tasks here from a task’s “Move to” menu."}
             </Text>
           )
         ) : (
           <Text tone="tertiary" variant="caption" style={styles.empty}>
-            {SECTION_LABEL[section]} for this project arrive in a later milestone.
+            {SECTION_LABEL[section]} for this {where} arrive in a later milestone.
           </Text>
         )}
       </ScrollView>
@@ -482,14 +504,12 @@ function ListColumn({ section, notes, tasks, seeds, canvases }: { section: Proje
 
 /** The detail pane: the selected note, task, list or canvas — or the empty state. Nothing
  * is picked on the user's behalf. */
-function DetailPane({ section }: { section: ProjectSection }) {
+function DetailPane({ container, section }: { container: ContainerRef & { itemId?: string; subItemId?: string }; section: ProjectSection }) {
   const nav = useNav();
   const notesStore = useNotes();
   const tasksStore = useTasks();
   const ms = useMultiSelect();
-  const loc = nav.current;
-  if (loc.kind !== "project") return null;
-  const { itemId, subItemId } = loc;
+  const { itemId, subItemId } = container;
 
   // A multiselection takes over the detail pane: the bulk sub-toolbar + the selection stack
   // showing the first selected item, instead of the single-item editor.
@@ -528,7 +548,7 @@ function DetailPane({ section }: { section: ProjectSection }) {
         onPopOut={(id) => nav.openInNewTab({ kind: "note", id })}
         onDelete={async (id) => {
           await notesStore.remove(id);
-          nav.openProjectSection(loc.projectId, "notes");
+          nav.openContainer(container, "notes");
         }}
       />
     );
@@ -551,7 +571,7 @@ function DetailPane({ section }: { section: ProjectSection }) {
         onPopOut={(id) => nav.openInNewTab({ kind: "task", id })}
         onDelete={async (id) => {
           await tasksStore.remove(id);
-          nav.openProjectSection(loc.projectId, "tasks");
+          nav.openContainer(container, "tasks");
         }}
       />
     );
@@ -576,21 +596,21 @@ function DetailPane({ section }: { section: ProjectSection }) {
         onPopOut={(id) => nav.openInNewTab({ kind: "task", id })}
         onDelete={async (id) => {
           await tasksStore.remove(id);
-          nav.openProjectItem(loc.projectId, "lists", itemId);
+          nav.openProjectItem(container.id, "lists", itemId);
         }}
       />
     );
   }
   if (section === "lists" && itemId) {
-    return <ListHome projectId={loc.projectId} listId={itemId} />;
+    return <ListHome projectId={container.id} listId={itemId} />;
   }
   if (section === "canvases" && itemId) {
-    return <CanvasPane key={itemId} canvasId={itemId} onDeleted={() => nav.openProjectSection(loc.projectId, "canvases")} />;
+    return <CanvasPane key={itemId} canvasId={itemId} onDeleted={() => nav.openContainer(container, "canvases")} />;
   }
 
   // The project's calendar: the events of the calendars it holds, and its own tasks and notes.
   if (section === "calendars") {
-    return <CalendarScreen key={loc.projectId} projectId={loc.projectId} />;
+    return <CalendarScreen key={container.id} projectId={container.id} />;
   }
   if (section === "habits") {
     return (
@@ -602,94 +622,6 @@ function DetailPane({ section }: { section: ProjectSection }) {
     );
   }
   return <EmptyDetail kind={section === "notes" ? "note" : section === "canvases" ? "canvas" : "task"} />;
-}
-
-/** The project's settings page (behind the header's settings button): editable name, area
- * reassignment, a peek at recent notes, and delete. */
-function ProjectHome({ notes }: { notes: Note[] }) {
-  const nav = useNav();
-  const { projects, areas, updateProject, deleteProject } = useProjects();
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const loc = nav.current;
-  const project = loc.kind === "project" ? projects.find((p) => p.id === loc.projectId) : undefined;
-  if (!project || loc.kind !== "project") return null;
-
-  return (
-    <View style={styles.detail}>
-    <ScrollView contentContainerStyle={styles.home}>
-      <View style={styles.titleRow}>
-        <View style={[styles.dot, { backgroundColor: project.color ?? colors.borderStrong }]} />
-        <TextField variant="title" value={project.name} placeholder="Project name" onChangeText={(t) => t.trim() && void updateProject(project.id, { name: t.trim() })} />
-      </View>
-
-      <Text variant="eyebrow" tone="quaternary" style={styles.groupLabel}>
-        Area
-      </Text>
-      <View style={styles.chips}>
-        {areas.map((a) => {
-          const on = a.id === project.areaId;
-          return (
-            <Pressable
-              key={a.id}
-              onPress={() => void updateProject(project.id, { areaId: a.id })}
-              aria-label={a.name}
-              style={({ hovered, pressed }: PressState) => [
-                styles.chip,
-                styles.areaChip,
-                on ? styles.areaChipOn : { backgroundColor: pressed ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent" },
-              ]}
-            >
-              <Text variant="caption" tone={on ? "accent" : "secondary"}>
-                {a.name}
-              </Text>
-            </Pressable>
-          );
-        })}
-        {areas.length === 0 ? (
-          <Text variant="caption" tone="tertiary">
-            No areas yet.
-          </Text>
-        ) : null}
-      </View>
-
-      <Text variant="eyebrow" tone="quaternary" style={styles.groupLabel}>
-        Recent notes
-      </Text>
-      {notes.length ? (
-        <View style={styles.card}>
-          {notes.slice(0, 5).map((n) => (
-            <ListRow
-              key={n.id}
-              icon={<Icon name={n.date ? "today" : "file"} size={icon.sm} color={colors.textQuaternary} />}
-              title={n.title || "Untitled"}
-              trailing={timeAgo(n.updatedAt)}
-              onPress={() => nav.openProjectItem(project.id, "notes", n.id)}
-            />
-          ))}
-        </View>
-      ) : (
-        <Text tone="tertiary" variant="caption">
-          No notes yet. Open the Notes section to add one.
-        </Text>
-      )}
-
-      <View style={styles.footer}>
-        <Button label="Delete project" variant="danger" size="sm" onPress={() => setConfirmDelete(true)} />
-      </View>
-    </ScrollView>
-
-    {confirmDelete ? (
-      <DeleteProjectDialog
-        projectName={project.name}
-        onConfirm={async (deleteContent) => {
-          await deleteProject(project.id, deleteContent);
-          nav.back();
-        }}
-        onClose={() => setConfirmDelete(false)}
-      />
-    ) : null}
-    </View>
-  );
 }
 
 const styles = {
@@ -724,12 +656,7 @@ const styles = {
     paddingHorizontal: 7,
     borderRadius: radius.sm,
   },
+  // An emoji sits in the icon's slot; pin the line box so the header never grows around one.
+  headerEmoji: { fontSize: 14, lineHeight: 18, flexShrink: 0 },
   detail: { flex: 1, minWidth: 0, minHeight: 0, backgroundColor: colors.surfaceCard },
-  dot: { width: 8, height: 8, borderRadius: radius.full, flexShrink: 0 },
-  groupLabel: { marginTop: space.md },
-  chips: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: space.xs },
-  // Area choices are bordered chips (a pick-one set), unlike the borderless section chips.
-  areaChip: { borderWidth: 1, borderColor: colors.borderSubtle, paddingHorizontal: 6 },
-  areaChipOn: { borderColor: colors.accentSoftBorder, backgroundColor: colors.accentSoft },
-  card: { borderRadius: radius.lg, borderWidth: 1, borderColor: colors.borderSubtle, overflow: "hidden" as const, padding: space.xs, gap: 1 },
 };

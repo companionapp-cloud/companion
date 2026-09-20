@@ -1,68 +1,44 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useRoute } from "@react-navigation/native";
 import type { Canvas } from "@companion/core-bridge";
 import { Center, Input, Spinner, Text, colors, space } from "@companion/design-system";
 import { useNav } from "../nav-context";
-import { useCore } from "../CoreContext";
 import { useProjects } from "../ProjectsProvider";
 import { timeAgo } from "../NotificationRow";
 import { useCanvases } from "../canvas/CanvasesProvider";
 import { CanvasEditor } from "../canvas/CanvasEditor";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { MembershipPicker } from "../MembershipPicker";
+import { useMemberIds } from "./ListScreens";
 import { Card, CardRow, EmptyCaption, FAB_CLEARANCE, Fab, NavAction, NavBar, ROW_ICON_INSET, RowIcon } from "./ui";
 
 // Canvases for the mobile web shell (PLAN-canvases.md): a full-screen list (globally, or
 // scoped to a project's member boards) and the board itself as a pushed route. Inside a
 // project the project screen owns the nav bar, so the list renders bare.
 
-/** Tracks a project's member canvas ids, refreshed as memberships change. */
-function useMemberCanvasIds(projectId: string | undefined): Set<string> | null {
-  const { core } = useCore();
-  const { membershipsForProject } = useProjects();
-  const [ids, setIds] = useState<Set<string> | null>(null);
-  useEffect(() => {
-    if (!projectId) {
-      setIds(null);
-      return;
-    }
-    let cancelled = false;
-    const load = async () => {
-      const rows = await membershipsForProject(projectId);
-      if (!cancelled) setIds(new Set(rows.filter((m) => m.entityType === "canvas").map((m) => m.entityId)));
-    };
-    void load();
-    const offNav = core.on("nav.changed", () => void load());
-    const offData = core.on("data.changed", () => void load());
-    return () => {
-      cancelled = true;
-      offNav();
-      offData();
-    };
-  }, [projectId, membershipsForProject, core]);
-  return ids;
-}
-
-export function CanvasesListScreen({ projectId }: { projectId?: string }) {
+export function CanvasesListScreen({ projectId, areaId }: { projectId?: string; areaId?: string }) {
   const store = useCanvases();
   const nav = useNav();
-  const { addMember } = useProjects();
-  const memberIds = useMemberCanvasIds(projectId);
+  const { addMember, addAreaMember } = useProjects();
+  const memberIds = useMemberIds(projectId, "canvas", areaId);
+  // Scoped to a project or an area: the host screen owns the nav bar, and new boards are filed there.
+  const scoped = !!(projectId || areaId);
 
   const canvases = useMemo(() => {
-    if (!projectId) return store.canvases;
+    if (!scoped) return store.canvases;
     if (!memberIds) return [];
     return store.canvases.filter((c) => memberIds.has(c.id));
-  }, [store.canvases, projectId, memberIds]);
+  }, [store.canvases, scoped, memberIds]);
 
   const create = async () => {
     const c = await store.create();
     if (projectId) await addMember(projectId, "canvas", c.id);
+    else if (areaId) await addAreaMember(areaId, "canvas", c.id);
     nav.openCanvas(c.id);
   };
 
-  const bar = projectId ? null : <NavBar title="Canvases" right={<NavAction icon="plus" label="New canvas" onPress={() => void create()} />} />;
+  const bar = scoped ? null : <NavBar title="Canvases" right={<NavAction icon="plus" label="New canvas" onPress={() => void create()} />} />;
 
   if (store.loading) {
     return (

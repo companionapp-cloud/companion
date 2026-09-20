@@ -366,7 +366,7 @@ func scanServerDocument(sc rowScanner) (*domain.Document, int64, error) {
 
 // ---- areas ---------------------------------------------------------------
 
-const areaCols = `id, name, color, sort_order, created_at, updated_at, deleted_at, version, server_seq`
+const areaCols = `id, name, color, icon, cover_document_id, description_md, sort_order, created_at, updated_at, deleted_at, version, server_seq`
 
 var areaHandler = &entityHandler{
 	typ:   protocol.EntityArea,
@@ -381,13 +381,15 @@ var areaHandler = &entityHandler{
 			deletedAt = a.DeletedAt.UTC().Format(timeFormat)
 		}
 		_, err := tx.Exec(s.rebind(
-			`INSERT INTO areas (id, user_id, name, color, sort_order, created_at, updated_at, deleted_at, version, server_seq)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO areas (id, user_id, name, color, icon, cover_document_id, description_md, sort_order, created_at, updated_at, deleted_at, version, server_seq)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT (id) DO UPDATE SET
-			   name = excluded.name, color = excluded.color, sort_order = excluded.sort_order,
+			   name = excluded.name, color = excluded.color, icon = excluded.icon,
+			   cover_document_id = excluded.cover_document_id, description_md = excluded.description_md,
+			   sort_order = excluded.sort_order,
 			   updated_at = excluded.updated_at, deleted_at = excluded.deleted_at,
 			   version = excluded.version, server_seq = excluded.server_seq;`),
-			a.ID, uid, a.Name, a.Color, a.SortOrder,
+			a.ID, uid, a.Name, a.Color, a.Icon, a.CoverDocumentID, a.DescriptionMd, a.SortOrder,
 			a.CreatedAt.UTC().Format(timeFormat), updatedAt.Format(timeFormat), deletedAt, version, seq)
 		return err
 	},
@@ -423,16 +425,22 @@ var areaHandler = &entityHandler{
 
 func scanServerArea(sc rowScanner) (*domain.Area, int64, error) {
 	var (
-		a                    domain.Area
-		color, deletedAt     sql.NullString
-		createdAt, updatedAt string
-		seq                  int64
+		a                             domain.Area
+		color, icon, cover, deletedAt sql.NullString
+		createdAt, updatedAt          string
+		seq                           int64
 	)
-	if err := sc.Scan(&a.ID, &a.Name, &color, &a.SortOrder, &createdAt, &updatedAt, &deletedAt, &a.Version, &seq); err != nil {
+	if err := sc.Scan(&a.ID, &a.Name, &color, &icon, &cover, &a.DescriptionMd, &a.SortOrder, &createdAt, &updatedAt, &deletedAt, &a.Version, &seq); err != nil {
 		return nil, 0, err
 	}
 	if color.Valid {
 		a.Color = &color.String
+	}
+	if icon.Valid && icon.String != "" {
+		a.Icon = &icon.String
+	}
+	if cover.Valid && cover.String != "" {
+		a.CoverDocumentID = &cover.String
 	}
 	if err := parseTimes(createdAt, updatedAt, deletedAt, &a.CreatedAt, &a.UpdatedAt, &a.DeletedAt); err != nil {
 		return nil, 0, err
@@ -442,7 +450,7 @@ func scanServerArea(sc rowScanner) (*domain.Area, int64, error) {
 
 // ---- projects ------------------------------------------------------------
 
-const projectCols = `id, area_id, name, color, sort_order, archived_at, created_at, updated_at, deleted_at, version, server_seq`
+const projectCols = `id, area_id, name, color, icon, cover_document_id, description_md, sort_order, archived_at, created_at, updated_at, deleted_at, version, server_seq`
 
 var projectHandler = &entityHandler{
 	typ:   protocol.EntityProject,
@@ -460,14 +468,16 @@ var projectHandler = &entityHandler{
 			archivedAt = p.ArchivedAt.UTC().Format(timeFormat)
 		}
 		_, err := tx.Exec(s.rebind(
-			`INSERT INTO projects (id, user_id, area_id, name, color, sort_order, archived_at, created_at, updated_at, deleted_at, version, server_seq)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO projects (id, user_id, area_id, name, color, icon, cover_document_id, description_md, sort_order, archived_at, created_at, updated_at, deleted_at, version, server_seq)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT (id) DO UPDATE SET
 			   area_id = excluded.area_id, name = excluded.name, color = excluded.color,
+			   icon = excluded.icon, cover_document_id = excluded.cover_document_id,
+			   description_md = excluded.description_md,
 			   sort_order = excluded.sort_order, archived_at = excluded.archived_at,
 			   updated_at = excluded.updated_at, deleted_at = excluded.deleted_at,
 			   version = excluded.version, server_seq = excluded.server_seq;`),
-			p.ID, uid, p.AreaID, p.Name, p.Color, p.SortOrder, archivedAt,
+			p.ID, uid, p.AreaID, p.Name, p.Color, p.Icon, p.CoverDocumentID, p.DescriptionMd, p.SortOrder, archivedAt,
 			p.CreatedAt.UTC().Format(timeFormat), updatedAt.Format(timeFormat), deletedAt, version, seq)
 		return err
 	},
@@ -503,16 +513,22 @@ var projectHandler = &entityHandler{
 
 func scanServerProject(sc rowScanner) (*domain.Project, int64, error) {
 	var (
-		p                            domain.Project
-		color, deletedAt, archivedAt sql.NullString
-		createdAt, updatedAt         string
-		seq                          int64
+		p                                         domain.Project
+		color, icon, cover, deletedAt, archivedAt sql.NullString
+		createdAt, updatedAt                      string
+		seq                                       int64
 	)
-	if err := sc.Scan(&p.ID, &p.AreaID, &p.Name, &color, &p.SortOrder, &archivedAt, &createdAt, &updatedAt, &deletedAt, &p.Version, &seq); err != nil {
+	if err := sc.Scan(&p.ID, &p.AreaID, &p.Name, &color, &icon, &cover, &p.DescriptionMd, &p.SortOrder, &archivedAt, &createdAt, &updatedAt, &deletedAt, &p.Version, &seq); err != nil {
 		return nil, 0, err
 	}
 	if color.Valid {
 		p.Color = &color.String
+	}
+	if icon.Valid && icon.String != "" {
+		p.Icon = &icon.String
+	}
+	if cover.Valid && cover.String != "" {
+		p.CoverDocumentID = &cover.String
 	}
 	if err := parseTimes(createdAt, updatedAt, deletedAt, &p.CreatedAt, &p.UpdatedAt, &p.DeletedAt); err != nil {
 		return nil, 0, err
@@ -529,7 +545,7 @@ func scanServerProject(sc rowScanner) (*domain.Project, int64, error) {
 
 // ---- project members -----------------------------------------------------
 
-const memberCols = `id, project_id, entity_type, entity_id, created_at, updated_at, deleted_at, version, server_seq`
+const memberCols = `id, project_id, container_type, entity_type, entity_id, created_at, updated_at, deleted_at, version, server_seq`
 
 var memberHandler = &entityHandler{
 	typ:   protocol.EntityProjectMember,
@@ -544,14 +560,15 @@ var memberHandler = &entityHandler{
 			deletedAt = m.DeletedAt.UTC().Format(timeFormat)
 		}
 		_, err := tx.Exec(s.rebind(
-			`INSERT INTO project_members (id, user_id, project_id, entity_type, entity_id, created_at, updated_at, deleted_at, version, server_seq)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO project_members (id, user_id, project_id, container_type, entity_type, entity_id, created_at, updated_at, deleted_at, version, server_seq)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT (id) DO UPDATE SET
-			   project_id = excluded.project_id, entity_type = excluded.entity_type,
+			   project_id = excluded.project_id, container_type = excluded.container_type,
+			   entity_type = excluded.entity_type,
 			   entity_id = excluded.entity_id, updated_at = excluded.updated_at,
 			   deleted_at = excluded.deleted_at, version = excluded.version,
 			   server_seq = excluded.server_seq;`),
-			m.ID, uid, m.ProjectID, m.EntityType, m.EntityID,
+			m.ID, uid, m.ProjectID, m.Container(), m.EntityType, m.EntityID,
 			m.CreatedAt.UTC().Format(timeFormat), updatedAt.Format(timeFormat), deletedAt, version, seq)
 		return err
 	},
@@ -592,7 +609,7 @@ func scanServerMember(sc rowScanner) (*domain.ProjectMember, int64, error) {
 		createdAt, updatedAt string
 		seq                  int64
 	)
-	if err := sc.Scan(&m.ID, &m.ProjectID, &m.EntityType, &m.EntityID, &createdAt, &updatedAt, &deletedAt, &m.Version, &seq); err != nil {
+	if err := sc.Scan(&m.ID, &m.ProjectID, &m.ContainerType, &m.EntityType, &m.EntityID, &createdAt, &updatedAt, &deletedAt, &m.Version, &seq); err != nil {
 		return nil, 0, err
 	}
 	if err := parseTimes(createdAt, updatedAt, deletedAt, &m.CreatedAt, &m.UpdatedAt, &m.DeletedAt); err != nil {

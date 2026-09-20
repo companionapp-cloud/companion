@@ -1,15 +1,20 @@
-import { useState } from "react";
 import { ScrollView, View } from "react-native";
 import { Icon, ListRow, SplitView, Text, colors, icon, space } from "@companion/design-system";
 import { visibleSettingsSections, settingsSection, type SettingsSectionId } from "./settingsSections";
+import { useNav } from "./nav-context";
 
 /** The settings page (web/desktop): a content-details master-detail rendered in the main
  *  content area — not a modal. A 190px section list (dense rows, hairline on its right)
  *  beside a 520px-max content column that renders the selected section. Mirrors the
- *  ProjectView master-detail so settings reads as a first-class screen (PLAN §3.1 shell). */
+ *  ProjectView master-detail so settings reads as a first-class screen (PLAN §3.1 shell).
+ *  The selected section lives in the tab's location (/settings/:section), not local state,
+ *  so it deep-links and survives a swap to the mobile shell and back. */
 export function SettingsScreen() {
-  const [selected, setSelected] = useState<SettingsSectionId>("sync");
-  const section = settingsSection(selected);
+  const nav = useNav();
+  const requested = nav.current.kind === "view" ? nav.current.section : undefined;
+  // An unknown or missing section falls back to the first visible one.
+  const section = settingsSection((requested ?? "sync") as SettingsSectionId);
+  const setSelected = (id: SettingsSectionId) => nav.openRef({ kind: "view", view: "settings", section: id });
   const Detail = section.Component;
 
   return (

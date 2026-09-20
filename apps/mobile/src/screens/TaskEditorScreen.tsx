@@ -39,7 +39,7 @@ export function TaskEditorScreen() {
       title: 'Task',
       headerRight: () => (
         <NavActions>
-          <NavAction icon="folder" label="Add to projects" onPress={() => setShowProjects(true)} />
+          <NavAction icon="folder" label="Move to an area or project" onPress={() => setShowProjects(true)} />
           <NavAction icon="graph" label="Show task graph" onPress={() => nav.navigate('TaskGraph', { id: taskId })} />
           <NavAction icon="trash" label="Delete task" onPress={() => setConfirmDelete(true)} />
         </NavActions>

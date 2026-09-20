@@ -15,6 +15,7 @@ declare global {
     __HAS_LINK_SOURCE__?: boolean;
     __HAS_DOCUMENT_SOURCE__?: boolean;
     __EDITOR_VARIANT__?: "full" | "simple";
+    __EDITOR_INLINE__?: boolean;
     __PLACEHOLDER__?: string;
     __SUBMIT_ON_ENTER__?: boolean;
     __DEBOUNCE_MS__?: number;
@@ -185,8 +186,9 @@ function init(): void {
 
   // The simple editor is an inline field (task note / composer), not a full-screen page, so
   // report its content height and let the host size the WebView to it (bounded by the host's
-  // min/max). The full editor fills the screen and ignores this.
-  if (simple) {
+  // min/max). The full editor fills the screen and ignores this — unless it was asked to sit
+  // inline (an overview's description), where it is sized the same way.
+  if (simple || window.__EDITOR_INLINE__) {
     const report = () => post("height", document.body.scrollHeight);
     report();
     if (typeof ResizeObserver !== "undefined") new ResizeObserver(report).observe(document.body);

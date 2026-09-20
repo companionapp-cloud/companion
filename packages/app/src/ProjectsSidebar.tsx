@@ -6,17 +6,21 @@ import { useProjects } from "./ProjectsProvider";
 import { SortableList } from "./SortableList";
 import { useDropTarget } from "./DndContext";
 
-/** The areas → projects tree in the expanded rail (PLAN §6.6): area headings, project
- * nav items with a task-completion ring (hidden until member tasks exist), an
- * "Unsorted" bucket for dangling areas, and inline create affordances. Areas and the
- * projects within each area are drag-reorderable (drag a row; a tap still navigates). */
+/** The areas → projects tree in the expanded rail (PLAN §6.6): area headings that open the
+ * area's page, project nav items with a task-completion ring (hidden until member tasks
+ * exist), an "Unsorted" bucket for dangling areas, and inline create affordances. Areas and
+ * the projects within each area are drag-reorderable (drag a row; a tap still navigates). */
 export function ProjectsSidebar({
   onSelectProject,
   activeProjectId,
+  onSelectArea,
+  activeAreaId,
   onDeleteArea,
 }: {
   onSelectProject?: (id: string) => void;
   activeProjectId?: string | null;
+  onSelectArea?: (id: string) => void;
+  activeAreaId?: string | null;
   /** Request deletion of an (empty) area. The host renders the confirm dialog outside the
    *  clipped rail (see AppShell). */
   onDeleteArea?: (area: SidebarArea) => void;
@@ -49,6 +53,8 @@ export function ProjectsSidebar({
       <AreaHeader
         area={area}
         open={!collapsed.has(area.id)}
+        active={area.id === activeAreaId}
+        onOpen={() => onSelectArea?.(area.id)}
         onToggle={() => toggle(area.id)}
         dragHandlers={dragHandlers}
         onAddProject={() => {
@@ -181,13 +187,16 @@ function MiniButton({ label, icon: name, onPress }: { label: string; icon: IconN
   );
 }
 
-/** An area heading: an 18px mono eyebrow with a fold chevron, an optional colour dot, and
- *  the always-present "new project" button. An empty area additionally reveals a delete
- *  button on hover — areas are only deletable once they hold no projects (PLAN §6.6). The
- *  whole header is the area's drag handle; a plain tap folds or unfolds it. */
+/** An area heading: an 18px mono eyebrow with a fold chevron, an optional emoji or colour
+ *  dot, and the always-present "new project" button. The chevron folds the area; the name
+ *  opens its page (PLAN-areas.md §3). An empty area additionally reveals a delete button on
+ *  hover — areas are only deletable once they hold no projects (PLAN §6.6). The whole header
+ *  is the area's drag handle, and a drop target: a dragged note or task is filed in the area. */
 function AreaHeader({
   area,
   open,
+  active,
+  onOpen,
   onToggle,
   dragHandlers,
   onAddProject,
@@ -195,28 +204,40 @@ function AreaHeader({
 }: {
   area: SidebarArea;
   open: boolean;
+  active?: boolean;
+  onOpen: () => void;
   onToggle: () => void;
   dragHandlers: object;
   onAddProject: () => void;
   onDeleteArea?: (area: SidebarArea) => void;
 }) {
   const [hovered, setHovered] = useState(false);
+  const { addAreaMember } = useProjects();
+  const { ref, isOver } = useDropTarget(`area:${area.id}`, (p) => void addAreaMember(area.id, p.kind, p.id));
+  const on = isOver || !!active;
   const deletable = area.projects.length === 0 && !!onDeleteArea;
   let trailing: ReactNode = null;
   if (deletable && hovered) trailing = <MiniButton label={`Delete area ${area.name}`} icon="trash" onPress={() => onDeleteArea?.(area)} />;
   return (
     <View
-      style={styles.header}
+      ref={ref}
+      style={[styles.header, styles.areaHeader, { backgroundColor: on ? colors.accentSoft : "transparent", borderColor: isOver ? colors.accent : "transparent" }]}
       {...dragHandlers}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
     >
-      <Pressable onPress={onToggle} aria-label={`${open ? "Collapse" : "Expand"} ${area.name}`} style={styles.headerLabel}>
+      <Pressable onPress={onToggle} aria-label={`${open ? "Collapse" : "Expand"} ${area.name}`} style={[styles.fold, noDragRegion]}>
         <View style={[{ transform: [{ rotate: open ? "90deg" : "0deg" }] }, transition("transform", motion.fast)]}>
           <Icon name="chevronRight" size={10} color={colors.textQuaternary} />
         </View>
-        {area.color ? <View style={[styles.areaDot, { backgroundColor: area.color }]} /> : null}
-        <Text variant="eyebrow" tone="quaternary" numberOfLines={1} style={{ flex: 1 }}>
+      </Pressable>
+      <Pressable onPress={onOpen} aria-label={`Open area ${area.name}`} style={styles.headerLabel}>
+        {area.icon ? (
+          <Text style={styles.areaEmoji}>{area.icon}</Text>
+        ) : area.color ? (
+          <View style={[styles.areaDot, { backgroundColor: area.color }]} />
+        ) : null}
+        <Text variant="eyebrow" tone={on ? "accent" : hovered ? "secondary" : "quaternary"} numberOfLines={1} style={{ flex: 1 }}>
           {area.name}
         </Text>
       </Pressable>
@@ -256,8 +277,13 @@ function ProjectRow({
           },
         ]}
       >
-        {/* The folder carries the project's swatch; selection overrides it, as everywhere. */}
-        <Icon name="folder" size={icon.md} color={on ? colors.textAccent : (project.color ?? colors.textTertiary)} />
+        {/* The project's emoji, else a folder carrying its swatch; selection overrides the
+            swatch, as everywhere. */}
+        {project.icon ? (
+          <Text style={styles.projectEmoji}>{project.icon}</Text>
+        ) : (
+          <Icon name="folder" size={icon.md} color={on ? colors.textAccent : (project.color ?? colors.textTertiary)} />
+        )}
         <Text variant="label" tone={on ? "accent" : "secondary"} numberOfLines={1} style={{ flex: 1, minWidth: 0 }}>
           {project.name}
         </Text>
@@ -301,7 +327,14 @@ const styles = {
     // With the 1px above each project row this makes the 2px under a header.
     marginBottom: 1,
   },
+  // An area heading is a nav target and a drop target: the same 1px always-there border as a
+  // project row, so highlighting it never shifts the layout.
+  areaHeader: { borderWidth: 1, borderRadius: radius.sm, paddingLeft: 2, paddingRight: space.xxs },
+  fold: { width: 14, height: 16, alignItems: "center" as const, justifyContent: "center" as const, flexShrink: 0 },
   headerLabel: { flex: 1, minWidth: 0, flexDirection: "row" as const, alignItems: "center" as const, gap: space.xs, height: 18 },
+  // Emoji render at the glyph's own metrics; pin the line box so rows don't grow.
+  areaEmoji: { fontSize: 11, lineHeight: 16, flexShrink: 0 },
+  projectEmoji: { fontSize: 13, lineHeight: 16, width: icon.md, textAlign: "center" as const, flexShrink: 0 },
   areaDot: { width: 5, height: 5, borderRadius: radius.full, flexShrink: 0 },
   mini: { width: 16, height: 16, borderRadius: radius.xs, alignItems: "center" as const, justifyContent: "center" as const, flexShrink: 0 },
   projectSlot: { marginTop: 1 },
