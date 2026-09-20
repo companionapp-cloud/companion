@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { Pressable, ScrollView, View, type GestureResponderHandlers } from "react-native";
 import type { List, ListItem, Task } from "@companion/core-bridge";
 import { Button, Center, Icon, IconButton, Input, ListRow, Text, TextField, colors, icon, layout, radius, space } from "@companion/design-system";
 import { useNav } from "./nav-context";
@@ -7,6 +7,8 @@ import { useTasks } from "./TasksProvider";
 import { useLists, useListItems, useProjectLists } from "./ListsProvider";
 import { ListFilterMenu } from "./ListFilterMenu";
 import { SortableList } from "./SortableList";
+import { DragGrip } from "./DragGrip";
+import { ListSectionFold } from "./ListSectionFold";
 import { useDropTarget } from "./DndContext";
 import { TaskRow } from "./TaskEditor";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -76,10 +78,10 @@ function ListsIndex({ projectId }: { projectId: string }) {
             items={lists}
             keyExtractor={(l) => l.id}
             onReorder={(ids) => void reorderLists(projectId, ids)}
+            // Rows reorder from the grip at their far right, which claims the drag on press.
+            activateOnStart
             renderItem={({ item, isActive, drag }) => (
-              <View {...drag}>
-                <ListIndexRow list={item} dragging={isActive} onPress={() => nav.openProjectItem(projectId, "lists", item.id)} />
-              </View>
+              <ListIndexRow list={item} dragging={isActive} drag={drag} onPress={() => nav.openProjectItem(projectId, "lists", item.id)} />
             )}
           />
         ) : (
@@ -92,7 +94,7 @@ function ListsIndex({ projectId }: { projectId: string }) {
   );
 }
 
-function ListIndexRow({ list, dragging, onPress }: { list: List; dragging: boolean; onPress: () => void }) {
+function ListIndexRow({ list, dragging, drag, onPress }: { list: List; dragging: boolean; drag: GestureResponderHandlers; onPress: () => void }) {
   const { addTask } = useLists();
   const items = useListItems(list.id);
   // Dropping a dragged task on a list appends it (and joins the project if needed).
@@ -108,6 +110,7 @@ function ListIndexRow({ list, dragging, onPress }: { list: List; dragging: boole
         trailing={taskCount ? String(taskCount) : undefined}
         selected={isOver}
         hasChildren
+        accessory={<DragGrip handlers={drag} label="Drag to reorder" />}
         onPress={onPress}
       />
     </View>
@@ -135,6 +138,17 @@ function ListRows({ projectId, listId, selectedTaskId, projectTasks }: { project
         .filter((r) => r.item.kind === "heading" || r.task),
     [items, tasksStore],
   );
+  // Completed tasks leave the drag order for their own folded section at the foot (as in the
+  // plain task lists, §6.4); headings and open tasks keep the hierarchy to themselves.
+  const active = useMemo(() => rows.filter((r) => r.task?.status !== "done"), [rows]);
+  const done = useMemo(() => rows.filter((r) => r.task?.status === "done"), [rows]);
+  // A drag reorders the active rows only. Completed rows keep their slots in the full order,
+  // so reopening one returns it to where it sat rather than to wherever the drag left a gap.
+  const reorderActive = (ids: string[]) => {
+    const next = [...ids];
+    const held = new Set(done.map((r) => r.item.id));
+    return reorderItems(listId, rows.map((r) => (held.has(r.item.id) ? r.item.id : (next.shift() ?? r.item.id))));
+  };
   const inList = useMemo(() => new Set(items.filter((i) => i.taskId).map((i) => i.taskId as string)), [items]);
   // Project tasks not yet in this list — the "add existing" picker's candidates.
   const candidates = useMemo(() => projectTasks.filter((t) => !inList.has(t.id) && t.status !== "done"), [projectTasks, inList]);
@@ -203,24 +217,25 @@ function ListRows({ projectId, listId, selectedTaskId, projectTasks }: { project
         )}
       </View>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll}>
-        {rows.length ? (
+        {active.length ? (
           <SortableList
             style={styles.rows}
-            items={rows}
+            items={active}
             keyExtractor={(r) => r.item.id}
-            onReorder={(ids) => void reorderItems(listId, ids)}
+            onReorder={(ids) => void reorderActive(ids)}
+            // Rows reorder from the grip at their far right, which claims the drag on press.
+            activateOnStart
             renderItem={({ item: r, isActive, drag }) =>
               r.item.kind === "heading" ? (
-                <View {...drag}>
-                  <HeadingRow item={r.item} dragging={isActive} onRename={(title) => void renameHeading(r.item.id, title)} onRemove={() => void removeItem(r.item.id)} />
-                </View>
+                <HeadingRow item={r.item} dragging={isActive} drag={drag} onRename={(title) => void renameHeading(r.item.id, title)} onRemove={() => void removeItem(r.item.id)} />
               ) : (
-                <View {...drag} style={isActive ? styles.rowDragging : null}>
+                <View style={isActive ? styles.rowDragging : null}>
                   <TaskRow
                     task={r.task as Task}
                     selected={r.task?.id === selectedTaskId}
                     onPress={() => nav.openProjectSubItem(projectId, "lists", listId, (r.task as Task).id)}
-                    onToggle={() => void tasksStore.setStatus((r.task as Task).id, r.task?.status === "done" ? "open" : "done")}
+                    onToggle={() => void tasksStore.setStatus((r.task as Task).id, "done")}
+                    handle={<DragGrip handlers={drag} label="Drag to reorder" />}
                     trailing={
                       <IconButton label="Remove from list" size="sm" onPress={() => void removeItem(r.item.id)}>
                         <Icon name="close" size={icon.sm} color={colors.textQuaternary} />
@@ -233,9 +248,29 @@ function ListRows({ projectId, listId, selectedTaskId, projectTasks }: { project
           />
         ) : (
           <Text tone="tertiary" variant="caption" style={styles.empty}>
-            This list is empty. Add a task above, or pull in existing project tasks. Drag rows to set priority; headings group them.
+            {done.length
+              ? "Everything in this list is done. Add a task above, or pull in existing project tasks."
+              : "This list is empty. Add a task above, or pull in existing project tasks. Drag rows to set priority; headings group them."}
           </Text>
         )}
+        {done.length ? (
+          <ListSectionFold label={`Completed · ${done.length}`} storageKey="lists.completed" defaultOpen={false}>
+            {done.map((r) => (
+              <TaskRow
+                key={r.item.id}
+                task={r.task as Task}
+                selected={r.task?.id === selectedTaskId}
+                onPress={() => nav.openProjectSubItem(projectId, "lists", listId, (r.task as Task).id)}
+                onToggle={() => void tasksStore.setStatus((r.task as Task).id, "open")}
+                trailing={
+                  <IconButton label="Remove from list" size="sm" onPress={() => void removeItem(r.item.id)}>
+                    <Icon name="close" size={icon.sm} color={colors.textQuaternary} />
+                  </IconButton>
+                }
+              />
+            ))}
+          </ListSectionFold>
+        ) : null}
       </ScrollView>
       {picking ? <AddTasksPicker candidates={candidates} onAdd={(ids) => addTasks(listId, ids)} onClose={() => setPicking(false)} /> : null}
     </View>
@@ -244,7 +279,19 @@ function ListRows({ projectId, listId, selectedTaskId, projectTasks }: { project
 
 /** A heading row (sublist label). Press to rename inline; the ✕ removes the heading only —
  *  the tasks beneath it simply join the sublist above. */
-function HeadingRow({ item, dragging, onRename, onRemove }: { item: ListItem; dragging: boolean; onRename: (title: string) => void; onRemove: () => void }) {
+function HeadingRow({
+  item,
+  dragging,
+  drag,
+  onRename,
+  onRemove,
+}: {
+  item: ListItem;
+  dragging: boolean;
+  drag: GestureResponderHandlers;
+  onRename: (title: string) => void;
+  onRemove: () => void;
+}) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.title);
   useEffect(() => setDraft(item.title), [item.title]);
@@ -277,6 +324,9 @@ function HeadingRow({ item, dragging, onRename, onRemove }: { item: ListItem; dr
         <IconButton label="Remove heading" size="sm" onPress={onRemove}>
           <Icon name="close" size={icon.sm} color={colors.textQuaternary} />
         </IconButton>
+      </View>
+      <View style={{ opacity: hovered || dragging ? 1 : 0 }}>
+        <DragGrip handlers={drag} label="Drag to reorder" />
       </View>
     </View>
   );
@@ -366,7 +416,7 @@ export const listStyles = {
 
 const styles = {
   ...listStyles,
-  heading: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.xs, minHeight: 24, paddingLeft: space.sm, paddingRight: 1, paddingTop: space.sm, borderRadius: radius.sm },
+  heading: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.xs, minHeight: 24, paddingLeft: space.sm, paddingRight: space.sm, paddingTop: space.sm, borderRadius: radius.sm },
   rowDragging: { backgroundColor: colors.surfaceActive, borderRadius: radius.sm },
   rowOver: { borderRadius: radius.sm, borderWidth: 1, borderColor: colors.accent, margin: -1 },
 };

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Platform, Pressable, ScrollView, View } from "react-native";
-import type { MemberEntityType, Project } from "@companion/core-bridge";
+import type { List, MemberEntityType, Project } from "@companion/core-bridge";
 import { Icon, IconButton, Input, Text, colors, icon, radius, row, shadow, space, useDensity, type PressState } from "@companion/design-system";
+import { useCore } from "./CoreContext";
 import { useProjects } from "./ProjectsProvider";
+import { useSync } from "./SyncProvider";
 import { Overlay } from "./Overlay";
 
 /** Where an entity is filed — the "membership edited from either end" picker (PLAN §6.6).
@@ -10,7 +12,9 @@ import { Overlay } from "./Overlay";
  * Content (a note, task, habit or canvas) lives in ONE place: a project, or — for notes, tasks
  * and canvases — directly in an area (PLAN-areas.md §2.1). For those this is a pick-one "Move
  * to" list of every area and its projects; picking the place it already lives in takes it out
- * (back to Unsorted). A calendar can sit in several projects, so for calendars the rows stay
+ * (back to Unsorted). A task also gets each project's lists, nested under the project: picking
+ * a list files the task in that list (and so in its project); a task can sit in several of
+ * one project's lists. A calendar can sit in several projects, so for calendars the rows stay
  * independent toggles over the projects. */
 export function MembershipPicker({
   entityType,
@@ -28,7 +32,15 @@ export function MembershipPicker({
   onClose: () => void;
 }) {
   const { projects, areas, addMember, removeMember, addAreaMember, removeAreaMember, membershipsFor } = useProjects();
+  // The raw lists API rather than ListsProvider: the native shell mounts this picker without
+  // one. The core's lists.changed event keeps any mounted provider's cache fresh.
+  const { lists: listsApi } = useCore();
+  const { trigger: syncTrigger } = useSync();
   const [memberOf, setMemberOf] = useState<Set<string>>(new Set());
+  // Tasks only: every project's lists, and the ones this task is in.
+  const withLists = entityType === "task";
+  const [listsByProject, setListsByProject] = useState<Map<string, List[]>>(new Map());
+  const [inLists, setInLists] = useState<Set<string>>(new Set());
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
   const single = entityType !== "calendar" && entityType !== "calendar_account";
@@ -45,6 +57,21 @@ export function MembershipPicker({
       cancelled = true;
     };
   }, [membershipsFor, entityType, entityId]);
+
+  useEffect(() => {
+    if (!withLists) return;
+    let cancelled = false;
+    void Promise.all([Promise.all(projects.map(async (p) => [p.id, await listsApi.listForProject(p.id)] as const)), listsApi.listIdsForTask(entityId)]).then(
+      ([byProject, ids]) => {
+        if (cancelled) return;
+        setListsByProject(new Map(byProject));
+        setInLists(new Set(ids));
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [withLists, listsApi, projects, entityId]);
 
   // Area label per project (for a bit of context), with "Unsorted" for dangling areas.
   const areaName = useMemo(() => {
@@ -64,6 +91,9 @@ export function MembershipPicker({
       else next.add(containerId);
       return next;
     });
+    // Leaving a project (out, or on to somewhere else) takes the task out of its lists.
+    const listsBefore = inLists;
+    if (withLists) setInLists(new Set());
     try {
       if (inArea && areaType) {
         if (isMember) await removeAreaMember(containerId, areaType, entityId);
@@ -72,11 +102,64 @@ export function MembershipPicker({
       else await addMember(containerId, entityType, entityId);
     } catch {
       setMemberOf(before);
+      setInLists(listsBefore);
     }
   };
 
-  const shown = filterProjects(projects, query);
+  /** Toggle a list. Joining one files the task in the list's project (a move, if it lived
+   *  elsewhere); leaving one keeps it in the project. */
+  const toggleList = async (list: List) => {
+    const inList = inLists.has(list.id);
+    const before = { memberOf, inLists };
+    if (inList) {
+      setInLists((prev) => {
+        const next = new Set(prev);
+        next.delete(list.id);
+        return next;
+      });
+    } else if (memberOf.has(list.projectId)) {
+      setInLists((prev) => new Set(prev).add(list.id));
+    } else {
+      setMemberOf(new Set([list.projectId]));
+      setInLists(new Set([list.id]));
+    }
+    try {
+      if (inList) {
+        const item = (await listsApi.items(list.id)).find((i) => i.taskId === entityId);
+        if (item) await listsApi.removeItem(item.id);
+      } else await listsApi.addTask(list.id, entityId);
+      syncTrigger();
+    } catch {
+      setMemberOf(before.memberOf);
+      setInLists(before.inLists);
+    }
+  };
+
   const q = query.trim().toLowerCase();
+  // A project's lists to show: all of them when the project itself matches (or nothing is
+  // being searched), else just the lists that match.
+  const listsShown = (p: Project): List[] => {
+    const all = listsByProject.get(p.id) ?? [];
+    return !q || p.name.toLowerCase().includes(q) ? all : all.filter((l) => l.name.toLowerCase().includes(q));
+  };
+  // A project stays on show while one of its lists matches the search.
+  const shown = withLists && q ? projects.filter((p) => p.name.toLowerCase().includes(q) || listsShown(p).length > 0) : filterProjects(projects, query);
+  const listCount = [...listsByProject.values()].reduce((n, ls) => n + ls.length, 0);
+  const projectRows = (p: Project, meta: string) => (
+    <View key={p.id}>
+      <PickerRow
+        onPress={() => void toggle(p.id)}
+        disabled={!loaded}
+        label={p.icon ? `${p.icon} ${p.name}` : p.name}
+        meta={meta}
+        color={p.color ?? null}
+        leading={<PickerCheck checked={memberOf.has(p.id)} />}
+      />
+      {listsShown(p).map((l) => (
+        <PickerRow key={l.id} indent onPress={() => void toggleList(l)} disabled={!loaded} label={l.name} meta="list" leading={<PickerCheck checked={inLists.has(l.id)} />} />
+      ))}
+    </View>
+  );
   // Pick-one rows: each area (when this kind of thing can be filed in one) then its projects.
   const liveAreas = new Set(areas.map((a) => a.id));
   const groups = areas
@@ -87,18 +170,29 @@ export function MembershipPicker({
     }))
     .filter((g) => g.showArea || g.projects.length > 0);
   const dangling = shown.filter((p) => !liveAreas.has(p.areaId));
-  const rowCount = projects.length + (areaType ? areas.length : 0);
+  const rowCount = projects.length + (areaType ? areas.length : 0) + listCount;
   const nothing = single ? groups.length === 0 && dangling.length === 0 : shown.length === 0;
 
   return (
     <PickerShell
       title={single ? "Move to" : "Add to projects"}
-      subtitle={subtitle ?? (single ? "It lives in one place. Pick where it is again to take it out." : undefined)}
+      subtitle={
+        subtitle ??
+        (withLists && listCount > 0
+          ? "It lives in one place. Pick where it is again to take it out. A list files it in that list’s project."
+          : single
+            ? "It lives in one place. Pick where it is again to take it out."
+            : undefined)
+      }
       portal={portal}
       onClose={onClose}
     >
       {rowCount > SEARCH_THRESHOLD ? (
-        <PickerSearch placeholder={areaType ? "Search areas and projects" : "Search projects"} value={query} onChangeText={setQuery} />
+        <PickerSearch
+          placeholder={withLists && listCount > 0 ? "Search areas, projects and lists" : areaType ? "Search areas and projects" : "Search projects"}
+          value={query}
+          onChangeText={setQuery}
+        />
       ) : null}
       <ScrollView contentContainerStyle={pickerStyles.body}>
         {rowCount === 0 ? (
@@ -122,22 +216,10 @@ export function MembershipPicker({
                     leading={<PickerCheck checked={memberOf.has(g.area.id)} />}
                   />
                 ) : null}
-                {g.projects.map((p) => (
-                  <PickerRow
-                    key={p.id}
-                    onPress={() => void toggle(p.id)}
-                    disabled={!loaded}
-                    label={p.icon ? `${p.icon} ${p.name}` : p.name}
-                    meta={g.area.name}
-                    color={p.color ?? null}
-                    leading={<PickerCheck checked={memberOf.has(p.id)} />}
-                  />
-                ))}
+                {g.projects.map((p) => projectRows(p, g.area.name))}
               </View>
             ))}
-            {dangling.map((p) => (
-              <PickerRow key={p.id} onPress={() => void toggle(p.id)} disabled={!loaded} label={p.name} meta="Unsorted" color={p.color ?? null} leading={<PickerCheck checked={memberOf.has(p.id)} />} />
-            ))}
+            {dangling.map((p) => projectRows(p, "Unsorted"))}
           </>
         ) : (
           shown.map((p) => {
@@ -228,12 +310,15 @@ export function PickerRow({
   meta,
   color,
   leading,
+  indent,
   selected,
   disabled,
   onPress,
 }: {
   label: string;
   meta?: string;
+  /** Nest the row one level under the row above (a project's lists). */
+  indent?: boolean;
   /** A project swatch (literal hex). Omit for rows that aren't projects. */
   color?: string | null;
   leading?: ReactNode;
@@ -249,6 +334,7 @@ export function PickerRow({
       style={({ hovered, pressed }: PressState) => [
         pickerStyles.row,
         { minHeight: touch ? row.touch : row.h },
+        indent ? pickerStyles.rowIndent : null,
         { backgroundColor: selected ? colors.surfaceSelected : pressed ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent" },
       ]}
     >
@@ -325,6 +411,7 @@ export const pickerStyles = {
     paddingHorizontal: space.md,
     borderRadius: radius.sm,
   },
+  rowIndent: { paddingLeft: space.md + 20 },
   check: {
     borderRadius: radius.xs,
     borderWidth: 1,

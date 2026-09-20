@@ -6,6 +6,7 @@ import { useNav } from "../nav-context";
 import { useTasks } from "../TasksProvider";
 import { useLists, useListItems, useProjectLists } from "../ListsProvider";
 import { SortableList } from "../SortableList";
+import { ListSectionFold } from "../ListSectionFold";
 import { AddTasksPicker } from "../AddTasksPicker";
 import { useMemberIds } from "./ListScreens";
 import { Card, CardRow, Checkbox, EmptyCaption, FAB_CLEARANCE, Fab, NavAction, NavBar, ROW_ICON_INSET, RowIcon, cardStyle } from "./ui";
@@ -97,6 +98,15 @@ export function ListRowsScreen({ projectId, listId }: { projectId: string; listI
   const rows = items
     .map((item) => ({ item, task: item.kind === "task" && item.taskId ? tasksStore.byId(item.taskId) : undefined }))
     .filter((r) => r.item.kind === "heading" || r.task);
+  // Completed tasks leave the drag order for their own folded section at the foot; a drag
+  // reorders the active rows only, and completed rows keep their slots in the full order.
+  const active = rows.filter((r) => r.task?.status !== "done");
+  const done = rows.filter((r) => r.task?.status === "done");
+  const reorderActive = (ids: string[]) => {
+    const next = [...ids];
+    const held = new Set(done.map((r) => r.item.id));
+    return reorderItems(listId, rows.map((r) => (held.has(r.item.id) ? r.item.id : (next.shift() ?? r.item.id))));
+  };
 
   const addTaskFromDraft = async () => {
     const title = taskDraft.trim();
@@ -161,16 +171,16 @@ export function ListRowsScreen({ projectId, listId }: { projectId: string; listI
       </View>
       {/* activateOnStart claims the ☰ handle's touch before the scroll view can. */}
       <ScrollView contentContainerStyle={styles.list}>
-        {rows.length ? (
+        {active.length ? (
           <SortableList
             style={cardStyle()}
-            items={rows}
+            items={active}
             keyExtractor={(r) => r.item.id}
-            onReorder={(ids) => void reorderItems(listId, ids)}
+            onReorder={(ids) => void reorderActive(ids)}
             activateOnStart
             renderItem={({ item: r, index, drag }) =>
               r.item.kind === "heading" ? (
-                <View style={[styles.headingRow, index === rows.length - 1 ? null : styles.rowDivider]}>
+                <View style={[styles.headingRow, index === active.length - 1 ? null : styles.rowDivider]}>
                   <View {...drag} style={styles.handle}>
                     <Icon name="moreH" size={18} color={colors.textTertiary} />
                   </View>
@@ -182,29 +192,41 @@ export function ListRowsScreen({ projectId, listId }: { projectId: string; listI
                   </IconButton>
                 </View>
               ) : (
-                <TaskCard task={r.task as Task} item={r.item} drag={drag} isLast={index === rows.length - 1} onRemove={() => void removeItem(r.item.id)} />
+                <TaskCard task={r.task as Task} item={r.item} drag={drag} isLast={index === active.length - 1} onRemove={() => void removeItem(r.item.id)} />
               )
             }
           />
         ) : (
-          <EmptyCaption>This list is empty. Type a task above, then drag ☰ to set priority.</EmptyCaption>
+          <EmptyCaption>{done.length ? "Everything in this list is done. Type a task above to add another." : "This list is empty. Type a task above, then drag ☰ to set priority."}</EmptyCaption>
         )}
+        {done.length ? (
+          <ListSectionFold label={`Completed · ${done.length}`} storageKey="lists.completed" defaultOpen={false}>
+            <View style={cardStyle()}>
+              {done.map((r, index) => (
+                <TaskCard key={r.item.id} task={r.task as Task} item={r.item} isLast={index === done.length - 1} onRemove={() => void removeItem(r.item.id)} />
+              ))}
+            </View>
+          </ListSectionFold>
+        ) : null}
       </ScrollView>
       {picking ? <AddTasksPicker candidates={candidates} onAdd={(ids) => addTasks(listId, ids)} onClose={() => setPicking(false)} /> : null}
     </View>
   );
 }
 
-function TaskCard({ task, drag, isLast, onRemove }: { task: Task; item: ListItem; drag: object; isLast: boolean; onRemove: () => void }) {
+/** `drag` is the reorder handle's handlers; a completed row has none (it sits outside the order). */
+function TaskCard({ task, drag, isLast, onRemove }: { task: Task; item: ListItem; drag?: object; isLast: boolean; onRemove: () => void }) {
   const nav = useNav();
   const store = useTasks();
   return (
     <CardRow
       leading={
         <View style={styles.leading}>
-          <View {...drag} style={styles.handle}>
-            <Icon name="moreH" size={18} color={colors.textTertiary} />
-          </View>
+          {drag ? (
+            <View {...drag} style={styles.handle}>
+              <Icon name="moreH" size={18} color={colors.textTertiary} />
+            </View>
+          ) : null}
           <Checkbox checked={task.status === "done"} onPress={() => void store.setStatus(task.id, task.status === "done" ? "open" : "done")} />
         </View>
       }

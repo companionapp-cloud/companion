@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Animated, PanResponder, View, type GestureResponderHandlers, type PanResponderGestureState } from "react-native";
-import { Icon, Text, colors, noDragRegion, noSelect, radius, shadow, space } from "@companion/design-system";
+import { Icon, Text, colors, noSelect, radius, shadow, space } from "@companion/design-system";
+import { DragGrip } from "./DragGrip";
 
 /** What is being dragged (a note, task or canvas), plus a label for the drag ghost. */
 export type DragPayload = { kind: "note" | "task" | "canvas"; id: string; label: string };
@@ -222,16 +223,9 @@ export function DragHandle({ payload }: { payload: DragPayload }) {
   return dnd ? <Grip payload={payload} /> : null;
 }
 
-// A click on the grip must not bubble to the row's Pressable and open the item.
-const SWALLOW_CLICK = { onClick: (e: { stopPropagation: () => void }) => e.stopPropagation() } as object;
-
 function Grip({ payload }: { payload: DragPayload }) {
   const handlers = useDraggable(() => payload, { fromStart: true });
-  return (
-    <View {...handlers} {...SWALLOW_CLICK} aria-label="Drag to a project or area" style={[styles.grip, noSelect, noDragRegion]}>
-      <Icon name="grip" size={12} color={colors.textTertiary} strokeWidth={2.5} />
-    </View>
-  );
+  return <DragGrip handlers={handlers} label="Drag to a project or area" />;
 }
 
 /** Register an element as a drop target. Returns a ref to attach and whether a drag is
@@ -294,15 +288,6 @@ function DragGhost({ payload, position }: { payload: DragPayload; position: { x:
 }
 
 const styles = {
-  grip: {
-    width: 16,
-    alignSelf: "stretch" as const,
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-    // Sit flush with the row's right edge (rows pad their right side by space.sm).
-    marginRight: -space.xs,
-    cursor: "grab",
-  },
   ghost: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
