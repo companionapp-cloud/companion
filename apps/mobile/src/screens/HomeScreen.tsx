@@ -150,6 +150,8 @@ export function HomeScreen() {
           renderItem={({ item: area, drag }) => (
             <View>
               <SectionLabel
+                // Editing reorders and deletes; otherwise the heading opens the area's page.
+                onPress={editing ? undefined : () => nav.navigate('Area', { areaId: area.id })}
                 leading={area.color ? <View style={[styles.areaDot, { backgroundColor: area.color }]} /> : undefined}
                 trailing={
                   editing ? (
@@ -177,7 +179,7 @@ export function HomeScreen() {
                   )
                 }
               >
-                {area.name}
+                {area.icon ? `${area.icon} ${area.name}` : area.name}
               </SectionLabel>
               {area.projects.length > 0 || (addingProjectFor === area.id && !editing) ? (
                 <Card>

@@ -264,6 +264,14 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.areasReorder(payload)
 	case "areas.delete":
 		return c.areasDelete(payload)
+	case "areas.addMember":
+		return c.areasAddMember(payload)
+	case "areas.addMembers":
+		return c.areasAddMembers(payload)
+	case "areas.removeMember":
+		return c.areasRemoveMember(payload)
+	case "areas.members":
+		return c.areasMembers(payload)
 	case "projects.list":
 		return c.projectsList()
 	case "projects.create":

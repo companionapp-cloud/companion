@@ -5,9 +5,13 @@ import { Icon, IconButton, Input, Text, colors, icon, radius, row, shadow, space
 import { useProjects } from "./ProjectsProvider";
 import { Overlay } from "./Overlay";
 
-/** A popover to add/remove an entity (a note, task or canvas — or a calendar) to/from
- * projects — the "membership edited from either end" picker (PLAN §6.6). Reflects the
- * entity's current memberships as toggles over every project, grouped by area. */
+/** Where an entity is filed — the "membership edited from either end" picker (PLAN §6.6).
+ *
+ * Content (a note, task, habit or canvas) lives in ONE place: a project, or — for notes, tasks
+ * and canvases — directly in an area (PLAN-areas.md §2.1). For those this is a pick-one "Move
+ * to" list of every area and its projects; picking the place it already lives in takes it out
+ * (back to Unsorted). A calendar can sit in several projects, so for calendars the rows stay
+ * independent toggles over the projects. */
 export function MembershipPicker({
   entityType,
   entityId,
@@ -23,10 +27,12 @@ export function MembershipPicker({
   portal?: boolean;
   onClose: () => void;
 }) {
-  const { projects, areas, addMember, removeMember, membershipsFor } = useProjects();
+  const { projects, areas, addMember, removeMember, addAreaMember, removeAreaMember, membershipsFor } = useProjects();
   const [memberOf, setMemberOf] = useState<Set<string>>(new Set());
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
+  const single = entityType !== "calendar" && entityType !== "calendar_account";
+  const areaType = entityType === "note" || entityType === "task" || entityType === "canvas" ? entityType : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -46,42 +52,93 @@ export function MembershipPicker({
     return (areaId: string) => m.get(areaId) ?? "Unsorted";
   }, [areas]);
 
-  const toggle = async (projectId: string) => {
-    const isMember = memberOf.has(projectId);
-    // Optimistic: flip immediately, reconcile on failure.
+  /** Toggle a container. `inArea` says the id is an area's, filed into directly. */
+  const toggle = async (containerId: string, inArea = false) => {
+    const isMember = memberOf.has(containerId);
+    const before = memberOf;
+    // Optimistic: flip immediately, reconcile on failure. Content moves, so picking a place
+    // clears whichever one it was in.
     setMemberOf((prev) => {
-      const next = new Set(prev);
-      if (isMember) next.delete(projectId);
-      else next.add(projectId);
+      const next = single ? new Set<string>() : new Set(prev);
+      if (isMember) next.delete(containerId);
+      else next.add(containerId);
       return next;
     });
     try {
-      if (isMember) await removeMember(projectId, entityType, entityId);
-      else await addMember(projectId, entityType, entityId);
+      if (inArea && areaType) {
+        if (isMember) await removeAreaMember(containerId, areaType, entityId);
+        else await addAreaMember(containerId, areaType, entityId);
+      } else if (isMember) await removeMember(containerId, entityType, entityId);
+      else await addMember(containerId, entityType, entityId);
     } catch {
-      setMemberOf((prev) => {
-        const next = new Set(prev);
-        if (isMember) next.add(projectId);
-        else next.delete(projectId);
-        return next;
-      });
+      setMemberOf(before);
     }
   };
 
   const shown = filterProjects(projects, query);
+  const q = query.trim().toLowerCase();
+  // Pick-one rows: each area (when this kind of thing can be filed in one) then its projects.
+  const liveAreas = new Set(areas.map((a) => a.id));
+  const groups = areas
+    .map((a) => ({
+      area: a,
+      showArea: !!areaType && (!q || a.name.toLowerCase().includes(q)),
+      projects: shown.filter((p) => p.areaId === a.id),
+    }))
+    .filter((g) => g.showArea || g.projects.length > 0);
+  const dangling = shown.filter((p) => !liveAreas.has(p.areaId));
+  const rowCount = projects.length + (areaType ? areas.length : 0);
+  const nothing = single ? groups.length === 0 && dangling.length === 0 : shown.length === 0;
 
   return (
-    <PickerShell title="Add to projects" subtitle={subtitle} portal={portal} onClose={onClose}>
-      {projects.length > SEARCH_THRESHOLD ? <PickerSearch placeholder="Search projects" value={query} onChangeText={setQuery} /> : null}
+    <PickerShell
+      title={single ? "Move to" : "Add to projects"}
+      subtitle={subtitle ?? (single ? "It lives in one place. Pick where it is again to take it out." : undefined)}
+      portal={portal}
+      onClose={onClose}
+    >
+      {rowCount > SEARCH_THRESHOLD ? (
+        <PickerSearch placeholder={areaType ? "Search areas and projects" : "Search projects"} value={query} onChangeText={setQuery} />
+      ) : null}
       <ScrollView contentContainerStyle={pickerStyles.body}>
-        {projects.length === 0 ? (
+        {rowCount === 0 ? (
           <Text tone="tertiary" variant="caption" style={pickerStyles.empty}>
-            No projects yet. Create one from the sidebar.
+            {areaType ? "No areas or projects yet. Create one from the sidebar." : "No projects yet. Create one from the sidebar."}
           </Text>
-        ) : shown.length === 0 ? (
+        ) : nothing ? (
           <Text tone="tertiary" variant="caption" style={pickerStyles.empty}>
-            No projects match that.
+            {areaType ? "Nothing matches that." : "No projects match that."}
           </Text>
+        ) : single ? (
+          <>
+            {groups.map((g) => (
+              <View key={g.area.id}>
+                {g.showArea ? (
+                  <PickerRow
+                    onPress={() => void toggle(g.area.id, true)}
+                    disabled={!loaded}
+                    label={g.area.icon ? `${g.area.icon} ${g.area.name}` : g.area.name}
+                    meta="area"
+                    leading={<PickerCheck checked={memberOf.has(g.area.id)} />}
+                  />
+                ) : null}
+                {g.projects.map((p) => (
+                  <PickerRow
+                    key={p.id}
+                    onPress={() => void toggle(p.id)}
+                    disabled={!loaded}
+                    label={p.icon ? `${p.icon} ${p.name}` : p.name}
+                    meta={g.area.name}
+                    color={p.color ?? null}
+                    leading={<PickerCheck checked={memberOf.has(p.id)} />}
+                  />
+                ))}
+              </View>
+            ))}
+            {dangling.map((p) => (
+              <PickerRow key={p.id} onPress={() => void toggle(p.id)} disabled={!loaded} label={p.name} meta="Unsorted" color={p.color ?? null} leading={<PickerCheck checked={memberOf.has(p.id)} />} />
+            ))}
+          </>
         ) : (
           shown.map((p) => {
             const on = memberOf.has(p.id);

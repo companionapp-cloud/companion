@@ -2,8 +2,15 @@ import { createContext, useContext } from "react";
 
 export type ViewId = "today" | "chat" | "calendar" | "notes" | "tasks" | "canvases" | "habits" | "graph" | "trash" | "settings" | "notifications";
 
-/** The content types a project drills into (its sub-nav). */
+/** The content types a project drills into (its sub-nav). No section is the project's
+ *  overview page (PLAN-areas.md §3). */
 export type ProjectSection = "notes" | "tasks" | "lists" | "canvases" | "calendars" | "habits";
+/** What an area holds directly — notes, tasks and canvases, never lists or calendars. */
+export type AreaSection = "notes" | "tasks" | "canvases";
+
+/** A place content is filed: a project, or an area. The two share one page layout — an
+ *  overview, then a toolbar of sections — so views address either through this. */
+export type ContainerRef = { kind: "project" | "area"; id: string };
 
 /** The workspace sections: each browses one document kind. */
 export type WorkspaceSection = "notes" | "tasks" | "canvases";
@@ -21,9 +28,11 @@ export type TabRef =
   | DocRef
   | { kind: "browse"; section: WorkspaceSection }
   /** A view. `date` (YYYY-MM-DD) asks the Today view to open on that day — how a dated
-   *  note is followed from the calendar into the daily-notes tool. */
-  | { kind: "view"; view: SurfaceViewId; date?: string }
-  | { kind: "project"; projectId: string; section?: ProjectSection; itemId?: string; subItemId?: string };
+   *  note is followed from the calendar into the daily-notes tool. `section` is the Settings
+   *  section on show, carried in the URL (/settings/:section) so it survives a shell swap. */
+  | { kind: "view"; view: SurfaceViewId; date?: string; section?: string }
+  | { kind: "project"; projectId: string; section?: ProjectSection; itemId?: string; subItemId?: string }
+  | { kind: "area"; areaId: string; section?: AreaSection; itemId?: string };
 
 /** One tab slot: a stable uid, what it holds (null = a fresh, empty tab), and that tab's
  *  own history. `back`/`fwd` (oldest→newest) drive per-tab Back/Forward — each tab
@@ -37,11 +46,11 @@ export const SECTION_OF: Record<DocRef["kind"], WorkspaceSection> = { note: "not
 export function docOfRef(ref: TabRef | null): DocRef | null {
   if (!ref) return null;
   if (ref.kind === "note" || ref.kind === "task" || ref.kind === "canvas") return ref;
-  if (ref.kind !== "project" || !ref.itemId) return null;
+  if ((ref.kind !== "project" && ref.kind !== "area") || !ref.itemId) return null;
   if (ref.section === "notes") return { kind: "note", id: ref.itemId };
   if (ref.section === "tasks") return { kind: "task", id: ref.itemId };
   if (ref.section === "canvases") return { kind: "canvas", id: ref.itemId };
-  if (ref.section === "lists" && ref.subItemId) return { kind: "task", id: ref.subItemId };
+  if (ref.kind === "project" && ref.section === "lists" && ref.subItemId) return { kind: "task", id: ref.subItemId };
   return null;
 }
 
@@ -52,9 +61,11 @@ export function keyOfRef(ref: TabRef | null): string {
     case "browse":
       return `browse:${ref.section}`;
     case "view":
-      return ref.date ? `view:${ref.view}:${ref.date}` : `view:${ref.view}`;
+      return ref.date || ref.section ? `view:${ref.view}:${ref.date ?? ref.section}` : `view:${ref.view}`;
     case "project":
       return `project:${ref.projectId}:${ref.section ?? ""}:${ref.itemId ?? ""}:${ref.subItemId ?? ""}`;
+    case "area":
+      return `area:${ref.areaId}:${ref.section ?? ""}:${ref.itemId ?? ""}`;
     default:
       return `${ref.kind}:${ref.id}`;
   }
@@ -67,9 +78,11 @@ export function locationOfRef(ref: TabRef | null): NavLocation {
     case "browse":
       return ref.section === "canvases" ? { kind: "canvases" } : { kind: ref.section };
     case "view":
-      return { kind: "view", view: ref.view, date: ref.date };
+      return { kind: "view", view: ref.view, date: ref.date, section: ref.section };
     case "project":
       return { kind: "project", projectId: ref.projectId, section: ref.section, itemId: ref.itemId, subItemId: ref.subItemId };
+    case "area":
+      return { kind: "area", areaId: ref.areaId, section: ref.section, itemId: ref.itemId };
     case "canvas":
       return { kind: "canvases", canvasId: ref.id };
     default:
@@ -78,11 +91,11 @@ export function locationOfRef(ref: TabRef | null): NavLocation {
 }
 
 /** The rail entry a tab lights up. */
-export function viewOfRef(ref: TabRef | null): ViewId | "project" | null {
+export function viewOfRef(ref: TabRef | null): ViewId | "project" | "area" | null {
   if (!ref) return null;
   if (ref.kind === "browse") return ref.section;
   if (ref.kind === "view") return ref.view;
-  if (ref.kind === "project") return "project";
+  if (ref.kind === "project" || ref.kind === "area") return ref.kind;
   return SECTION_OF[ref.kind];
 }
 
@@ -94,13 +107,26 @@ export function viewOfRef(ref: TabRef | null): ViewId | "project" | null {
 export type NavLocation =
   /** A fresh tab holding nothing yet. */
   | { kind: "empty" }
-  /** A view; `date` is the day the Today view was asked to open on (see TabRef). */
-  | { kind: "view"; view: SurfaceViewId; date?: string }
+  /** A view; `date` is the day the Today view was asked to open on, `section` the Settings
+   *  section on show (see TabRef). */
+  | { kind: "view"; view: SurfaceViewId; date?: string; section?: string }
   | { kind: "notes" }
   | { kind: "tasks" }
   /** The canvases browse list, with the open board (if any) in the URL: /canvases/:id. */
   | { kind: "canvases"; canvasId?: string }
-  | { kind: "project"; projectId: string; section?: ProjectSection; itemId?: string; subItemId?: string };
+  | { kind: "project"; projectId: string; section?: ProjectSection; itemId?: string; subItemId?: string }
+  /** An area's page: its overview, or one of its sections (/area/<id>[/<section>[/<itemId>]]). */
+  | { kind: "area"; areaId: string; section?: AreaSection; itemId?: string };
+
+/** The container a location sits in, with its drill-down flattened — what the shared
+ *  project/area page reads instead of branching on the kind. */
+export function containerOfLocation(
+  loc: NavLocation,
+): (ContainerRef & { section?: ProjectSection; itemId?: string; subItemId?: string }) | null {
+  if (loc.kind === "project") return { kind: "project", id: loc.projectId, section: loc.section, itemId: loc.itemId, subItemId: loc.subItemId };
+  if (loc.kind === "area") return { kind: "area", id: loc.areaId, section: loc.section, itemId: loc.itemId };
+  return null;
+}
 
 /** The app-facing navigation API. Implemented on top of React Navigation (routing +
  * URL linking) plus a thin layer for the workspace tab strip and forward history. */
@@ -108,7 +134,7 @@ export interface Navigator {
   /** Inside a tab's surface this is *that tab's* location; elsewhere, the active tab's. */
   current: NavLocation;
   /** The rail entry the active tab lights up (null for an empty tab). */
-  activeView: ViewId | "project" | null;
+  activeView: ViewId | "project" | "area" | null;
   /** False inside a background tab's surface — every tab stays mounted so its state
    *  survives a switch, but only the visible one should claim shared, window-wide scopes
    *  (multiselect registration, keyboard shortcuts). */
@@ -162,6 +188,13 @@ export interface Navigator {
   openProjectItem: (projectId: string, section: ProjectSection, itemId: string) => void;
   /** Push into an item nested under a section item — a task inside a list. */
   openProjectSubItem: (projectId: string, section: ProjectSection, itemId: string, subItemId: string) => void;
+
+  // --- areas (PLAN-areas.md §3) ----------------------------------------------
+  /** Open an area's overview. */
+  openArea: (areaId: string) => void;
+  /** Open a project's or an area's overview, a section of it, or an item in a section. An area
+   *  has only the notes/tasks/canvases sections; any other falls back to its overview. */
+  openContainer: (container: ContainerRef, section?: ProjectSection, itemId?: string) => void;
 }
 
 export const NavContext = createContext<Navigator | null>(null);

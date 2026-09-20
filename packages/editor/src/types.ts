@@ -87,7 +87,7 @@ export interface EditorProps {
   /** "full" is the document editor (headings, lists, task items, marks …). "simple" is a
    * plain-text-plus-references editor for task notes and the chat composer. Default "full". */
   variant?: "full" | "simple";
-  /** Placeholder shown while the document is empty (simple variant). */
+  /** Placeholder shown while the document is empty. */
   placeholder?: string;
   /** When set, Enter submits (calls this with the current content) instead of a newline, and
    * Shift-Enter makes a new paragraph — the chat composer's send behavior. Simple variant only. */
@@ -95,7 +95,14 @@ export interface EditorProps {
   /** Change this value's identity to empty the editor (e.g. the chat composer after a send).
    * Skips the initial mount. */
   clearSignal?: unknown;
-  /** Simple variant only. The field hugs its content; these bound how far it grows. On native
+  /** Full variant: hug the content like an inline field instead of filling a page — the
+   * description on an area's or a project's overview (PLAN-areas.md §1), which sits in a
+   * scrolling page between a title and cards. Everything else about the full editor holds:
+   * the schema, references, embeds, tables. `minHeight`/`maxHeight` bound it as they do the
+   * simple field. On native the keyboard toolbar is skipped (it assumes a full-screen editor);
+   * markdown shortcuts still format. */
+  inline?: boolean;
+  /** Simple variant, or `inline`. The field hugs its content; these bound how far it grows. On native
    * the WebView is sized to its content between these; on web the wrapper caps + scrolls at
    * maxHeight. Ignored by the full editor. */
   minHeight?: number;

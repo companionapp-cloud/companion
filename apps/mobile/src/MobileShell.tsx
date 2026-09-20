@@ -25,6 +25,7 @@ import { ChatScreen } from './screens/ChatScreen';
 import { ChatListScreen } from './screens/ChatListScreen';
 import { PlaceholderScreen } from './screens/PlaceholderScreen';
 import { ProjectScreen } from './screens/ProjectScreen';
+import { AreaScreen } from './screens/AreaScreen';
 import { ProjectSettingsScreen } from './screens/ProjectSettingsScreen';
 import { SettingsScreen, SettingsSectionScreen } from './screens/SettingsScreen';
 import type { SettingsSectionId } from '@companion/app';
@@ -60,6 +61,8 @@ export type RootStackParamList = {
   Notifications: undefined;
   // A project and its scoped tab bar.
   Project: { projectId: string };
+  // An area's page and its scoped tab bar (PLAN-areas.md §3).
+  Area: { areaId: string };
   // A project's settings (rename, reassign area, delete).
   ProjectSettings: { projectId: string };
   // Shared detail/overlay screens.
@@ -74,10 +77,19 @@ export type RootStackParamList = {
 // The tabs shown inside a project (PLAN §6.6). Notes works today; Tasks and Calendar
 // are placeholders until those milestones land.
 export type ProjectTabParamList = {
+  ProjectOverview: undefined;
   ProjectNotes: undefined;
   ProjectTasks: undefined;
   ProjectCanvases: undefined;
   ProjectCalendar: undefined;
+};
+
+// The tabs shown inside an area: what it holds directly, never lists or calendars.
+export type AreaTabParamList = {
+  AreaOverview: undefined;
+  AreaNotes: undefined;
+  AreaTasks: undefined;
+  AreaCanvases: undefined;
 };
 
 const RootStack = createNativeStackNavigator<RootStackParamList>();
@@ -153,6 +165,7 @@ export function MobileShell() {
             <RootStack.Screen name="Trash" component={TrashRouteScreen} options={{ title: 'Trash' }} />
             <RootStack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifications' }} />
             <RootStack.Screen name="Project" component={ProjectScreen} options={{ title: 'Project' }} />
+            <RootStack.Screen name="Area" component={AreaScreen} options={{ title: 'Area' }} />
             <RootStack.Screen name="ProjectSettings" component={ProjectSettingsScreen} options={{ title: 'Project settings' }} />
             <RootStack.Screen name="NoteEditor" component={NoteEditorScreen} options={{ title: '' }} />
             <RootStack.Screen name="TaskEditor" component={TaskEditorScreen} options={{ title: 'Task' }} />

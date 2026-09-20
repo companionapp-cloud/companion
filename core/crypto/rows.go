@@ -17,10 +17,12 @@ import (
 // carry title/location/description, so a client-side fetch design (feeds fetched on-device, events
 // pushed like any entity) keeps them opaque to the server.
 var protectedFields = map[string][]string{
-	protocol.EntityNote:        {"title", "contentMd", "props"},
-	protocol.EntityTask:        {"title", "notesMd", "props"},
-	protocol.EntityArea:        {"name"},
-	protocol.EntityProject:     {"name"},
+	protocol.EntityNote: {"title", "contentMd", "props"},
+	protocol.EntityTask: {"title", "notesMd", "props"},
+	// An area's and a project's page (PLAN-areas.md §1): the emoji and the description are
+	// content. The cover stays a plaintext document id, like every other foreign key.
+	protocol.EntityArea:        {"name", "icon", "descriptionMd"},
+	protocol.EntityProject:     {"name", "icon", "descriptionMd"},
 	protocol.EntityList:        {"name"},
 	protocol.EntityListItem:    {"title"},
 	protocol.EntityObjectType:  {"name", "schemaJson"},

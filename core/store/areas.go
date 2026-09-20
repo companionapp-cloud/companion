@@ -25,20 +25,35 @@ type AreasRepo struct {
 	clock domain.Clock
 }
 
-const areaColumns = `id, name, color, sort_order, created_at, updated_at, deleted_at, version, dirty`
+const areaColumns = `id, name, color, icon, cover_document_id, description_md, sort_order, created_at, updated_at, deleted_at, version, dirty`
 
 // CreateAreaInput carries the client-supplied fields for a new area.
 type CreateAreaInput struct {
-	Name      string  `json:"name"`
-	Color     *string `json:"color,omitempty"`
-	SortOrder int     `json:"sortOrder"`
+	Name            string  `json:"name"`
+	Color           *string `json:"color,omitempty"`
+	Icon            *string `json:"icon,omitempty"`
+	CoverDocumentID *string `json:"coverDocumentId,omitempty"`
+	DescriptionMd   string  `json:"descriptionMd,omitempty"`
+	SortOrder       int     `json:"sortOrder"`
 }
 
-// UpdateAreaInput carries partial updates; nil fields are left unchanged.
+// UpdateAreaInput carries partial updates; nil fields are left unchanged. An empty Icon or
+// CoverDocumentID clears it (PLAN-areas.md §1).
 type UpdateAreaInput struct {
-	Name      *string `json:"name,omitempty"`
-	Color     *string `json:"color,omitempty"`
-	SortOrder *int    `json:"sortOrder,omitempty"`
+	Name            *string `json:"name,omitempty"`
+	Color           *string `json:"color,omitempty"`
+	Icon            *string `json:"icon,omitempty"`
+	CoverDocumentID *string `json:"coverDocumentId,omitempty"`
+	DescriptionMd   *string `json:"descriptionMd,omitempty"`
+	SortOrder       *int    `json:"sortOrder,omitempty"`
+}
+
+// emptyToNil folds an empty optional string to nil, so "cleared" and "never set" store alike.
+func emptyToNil(s *string) *string {
+	if s == nil || *s == "" {
+		return nil
+	}
+	return s
 }
 
 // Create inserts a new area (UUIDv7 id, version 0, dirty).
@@ -58,15 +73,16 @@ func (r *AreasRepo) Create(in CreateAreaInput) (*domain.Area, error) {
 	}
 	a := &domain.Area{
 		ID: id.String(), Name: in.Name, Color: in.Color, SortOrder: order,
+		Icon: emptyToNil(in.Icon), CoverDocumentID: emptyToNil(in.CoverDocumentID), DescriptionMd: in.DescriptionMd,
 		CreatedAt: now, UpdatedAt: now, Version: 0, Dirty: true,
 	}
 	if err := a.Validate(); err != nil {
 		return nil, err
 	}
 	if _, err := r.db.Exec(
-		`INSERT INTO areas (id, name, color, sort_order, created_at, updated_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
-		a.ID, a.Name, a.Color, a.SortOrder,
+		`INSERT INTO areas (id, name, color, icon, cover_document_id, description_md, sort_order, created_at, updated_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		a.ID, a.Name, a.Color, a.Icon, a.CoverDocumentID, a.DescriptionMd, a.SortOrder,
 		a.CreatedAt.Format(timeFormat), a.UpdatedAt.Format(timeFormat), a.Version, boolToInt(a.Dirty),
 	); err != nil {
 		return nil, fmt.Errorf("insert area: %w", err)
@@ -153,6 +169,15 @@ func (r *AreasRepo) Update(id string, in UpdateAreaInput) (*domain.Area, error) 
 	if in.Color != nil {
 		a.Color = in.Color
 	}
+	if in.Icon != nil {
+		a.Icon = emptyToNil(in.Icon)
+	}
+	if in.CoverDocumentID != nil {
+		a.CoverDocumentID = emptyToNil(in.CoverDocumentID)
+	}
+	if in.DescriptionMd != nil {
+		a.DescriptionMd = *in.DescriptionMd
+	}
 	if in.SortOrder != nil {
 		a.SortOrder = *in.SortOrder
 	}
@@ -162,9 +187,10 @@ func (r *AreasRepo) Update(id string, in UpdateAreaInput) (*domain.Area, error) 
 		return nil, err
 	}
 	res, err := r.db.Exec(
-		`UPDATE areas SET name = ?, color = ?, sort_order = ?, updated_at = ?, dirty = 1
+		`UPDATE areas SET name = ?, color = ?, icon = ?, cover_document_id = ?, description_md = ?,
+		   sort_order = ?, updated_at = ?, dirty = 1
 		 WHERE id = ? AND deleted_at IS NULL;`,
-		a.Name, a.Color, a.SortOrder, a.UpdatedAt.Format(timeFormat), id,
+		a.Name, a.Color, a.Icon, a.CoverDocumentID, a.DescriptionMd, a.SortOrder, a.UpdatedAt.Format(timeFormat), id,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update area: %w", err)
@@ -234,13 +260,15 @@ func (r *AreasRepo) Apply(a *domain.Area) error {
 		deletedAt = a.DeletedAt.UTC().Format(timeFormat)
 	}
 	_, err := r.db.Exec(
-		`INSERT INTO areas (id, name, color, sort_order, created_at, updated_at, deleted_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+		`INSERT INTO areas (id, name, color, icon, cover_document_id, description_md, sort_order, created_at, updated_at, deleted_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 		 ON CONFLICT(id) DO UPDATE SET
-		   name = excluded.name, color = excluded.color, sort_order = excluded.sort_order,
+		   name = excluded.name, color = excluded.color, icon = excluded.icon,
+		   cover_document_id = excluded.cover_document_id, description_md = excluded.description_md,
+		   sort_order = excluded.sort_order,
 		   created_at = excluded.created_at, updated_at = excluded.updated_at,
 		   deleted_at = excluded.deleted_at, version = excluded.version, dirty = 0;`,
-		a.ID, a.Name, a.Color, a.SortOrder,
+		a.ID, a.Name, a.Color, a.Icon, a.CoverDocumentID, a.DescriptionMd, a.SortOrder,
 		a.CreatedAt.UTC().Format(timeFormat), a.UpdatedAt.UTC().Format(timeFormat), deletedAt, a.Version,
 	)
 	if err != nil {
@@ -258,6 +286,9 @@ func (r *AreasRepo) MarkPushed(id string, version int64) error {
 
 func (r *AreasRepo) MeaningfulDiff(a, b *domain.Area) bool {
 	if a.Name != b.Name || derefStr(a.Color) != derefStr(b.Color) || a.SortOrder != b.SortOrder {
+		return true
+	}
+	if derefStr(a.Icon) != derefStr(b.Icon) || derefStr(a.CoverDocumentID) != derefStr(b.CoverDocumentID) || a.DescriptionMd != b.DescriptionMd {
 		return true
 	}
 	return (a.DeletedAt == nil) != (b.DeletedAt == nil)
@@ -284,9 +315,9 @@ func (r *AreasRepo) ConflictedCopy(local *domain.Area, suffix string) error {
 		name = "Untitled"
 	}
 	_, err = r.db.Exec(
-		`INSERT INTO areas (id, name, color, sort_order, created_at, updated_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, 0, 1);`,
-		id.String(), name+" "+suffix, local.Color, local.SortOrder,
+		`INSERT INTO areas (id, name, color, icon, cover_document_id, description_md, sort_order, created_at, updated_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1);`,
+		id.String(), name+" "+suffix, local.Color, local.Icon, local.CoverDocumentID, local.DescriptionMd, local.SortOrder,
 		now.Format(timeFormat), now.Format(timeFormat),
 	)
 	if err != nil {
@@ -297,16 +328,22 @@ func (r *AreasRepo) ConflictedCopy(local *domain.Area, suffix string) error {
 
 func scanArea(rows Rows) (*domain.Area, error) {
 	var (
-		a                    domain.Area
-		color, deletedAt     sql.NullString
-		createdAt, updatedAt string
-		dirty                int
+		a                             domain.Area
+		color, icon, cover, deletedAt sql.NullString
+		createdAt, updatedAt          string
+		dirty                         int
 	)
-	if err := rows.Scan(&a.ID, &a.Name, &color, &a.SortOrder, &createdAt, &updatedAt, &deletedAt, &a.Version, &dirty); err != nil {
+	if err := rows.Scan(&a.ID, &a.Name, &color, &icon, &cover, &a.DescriptionMd, &a.SortOrder, &createdAt, &updatedAt, &deletedAt, &a.Version, &dirty); err != nil {
 		return nil, fmt.Errorf("scan area: %w", err)
 	}
 	if color.Valid {
 		a.Color = &color.String
+	}
+	if icon.Valid && icon.String != "" {
+		a.Icon = &icon.String
+	}
+	if cover.Valid && cover.String != "" {
+		a.CoverDocumentID = &cover.String
 	}
 	var err error
 	if a.CreatedAt, err = time.Parse(timeFormat, createdAt); err != nil {

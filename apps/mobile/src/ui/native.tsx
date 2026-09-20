@@ -26,8 +26,19 @@ export function Card({ children }: { children: ReactNode }) {
 
 /** A small uppercase mono section label (e.g. an area's name), sitting above a card.
  * `trailing` hosts the section's own actions across from the label. */
-export function SectionLabel({ children, leading, trailing }: { children: ReactNode; leading?: ReactNode; trailing?: ReactNode }) {
-  if (!trailing && !leading) {
+export function SectionLabel({
+  children,
+  leading,
+  trailing,
+  onPress,
+}: {
+  children: ReactNode;
+  leading?: ReactNode;
+  trailing?: ReactNode;
+  /** Opens what the heading names (an area's page). */
+  onPress?: () => void;
+}) {
+  if (!trailing && !leading && !onPress) {
     return (
       <Text variant="eyebrow" tone="tertiary" numberOfLines={1} style={styles.sectionLabel}>
         {children}
@@ -37,9 +48,18 @@ export function SectionLabel({ children, leading, trailing }: { children: ReactN
   return (
     <View style={styles.sectionRow}>
       {leading}
-      <Text variant="eyebrow" tone="tertiary" numberOfLines={1} style={styles.sectionRowLabel}>
-        {children}
-      </Text>
+      {onPress ? (
+        <Pressable onPress={onPress} accessibilityRole="button" style={styles.sectionRowPress}>
+          <Text variant="eyebrow" tone="tertiary" numberOfLines={1}>
+            {children}
+          </Text>
+          <Icon name="chevronRight" size={12} color={colors.textQuaternary} />
+        </Pressable>
+      ) : (
+        <Text variant="eyebrow" tone="tertiary" numberOfLines={1} style={styles.sectionRowLabel}>
+          {children}
+        </Text>
+      )}
       {trailing}
     </View>
   );
@@ -323,6 +343,7 @@ const styles = StyleSheet.create({
     minHeight: 38,
   },
   sectionRowLabel: { flex: 1, minWidth: 0 },
+  sectionRowPress: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: space.xs, alignSelf: 'stretch' },
   tile: { width: TILE, height: TILE, borderRadius: radius.lg, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   tileAccent: { backgroundColor: colors.accentSoft },
   tileNeutral: { backgroundColor: colors.surfaceSunken },

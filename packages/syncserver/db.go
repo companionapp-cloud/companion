@@ -141,6 +141,9 @@ CREATE TABLE IF NOT EXISTS areas (
   user_id    TEXT NOT NULL,
   name       TEXT NOT NULL,
   color      TEXT,
+  icon       TEXT,
+  cover_document_id TEXT,
+  description_md    TEXT NOT NULL DEFAULT '',
   sort_order BIGINT NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -156,6 +159,9 @@ CREATE TABLE IF NOT EXISTS projects (
   area_id     TEXT NOT NULL,
   name        TEXT NOT NULL,
   color       TEXT,
+  icon        TEXT,
+  cover_document_id TEXT,
+  description_md    TEXT NOT NULL DEFAULT '',
   sort_order  BIGINT NOT NULL DEFAULT 0,
   archived_at TEXT,
   created_at  TEXT NOT NULL,
@@ -170,6 +176,7 @@ CREATE TABLE IF NOT EXISTS project_members (
   id          TEXT PRIMARY KEY,
   user_id     TEXT NOT NULL,
   project_id  TEXT NOT NULL,
+  container_type TEXT NOT NULL DEFAULT 'project',
   entity_type TEXT NOT NULL,
   entity_id   TEXT NOT NULL,
   created_at  TEXT NOT NULL,
@@ -531,6 +538,15 @@ func migrate(db *sql.DB, dialect string) error {
 		// Task start + reminder lists (PLAN §6.4), retrofitted onto pre-reminders DBs.
 		`ALTER TABLE tasks ADD COLUMN start_at TEXT`,
 		`ALTER TABLE tasks ADD COLUMN reminders_json TEXT NOT NULL DEFAULT '[]'`,
+		// Area and project pages, and content filed directly in an area (PLAN-areas.md),
+		// retrofitted onto pre-overview DBs. For an 'area' membership project_id is the area's id.
+		`ALTER TABLE areas ADD COLUMN icon TEXT`,
+		`ALTER TABLE areas ADD COLUMN cover_document_id TEXT`,
+		`ALTER TABLE areas ADD COLUMN description_md TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE projects ADD COLUMN icon TEXT`,
+		`ALTER TABLE projects ADD COLUMN cover_document_id TEXT`,
+		`ALTER TABLE projects ADD COLUMN description_md TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE project_members ADD COLUMN container_type TEXT NOT NULL DEFAULT 'project'`,
 	}
 	for _, alter := range alters {
 		if dialect == "postgres" {

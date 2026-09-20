@@ -47,7 +47,7 @@ const FORMAT_BUTTONS: { name: FormatName; icon: IconName; label: string }[] = [
 function buildHtml(
   markdown: string,
   hasLinkSource: boolean,
-  opts: { simple: boolean; placeholder?: string; submitOnEnter: boolean; debounceMs?: number; hasDocumentSource: boolean; hasInk: boolean },
+  opts: { simple: boolean; inline: boolean; placeholder?: string; submitOnEnter: boolean; debounceMs?: number; hasDocumentSource: boolean; hasInk: boolean },
 ): string {
   // Escape `<` so note content can't break out of the <script> (e.g. "</script>").
   const initial = JSON.stringify(markdown).replace(/</g, "\\u003c");
@@ -56,10 +56,12 @@ function buildHtml(
   // The full document editor is a full-screen page (min-height:100%, roomy .pm-wrap). The
   // simple editor is an inline field that hugs its content, so the host can size the WebView
   // to it (see the height message) — no min-height, tight padding.
-  const bodyCss = opts.simple
+  // An inline full editor (EditorProps.inline) hugs its content the same way.
+  const hug = opts.simple || opts.inline;
+  const bodyCss = hug
     ? "html,body{margin:0;padding:0;background:transparent;}"
     : `html,body{margin:0;padding:0;min-height:100%;background:${colors.surfaceCard};}`;
-  const mountClass = opts.simple ? "pm-compact" : "pm-wrap";
+  const mountClass = opts.simple ? "pm-compact" : opts.inline ? "pm-compact pm-inline" : "pm-wrap";
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -69,7 +71,7 @@ function buildHtml(
 </head>
 <body>
 <div id="editor" class="${mountClass}"></div>
-<script>window.__INITIAL_MARKDOWN__ = ${initial}; window.__HAS_LINK_SOURCE__ = ${hasLinkSource ? "true" : "false"}; window.__HAS_DOCUMENT_SOURCE__ = ${opts.hasDocumentSource ? "true" : "false"}; window.__EDITOR_VARIANT__ = ${opts.simple ? '"simple"' : '"full"'}; window.__PLACEHOLDER__ = ${placeholder}; window.__SUBMIT_ON_ENTER__ = ${opts.submitOnEnter ? "true" : "false"}; window.__DEBOUNCE_MS__ = ${debounce}; window.__HAS_INK__ = ${opts.hasInk ? "true" : "false"};</script>
+<script>window.__INITIAL_MARKDOWN__ = ${initial}; window.__HAS_LINK_SOURCE__ = ${hasLinkSource ? "true" : "false"}; window.__HAS_DOCUMENT_SOURCE__ = ${opts.hasDocumentSource ? "true" : "false"}; window.__EDITOR_VARIANT__ = ${opts.simple ? '"simple"' : '"full"'}; window.__EDITOR_INLINE__ = ${opts.inline ? "true" : "false"}; window.__PLACEHOLDER__ = ${placeholder}; window.__SUBMIT_ON_ENTER__ = ${opts.submitOnEnter ? "true" : "false"}; window.__DEBOUNCE_MS__ = ${debounce}; window.__HAS_INK__ = ${opts.hasInk ? "true" : "false"};</script>
 <script>${EDITOR_JS}</script>
 </body>
 </html>`;
@@ -91,10 +93,12 @@ interface PickerState {
 }
 
 export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
-  { markdown, onChangeMarkdown, linkSource, documentSource, onOpenRef, onQuickCreate, linkRevision, variant, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange, ink },
+  { markdown, onChangeMarkdown, linkSource, documentSource, onOpenRef, onQuickCreate, linkRevision, variant, inline, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange, ink },
   ref,
 ) {
   const simple = variant === "simple";
+  // Sized to its content: the simple field, or the full editor asked to sit inline.
+  const hug = simple || !!inline;
   const onChangeRef = useRef(onChangeMarkdown);
   onChangeRef.current = onChangeMarkdown;
   const onFormatStateRef = useRef(onFormatStateChange);
@@ -130,7 +134,7 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
 
   // Built once from the initial content; the WebView owns edits thereafter.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const html = useMemo(() => buildHtml(markdown, !!linkSource, { simple, placeholder, submitOnEnter: !!onSubmit, debounceMs, hasDocumentSource: !!documentSource, hasInk }), []);
+  const html = useMemo(() => buildHtml(markdown, !!linkSource, { simple, inline: !!inline, placeholder, submitOnEnter: !!onSubmit, debounceMs, hasDocumentSource: !!documentSource, hasInk }), []);
 
   useEffect(() => {
     const showEvt = Platform.OS === "ios" ? "keyboardWillChangeFrame" : "keyboardDidShow";
@@ -352,13 +356,13 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
 
   // The simple field types `[[` to open the native picker; its keyboard toolbar is skipped
   // (it's a screen-anchored overlay that assumes the full-screen editor's layout).
-  const showToolbar = !simple && editorFocused && kbHeight > 0 && !picker.open;
+  const showToolbar = !hug && editorFocused && kbHeight > 0 && !picker.open;
 
   return (
-    <View style={simple ? { height: contentHeight } : styles.root}>
+    <View style={hug ? { height: contentHeight } : styles.root}>
       <WebView
         ref={webRef}
-        style={simple ? { height: contentHeight, backgroundColor: "transparent" } : styles.web}
+        style={hug ? { height: contentHeight, backgroundColor: "transparent" } : styles.web}
         originWhitelist={["*"]}
         source={{ html }}
         onMessage={onMessage}

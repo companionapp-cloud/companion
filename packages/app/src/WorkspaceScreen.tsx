@@ -9,6 +9,7 @@ import { TaskEditor, TaskRow } from "./TaskEditor";
 import { Draggable } from "./DndContext";
 import { repeatSubtitle } from "./repeat";
 import { ListFilterMenu } from "./ListFilterMenu";
+import { ListSectionFold } from "./ListSectionFold";
 import { useMultiSelect, pressMods } from "./MultiSelectProvider";
 import { SelectionStack } from "./SelectionStack";
 import { MultiSelectBar } from "./MultiSelectBar";
@@ -173,7 +174,7 @@ function TaskTabBody({ id, onDelete }: { id: string; onDelete: () => void }) {
         if (ref.type === "task" || ref.type === "note") nav.openInNewTab({ kind: ref.type, id: ref.id });
         else if (ref.type === "canvas") nav.openCanvas(ref.id);
       }}
-      onConnectSync={() => nav.goView("settings")}
+      onConnectSync={() => nav.openRef({ kind: "view", view: "settings", section: "sync" })}
     />
   );
 }
@@ -344,10 +345,7 @@ function TasksList() {
           </Text>
         )}
         {store.seeds.length ? (
-          <>
-            <Text variant="eyebrow" tone="quaternary" style={styles.sectionLabel}>
-              Repeating · {store.seeds.length}
-            </Text>
+          <ListSectionFold label={`Repeating · ${store.seeds.length}`} storageKey="tasks.repeating" defaultOpen>
             {store.seeds.map((s) => (
               <ListRow
                 key={s.id}
@@ -358,19 +356,16 @@ function TasksList() {
                 onPress={() => nav.openTask(s.id)}
               />
             ))}
-          </>
+          </ListSectionFold>
         ) : null}
         {done.length ? (
-          <>
-            <Text variant="eyebrow" tone="quaternary" style={styles.sectionLabel}>
-              Completed · {done.length}
-            </Text>
+          <ListSectionFold label={`Completed · ${done.length}`} storageKey="tasks.completed" defaultOpen={false}>
             {done.map((t) => (
               <Draggable key={t.id} payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }}>
                 <TaskRow task={t} selected={selectFor(t.id)} onPress={(e) => pressTask(t.id, e)} onToggle={() => void store.setStatus(t.id, "open")} />
               </Draggable>
             ))}
-          </>
+          </ListSectionFold>
         ) : null}
       </ScrollView>
     </View>
@@ -396,7 +391,6 @@ const styles = {
   scroll: { padding: space.xs, gap: 1 },
   empty: { padding: space.xl, textAlign: "center" as const, lineHeight: 18 },
   emptyBody: { maxWidth: 300, textAlign: "center" as const, lineHeight: 18 },
-  sectionLabel: { paddingHorizontal: space.sm, paddingTop: space.md, paddingBottom: 3 },
   detail: { flex: 1, minWidth: 0, backgroundColor: colors.surfaceCard },
 };
 

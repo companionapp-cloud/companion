@@ -7,7 +7,7 @@ import type { EditorController, EditorProps } from "./types";
 // real DOM, so no WebView is needed — Vite resolves this via .web.tsx). It grows to
 // its content; the note view's ScrollView provides the scroll and document column.
 export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
-  { markdown, onChangeMarkdown, linkSource, documentSource, onOpenRef, onQuickCreate, linkRevision, variant, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange, onFocusChange, tableMenuPresenter, ink },
+  { markdown, onChangeMarkdown, linkSource, documentSource, onOpenRef, onQuickCreate, linkRevision, variant, inline, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange, onFocusChange, tableMenuPresenter, ink },
   ref,
 ) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -133,8 +133,9 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
   // The simple field hugs its content; cap it at maxHeight (scrolling past it) and reserve
   // minHeight so an empty composer/note still has a comfortable tap target.
   const style =
-    variant === "simple"
+    variant === "simple" || inline
       ? { minHeight, maxHeight, overflowY: maxHeight ? ("auto" as const) : undefined }
       : undefined;
-  return <div ref={mountRef} className={variant === "simple" ? "companion-editor pm-simple" : "companion-editor"} style={style} />;
+  const className = variant === "simple" ? "companion-editor pm-simple" : inline ? "companion-editor pm-inline" : "companion-editor";
+  return <div ref={mountRef} className={className} style={style} />;
 });

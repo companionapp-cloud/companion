@@ -9,19 +9,24 @@ import (
 // Project collects notes, tasks, and habits and drives the sidebar navigation. A
 // project belongs to exactly ONE area (AreaID is a plain column, not an edge table —
 // PLAN §4.0/§6.6), so the "only one area" invariant is structural. A dangling AreaID
-// (its area was deleted) is tolerated: the project renders under "Unsorted".
+// (its area was deleted) is tolerated: the project renders under "Unsorted". Like an area,
+// a project is a page (PLAN-areas.md) with an optional emoji icon, cover image and markdown
+// description.
 type Project struct {
-	ID         string     `json:"id"`
-	AreaID     string     `json:"areaId"`
-	Name       string     `json:"name"`
-	Color      *string    `json:"color,omitempty"`
-	SortOrder  int        `json:"sortOrder"`
-	ArchivedAt *time.Time `json:"archivedAt,omitempty"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	UpdatedAt  time.Time  `json:"updatedAt"`
-	DeletedAt  *time.Time `json:"deletedAt,omitempty"`
-	Version    int64      `json:"version"`
-	Dirty      bool       `json:"dirty"`
+	ID              string     `json:"id"`
+	AreaID          string     `json:"areaId"`
+	Name            string     `json:"name"`
+	Color           *string    `json:"color,omitempty"`
+	Icon            *string    `json:"icon,omitempty"`
+	CoverDocumentID *string    `json:"coverDocumentId,omitempty"`
+	DescriptionMd   string     `json:"descriptionMd"`
+	SortOrder       int        `json:"sortOrder"`
+	ArchivedAt      *time.Time `json:"archivedAt,omitempty"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
+	DeletedAt       *time.Time `json:"deletedAt,omitempty"`
+	Version         int64      `json:"version"`
+	Dirty           bool       `json:"dirty"`
 }
 
 // ErrInvalidProject is returned when a project fails validation.

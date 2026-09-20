@@ -7,7 +7,7 @@ import type { Canvas } from '@companion/core-bridge';
 import { useCore, useCanvases, useProjects, timeAgo } from '@companion/app';
 import { Spinner, colors, space } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
-import { useProjectScope } from '../ProjectContext';
+import { useAreaScope, useProjectScope } from '../ProjectContext';
 import { CardRow, EmptyCaption, FAB_CLEARANCE, Fab, GroupedItem, ROW_ICON_INSET, RowIcon } from '../ui/native';
 
 // A list of canvas boards with a create FAB (PLAN-canvases.md). Used globally (all
@@ -18,19 +18,22 @@ export function CanvasesListScreen() {
   const store = useCanvases();
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const projectId = useProjectScope();
+  const areaId = useAreaScope();
+  // The container this list is scoped to — a project, or an area (whose list is its whole tree).
+  const scopeId = projectId ?? areaId;
   const insets = useSafeAreaInsets();
   const { core } = useCore();
-  const { membershipsForProject, addMember } = useProjects();
+  const { membershipsForProject, membershipsForArea, addMember, addAreaMember } = useProjects();
 
   const [memberIds, setMemberIds] = useState<Set<string> | null>(null);
   useEffect(() => {
-    if (!projectId) {
+    if (!scopeId) {
       setMemberIds(null);
       return;
     }
     let cancelled = false;
     const load = async () => {
-      const rows = await membershipsForProject(projectId);
+      const rows = (await (projectId ? membershipsForProject(projectId) : membershipsForArea(scopeId, true))) ?? [];
       if (!cancelled) setMemberIds(new Set(rows.filter((m) => m.entityType === 'canvas').map((m) => m.entityId)));
     };
     void load();
@@ -41,18 +44,19 @@ export function CanvasesListScreen() {
       offNav();
       offData();
     };
-  }, [projectId, membershipsForProject, core]);
+  }, [projectId, scopeId, membershipsForProject, membershipsForArea, core]);
 
   const canvases = useMemo(() => {
-    if (!projectId) return store.canvases;
+    if (!scopeId) return store.canvases;
     if (!memberIds) return [];
     return store.canvases.filter((c) => memberIds.has(c.id));
-  }, [store.canvases, projectId, memberIds]);
+  }, [store.canvases, scopeId, memberIds]);
 
   const openCanvas = (id: string) => nav.navigate('Canvas', { id });
   const createCanvas = async () => {
     const c = await store.create();
     if (projectId) await addMember(projectId, 'canvas', c.id);
+    else if (areaId) await addAreaMember(areaId, 'canvas', c.id);
     openCanvas(c.id);
   };
 
@@ -64,10 +68,10 @@ export function CanvasesListScreen() {
         data={canvases}
         keyExtractor={(c) => c.id}
         // Project tabs sit above a tab bar that already clears the home indicator.
-        contentContainerStyle={[styles.list, { paddingBottom: FAB_CLEARANCE + space.xl + (projectId ? 0 : insets.bottom) }]}
+        contentContainerStyle={[styles.list, { paddingBottom: FAB_CLEARANCE + space.xl + (scopeId ? 0 : insets.bottom) }]}
         ListEmptyComponent={
           <EmptyCaption>
-            {projectId ? 'No canvases in this project yet. Tap + to start a board.' : 'No canvases yet. Tap + to start a board.'}
+            {scopeId ? `No canvases in this ${areaId ? 'area' : 'project'} yet. Tap + to start a board.` : 'No canvases yet. Tap + to start a board.'}
           </EmptyCaption>
         }
         renderItem={({ item, index }) => (
@@ -76,7 +80,7 @@ export function CanvasesListScreen() {
           </GroupedItem>
         )}
       />
-      <Fab label="New canvas" onPress={() => void createCanvas()} bottomInset={projectId ? 0 : insets.bottom} />
+      <Fab label="New canvas" onPress={() => void createCanvas()} bottomInset={scopeId ? 0 : insets.bottom} />
     </View>
   );
 }

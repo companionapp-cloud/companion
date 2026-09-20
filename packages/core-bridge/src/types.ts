@@ -218,6 +218,11 @@ export interface Area {
   id: string;
   name: string;
   color?: string | null;
+  /** The area's page (PLAN-areas.md §1): an emoji, a cover image (a document id) and a
+   *  markdown description. */
+  icon?: string | null;
+  coverDocumentId?: string | null;
+  descriptionMd: string;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -335,6 +340,10 @@ export interface Project {
   areaId: string;
   name: string;
   color?: string | null;
+  /** The project's page — see Area. */
+  icon?: string | null;
+  coverDocumentId?: string | null;
+  descriptionMd: string;
   sortOrder: number;
   archivedAt?: string | null;
   createdAt: string;
@@ -348,7 +357,10 @@ export interface Project {
  *  "calendar_account" an account id) — mirrors core/domain.ProjectMember. */
 export interface ProjectMember {
   id: string;
+  /** The CONTAINER's id: a project's, or an area's when `containerType` is "area". */
   projectId: string;
+  /** Absent on rows written before areas held content — read that as "project". */
+  containerType?: "project" | "area";
   entityType: "note" | "task" | "habit" | "canvas" | "calendar" | "calendar_account";
   entityId: string;
   createdAt: string;
@@ -394,6 +406,7 @@ export interface SidebarProject {
   id: string;
   name: string;
   color?: string | null;
+  icon?: string | null;
   taskProgress: number | null; // 0..1 done/(open+done) member tasks; null if none
   habitHealth: number | null; // 0..1 mean member-habit streak health; null if none
 }
@@ -403,6 +416,7 @@ export interface SidebarArea {
   id: string;
   name: string;
   color?: string | null;
+  icon?: string | null;
   projects: SidebarProject[];
 }
 

@@ -9,3 +9,12 @@ export const ProjectContext = createContext<string | null>(null);
 export function useProjectScope(): string | null {
   return useContext(ProjectContext);
 }
+
+/** The area a screen is scoped to (PLAN-areas.md §2), provided by the area's tab navigator. An
+ * area-scoped list shows the area's whole tree — what is filed directly in it plus what its
+ * projects hold — and files what it creates in the area itself. */
+export const AreaContext = createContext<string | null>(null);
+
+export function useAreaScope(): string | null {
+  return useContext(AreaContext);
+}

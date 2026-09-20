@@ -43,7 +43,7 @@ It works from the other side too: a task's notes field accepts `[[`, so a task c
 
 ## Projects and lists
 
-Click the **folder** icon in a task's toolbar to open **Add to projects** and tick every project it belongs to — a task can sit in several. You can also drag a task onto a project in the sidebar, or select several and choose **Assign to project**. Tasks aren't filed under areas directly: they belong to projects, and projects belong to [areas](/docs/your-first-project).
+Click the **folder** icon in a task's toolbar to open **Move to** and pick where it lives: a project, or an [area](/docs/your-first-project) directly. A task lives in one place, so picking a new one moves it. You can also drag a task onto an area or a project in the sidebar, or select several and choose **Move to…**.
 
 Inside a project, **Lists** put tasks in an order you choose. Add one with **New list**, drag rows into priority order, and use **New heading** to break a list into sublists. **Add existing task** pulls in tasks already in the project.
 

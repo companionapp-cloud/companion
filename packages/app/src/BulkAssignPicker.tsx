@@ -5,10 +5,11 @@ import { Spinner, Text, colors, space } from "@companion/design-system";
 import { useProjects } from "./ProjectsProvider";
 import { PickerRow, PickerSearch, PickerShell, SEARCH_THRESHOLD, filterProjects, pickerStyles } from "./MembershipPicker";
 
-/** Bulk "Assign to project" for a multiselection (PLAN §4). Unlike the single-entity
- *  MembershipPicker, this is assign-only — picking a project adds every selected entity to
- *  it (selected items may have differing memberships, so there's no meaningful toggle
- *  state). Closes and clears the selection via `onDone` when finished. */
+/** Bulk "Move to" for a multiselection (PLAN §4). Unlike the single-entity MembershipPicker,
+ *  this is move-only — picking an area or a project files every selected entity there, taking
+ *  each out of wherever it was (content lives in one place — PLAN-areas.md §2.1). Selected
+ *  items may be filed differently, so there's no meaningful toggle state. Closes and clears
+ *  the selection via `onDone` when finished. */
 export function BulkAssignPicker({
   entityType,
   entityIds,
@@ -21,7 +22,8 @@ export function BulkAssignPicker({
   onDone: () => void;
   onClose: () => void;
 }) {
-  const { projects, areas, addMembers } = useProjects();
+  const { projects, areas, addMembers, addAreaMembers } = useProjects();
+  const areaType = entityType === "note" || entityType === "task" || entityType === "canvas" ? entityType : null;
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -30,11 +32,12 @@ export function BulkAssignPicker({
     return (areaId: string) => m.get(areaId) ?? "Unsorted";
   }, [areas]);
 
-  const assign = async (projectId: string) => {
+  const assign = async (containerId: string, inArea = false) => {
     if (busy) return;
     setBusy(true);
     try {
-      await addMembers(projectId, entityType, entityIds);
+      if (inArea && areaType) await addAreaMembers(containerId, areaType, entityIds);
+      else await addMembers(containerId, entityType, entityIds);
       onDone();
     } catch {
       setBusy(false);
@@ -44,26 +47,36 @@ export function BulkAssignPicker({
   const noun = entityType === "task" ? "task" : "note";
   const label = entityIds.length === 1 ? noun : `${noun}s`;
   const shown = filterProjects(projects, query);
+  const q = query.trim().toLowerCase();
+  const shownAreas = areaType ? areas.filter((a) => !q || a.name.toLowerCase().includes(q)) : [];
+  const rowCount = projects.length + (areaType ? areas.length : 0);
 
   return (
-    <PickerShell title="Assign to project" subtitle={`Add ${entityIds.length} ${label} to a project.`} onClose={onClose}>
-      {projects.length > SEARCH_THRESHOLD ? <PickerSearch placeholder="Search projects" value={query} onChangeText={setQuery} /> : null}
+    <PickerShell title="Move to" subtitle={`Move ${entityIds.length} ${label} to an area or a project.`} onClose={onClose}>
+      {rowCount > SEARCH_THRESHOLD ? <PickerSearch placeholder="Search areas and projects" value={query} onChangeText={setQuery} /> : null}
       <ScrollView contentContainerStyle={pickerStyles.body}>
-        {projects.length === 0 ? (
+        {rowCount === 0 ? (
           <Text tone="tertiary" variant="caption" style={pickerStyles.empty}>
-            No projects yet. Create one from the sidebar.
+            No areas or projects yet. Create one from the sidebar.
           </Text>
-        ) : shown.length === 0 ? (
+        ) : shown.length === 0 && shownAreas.length === 0 ? (
           <Text tone="tertiary" variant="caption" style={pickerStyles.empty}>
-            No projects match that.
+            Nothing matches that.
           </Text>
         ) : (
-          shown.map((p) => <PickerRow key={p.id} onPress={() => void assign(p.id)} disabled={busy} label={p.name} meta={areaName(p.areaId)} color={p.color ?? null} />)
+          <>
+            {shownAreas.map((a) => (
+              <PickerRow key={a.id} onPress={() => void assign(a.id, true)} disabled={busy} label={a.icon ? `${a.icon} ${a.name}` : a.name} meta="area" />
+            ))}
+            {shown.map((p) => (
+              <PickerRow key={p.id} onPress={() => void assign(p.id)} disabled={busy} label={p.icon ? `${p.icon} ${p.name}` : p.name} meta={areaName(p.areaId)} color={p.color ?? null} />
+            ))}
+          </>
         )}
       </ScrollView>
       {busy ? (
         <View style={styles.busy}>
-          <Spinner inline label="Assigning…" />
+          <Spinner inline label="Moving…" />
         </View>
       ) : null}
     </PickerShell>

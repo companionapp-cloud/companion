@@ -85,11 +85,12 @@ func New(d Driver, clock domain.Clock) (*Store, error) {
 	s.Documents = &DocumentsRepo{db: d, clock: clock, links: s.Links}
 	s.Areas = &AreasRepo{db: d, clock: clock}
 	s.Projects = &ProjectsRepo{db: d, clock: clock}
-	// Project membership mirrors into the link index as authored 'member' edges.
-	s.ProjectMembers = &ProjectMembersRepo{db: d, clock: clock, links: s.Links}
 	// Project lists + their items (task refs and headings sharing one flat order).
 	s.Lists = &ListsRepo{db: d, clock: clock}
 	s.ListItems = &ListItemsRepo{db: d, clock: clock}
+	// Memberships file content in a project or an area; project ones mirror into the link
+	// index as authored 'member' edges, and a task leaving a project leaves its lists.
+	s.ProjectMembers = &ProjectMembersRepo{db: d, clock: clock, links: s.Links, listItems: s.ListItems}
 	// Full-text search reads the trigger-maintained notes_fts / tasks_fts indexes; it backs
 	// the LLM search_notes retrieval tool (PLAN §6.8).
 	s.Search = &SearchRepo{db: d}
@@ -111,6 +112,12 @@ func New(d Driver, clock domain.Clock) (*Store, error) {
 	s.CanvasNodes = &CanvasNodesRepo{db: d, clock: clock, links: s.Links}
 	s.CanvasEdges = &CanvasEdgesRepo{db: d, clock: clock}
 	s.NoteInk = &NoteInkRepo{db: d, clock: clock}
+	// Content lives in one container (PLAN-areas.md §2.1). Anything still filed in several
+	// projects from before that rule keeps the first and leaves the rest; a no-op afterwards.
+	if _, err := s.ProjectMembers.EnforceSingleContainer(); err != nil {
+		d.Close()
+		return nil, fmt.Errorf("enforce single container: %w", err)
+	}
 	return s, nil
 }
 

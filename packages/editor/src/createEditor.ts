@@ -269,6 +269,8 @@ export function createEditor(
         tableEditing(),
         trailingParagraphPlugin(),
         tableMenuPlugin({ presenter: options.tableMenuPresenter, clipboard: options.clipboard }),
+        // An inline full editor (an overview's description) prompts while it is empty.
+        ...(options.placeholder ? [placeholderPlugin(options.placeholder)] : []),
         // Native delegates `[[` to a host modal; web/desktop use the in-editor DOM popup.
         ...autocompletePlugins,
         ...emptyLinkPlugins,

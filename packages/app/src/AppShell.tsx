@@ -45,6 +45,7 @@ import {
   viewOfRef,
   type DocRef,
   type Navigator,
+  type AreaSection,
   type ProjectSection,
   type SurfaceViewId,
   type Tab,
@@ -140,11 +141,15 @@ function webLinking(): LinkingOptions<ParamListBase> | undefined {
         habits: "habits",
         graph: "graph",
         trash: "trash",
-        settings: "settings",
+        // The open section rides in the URL (/settings/ai) — the same path the mobile shell
+        // uses for its pushed section screen, so a shell swap lands on the same section.
+        settings: "settings/:section?",
         notifications: "notifications",
         // Deep-linkable project drill-down: /project/<id>[/<section>[/<itemId>[/<subItemId>]]].
         // The fourth segment is the task selected inside a list (/lists/<listId>/<taskId>).
         project: "project/:projectId/:section?/:itemId?/:subItemId?",
+        // An area's page: /area/<id>[/<section>[/<itemId>]] (PLAN-areas.md §3).
+        area: "area/:areaId/:section?/:itemId?",
       },
     },
   };
@@ -160,6 +165,7 @@ interface RouteParams {
   id?: string;
   date?: string;
   projectId?: string;
+  areaId?: string;
   section?: string;
   itemId?: string;
   subItemId?: string;
@@ -192,7 +198,20 @@ function refOfRoute(route: RouteLike): TabRef {
       subItemId: p.subItemId,
     };
   }
-  return { kind: "view", view: route.name as SurfaceViewId, date: route.name === "today" ? p.date : undefined };
+  if (route.name === "area") {
+    return { kind: "area", areaId: p.areaId ?? "", section: asAreaSection(p.section), itemId: p.itemId };
+  }
+  return {
+    kind: "view",
+    view: route.name as SurfaceViewId,
+    date: route.name === "today" ? p.date : undefined,
+    section: route.name === "settings" ? p.section : undefined,
+  };
+}
+
+/** An area holds only notes, tasks and canvases; anything else in the URL is its overview. */
+function asAreaSection(section: string | undefined): AreaSection | undefined {
+  return section === "notes" || section === "tasks" || section === "canvases" ? section : undefined;
 }
 
 /** The route that mirrors a tab's contents into the URL. */
@@ -201,9 +220,12 @@ function routeOfRef(ref: TabRef): { name: string; params?: RouteParams } {
     case "browse":
       return { name: ref.section };
     case "view":
-      return ref.date ? { name: ref.view, params: { date: ref.date } } : { name: ref.view };
+      if (ref.date) return { name: ref.view, params: { date: ref.date } };
+      return ref.section ? { name: ref.view, params: { section: ref.section } } : { name: ref.view };
     case "project":
       return { name: "project", params: { projectId: ref.projectId, section: ref.section, itemId: ref.itemId, subItemId: ref.subItemId } };
+    case "area":
+      return { name: "area", params: { areaId: ref.areaId, section: ref.section, itemId: ref.itemId } };
     default:
       return { name: SECTION_OF[ref.kind], params: { id: ref.id } };
   }
@@ -407,6 +429,13 @@ function NavBridge({
       // A task selected inside a list: the list stays the column's item, the task is the detail.
       openProjectSubItem: (projectId, section, itemId, subItemId) =>
         selectRef({ kind: "project", projectId, section, itemId, subItemId }),
+      openArea: (areaId) => selectRef({ kind: "area", areaId }),
+      openContainer: (container, section, itemId) =>
+        selectRef(
+          container.kind === "area"
+            ? { kind: "area", areaId: container.id, section: asAreaSection(section), itemId: asAreaSection(section) ? itemId : undefined }
+            : { kind: "project", projectId: container.id, section, itemId },
+        ),
     };
   }, [tabs, active, activeTab, activeRef, selectRef, replaceRef, stepTab]);
 
@@ -496,6 +525,7 @@ function ShellRoutes({ topInset, windowControls }: { topInset: number; windowCon
         <Nav.Screen name="settings" component={RouteAnchor} />
         <Nav.Screen name="notifications" component={RouteAnchor} />
         <Nav.Screen name="project" component={RouteAnchor} />
+        <Nav.Screen name="area" component={RouteAnchor} />
       </Nav.Navigator>
     </NavigationContainer>
   );
@@ -557,6 +587,7 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
     ? Math.max(0, Math.round((windowControls.top + windowControls.bottom) / 2 - layout.toolbarH / 2))
     : 0;
   const activeProjectId = nav.current.kind === "project" ? nav.current.projectId : null;
+  const activeAreaId = nav.current.kind === "area" ? nav.current.areaId : null;
 
   // Sync on navigation (§5.4). Key on the active tab's contents so every move fires.
   // Depend on the stable `trigger`, not the whole `sync` object: `sync` is a memo that
@@ -639,6 +670,8 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
               <ProjectsSidebar
                 onSelectProject={nav.openProject}
                 activeProjectId={activeProjectId}
+                onSelectArea={nav.openArea}
+                activeAreaId={activeAreaId}
                 onDeleteArea={setDeletingArea}
               />
             ) : null}
@@ -668,7 +701,7 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
 
         <View style={{ flex: 1, minWidth: 0 }}>
           {/* Sync health: prompts re-auth / unlock in Settings when sync is blocked (§7). */}
-          <SyncHealthBanner onOpenSettings={() => nav.goView("settings")} leftInset={chromeInset} />
+          <SyncHealthBanner onOpenSettings={() => nav.openRef({ kind: "view", view: "settings", section: "sync" })} leftInset={chromeInset} />
           <Frame toolbar={<AppToolbar onCapture={() => setCaptureOpen(true)} leftInset={chromeInset} verticalInset={toolbarInset} />}>
             {/* Every tab's surface stays mounted and only the active one is shown, so an
                 editor's draft, a chat's scroll or a graph's layout survives a tab switch. */}
@@ -686,7 +719,7 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
       {deletingArea ? (
         <ConfirmDialog
           title="Delete area?"
-          message={`Delete the area “${deletingArea.name}”? It has no projects, so nothing else is affected.`}
+          message={`Delete the area “${deletingArea.name}”? It has no projects; anything filed directly in it moves to Unsorted.`}
           confirmLabel="Delete area"
           onConfirm={async () => {
             await deleteArea(deletingArea.id);
@@ -730,6 +763,7 @@ const VIEW_SCREENS: Partial<Record<SurfaceViewId, ComponentType>> = {
 function SurfaceBody({ tabRef }: { tabRef: TabRef | null }) {
   if (!tabRef) return <EmptyTab />;
   if (tabRef.kind === "project") return <ProjectView key={tabRef.projectId} />;
+  if (tabRef.kind === "area") return <ProjectView key={tabRef.areaId} />;
   if (tabRef.kind === "view") {
     const Screen = VIEW_SCREENS[tabRef.view];
     return Screen ? <Screen /> : <ComingSoon view={tabRef.view as PlaceholderView} />;

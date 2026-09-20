@@ -30,7 +30,7 @@ Quit Things first, so its latest changes are included.
 Companion shows what it found:
 
 - **Inbox** — your Inbox, along with any to-dos in no area or project. They land in **Unsorted tasks**.
-- **Areas** — ticking an area ticks its projects too; untick any project you don't want. An area's own to-dos (the ones not in a project) become a project named after the area.
+- **Areas** — ticking an area ticks its projects too; untick any project you don't want. An area's own to-dos (the ones not in a project) are filed in the area itself — open its **Tasks** tab, or look under **Unsorted tasks** on its overview.
 - **Projects in no area** — Companion projects always belong to an area, so these go into a new area called **Things**.
 - **Include completed to-dos** — also brings Things' Logbook: completed and canceled to-dos, and finished projects, which arrive archived.
 

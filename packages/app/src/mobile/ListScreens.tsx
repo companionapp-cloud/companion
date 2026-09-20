@@ -19,19 +19,21 @@ import { CHECKBOX_INSET, CardRow, Checkbox, EmptyCaption, FAB_CLEARANCE, Fab, Gr
 // search directly beneath; inside a project the project screen owns the bar, so the list
 // renders bare. Rows are one contiguous grouped card with inset hairlines.
 
-/** Tracks a project's member ids of one entity type, refreshed as memberships change. */
-export function useMemberIds(projectId: string | undefined, entityType: "note" | "task"): Set<string> | null {
+/** Tracks a container's member ids of one entity type, refreshed as memberships change. The
+ *  container is a project, or — with `areaId` — an area, whose members are its whole tree: what
+ *  is filed directly in it plus what its projects hold (PLAN-areas.md §3). */
+export function useMemberIds(projectId: string | undefined, entityType: "note" | "task" | "canvas", areaId?: string): Set<string> | null {
   const { core } = useCore();
-  const { membershipsForProject } = useProjects();
+  const { membershipsForProject, membershipsForArea } = useProjects();
   const [memberIds, setMemberIds] = useState<Set<string> | null>(null);
   useEffect(() => {
-    if (!projectId) {
+    if (!projectId && !areaId) {
       setMemberIds(null);
       return;
     }
     let cancelled = false;
     const load = async () => {
-      const rows = await membershipsForProject(projectId);
+      const rows = (await (projectId ? membershipsForProject(projectId) : membershipsForArea(areaId ?? "", true))) ?? [];
       if (!cancelled) setMemberIds(new Set(rows.filter((m) => m.entityType === entityType).map((m) => m.entityId)));
     };
     void load();
@@ -40,19 +42,21 @@ export function useMemberIds(projectId: string | undefined, entityType: "note" |
       cancelled = true;
       off();
     };
-  }, [projectId, entityType, membershipsForProject, core]);
+  }, [projectId, areaId, entityType, membershipsForProject, membershipsForArea, core]);
   return memberIds;
 }
 
-export function NotesListScreen({ projectId }: { projectId?: string }) {
+export function NotesListScreen({ projectId, areaId }: { projectId?: string; areaId?: string }) {
   const store = useNotes();
   const nav = useNav();
-  const { addMember } = useProjects();
-  const memberIds = useMemberIds(projectId, "note");
+  const { addMember, addAreaMember } = useProjects();
+  const memberIds = useMemberIds(projectId, "note", areaId);
+  // Scoped to a project or an area: the host screen owns the nav bar, and new notes are filed there.
+  const scoped = !!(projectId || areaId);
   const [query, setQuery] = useState("");
 
   const notes = useMemo(() => {
-    const base = !projectId
+    const base = !scoped
       ? store.visible // global list honours the Unsorted/All filter
       : !memberIds
         ? []
@@ -60,15 +64,16 @@ export function NotesListScreen({ projectId }: { projectId?: string }) {
     const q = query.trim().toLowerCase();
     if (!q) return base;
     return base.filter((n) => n.title.toLowerCase().includes(q) || n.contentMd.toLowerCase().includes(q));
-  }, [store.visible, store.notes, projectId, memberIds, query]);
+  }, [store.visible, store.notes, scoped, memberIds, query]);
 
   const createNote = async () => {
     const note = await store.create();
     if (projectId) await addMember(projectId, "note", note.id);
+    else if (areaId) await addAreaMember(areaId, "note", note.id);
     nav.openNote(note.id);
   };
 
-  const bar = projectId ? null : (
+  const bar = scoped ? null : (
     <NavBar
       title="Notes"
       right={<NavAction icon="plus" label="New note" onPress={() => void createNote()} />}
@@ -113,8 +118,8 @@ export function NotesListScreen({ projectId }: { projectId?: string }) {
           <EmptyCaption>
             {query
               ? "No notes match that."
-              : projectId
-                ? "No notes in this project yet. Tap + to add one."
+              : scoped
+                ? `No notes in this ${areaId ? "area" : "project"} yet. Tap + to add one.`
                 : "Nothing here yet. Tap + to start a note."}
           </EmptyCaption>
         }
@@ -141,30 +146,32 @@ export function NotesListScreen({ projectId }: { projectId?: string }) {
   );
 }
 
-export function TasksListScreen({ projectId }: { projectId?: string }) {
+export function TasksListScreen({ projectId, areaId }: { projectId?: string; areaId?: string }) {
   const store = useTasks();
   const nav = useNav();
-  const { addMember } = useProjects();
-  const memberIds = useMemberIds(projectId, "task");
+  const { addMember, addAreaMember } = useProjects();
+  const memberIds = useMemberIds(projectId, "task", areaId);
+  const scoped = !!(projectId || areaId);
 
   // Project-scoped lists don't use the global Unsorted/All filter; they carry their own
   // due-date filter (all / upcoming / overdue) instead.
   const [dueFilter, setDueFilter] = useState<"all" | "upcoming" | "overdue">("all");
 
   const tasks = useMemo(() => {
-    if (!projectId) return store.visible; // global list honours the Unsorted/All/Upcoming/Overdue filter
+    if (!scoped) return store.visible; // global list honours the Unsorted/All/Upcoming/Overdue filter
     if (!memberIds) return [];
     const members = store.tasks.filter((t) => memberIds.has(t.id));
     return dueFilter === "all" ? members : filterTasksByDue(members, dueFilter);
-  }, [store.visible, store.tasks, projectId, memberIds, dueFilter]);
+  }, [store.visible, store.tasks, scoped, memberIds, dueFilter]);
 
   const createTask = async () => {
     const task = await store.create({ title: "Untitled task" });
     if (projectId) await addMember(projectId, "task", task.id);
+    else if (areaId) await addAreaMember(areaId, "task", task.id);
     nav.openTask(task.id);
   };
 
-  const bar = projectId ? (
+  const bar = scoped ? (
     // The project screen's bar holds the section switcher; this list's own due filter
     // continues that bar as a second segmented row.
     <View style={styles.subBar}>
@@ -215,12 +222,12 @@ export function TasksListScreen({ projectId }: { projectId?: string }) {
         contentContainerStyle={[styles.list, styles.listTop]}
         ListEmptyComponent={
           <EmptyCaption>
-            {projectId
+            {scoped
               ? dueFilter === "upcoming"
-                ? "No upcoming tasks in this project."
+                ? `No upcoming tasks in this ${areaId ? "area" : "project"}.`
                 : dueFilter === "overdue"
-                  ? "No overdue tasks in this project."
-                  : "No tasks in this project yet. Tap + to add one."
+                  ? `No overdue tasks in this ${areaId ? "area" : "project"}.`
+                  : `No tasks in this ${areaId ? "area" : "project"} yet. Tap + to add one.`
               : "Nothing to do. Tap + to add a task."}
           </EmptyCaption>
         }

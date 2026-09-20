@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   Area,
+  AreaMemberEntityType,
   CreateAreaInput,
   CreateProjectInput,
   MemberEntityType,
@@ -20,7 +21,9 @@ export interface ProjectsStore {
   loading: boolean;
   createArea: (input: CreateAreaInput) => Promise<Area>;
   updateArea: (id: string, fields: UpdateAreaInput) => Promise<void>;
-  deleteArea: (id: string) => Promise<void>;
+  /** Delete an area (only once it has no projects). When `deleteContent` is true the notes and
+   *  tasks filed directly in it are trashed too; otherwise they fall back to "Unsorted". */
+  deleteArea: (id: string, deleteContent?: boolean) => Promise<void>;
   createProject: (input: CreateProjectInput) => Promise<Project>;
   updateProject: (id: string, fields: UpdateProjectInput) => Promise<void>;
   /** Delete a project. When `deleteContent` is true its member notes/tasks are trashed too;
@@ -30,12 +33,20 @@ export interface ProjectsStore {
   reorderAreas: (ids: string[]) => Promise<void>;
   /** Persist a new order for one area's projects (drag-and-drop, PLAN §6.6). */
   reorderProjects: (areaId: string, ids: string[]) => Promise<void>;
+  /** File an entity in a project. Content lives in one place, so this MOVES a note, task or
+   *  canvas out of the project or area that held it (PLAN-areas.md §2.1). */
   addMember: (projectId: string, entityType: MemberEntityType, entityId: string) => Promise<void>;
   /** Assign several entities to one project in a single core call (multiselect assign). */
   addMembers: (projectId: string, entityType: MemberEntityType, entityIds: string[]) => Promise<void>;
   removeMember: (projectId: string, entityType: MemberEntityType, entityId: string) => Promise<void>;
   membershipsFor: (entityType: MemberEntityType, entityId: string) => Promise<ProjectMember[]>;
   membershipsForProject: (projectId: string) => Promise<ProjectMember[]>;
+  /** File a note, task or canvas directly in an area — a move, like `addMember`. */
+  addAreaMember: (areaId: string, entityType: AreaMemberEntityType, entityId: string) => Promise<void>;
+  addAreaMembers: (areaId: string, entityType: AreaMemberEntityType, entityIds: string[]) => Promise<void>;
+  removeAreaMember: (areaId: string, entityType: AreaMemberEntityType, entityId: string) => Promise<void>;
+  /** What is filed directly in an area — or, with `tree`, that plus its projects' content. */
+  membershipsForArea: (areaId: string, tree?: boolean) => Promise<ProjectMember[]>;
 }
 
 const EMPTY_SIDEBAR: SidebarData = { areas: [], unsorted: [] };
@@ -98,8 +109,8 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
     [api, refresh, syncTrigger],
   );
   const deleteArea = useCallback(
-    async (id: string) => {
-      await api.deleteArea(id);
+    async (id: string, deleteContent?: boolean) => {
+      await api.deleteArea(id, deleteContent);
       await refresh();
       syncTrigger();
     },
@@ -184,6 +195,32 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
     [api],
   );
   const membershipsForProject = useCallback((projectId: string) => api.projectMembers(projectId), [api]);
+  const addAreaMember = useCallback(
+    async (areaId: string, entityType: AreaMemberEntityType, entityId: string) => {
+      await api.addAreaMember(areaId, entityType, entityId);
+      await refresh();
+      syncTrigger();
+    },
+    [api, refresh, syncTrigger],
+  );
+  const addAreaMembers = useCallback(
+    async (areaId: string, entityType: AreaMemberEntityType, entityIds: string[]) => {
+      if (entityIds.length === 0) return;
+      await api.addAreaMembers(areaId, entityType, entityIds);
+      await refresh();
+      syncTrigger();
+    },
+    [api, refresh, syncTrigger],
+  );
+  const removeAreaMember = useCallback(
+    async (areaId: string, entityType: AreaMemberEntityType, entityId: string) => {
+      await api.removeAreaMember(areaId, entityType, entityId);
+      await refresh();
+      syncTrigger();
+    },
+    [api, refresh, syncTrigger],
+  );
+  const membershipsForArea = useCallback((areaId: string, tree?: boolean) => api.areaMembers(areaId, tree), [api]);
 
   const value = useMemo<ProjectsStore>(
     () => ({
@@ -204,8 +241,12 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
       removeMember,
       membershipsFor,
       membershipsForProject,
+      addAreaMember,
+      addAreaMembers,
+      removeAreaMember,
+      membershipsForArea,
     }),
-    [sidebar, areas, projects, loading, createArea, updateArea, deleteArea, createProject, updateProject, deleteProject, reorderAreas, reorderProjects, addMember, addMembers, removeMember, membershipsFor, membershipsForProject],
+    [addAreaMember, addAreaMembers, removeAreaMember, membershipsForArea, sidebar, areas, projects, loading, createArea, updateArea, deleteArea, createProject, updateProject, deleteProject, reorderAreas, reorderProjects, addMember, addMembers, removeMember, membershipsFor, membershipsForProject],
   );
 
   return <ProjectsCtx.Provider value={value}>{children}</ProjectsCtx.Provider>;

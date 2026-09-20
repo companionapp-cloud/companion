@@ -286,17 +286,17 @@ func (s *Server) materializeSeed(uid, seedID string) (int, int64, error) {
 	}
 	bump(seq)
 
-	// 2. Copy the seed's project memberships onto the occurrence.
-	projectIDs, err := s.seedProjectIDs(tx, uid, seedID)
+	// 2. File the occurrence where the seed lives — its project, or its area.
+	containers, err := s.seedContainers(tx, uid, seedID)
 	if err != nil {
 		return 0, 0, err
 	}
-	for _, pid := range projectIDs {
+	for _, c := range containers {
 		seq, err := s.nextSeq(tx, uid)
 		if err != nil {
 			return 0, 0, err
 		}
-		if err := s.copyOccurrenceMembership(tx, uid, pid, occID, seq); err != nil {
+		if err := s.copyOccurrenceMembership(tx, uid, c, occID, seq); err != nil {
 			return 0, 0, err
 		}
 		bump(seq)
@@ -333,37 +333,51 @@ func (s *Server) firstOccurrence(tx *sql.Tx, uid, seedID string, startAnchored b
 	return parseServerTime(at)
 }
 
-// seedProjectIDs returns the ids of projects the seed is a live member of, so its occurrences
-// can inherit the same memberships (PLAN §6.6).
-func (s *Server) seedProjectIDs(tx *sql.Tx, uid, seedID string) ([]string, error) {
+// seedContainer is where a seed is filed: a project, or an area (PLAN-areas.md §2).
+type seedContainer struct{ id, kind string }
+
+// seedContainers returns the containers the seed is a live member of, so its occurrences are
+// filed in the same place (PLAN §6.6). A task lives in one container, so this is one row at
+// most — several only while an older client's multi-project memberships wait for a newer
+// client to settle them.
+func (s *Server) seedContainers(tx *sql.Tx, uid, seedID string) ([]seedContainer, error) {
 	rows, err := tx.Query(s.rebind(
-		`SELECT project_id FROM project_members
-		 WHERE user_id = ? AND entity_type = 'task' AND entity_id = ? AND deleted_at IS NULL;`),
+		`SELECT project_id, container_type FROM project_members
+		 WHERE user_id = ? AND entity_type = 'task' AND entity_id = ? AND deleted_at IS NULL
+		 ORDER BY created_at, id;`),
 		uid, seedID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []string
+	var out []seedContainer
 	for rows.Next() {
-		var pid string
-		if err := rows.Scan(&pid); err != nil {
+		var c seedContainer
+		if err := rows.Scan(&c.id, &c.kind); err != nil {
 			return nil, err
 		}
-		out = append(out, pid)
+		out = append(out, c)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Keep the first, exactly as the clients' EnforceSingleContainer will, so the occurrence
+	// is never born filed in two places.
+	if len(out) > 1 {
+		out = out[:1]
+	}
+	return out, nil
 }
 
-// copyOccurrenceMembership creates a project_members row joining an occurrence to a project,
+// copyOccurrenceMembership creates a project_members row filing an occurrence in a container,
 // using the shared deterministic id (domain.MemberID) so it converges with any client copy.
-func (s *Server) copyOccurrenceMembership(tx *sql.Tx, uid, projectID, occID string, seq int64) error {
+func (s *Server) copyOccurrenceMembership(tx *sql.Tx, uid string, c seedContainer, occID string, seq int64) error {
 	now := s.clock.Now().UTC().Format(timeFormat)
 	_, err := tx.Exec(s.rebind(
-		`INSERT INTO project_members (id, user_id, project_id, entity_type, entity_id, created_at, updated_at, deleted_at, version, server_seq)
-		 VALUES (?, ?, ?, 'task', ?, ?, ?, NULL, 1, ?)
+		`INSERT INTO project_members (id, user_id, project_id, container_type, entity_type, entity_id, created_at, updated_at, deleted_at, version, server_seq)
+		 VALUES (?, ?, ?, ?, 'task', ?, ?, ?, NULL, 1, ?)
 		 ON CONFLICT (project_id, entity_type, entity_id) DO NOTHING;`),
-		domain.MemberID(projectID, "task", occID), uid, projectID, occID, now, now, seq)
+		domain.MemberID(c.id, "task", occID), uid, c.id, c.kind, occID, now, now, seq)
 	return err
 }
 

@@ -43,12 +43,16 @@ type planArea struct {
 	thingsID string // "" for the catch-all area
 	name     string
 	projects []*planProject
-	loose    *planProject // the project holding the area's own to-dos, when it has any
-	id       string       // set once written
+	// own are the area's own to-dos — the ones in the area but in none of its projects. They
+	// are filed directly in the area (PLAN-areas.md §2): open, completed and repeating alike.
+	// An area holds no lists, so unlike a project's they keep no manual order.
+	own    []*planTask
+	counts Counts // what a scan found of them, before the Logbook option and the selection
+	id     string // set once written
 }
 
 type planProject struct {
-	thingsID string // the Things project, or the area for an area's own to-dos
+	thingsID string
 	name     string
 	archived bool
 	note     string      // its notes, dates and tags, kept as a note in the project
@@ -167,7 +171,7 @@ func (b *builder) build() {
 		case pp != nil:
 			counts, container = &pp.outline.Counts, pp.thingsID
 		case pa != nil:
-			counts, container = &b.looseProject(pa).outline.Counts, pa.thingsID
+			counts, container = &pa.counts, pa.thingsID
 		}
 		if it.rule != nil {
 			if t := b.seed(it, container); t != nil {
@@ -192,8 +196,6 @@ func (b *builder) build() {
 				underHeading[it.heading] = append(underHeading[it.heading], t)
 			case pp != nil:
 				direct[pp] = append(direct[pp], t)
-			case pa != nil:
-				direct[pa.loose] = append(direct[pa.loose], t)
 			}
 		}
 	}
@@ -202,7 +204,7 @@ func (b *builder) build() {
 	// then each heading with its to-dos. A heading stays when it's open (even empty — it's
 	// structure) or still has open to-dos; archived, finished ones are left out.
 	for _, pa := range b.p.areas {
-		for _, pp := range pa.allProjects() {
+		for _, pp := range pa.projects {
 			for _, t := range direct[pp] {
 				pp.list = append(pp.list, listEntry{task: t})
 			}
@@ -228,10 +230,7 @@ func (b *builder) build() {
 			}
 			continue
 		}
-		ao := AreaOutline{ID: pa.thingsID, Name: pa.name, Projects: []ProjectOutline{}}
-		if pa.loose != nil {
-			ao.Counts = pa.loose.outline.Counts
-		}
+		ao := AreaOutline{ID: pa.thingsID, Name: pa.name, Counts: pa.counts, Projects: []ProjectOutline{}}
 		for _, pp := range pa.projects {
 			ao.Projects = append(ao.Projects, *pp.outline)
 		}
@@ -274,13 +273,12 @@ func (b *builder) prune() {
 			}
 		}
 		chosen := pa.thingsID != "" && areaOn(pa.thingsID)
-		// The area's own to-dos come with it — unless none made the cut (all finished, on a
-		// run without the Logbook), when there's no project to make.
-		if pa.loose != nil && chosen && len(pa.loose.members) > 0 {
-			projects = append(projects, pa.loose)
+		// The area's own to-dos come with it. An area brought along only because one of its
+		// projects was chosen leaves them behind.
+		if chosen {
 			kept[pa.thingsID] = true
 		} else {
-			pa.loose = nil
+			pa.own = nil
 		}
 		if !chosen && len(projects) == 0 {
 			continue
@@ -332,27 +330,10 @@ func (b *builder) place(t *planTask, pp *planProject, pa *planArea) {
 	case pp != nil:
 		pp.members = append(pp.members, t)
 	case pa != nil:
-		lp := b.looseProject(pa)
-		lp.members = append(lp.members, t)
+		pa.own = append(pa.own, t)
 	default:
 		b.p.unfiled = append(b.p.unfiled, t)
 	}
-}
-
-// looseProject is the project that holds an area's own to-dos, named after the area (tasks
-// belong to projects, not areas). It's created on first use and imported with its area.
-func (b *builder) looseProject(pa *planArea) *planProject {
-	if pa.loose == nil {
-		pa.loose = &planProject{thingsID: pa.thingsID, name: pa.name, outline: &ProjectOutline{ID: pa.thingsID, Name: pa.name}}
-	}
-	return pa.loose
-}
-
-func (pa *planArea) allProjects() []*planProject {
-	if pa.loose == nil {
-		return pa.projects
-	}
-	return append(append([]*planProject{}, pa.projects...), pa.loose)
 }
 
 // task converts a to-do.

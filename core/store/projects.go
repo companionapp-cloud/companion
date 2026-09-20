@@ -20,24 +20,31 @@ type ProjectsRepo struct {
 	clock domain.Clock
 }
 
-const projectColumns = `id, area_id, name, color, sort_order, archived_at, created_at, updated_at, deleted_at, version, dirty`
+const projectColumns = `id, area_id, name, color, icon, cover_document_id, description_md, sort_order, archived_at, created_at, updated_at, deleted_at, version, dirty`
 
 // CreateProjectInput carries the client-supplied fields for a new project.
 type CreateProjectInput struct {
-	AreaID    string  `json:"areaId"`
-	Name      string  `json:"name"`
-	Color     *string `json:"color,omitempty"`
-	SortOrder int     `json:"sortOrder"`
+	AreaID          string  `json:"areaId"`
+	Name            string  `json:"name"`
+	Color           *string `json:"color,omitempty"`
+	Icon            *string `json:"icon,omitempty"`
+	CoverDocumentID *string `json:"coverDocumentId,omitempty"`
+	DescriptionMd   string  `json:"descriptionMd,omitempty"`
+	SortOrder       int     `json:"sortOrder"`
 }
 
 // UpdateProjectInput carries partial updates; nil fields are left unchanged. Archived
-// toggles the archived_at timestamp.
+// toggles the archived_at timestamp; an empty Icon or CoverDocumentID clears it
+// (PLAN-areas.md §1).
 type UpdateProjectInput struct {
-	AreaID    *string `json:"areaId,omitempty"`
-	Name      *string `json:"name,omitempty"`
-	Color     *string `json:"color,omitempty"`
-	SortOrder *int    `json:"sortOrder,omitempty"`
-	Archived  *bool   `json:"archived,omitempty"`
+	AreaID          *string `json:"areaId,omitempty"`
+	Name            *string `json:"name,omitempty"`
+	Color           *string `json:"color,omitempty"`
+	Icon            *string `json:"icon,omitempty"`
+	CoverDocumentID *string `json:"coverDocumentId,omitempty"`
+	DescriptionMd   *string `json:"descriptionMd,omitempty"`
+	SortOrder       *int    `json:"sortOrder,omitempty"`
+	Archived        *bool   `json:"archived,omitempty"`
 }
 
 // Create inserts a new project (UUIDv7 id, version 0, dirty).
@@ -57,15 +64,16 @@ func (r *ProjectsRepo) Create(in CreateProjectInput) (*domain.Project, error) {
 	}
 	p := &domain.Project{
 		ID: id.String(), AreaID: in.AreaID, Name: in.Name, Color: in.Color, SortOrder: order,
+		Icon: emptyToNil(in.Icon), CoverDocumentID: emptyToNil(in.CoverDocumentID), DescriptionMd: in.DescriptionMd,
 		CreatedAt: now, UpdatedAt: now, Version: 0, Dirty: true,
 	}
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
 	if _, err := r.db.Exec(
-		`INSERT INTO projects (id, area_id, name, color, sort_order, created_at, updated_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-		p.ID, p.AreaID, p.Name, p.Color, p.SortOrder,
+		`INSERT INTO projects (id, area_id, name, color, icon, cover_document_id, description_md, sort_order, created_at, updated_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		p.ID, p.AreaID, p.Name, p.Color, p.Icon, p.CoverDocumentID, p.DescriptionMd, p.SortOrder,
 		p.CreatedAt.Format(timeFormat), p.UpdatedAt.Format(timeFormat), p.Version, boolToInt(p.Dirty),
 	); err != nil {
 		return nil, fmt.Errorf("insert project: %w", err)
@@ -174,6 +182,15 @@ func (r *ProjectsRepo) Update(id string, in UpdateProjectInput) (*domain.Project
 	if in.Color != nil {
 		p.Color = in.Color
 	}
+	if in.Icon != nil {
+		p.Icon = emptyToNil(in.Icon)
+	}
+	if in.CoverDocumentID != nil {
+		p.CoverDocumentID = emptyToNil(in.CoverDocumentID)
+	}
+	if in.DescriptionMd != nil {
+		p.DescriptionMd = *in.DescriptionMd
+	}
 	if in.SortOrder != nil {
 		p.SortOrder = *in.SortOrder
 	}
@@ -195,10 +212,10 @@ func (r *ProjectsRepo) Update(id string, in UpdateProjectInput) (*domain.Project
 		archivedAt = p.ArchivedAt.UTC().Format(timeFormat)
 	}
 	res, err := r.db.Exec(
-		`UPDATE projects SET area_id = ?, name = ?, color = ?, sort_order = ?, archived_at = ?,
-		   updated_at = ?, dirty = 1
+		`UPDATE projects SET area_id = ?, name = ?, color = ?, icon = ?, cover_document_id = ?,
+		   description_md = ?, sort_order = ?, archived_at = ?, updated_at = ?, dirty = 1
 		 WHERE id = ? AND deleted_at IS NULL;`,
-		p.AreaID, p.Name, p.Color, p.SortOrder, archivedAt, p.UpdatedAt.Format(timeFormat), id,
+		p.AreaID, p.Name, p.Color, p.Icon, p.CoverDocumentID, p.DescriptionMd, p.SortOrder, archivedAt, p.UpdatedAt.Format(timeFormat), id,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update project: %w", err)
@@ -271,14 +288,16 @@ func (r *ProjectsRepo) Apply(p *domain.Project) error {
 		archivedAt = p.ArchivedAt.UTC().Format(timeFormat)
 	}
 	_, err := r.db.Exec(
-		`INSERT INTO projects (id, area_id, name, color, sort_order, archived_at, created_at, updated_at, deleted_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+		`INSERT INTO projects (id, area_id, name, color, icon, cover_document_id, description_md, sort_order, archived_at, created_at, updated_at, deleted_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 		 ON CONFLICT(id) DO UPDATE SET
 		   area_id = excluded.area_id, name = excluded.name, color = excluded.color,
+		   icon = excluded.icon, cover_document_id = excluded.cover_document_id,
+		   description_md = excluded.description_md,
 		   sort_order = excluded.sort_order, archived_at = excluded.archived_at,
 		   created_at = excluded.created_at, updated_at = excluded.updated_at,
 		   deleted_at = excluded.deleted_at, version = excluded.version, dirty = 0;`,
-		p.ID, p.AreaID, p.Name, p.Color, p.SortOrder, archivedAt,
+		p.ID, p.AreaID, p.Name, p.Color, p.Icon, p.CoverDocumentID, p.DescriptionMd, p.SortOrder, archivedAt,
 		p.CreatedAt.UTC().Format(timeFormat), p.UpdatedAt.UTC().Format(timeFormat), deletedAt, p.Version,
 	)
 	if err != nil {
@@ -296,6 +315,9 @@ func (r *ProjectsRepo) MarkPushed(id string, version int64) error {
 
 func (r *ProjectsRepo) MeaningfulDiff(a, b *domain.Project) bool {
 	if a.AreaID != b.AreaID || a.Name != b.Name || derefStr(a.Color) != derefStr(b.Color) || a.SortOrder != b.SortOrder {
+		return true
+	}
+	if derefStr(a.Icon) != derefStr(b.Icon) || derefStr(a.CoverDocumentID) != derefStr(b.CoverDocumentID) || a.DescriptionMd != b.DescriptionMd {
 		return true
 	}
 	if (a.ArchivedAt == nil) != (b.ArchivedAt == nil) {
@@ -324,9 +346,9 @@ func (r *ProjectsRepo) ConflictedCopy(local *domain.Project, suffix string) erro
 		name = "Untitled"
 	}
 	_, err = r.db.Exec(
-		`INSERT INTO projects (id, area_id, name, color, sort_order, created_at, updated_at, version, dirty)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1);`,
-		id.String(), local.AreaID, name+" "+suffix, local.Color, local.SortOrder,
+		`INSERT INTO projects (id, area_id, name, color, icon, cover_document_id, description_md, sort_order, created_at, updated_at, version, dirty)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1);`,
+		id.String(), local.AreaID, name+" "+suffix, local.Color, local.Icon, local.CoverDocumentID, local.DescriptionMd, local.SortOrder,
 		now.Format(timeFormat), now.Format(timeFormat),
 	)
 	if err != nil {
@@ -337,16 +359,22 @@ func (r *ProjectsRepo) ConflictedCopy(local *domain.Project, suffix string) erro
 
 func scanProject(rows Rows) (*domain.Project, error) {
 	var (
-		p                            domain.Project
-		color, deletedAt, archivedAt sql.NullString
-		createdAt, updatedAt         string
-		dirty                        int
+		p                                         domain.Project
+		color, icon, cover, deletedAt, archivedAt sql.NullString
+		createdAt, updatedAt                      string
+		dirty                                     int
 	)
-	if err := rows.Scan(&p.ID, &p.AreaID, &p.Name, &color, &p.SortOrder, &archivedAt, &createdAt, &updatedAt, &deletedAt, &p.Version, &dirty); err != nil {
+	if err := rows.Scan(&p.ID, &p.AreaID, &p.Name, &color, &icon, &cover, &p.DescriptionMd, &p.SortOrder, &archivedAt, &createdAt, &updatedAt, &deletedAt, &p.Version, &dirty); err != nil {
 		return nil, fmt.Errorf("scan project: %w", err)
 	}
 	if color.Valid {
 		p.Color = &color.String
+	}
+	if icon.Valid && icon.String != "" {
+		p.Icon = &icon.String
+	}
+	if cover.Valid && cover.String != "" {
+		p.CoverDocumentID = &cover.String
 	}
 	var err error
 	if p.CreatedAt, err = time.Parse(timeFormat, createdAt); err != nil {

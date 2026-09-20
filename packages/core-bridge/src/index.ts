@@ -94,6 +94,8 @@ export { projectsApi } from "./projects";
 export type {
   ProjectsApi,
   MemberEntityType,
+  AreaMemberEntityType,
+  PageFields,
   CreateAreaInput,
   UpdateAreaInput,
   CreateProjectInput,

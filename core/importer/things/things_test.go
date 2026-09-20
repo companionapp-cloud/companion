@@ -96,7 +96,7 @@ func TestRunImportsTheLibrary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Summary{Areas: 3, Projects: 3, Lists: 3, Headings: 1, Tasks: 10, Repeating: 2, Notes: 1}
+	want := Summary{Areas: 3, Projects: 2, Lists: 2, Headings: 1, Tasks: 10, Repeating: 2, Notes: 1}
 	got := *sum
 	got.Warnings = nil
 	if !reflect.DeepEqual(got, want) {
@@ -112,7 +112,7 @@ func TestRunImportsTheLibrary(t *testing.T) {
 		t.Fatalf("areas = %v", names)
 	}
 	projects := projectsByName(t, st)
-	for name, area := range map[string]string{"Home": "Home", "Launch": "Work", "Side quest": "Things"} {
+	for name, area := range map[string]string{"Launch": "Work", "Side quest": "Things"} {
 		p := projects[name]
 		if p == nil || areaName(areas, p.AreaID) != area {
 			t.Errorf("project %q should be in area %q", name, area)
@@ -130,8 +130,13 @@ func TestRunImportsTheLibrary(t *testing.T) {
 	if got := listRows(t, st, launch.ID); !reflect.DeepEqual(got, []string{"Budget", "Weekly review", "Kickoff", "# Marketing", "Write post"}) {
 		t.Errorf("Launch list = %v", got)
 	}
-	if got := listRows(t, st, projects["Home"].ID); !reflect.DeepEqual(got, []string{"Call mom", "Lost project"}) {
-		t.Errorf("Home's own to-dos = %v", got)
+	// An area's own to-dos are filed directly in the area — no project is generated to hold
+	// them (PLAN-areas.md §2). A to-do whose project is gone files by its area the same way.
+	if projects["Home"] != nil {
+		t.Error("an area's own to-dos shouldn't generate a project named after the area")
+	}
+	if got := areaTasks(t, st, areas, "Home"); !reflect.DeepEqual(got, []string{"Call mom", "Lost project"}) {
+		t.Errorf("Home's own to-dos = %v, want them filed in the area", got)
 	}
 
 	// What a project can't hold becomes a note in it.
@@ -212,8 +217,8 @@ func TestRunWithTheLogbook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sum.Projects != 4 || sum.Tasks != 15 {
-		t.Errorf("summary = %+v, want 4 projects and 15 tasks", sum)
+	if sum.Projects != 3 || sum.Tasks != 15 {
+		t.Errorf("summary = %+v, want 3 projects and 15 tasks", sum)
 	}
 	projects := projectsByName(t, st)
 	if g := projects["Garden"]; g == nil || g.ArchivedAt == nil {
@@ -226,6 +231,11 @@ func TestRunWithTheLogbook(t *testing.T) {
 	}
 	if d := tasks["Dropped idea"]; d == nil || d.Status != domain.TaskCancelled {
 		t.Errorf("a canceled to-do imports cancelled: %+v", d)
+	}
+	// An area's finished to-dos are filed in it with the rest.
+	areas, _ := st.Areas.List()
+	if got := areaTasks(t, st, areas, "Home"); !reflect.DeepEqual(got, []string{"Call mom", "Lost project", "Paint fence"}) {
+		t.Errorf("Home's own to-dos with the Logbook = %v", got)
 	}
 	// Finished to-dos are project members but stay out of the list, like Things' Logbook.
 	if got := listRows(t, st, projects["Launch"].ID); !reflect.DeepEqual(got, []string{"Budget", "Weekly review", "Kickoff", "# Marketing", "Write post"}) {
@@ -288,8 +298,9 @@ func TestRunCancel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sum.Cancelled || sum.Areas != 1 || sum.Projects != 1 || sum.Tasks != 0 {
-		t.Errorf("summary = %+v, want cancelled after one area and one project", sum)
+	// The first batch of two: the Home area, then the first of its own to-dos.
+	if !sum.Cancelled || sum.Areas != 1 || sum.Projects != 0 || sum.Tasks != 1 {
+		t.Errorf("summary = %+v, want cancelled after one area and its first to-do", sum)
 	}
 	if areas, _ := st.Areas.List(); len(areas) != 1 {
 		t.Errorf("areas written = %d, want 1", len(areas))
@@ -336,10 +347,10 @@ func TestSources(t *testing.T) {
 
 	// A zip of the package, as Safari uploads it, with Finder's __MACOSX entries and a backup.
 	zipped := zipOf(t, map[string][]byte{
-		"Things Database.thingsdatabase/main.sqlite":             mainBytes,
-		"Things Database.thingsdatabase/main.sqlite-wal":         walBytes,
+		"Things Database.thingsdatabase/main.sqlite":            mainBytes,
+		"Things Database.thingsdatabase/main.sqlite-wal":        walBytes,
 		"__MACOSX/Things Database.thingsdatabase/._main.sqlite": []byte("junk"),
-		"Backups/2026-09-01.thingsdatabase/main.sqlite":          []byte("not this one"),
+		"Backups/2026-09-01.thingsdatabase/main.sqlite":         []byte("not this one"),
 	})
 	if pv, err := Scan(Source{Files: []File{{Name: "Things Database.thingsdatabase.zip", Data: zipped}}}, Options{}); err != nil || !reflect.DeepEqual(pv, full) {
 		t.Errorf("uploaded zip = %v", err)
@@ -423,7 +434,7 @@ func TestConvertRule(t *testing.T) {
 		}
 	}
 	for name, body := range map[string]string{
-		"unknown unit": `<key>fu</key><integer>2</integer>`,
+		"unknown unit":   `<key>fu</key><integer>2</integer>`,
 		"ended by count": `<key>fu</key><integer>16</integer><key>rc</key><integer>2</integer>`,
 		"ended by date":  `<key>fu</key><integer>16</integer><key>ed</key><real>1700000000</real>`,
 	} {
@@ -473,6 +484,35 @@ func areaName(areas []*domain.Area, id string) string {
 		}
 	}
 	return ""
+}
+
+// areaTasks returns the titles of the tasks filed directly in the named area, sorted.
+func areaTasks(t *testing.T, st *store.Store, areas []*domain.Area, name string) []string {
+	t.Helper()
+	var areaID string
+	for _, a := range areas {
+		if a.Name == name {
+			areaID = a.ID
+		}
+	}
+	members, err := st.ProjectMembers.ListForArea(areaID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	titles := []string{}
+	for _, m := range members {
+		if m.EntityType != domain.NodeTask || !m.InArea() {
+			t.Errorf("area member %+v, want a task filed in the area", m)
+			continue
+		}
+		task, err := st.Tasks.GetAny(m.EntityID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		titles = append(titles, task.Title)
+	}
+	sort.Strings(titles)
+	return titles
 }
 
 func projectsByName(t *testing.T, st *store.Store) map[string]*domain.Project {

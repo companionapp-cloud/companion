@@ -67,7 +67,7 @@ export function AppToolbar({
   const notes = useNotes();
   const tasks = useTasks();
   const canvases = useCanvases();
-  const { projects } = useProjects();
+  const { projects, areas } = useProjects();
   const sync = useSync();
   const theme = useTheme();
 
@@ -84,6 +84,7 @@ export function AppToolbar({
     if (ref.kind === "browse") return SECTION_META[ref.section];
     if (ref.kind === "view") return VIEW_META[ref.view];
     if (ref.kind === "project") return { label: projects.find((p) => p.id === ref.projectId)?.name || "Project", icon: "folder" };
+    if (ref.kind === "area") return { label: areas.find((a) => a.id === ref.areaId)?.name || "Area", icon: "folder" };
     return { label: "Untitled" };
   };
 

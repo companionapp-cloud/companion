@@ -357,7 +357,11 @@ func (e *Engine) pull() error {
 			return err
 		}
 		if len(resp.Changes) < e.pullLimit {
-			return nil
+			// Caught up, so the memberships are a consistent snapshot: settle any content entity
+			// two devices filed in different places (PLAN-areas.md §2.1). The tombstones it
+			// writes are dirty and ride the next push.
+			_, err := e.store.ProjectMembers.EnforceSingleContainer()
+			return err
 		}
 	}
 }
