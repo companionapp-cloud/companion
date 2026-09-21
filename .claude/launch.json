@@ -212,6 +212,22 @@
       ],
       "port": 5396,
       "autoPort": false
+    },
+    {
+      "name": "desktop-frontend-export",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@companion/desktop-frontend",
+        "--",
+        "--port",
+        "5407",
+        "--strictPort"
+      ],
+      "port": 5407,
+      "autoPort": false
     }
   ]
 }

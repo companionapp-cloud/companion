@@ -26,6 +26,12 @@ import (
 // note popped out into its own window exports that note, not the main window's tab.
 const exportRequestEvent = "export:request"
 
+// exportScheduleEvent asks the main window to open a settings section and start something
+// there, as {"kind": …}: "folder" a new scheduled filesystem export (Settings › Export), "git"
+// Git sync setup (Settings › Sync), "import" the Markdown file importer (Settings › Import). It travels the core's event stream, like File ›
+// Import (import_things.go): scheduled exports are the app's, not one window's.
+const exportScheduleEvent = "export.schedule"
+
 // exportFormats is the Export submenu, in order. The ids mirror EXPORT_FORMATS in
 // packages/app/src/export/types.ts — keep the two in sync.
 var exportFormats = []struct{ id, label string }{
@@ -52,6 +58,8 @@ type exportSession struct {
 
 type exportService struct {
 	app func() *application.App
+	// schedule shows the main window and opens Settings › Export on a new export of that kind.
+	schedule func(kind string)
 
 	mu       sync.Mutex
 	items    map[string]*application.MenuItem
@@ -59,11 +67,12 @@ type exportService struct {
 }
 
 func newExportService(app func() *application.App) *exportService {
-	return &exportService{app: app, items: map[string]*application.MenuItem{}, sessions: map[string]*exportSession{}}
+	return &exportService{app: app, schedule: func(string) {}, items: map[string]*application.MenuItem{}, sessions: map[string]*exportSession{}}
 }
 
-// addMenu adds the Export submenu to File. Every format starts disabled: the focused window
-// enables the ones that apply to what it's showing (handleMenu).
+// addMenu adds the Export submenu to File: the formats what's on screen can be saved as, then
+// the scheduled exports. Every format starts disabled: the focused window enables the ones that
+// apply to what it's showing (handleMenu). The scheduling items are always on.
 func (s *exportService) addMenu(file *application.Menu) {
 	export := file.AddSubmenu("Export")
 	for _, f := range exportFormats {
@@ -72,6 +81,41 @@ func (s *exportService) addMenu(file *application.Menu) {
 		item.OnClick(func(*application.Context) { s.request(format) })
 		s.items[format] = item
 	}
+	export.AddSeparator()
+	export.Add("Schedule Filesystem Exports…").OnClick(func(*application.Context) { s.schedule("folder") })
+	export.Add("Git Sync…").OnClick(func(*application.Context) { s.schedule("git") })
+}
+
+// handlePickFolder answers POST /export/pick-folder[?purpose=import] with the folder chosen —
+// to export to, or to import from — as {"path": …}, or 204 when the user cancelled. The core, which runs in this
+// process, writes to the path itself.
+func (s *exportService) handlePickFolder(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	title, message := "Export to Folder", "Choose the folder Companion keeps a copy of your notes, tasks and canvases in. An empty folder is best: Companion replaces files it finds with the same names."
+	if r.URL.Query().Get("purpose") == "import" {
+		title, message = "Import Markdown Files", "Choose the folder to import: a Companion export, an Obsidian vault, or any folder of Markdown notes. Nothing in it is changed."
+	}
+	path, err := s.app().Dialog.OpenFile().
+		SetTitle(title).
+		SetMessage(message).
+		SetButtonText("Choose").
+		CanChooseFiles(false).
+		CanChooseDirectories(true).
+		CanCreateDirectories(true).
+		PromptForSingleSelection()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if path == "" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"path": path})
 }
 
 // request tells the focused window to export in the given format.

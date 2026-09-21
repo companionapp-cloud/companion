@@ -127,3 +127,4 @@ export type { ExportSink, ExportSinkOpener, ExportPlan } from "./export/fileSink
 export { setExportMenuHost } from "./export/menuHost";
 export type { ExportMenuHost } from "./export/menuHost";
 export type { ExportFormat, ExportFile } from "./export/types";
+export { setExportFolderPicker } from "./export/scheduling";

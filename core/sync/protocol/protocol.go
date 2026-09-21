@@ -49,6 +49,10 @@ const (
 	// One ink group drawn over a note (PLAN-drawing.md): its strokes and the text anchor that
 	// pins it to the note. Keyed by note id; the payload is encrypted whole.
 	EntityNoteInk = "note_ink"
+	// A scheduled export to a Git repository (core/export): the repository, the schedule, the
+	// device that runs it, and the credential — so it is set up once for every device. Stored
+	// by the server as an opaque body.
+	EntityGitExport = "git_export"
 )
 
 // Push statuses.

@@ -36,7 +36,9 @@ func applicationMenu(newItem func(what string), openImport func(), exports *expo
 		file.Add(item.label).SetAccelerator(item.accelerator).OnClick(func(*application.Context) { newItem(what) })
 	}
 	file.AddSeparator()
-	file.AddSubmenu("Import").Add("Things 3…").OnClick(func(*application.Context) { openImport() })
+	imports := file.AddSubmenu("Import")
+	imports.Add("Markdown Files…").OnClick(func(*application.Context) { exports.schedule("import") })
+	imports.Add("Things 3…").OnClick(func(*application.Context) { openImport() })
 	exports.addMenu(file)
 	file.AddSeparator()
 	if runtime.GOOS == "darwin" {
