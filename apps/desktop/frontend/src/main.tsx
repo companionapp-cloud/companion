@@ -16,6 +16,7 @@ import {
   setThingsSourcePicker,
   setExportSinkOpener,
   setExportMenuHost,
+  setExportFolderPicker,
 } from "@companion/app";
 import type { ShortcutBinding, ShortcutId, WindowControls } from "@companion/app";
 import { createHttpBridge, documentsApi } from "@companion/core-bridge";
@@ -23,7 +24,7 @@ import type { CoreBridge } from "@companion/core-bridge";
 import type { DocumentSource } from "@companion/editor";
 import { desktopNotificationScheduler } from "./notifications";
 import { desktopTableMenuPresenter } from "./tableMenu";
-import { desktopExportMenu, desktopExportSink } from "./exports";
+import { desktopExportMenu, desktopExportSink, pickExportFolder } from "./exports";
 
 // Double-clicking the window chrome (any `--wails-draggable: drag` region, e.g. the
 // toolbar or rail) zooms the window, matching native macOS titlebar behaviour. The
@@ -122,6 +123,8 @@ setTableMenuPresenter(desktopTableMenuPresenter());
 if (typeof window !== "undefined" && (window as unknown as { _wails?: unknown })._wails) {
   setExportSinkOpener(desktopExportSink);
   setExportMenuHost(desktopExportMenu());
+  // Scheduled exports write to a folder the user picks in the native chooser.
+  setExportFolderPicker(pickExportFolder);
 }
 
 // macOS uses a transparent titlebar (main.go MacTitleBarHiddenInset), so content draws

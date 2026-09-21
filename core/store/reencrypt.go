@@ -28,6 +28,8 @@ var reencryptTables = []string{
 	"canvas_nodes",
 	"canvas_edges",
 	"note_ink",
+	// Git exports; folder rows share the table but are never pushed (ExportsRepo.Git).
+	"export_destinations",
 }
 
 // MarkAllForReencryption flags every content row dirty so a following sync re-pushes it encrypted.

@@ -81,6 +81,7 @@ import { ChatsScreen } from "./ChatScreen";
 import { DndProvider, useDnd } from "./DndContext";
 import { MultiSelectProvider, useMultiSelect } from "./MultiSelectProvider";
 import { useExportScope } from "./export/ExportProvider";
+import { EXPORT_SCHEDULE_EVENT, REQUEST_SECTION, requestScheduledExport, type ExportRequestKind } from "./export/scheduling";
 import { SettingsScreen } from "./SettingsScreen";
 import { useSync } from "./SyncProvider";
 import { SyncHealthBanner } from "./SyncHealthBanner";
@@ -451,6 +452,7 @@ function NavBridge({
       <ReminderNavigationBridge />
       <PaletteNavigationBridge />
       <ThingsImportHost />
+      <ExportScheduleBridge />
       <MultiSelectProvider>
         <ExportScope />
         <DndProvider>
@@ -483,6 +485,25 @@ function ReminderNavigationBridge() {
       off();
     };
   }, [nav, core]);
+  return null;
+}
+
+/** The desktop's File › Export › Schedule Filesystem Exports… and Git Sync…, and File › Import ›
+ *  Markdown Files…: open the settings section each belongs to and start it there (the section
+ *  takes the request once it mounts). */
+function ExportScheduleBridge() {
+  const nav = useNav();
+  const { core } = useCore();
+  useEffect(
+    () =>
+      core.on(EXPORT_SCHEDULE_EVENT, (payload) => {
+        const kind = (payload as { kind?: string } | null)?.kind as ExportRequestKind | undefined;
+        if (!kind || !(kind in REQUEST_SECTION)) return;
+        requestScheduledExport(kind);
+        nav.openRef({ kind: "view", view: "settings", section: REQUEST_SECTION[kind] });
+      }),
+    [nav, core],
+  );
   return null;
 }
 

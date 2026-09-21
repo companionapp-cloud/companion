@@ -7,9 +7,22 @@ import { ToolSettings } from "./ToolSettings";
 import { CalendarSettings } from "./CalendarSettings";
 import { ShortcutSettings } from "./ShortcutSettings";
 import { ImportSettings } from "./ImportSettings";
+import { ExportSettings } from "./ExportSettings";
+import { GitSyncSettings } from "./GitSyncSettings";
 import { shortcutStore } from "./shortcuts";
 
-export type SettingsSectionId = "sync" | "ai" | "objects" | "calendar" | "import" | "tools" | "shortcuts";
+/** Sync has two halves: the Companion server, which keeps devices in step, and — beside it, not
+ *  instead of it — a Git repository the workspace is mirrored with, both ways. */
+function SyncSection() {
+  return (
+    <>
+      <SyncSettings />
+      <GitSyncSettings />
+    </>
+  );
+}
+
+export type SettingsSectionId = "sync" | "ai" | "objects" | "calendar" | "import" | "export" | "tools" | "shortcuts";
 
 /** One entry in the settings navigation list (PLAN §3.1 shell). Each section is a
  *  self-contained component that reads its own data through the app providers, so the
@@ -29,9 +42,9 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
   {
     id: "sync",
     label: "Sync",
-    description: "Connect to a server and sync across devices",
+    description: "Sync across devices, and with a Git repository",
     icon: "refresh",
-    Component: SyncSettings,
+    Component: SyncSection,
   },
   {
     id: "ai",
@@ -57,9 +70,16 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
   {
     id: "import",
     label: "Import",
-    description: "Bring areas, projects and to-dos over from Things 3",
+    description: "Bring in Markdown files, or your work from Things 3",
     icon: "download",
     Component: ImportSettings,
+  },
+  {
+    id: "export",
+    label: "Export",
+    description: "Keep a copy of your workspace in a folder, on a schedule",
+    icon: "upload",
+    Component: ExportSettings,
   },
   {
     id: "tools",

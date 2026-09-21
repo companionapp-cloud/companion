@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { auth, keys, cryptoApi, formatRecoveryCode, syncApi, createSyncNotifier, type SyncApi, type SyncNotifier } from "@companion/core-bridge";
+import { auth, keys, cryptoApi, formatRecoveryCode, syncApi, createSyncNotifier, SYNC_REQUESTED_EVENT, type SyncApi, type SyncNotifier } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
 
 const STORAGE_KEY = "companion.sync.config";
@@ -230,6 +230,11 @@ export function SyncProvider({
     if (debounce.current) clearTimeout(debounce.current);
     debounce.current = setTimeout(() => void runNow(), DEBOUNCE_MS);
   }, [runNow]);
+
+  // The core asks for a sync when it needs fresh data before going on — a Git sync never runs on
+  // a stale workspace (core/bridge/export.go requireFreshSync). It asks rather than syncing
+  // itself because only this provider knows whether an encrypted account is unlocked.
+  useEffect(() => core.on(SYNC_REQUESTED_EVENT, () => void runNow()), [core, runNow]);
 
   // Configure the core against the saved endpoint, then sync on load / reconnect.
   useEffect(() => {

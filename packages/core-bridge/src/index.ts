@@ -107,6 +107,24 @@ export { canvasesApi } from "./canvases";
 export type { CanvasesApi, CreateCanvasInput, UpdateCanvasInput, CanvasNodeInput, CanvasEdgeInput } from "./canvases";
 export { noteInkApi } from "./noteInk";
 export type { NoteInkApi, NoteInkInput } from "./noteInk";
+export { exportsApi, importFilesApi, EXPORT_CHANGED_EVENT, SYNC_REQUESTED_EVENT } from "./exports";
+export type {
+  ExportsApi,
+  ExportKind as ScheduledExportKind,
+  ExportSchedule,
+  ExportDestination,
+  ExportFolderConfig,
+  ExportGitConfig,
+  ExportSummary,
+  ExportCapabilities,
+  SaveExportInput,
+  GitProvider,
+  GitAuth,
+  PendingSshKey,
+  ImportFilesApi,
+  FileImportReport,
+  FileImportOutcome,
+} from "./exports";
 export { syncApi } from "./sync";
 export type { SyncApi } from "./sync";
 export { graphApi } from "./graph";

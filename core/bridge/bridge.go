@@ -96,6 +96,9 @@ type Core struct {
 	importMu     sync.Mutex
 	importCancel context.CancelFunc
 	importFiles  func(handle string) ([]byte, error)
+
+	// exports is the scheduled-export scheduler's state (export.go).
+	exports exportState
 }
 
 // New builds a Core over an already-open store.
@@ -494,6 +497,28 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.noteInkUpsert(payload)
 	case "noteInk.delete":
 		return c.noteInkDelete(payload)
+	case "imports.files.scan":
+		return c.importFilesScan(payload)
+	case "imports.files.run":
+		return c.importFilesRun(payload)
+	case "export.capabilities":
+		return c.exportCapabilities()
+	case "export.destinations.list":
+		return c.exportDestinationsList()
+	case "export.destinations.save":
+		return c.exportDestinationsSave(payload)
+	case "export.destinations.delete":
+		return c.exportDestinationsDelete(payload)
+	case "export.destinations.run":
+		return c.exportDestinationsRun(payload)
+	case "export.destinations.check":
+		return c.exportDestinationsCheck(payload)
+	case "export.destinations.takeOver":
+		return c.exportDestinationsTakeOver(payload)
+	case "export.sshKey.generate":
+		return c.exportSSHKeyGenerate()
+	case "export.sshKey.discard":
+		return c.exportSSHKeyDiscard(payload)
 	default:
 		return nil, fmt.Errorf("unknown method %q", method)
 	}

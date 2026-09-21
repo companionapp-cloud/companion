@@ -47,6 +47,9 @@ var protectedFields = map[string][]string{
 	// Note ink: the whole group payload. The strokes are the user's handwriting and the anchor
 	// quotes the note's text, so none of it can stay plaintext; only the note id does.
 	protocol.EntityNoteInk: {"data"},
+	// A Git export: where the repository is, who signs in and with what, and the name of the
+	// device that exports. The schedule, the on/off flag and the device id stay plaintext.
+	protocol.EntityGitExport: {"name", "config", "credentialEnc", "deviceName"},
 }
 
 // ProtectedFields returns the encrypted field names for an entity type (nil if none). Exposed so

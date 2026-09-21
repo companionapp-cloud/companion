@@ -84,6 +84,36 @@ func (r *DocumentsRepo) Get(id string) (*domain.Document, error) {
 	return scanDocument(rows)
 }
 
+// FindBySHA returns the live document that holds exactly these bytes under this filename, or nil.
+// Documents are content-addressed, so importing a file that is already here (a re-import, a Git
+// sync reading back its own attachment) reuses the document instead of making a second.
+func (r *DocumentsRepo) FindBySHA(sha256, filename string) (*domain.Document, error) {
+	rows, err := r.db.Query(
+		`SELECT `+documentColumns+` FROM documents
+		 WHERE sha256 = ? AND filename = ? AND deleted_at IS NULL AND deleting_at IS NULL
+		 ORDER BY created_at, id LIMIT 1;`, sha256, filename)
+	if err != nil {
+		return nil, fmt.Errorf("find document: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, rows.Err()
+	}
+	return scanDocument(rows)
+}
+
+// KnownSHA reports whether any document — live, trashed or deleted — ever held these bytes. A
+// file in a Git repository whose bytes this workspace has seen and since let go of is stale, not
+// new.
+func (r *DocumentsRepo) KnownSHA(sha256 string) (bool, error) {
+	rows, err := r.db.Query(`SELECT 1 FROM documents WHERE sha256 = ? LIMIT 1;`, sha256)
+	if err != nil {
+		return false, fmt.Errorf("find document: %w", err)
+	}
+	defer rows.Close()
+	return rows.Next(), rows.Err()
+}
+
 // List returns all live documents, newest-updated first.
 func (r *DocumentsRepo) List() ([]*domain.Document, error) {
 	rows, err := r.db.Query(

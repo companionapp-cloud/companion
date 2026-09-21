@@ -95,6 +95,11 @@ func main() {
 	// LLM API keys (PLAN §6.8): stored beside the database in a 0600 file (keychain is the
 	// later hardening upgrade). Local Ollama configs need no key and work without this.
 	core.SetSecretStore(secrets.NewFileStore(filepath.Join(filepath.Dir(dbPath), "secrets.json")))
+	// Scheduled folder and Git exports (core/export) are a desktop feature: the core keeps their
+	// bare repositories beside the database and runs them on their schedules for as long as the
+	// app sits in the menu bar.
+	core.SetExportDir(filepath.Dir(dbPath))
+	core.StartExportScheduler()
 	// Local agents (PLAN-agents.md): only the desktop can scan this machine for Claude Code /
 	// Codex / Ollama / LM Studio and run the CLI ones as child processes, so it injects the
 	// discoverer and runner factory and declares itself able to host. Device identity is what
@@ -307,6 +312,13 @@ func main() {
 	// File › New Note / Task / Canvas: bring the window forward and have the app open the
 	// palette on that command (palette.go). File › Import › Things 3… (PLAN §6.12): likewise,
 	// for its import modal.
+	// File › Export › Schedule … Exports: bring the window forward and have the app open
+	// Settings › Export on a new export of that kind.
+	exports.schedule = func(kind string) {
+		updates.openApp()
+		payload, _ := json.Marshal(map[string]string{"kind": kind})
+		handler.OnEvent(exportScheduleEvent, payload)
+	}
 	app.Menu.Set(applicationMenu(func(what string) {
 		updates.openApp()
 		handler.OnEvent(captureNewEvent, captureNewPayload(what))
@@ -375,6 +387,8 @@ func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusW
 	mux.HandleFunc("/export/begin", exports.handleBegin)
 	mux.HandleFunc("/export/write", exports.handleWrite)
 	mux.HandleFunc("/export/end", exports.handleEnd)
+	// The folder chooser for a scheduled filesystem export.
+	mux.HandleFunc("/export/pick-folder", exports.handlePickFolder)
 	mux.Handle("/", files)
 	return mux
 }

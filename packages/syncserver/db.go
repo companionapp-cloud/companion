@@ -401,6 +401,23 @@ CREATE TABLE IF NOT EXISTS calendar_accounts (
 );
 CREATE INDEX IF NOT EXISTS idx_calendar_accounts_user_seq ON calendar_accounts (user_id, server_seq);
 
+-- Scheduled Git exports (core/export): which repository a user's workspace is pushed to, by which
+-- device, and the credential that does it. The server never contacts a Git host — only the
+-- exporting device does — so, like a CalDAV account, the row is kept whole in row_json; on an
+-- encrypted account its name, its config (repository URL, username, SSH public key, pinned host
+-- key) and its credential are enc$v1$ envelopes the server cannot read.
+CREATE TABLE IF NOT EXISTS git_exports (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  row_json   TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  version    BIGINT NOT NULL DEFAULT 0,
+  server_seq BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_git_exports_user_seq ON git_exports (user_id, server_seq);
+
 CREATE TABLE IF NOT EXISTS calendar_objects (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL,

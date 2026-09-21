@@ -17,6 +17,9 @@ import (
 var (
 	calendarAccountHandler = opaqueRowHandler(protocol.EntityCalendarAccount, "calendar_accounts")
 	calendarObjectHandler  = opaqueRowHandler(protocol.EntityCalendarObject, "calendar_objects")
+	// A scheduled Git export (core/export) is the same kind of courier job: the server never
+	// contacts the Git host, and the row's repository, settings and credential are ciphertext.
+	gitExportHandler = opaqueRowHandler(protocol.EntityGitExport, "git_exports")
 )
 
 // opaqueRowMeta is the only part of an opaque body the server reads.

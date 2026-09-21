@@ -56,3 +56,12 @@ export function desktopExportMenu(): ExportMenuHost {
     },
   };
 }
+
+/** A folder to export to (Settings › Export) or import from (Settings › Import): the Go side shows
+ *  the native chooser and the core — which runs in the same process — uses the path it returns. */
+export async function pickExportFolder(purpose: "export" | "import" = "export"): Promise<string | null> {
+  const res = await fetch(`/export/pick-folder?purpose=${purpose}`, { method: "POST" });
+  if (res.status === 204) return null;
+  if (!res.ok) throw new Error((await res.text()).trim() || "Couldn’t open the folder chooser.");
+  return ((await res.json()) as { path: string }).path;
+}
