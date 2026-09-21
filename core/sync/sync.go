@@ -271,7 +271,9 @@ func New(st *store.Store, t Transport, clock domain.Clock) *Engine {
 	// Note ink (PLAN-drawing.md) after notes, so a pulled group's note is usually already
 	// there; a group arriving first is a tolerated dangle, like a canvas node before its board.
 	e.register(newRepoSyncer[*domain.NoteInk](st.NoteInk, clock))
+	// Scheduled exports: each runs on one device, and syncs so the others know and can take over.
 	e.register(newRepoSyncer[*domain.GitExport](st.Exports.Git(), clock))
+	e.register(newRepoSyncer[*domain.FolderExport](st.Exports.Folder(), clock))
 	return e
 }
 

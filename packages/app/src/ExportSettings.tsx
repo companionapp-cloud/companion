@@ -3,11 +3,13 @@ import { View } from "react-native";
 import { Badge, Button, Icon, Input, Spinner, Text, colors, radius, space } from "@companion/design-system";
 import { EXPORT_CHANGED_EVENT, type ExportCapabilities, type ExportDestination, type ExportFolderConfig, type ExportSchedule } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
+import { useSync } from "./SyncProvider";
 import { ConfirmDialog, useDialogKeys } from "./ConfirmDialog";
 import { Dialog } from "./Dialog";
 import { timeAgo } from "./NotificationRow";
 import { CheckBox, Segmented, SettingsField, SettingsNote } from "./settingsUi";
 import { canPickExportFolder, onScheduledExportRequest, pickExportFolder, takeScheduledExportRequest } from "./export/scheduling";
+import { OtherDeviceActions, OtherDeviceStatus, exporterName } from "./export/OtherDeviceExport";
 
 const SCHEDULES: { value: ExportSchedule; label: string }[] = [
   { value: "changes", label: "On changes" },
@@ -26,18 +28,24 @@ const SCHEDULE_WORDS: Record<ExportSchedule, string> = {
 };
 
 type Editing = { destination?: ExportDestination } | null;
+type TakingOver = { destination: ExportDestination; path?: string } | null;
+
+const pathOf = (d: ExportDestination): string => (d.config as ExportFolderConfig).path ?? "";
 
 /** Settings › Export: keep a copy of the workspace in a folder, on a schedule — notes and tasks
  *  as markdown with front matter, canvases as JSON. The folder can sit in iCloud Drive, Dropbox
  *  and the like. It is one-way: a folder has no history and no way to say what was changed or
  *  deleted on purpose, so nothing is read back from it (two-way lives in Settings › Sync › Git;
- *  bringing files in is Settings › Import). The core does the exporting (core/export); the
- *  destinations belong to this device. Also reached from the desktop's File › Export menu. */
+ *  bringing files in is Settings › Import). The core does the exporting (core/export). Each
+ *  export runs on the device whose disk the folder is on, and syncs: every device lists every
+ *  export, and can pause it, remove it or (a desktop) take it over. Also reached from the
+ *  desktop's File › Export menu. */
 export function ExportSettings() {
   const { core, exports } = useCore();
   const [capabilities, setCapabilities] = useState<ExportCapabilities | null>(null);
   const [destinations, setDestinations] = useState<ExportDestination[]>([]);
   const [editing, setEditing] = useState<Editing>(null);
+  const [takingOver, setTakingOver] = useState<TakingOver>(null);
 
   const refresh = useCallback(() => {
     void exports
@@ -48,7 +56,15 @@ export function ExportSettings() {
   useEffect(() => {
     void exports.capabilities().then(setCapabilities).catch(() => setCapabilities({ folder: false, git: false }));
     refresh();
-    return core.on(EXPORT_CHANGED_EVENT, refresh);
+    const offExport = core.on(EXPORT_CHANGED_EVENT, refresh);
+    // Another device's exports, and its changes to them, arrive with a server sync.
+    const offData = core.on("data.changed", (payload) => {
+      if (!(payload as { id?: string } | null)?.id) refresh();
+    });
+    return () => {
+      offExport();
+      offData();
+    };
   }, [core, exports, refresh]);
 
   // File › Export › Schedule … Exports lands here with a kind to start on.
@@ -61,17 +77,8 @@ export function ExportSettings() {
   }, []);
 
   if (!capabilities) return <Spinner label="Loading…" />;
-  if (!capabilities.folder) {
-    return (
-      <View style={styles.page}>
-        <SettingsNote tone="secondary">
-          Scheduled exports run in the Companion desktop app, which can write to a folder and stay running to keep it up to
-          date. Set them up there under Settings › Export.
-        </SettingsNote>
-        <SettingsNote>To save a single note, task or canvas from here, open it and use its Export button.</SettingsNote>
-      </View>
-    );
-  }
+  const canRun = capabilities.folder;
+  const others = destinations.filter((d) => !d.thisDevice);
 
   return (
     <View style={styles.page}>
@@ -80,26 +87,36 @@ export function ExportSettings() {
           <Text variant="eyebrow" tone="quaternary">
             Filesystem exports
           </Text>
-          <SettingsNote>
-            Keep a folder of plain files up to date: notes and tasks as Markdown, canvases as JSON, the files they embed in an
-            Attachments folder — filed by area and project.
-            Put the folder in iCloud Drive, Dropbox or another synced drive to have a copy off this computer.
-          </SettingsNote>
+          <SettingsNote>Export your data to a folder on a schedule.</SettingsNote>
         </View>
-        {destinations.map((d) => (
-          <DestinationRow key={d.id} destination={d} onRun={() => void exports.run(d.id)} onEdit={() => setEditing({ destination: d })} />
-        ))}
-        <View style={styles.buttonRow}>
-          <Button label="Schedule filesystem export…" variant="secondary" onPress={() => setEditing({})} />
-        </View>
+        {destinations.map((d) =>
+          d.thisDevice ? (
+            <DestinationRow key={d.id} destination={d} onEdit={() => setEditing({ destination: d })} />
+          ) : (
+            <OtherDeviceRow key={d.id} destination={d} onTakeOver={canRun ? () => setTakingOver({ destination: d }) : undefined} />
+          ),
+        )}
+        {canRun ? (
+          <View style={styles.buttonRow}>
+            <Button label="Schedule filesystem export…" variant="secondary" onPress={() => setEditing({})} />
+          </View>
+        ) : (
+          <SettingsNote tone="secondary">Set up filesystem exports in the Companion desktop app.</SettingsNote>
+        )}
       </View>
-      <SettingsNote>
-        Exports are plain, readable files — that is the point of them — so they are not protected by Companion’s end-to-end
-        encryption: anyone who can read the folder can read what’s in it. They are one-way: changes made to the files don’t
-        come back into Companion. For that, sync with a Git repository under Settings › Sync, or bring files in once under
-        Settings › Import. Exports are set up per device, and run while Companion is open or in the menu bar.
-      </SettingsNote>
-      {editing ? <DestinationDialog destination={editing.destination} onClose={() => setEditing(null)} /> : null}
+      <SettingsNote>Files synced with scheduled filesystem exports are not E2E encrypted.</SettingsNote>
+      {editing ? (
+        <DestinationDialog
+          destination={editing.destination}
+          others={others}
+          onTakeOverInstead={(d, path) => {
+            setEditing(null);
+            setTakingOver({ destination: d, path });
+          }}
+          onClose={() => setEditing(null)}
+        />
+      ) : null}
+      {takingOver ? <TakeOverDialog destination={takingOver.destination} initialPath={takingOver.path} onClose={() => setTakingOver(null)} /> : null}
     </View>
   );
 }
@@ -122,8 +139,10 @@ function statusOf(d: ExportDestination): { text: string; tone: "tertiary" | "dan
   return { text: `Exported ${timeAgo(d.lastSuccessAt)}${counts ? ` · ${counts}` : " · up to date"}`, tone: "tertiary" };
 }
 
-function DestinationRow({ destination: d, onRun, onEdit }: { destination: ExportDestination; onRun: () => void; onEdit: () => void }) {
-  const where = (d.config as ExportFolderConfig).path;
+/** An export this device runs. */
+function DestinationRow({ destination: d, onEdit }: { destination: ExportDestination; onEdit: () => void }) {
+  const { exports } = useCore();
+  const sync = useSync();
   const status = statusOf(d);
   return (
     <View style={styles.row}>
@@ -134,11 +153,15 @@ function DestinationRow({ destination: d, onRun, onEdit }: { destination: Export
         </Text>
         {!d.enabled ? <Badge tone="neutral" label="paused" /> : null}
         <View style={{ flex: 1 }} />
-        <Button label={d.running ? "Exporting…" : "Export now"} variant="ghost" size="sm" disabled={d.running} onPress={onRun} />
+        {d.enabled ? (
+          <Button label={d.running ? "Exporting…" : "Export now"} variant="ghost" size="sm" disabled={d.running} onPress={() => void exports.run(d.id)} />
+        ) : (
+          <Button label="Resume" variant="ghost" size="sm" onPress={() => void exports.setEnabled(d.id, true).then(() => sync.trigger())} />
+        )}
         <Button label="Edit" variant="ghost" size="sm" onPress={onEdit} />
       </View>
       <Text variant="mono" tone="tertiary" numberOfLines={1}>
-        {where}
+        {pathOf(d)}
       </Text>
       <Text variant="caption" tone={status.tone} numberOfLines={3}>
         {d.enabled ? `Exports ${SCHEDULE_WORDS[d.schedule]}` : "Paused"} · {status.text}
@@ -147,24 +170,75 @@ function DestinationRow({ destination: d, onRun, onEdit }: { destination: Export
   );
 }
 
-function DestinationDialog({ destination, onClose }: { destination?: ExportDestination; onClose: () => void }) {
-  const { exports } = useCore();
-  const [name, setName] = useState(destination?.name ?? "");
-  const [schedule, setSchedule] = useState<ExportSchedule>(destination?.schedule ?? "changes");
-  const [enabled, setEnabled] = useState(destination?.enabled ?? true);
-  const [path, setPath] = useState((destination?.config as ExportFolderConfig | undefined)?.path ?? "");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+/** An export another device runs, into a folder on its own disk. */
+function OtherDeviceRow({ destination: d, onTakeOver }: { destination: ExportDestination; onTakeOver?: () => void }) {
+  return (
+    <View style={styles.row}>
+      <View style={styles.rowHead}>
+        <Icon name="folder" size={13} color={colors.textTertiary} />
+        <Text variant="label" numberOfLines={1} style={{ flexShrink: 1 }}>
+          {d.name}
+        </Text>
+        {!d.enabled ? <Badge tone="neutral" label="paused" /> : null}
+        <Badge tone="info" label={`on ${exporterName(d)}`} />
+      </View>
+      <Text variant="mono" tone="tertiary" numberOfLines={1}>
+        {pathOf(d)}
+      </Text>
+      <OtherDeviceStatus destination={d} scheduleWords={SCHEDULE_WORDS[d.schedule]} />
+      <OtherDeviceActions destination={d} onTakeOver={onTakeOver} />
+    </View>
+  );
+}
 
+/** A folder on this computer: the chosen path, and the native chooser. */
+function FolderField({ label, help, path, onChange, onError }: { label: string; help?: string; path: string; onChange: (path: string) => void; onError: (message: string) => void }) {
   const choose = async () => {
     try {
       const picked = await pickExportFolder("export");
-      if (picked) setPath(picked);
+      if (picked) onChange(picked);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      onError(e instanceof Error ? e.message : String(e));
     }
   };
+  return (
+    <SettingsField label={label} help={help}>
+      <View style={styles.pathRow}>
+        <View style={styles.path}>
+          <Text variant="mono" tone={path ? "default" : "quaternary"} numberOfLines={1}>
+            {path || "No folder chosen"}
+          </Text>
+        </View>
+        <Button label="Choose…" variant="secondary" disabled={!canPickExportFolder()} onPress={() => void choose()} />
+      </View>
+    </SettingsField>
+  );
+}
+
+function DestinationDialog({
+  destination,
+  others,
+  onTakeOverInstead,
+  onClose,
+}: {
+  destination?: ExportDestination;
+  /** The folder exports other devices run, to catch a second export into the same folder. */
+  others: ExportDestination[];
+  onTakeOverInstead: (d: ExportDestination, path: string) => void;
+  onClose: () => void;
+}) {
+  const { exports } = useCore();
+  const sync = useSync();
+  const [name, setName] = useState(destination?.name ?? "");
+  const [schedule, setSchedule] = useState<ExportSchedule>(destination?.schedule ?? "changes");
+  const [enabled, setEnabled] = useState(destination?.enabled ?? true);
+  const [path, setPath] = useState(destination ? pathOf(destination) : "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  // Another device already writing this very path: most likely one folder a cloud drive keeps on
+  // both, and two exporters writing it would get in each other's way.
+  const clash = !destination && path ? others.find((d) => pathOf(d) === path) : undefined;
 
   const save = async () => {
     if (busy) return;
@@ -173,6 +247,7 @@ function DestinationDialog({ destination, onClose }: { destination?: ExportDesti
     setError(null);
     try {
       await exports.save({ id: destination?.id, kind: "folder", name: name.trim(), schedule, enabled, path });
+      sync.trigger();
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -186,10 +261,11 @@ function DestinationDialog({ destination, onClose }: { destination?: ExportDesti
     return (
       <ConfirmDialog
         title="Stop this export?"
-        message={`Companion forgets “${destination.name}” and stops exporting to it. The files already in the folder stay where they are.`}
+        message={`Companion forgets “${destination.name}” on all your devices and stops exporting to it. The files already in the folder stay where they are.`}
         confirmLabel="Stop exporting"
         onConfirm={async () => {
           await exports.remove(destination.id);
+          sync.trigger();
           onClose();
         }}
         onClose={() => setConfirmDelete(false)}
@@ -211,16 +287,21 @@ function DestinationDialog({ destination, onClose }: { destination?: ExportDesti
         </>
       }
     >
-      <SettingsField label="Folder" help="An empty folder is best: Companion replaces files it finds with the same names, and only ever deletes files it wrote.">
-        <View style={styles.pathRow}>
-          <View style={styles.path}>
-            <Text variant="mono" tone={path ? "default" : "quaternary"} numberOfLines={1}>
-              {path || "No folder chosen"}
-            </Text>
+      <FolderField
+        label="Folder"
+        help="An empty folder is best: Companion replaces files it finds with the same names, and only ever deletes files it wrote."
+        path={path}
+        onChange={setPath}
+        onError={setError}
+      />
+      {clash ? (
+        <View style={styles.clash}>
+          <SettingsNote tone="secondary">{`${exporterName(clash)} already exports to this folder.`}</SettingsNote>
+          <View style={styles.buttonRow}>
+            <Button label="Take it over instead" variant="secondary" size="sm" onPress={() => onTakeOverInstead(clash, path)} />
           </View>
-          <Button label="Choose…" variant="secondary" disabled={!canPickExportFolder()} onPress={() => void choose()} />
         </View>
-      </SettingsField>
+      ) : null}
       <SettingsField label="Name" help="Optional. The folder’s name otherwise.">
         <Input value={name} onChangeText={setName} />
       </SettingsField>
@@ -233,11 +314,59 @@ function DestinationDialog({ destination, onClose }: { destination?: ExportDesti
   );
 }
 
+/** Take another device's folder export over: this computer exports it from now on, into a folder
+ *  on its own disk, and the other device stops the next time it connects. */
+function TakeOverDialog({ destination, initialPath, onClose }: { destination: ExportDestination; initialPath?: string; onClose: () => void }) {
+  const { exports } = useCore();
+  const sync = useSync();
+  const [path, setPath] = useState(initialPath ?? pathOf(destination));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const who = exporterName(destination);
+
+  const take = async () => {
+    if (busy) return;
+    if (!path) return setError("Choose a folder to export to.");
+    setBusy(true);
+    setError(null);
+    try {
+      await exports.takeOver(destination.id, path);
+      sync.trigger();
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  };
+
+  const hints = useDialogKeys({ onEnter: () => void take(), onEscape: busy ? undefined : onClose });
+
+  return (
+    <Dialog
+      title="Export from this computer"
+      width={480}
+      onClose={busy ? undefined : onClose}
+      footer={
+        <>
+          <View style={{ flex: 1 }} />
+          <Button label="Cancel" variant="ghost" kbd={hints ? "esc" : undefined} onPress={onClose} />
+          <Button label={busy ? "Taking over…" : "Take over"} kbd={hints ? "⏎" : undefined} disabled={busy} onPress={() => void take()} />
+        </>
+      }
+    >
+      <SettingsNote tone="secondary">{`${who} stops exporting when it next connects.`}</SettingsNote>
+      <FolderField label="Folder on this computer" path={path} onChange={setPath} onError={setError} />
+      {error ? <SettingsNote tone="danger">{error}</SettingsNote> : null}
+    </Dialog>
+  );
+}
+
 const styles = {
   page: { gap: space.xxl },
   section: { gap: space.md },
   head: { gap: space.xs },
   buttonRow: { flexDirection: "row" as const },
+  clash: { gap: space.sm },
   row: {
     borderWidth: 1,
     borderColor: colors.borderSubtle,
@@ -248,7 +377,7 @@ const styles = {
     paddingBottom: space.sm,
     gap: 2,
   },
-  rowHead: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.sm },
+  rowHead: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.sm, minHeight: 26 },
   pathRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.sm },
   path: {
     flex: 1,

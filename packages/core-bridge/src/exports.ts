@@ -3,12 +3,16 @@ import type { CoreBridge } from "./types";
 // Files outside the app (core/export, core/bridge/export.go): notes and tasks as markdown with
 // front matter, canvases as JSON, and the files they embed in an Attachments folder.
 //
-//  - A FOLDER destination is a one-way export, kept up to date on a schedule. It belongs to the
-//    device that set it up.
-//  - A GIT destination is a two-way sync: what changes in the repository comes back in. It syncs
-//    between devices — repository, settings and credential, the credential end-to-end encrypted
-//    — but only one device, its exporter, ever runs it; the others can take it over.
+//  - A FOLDER destination is a one-way export, kept up to date on a schedule, into a folder on
+//    one device's disk.
+//  - A GIT destination is a two-way sync: what changes in the repository comes back in. Its
+//    repository, settings and credential travel between devices, the credential end-to-end
+//    encrypted.
 //  - Importing a folder of files is a separate, one-time act (importFilesApi).
+//
+// Both kinds sync, and only one device, the exporter, ever runs each. Every other device lists
+// it with the exporter's name and how its last run went, and can pause, resume or remove it (the
+// exporter picks that up the next time it syncs) or, where exports can run, take it over.
 
 export type ExportKind = "folder" | "git";
 /** "changes": shortly after anything changes. "manual": only when asked. */
@@ -60,26 +64,38 @@ export interface ExportDestination {
   id: string;
   kind: ExportKind;
   name: string;
+  /** A folder export's path is on its exporter's disk. */
   config: ExportFolderConfig | ExportGitConfig;
   schedule: ExportSchedule;
   enabled: boolean;
-  /** The last attempt, however it went. */
+  /** The last attempt, however it went. On another device's export, this and the next two are
+   *  what its exporter last reported: after a run that changed something or failed, and at
+   *  least hourly while it's running. */
   lastRunAt?: string | null;
   lastSuccessAt?: string | null;
   lastError?: string;
+  /** This device's own runs only. */
   lastSummary?: ExportSummary | null;
   pushPending: boolean;
   /** Git: this device can sign in. False when the export synced here without its credential —
    *  an account without end-to-end encryption keeps it on the device it was typed into. The
    *  credential itself never crosses the bridge. */
   hasCredential: boolean;
-  /** This device is the one that runs it (always, for a folder). */
+  /** This device is the one that runs it. */
   thisDevice: boolean;
-  /** Git: the device that runs it, for the others to show. */
+  /** The device that runs it, and what the others call it. */
   deviceId?: string;
   deviceName?: string;
+  /** Another device's export: whether that device is online now, and when it last synced.
+   *  Unset when nothing is known of it (no server, or it hasn't registered). */
+  ownerOnline?: boolean;
+  ownerLastSeenAt?: string | null;
+  /** Another device's export whose settings changed after that device last synced: it hasn't
+   *  picked the change up yet, so a pause, say, hasn't taken effect. */
+  pending?: boolean;
   running: boolean;
   createdAt: string;
+  /** When the settings last changed (a run's report never moves it). */
   updatedAt: string;
 }
 
@@ -134,8 +150,13 @@ export function exportsApi(core: CoreBridge) {
     run: (id: string, force = false) => core.invoke<{ started: boolean }>("export.destinations.run", { id, force }),
     /** Try a Git remote with a credential before saving it. */
     check: (input: SaveExportInput) => core.invoke<{ ok: boolean; error?: string }>("export.destinations.check", input),
-    /** Make this device the one that runs a Git sync. */
-    takeOver: (id: string) => core.invoke<ExportDestination>("export.destinations.takeOver", { id }),
+    /** Make this device the one that runs an export, and start it if it was paused. A folder
+     *  export needs the folder on this device (`path`); a Git sync, the sign-in. The device that
+     *  ran it stops the next time it syncs. */
+    takeOver: (id: string, path?: string) => core.invoke<ExportDestination>("export.destinations.takeOver", { id, path }),
+    /** Pause or resume an export, from any device: another device's export stops or starts the
+     *  next time that device syncs (`pending` until then). */
+    setEnabled: (id: string, enabled: boolean) => core.invoke<ExportDestination>("export.destinations.setEnabled", { id, enabled }),
     /** Make an SSH deploy key. The private half stays in the core; save with its `keyId`. */
     generateSshKey: () => core.invoke<PendingSshKey>("export.sshKey.generate"),
     /** Throw away a generated key that no save adopted (a cancelled dialog). */

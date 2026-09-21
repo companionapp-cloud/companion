@@ -555,10 +555,13 @@ func TestGitExportCredentialStaysLocalWithoutE2EE(t *testing.T) {
 	if raw, _ := json.Marshal(dirty[0]); strings.Contains(string(raw), "hunter2") {
 		t.Fatalf("credential in the wire body: %s", raw)
 	}
-	// A folder export never syncs.
+	// A folder export syncs as its own kind of row, so the other devices know of it.
 	call[exportView](t, c, "export.destinations.save", `{"kind":"folder","path":`+quote(t.TempDir())+`,"schedule":"manual"}`)
 	if dirty, _ := c.store.Exports.Git().Dirty(); len(dirty) != 1 {
-		t.Errorf("only the git export should be queued to sync, got %d rows", len(dirty))
+		t.Errorf("the git export alone should sync as a git export, got %d rows", len(dirty))
+	}
+	if dirty, _ := c.store.Exports.Folder().Dirty(); len(dirty) != 1 || dirty[0].DeviceID != dest.DeviceID {
+		t.Errorf("the folder export should sync as a folder export, from this device: %+v", dirty)
 	}
 }
 
@@ -570,7 +573,7 @@ func TestGitExportApplyKeepsLocalState(t *testing.T) {
 	c.SetExportDir(t.TempDir())
 	dest := call[exportView](t, c, "export.destinations.save", `{"kind":"git","auth":"token","remoteUrl":"https://example.com/me/notes.git","token":"t","schedule":"manual"}`)
 	now := time.Now()
-	if err := c.store.Exports.RecordRun(dest.ID, now, &now, "", json.RawMessage(`{"added":2,"updated":0,"removed":0}`), true); err != nil {
+	if err := c.store.Exports.RecordRun(dest.ID, dest.DeviceID, store.ExportRun{RanAt: now, Success: &now, Summary: json.RawMessage(`{"added":2,"updated":0,"removed":0}`), PushPending: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.store.Exports.ApplyToManifest(dest.ID, []store.ExportManifestRow{{Path: "Notes/A.md", EntityType: "note", EntityID: "1", SHA: "x"}}, nil); err != nil {

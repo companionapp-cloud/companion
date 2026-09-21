@@ -418,6 +418,21 @@ CREATE TABLE IF NOT EXISTS git_exports (
 );
 CREATE INDEX IF NOT EXISTS idx_git_exports_user_seq ON git_exports (user_id, server_seq);
 
+-- Scheduled folder exports (core/export): which of the user's devices writes a copy of the
+-- workspace into a folder on its disk, so the others can see it, pause it or take it over. Kept
+-- whole like a Git export; on an encrypted account the folder's path and name are ciphertext.
+CREATE TABLE IF NOT EXISTS folder_exports (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  row_json   TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  version    BIGINT NOT NULL DEFAULT 0,
+  server_seq BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_folder_exports_user_seq ON folder_exports (user_id, server_seq);
+
 CREATE TABLE IF NOT EXISTS calendar_objects (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL,

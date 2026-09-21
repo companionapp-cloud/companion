@@ -53,6 +53,10 @@ const (
 	// device that runs it, and the credential — so it is set up once for every device. Stored
 	// by the server as an opaque body.
 	EntityGitExport = "git_export"
+	// A scheduled export to a folder on one device's disk. It syncs so the other devices know
+	// the folder is being written, and can pause it or take it over; only the device named in it
+	// ever writes. Stored by the server as an opaque body, like a Git export.
+	EntityFolderExport = "folder_export"
 )
 
 // Push statuses.

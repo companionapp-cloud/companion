@@ -206,8 +206,8 @@ export function SignInDialog({
       {where === "cloud" ? (
         <View style={styles.stack}>
           <SettingsNote tone="secondary">
-            Companion Cloud is the hosted sync server. To create an account, register at {CLOUD_PORTAL_LABEL} — that’s
-            where you choose a plan — then come back and log in here with the same email and password.
+            Companion Cloud is the hosted sync server. To create an account, register at {CLOUD_PORTAL_LABEL}, where you also choose a
+            plan, then come back and log in here with the same email and password.
           </SettingsNote>
           <View style={styles.row}>
             <Button

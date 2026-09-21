@@ -17,6 +17,7 @@ import { Dialog } from "./Dialog";
 import { timeAgo } from "./NotificationRow";
 import { CheckBox, CodeBlock, Segmented, SettingsField, SettingsNote } from "./settingsUi";
 import { onScheduledExportRequest, takeScheduledExportRequest } from "./export/scheduling";
+import { OtherDeviceActions, OtherDeviceStatus, exporterName } from "./export/OtherDeviceExport";
 
 // ---- providers --------------------------------------------------------------------------
 
@@ -56,7 +57,7 @@ const PROVIDERS: Record<Exclude<GitProvider, "other">, ProviderInfo> = {
     repoHint: "workspace/companion-notes",
     token: "A repository access token with Repositories: Write. Create it in the repository under Repository settings › Access tokens.",
     ssh:
-      "Bitbucket’s repository access keys are read-only, so add this key to your own account instead — Personal settings › SSH keys. It can then reach every repository you can, not just this one.",
+      "Bitbucket’s repository access keys are read-only, so add this key to your own account instead, under Personal settings › SSH keys. It can then reach every repository you can, not just this one.",
     https: "Your Bitbucket username (not your email) and an app password or API token with repository write access.",
   },
 };
@@ -110,19 +111,30 @@ export function repoPath(input: string): string {
 
 // ---- settings section -------------------------------------------------------------------
 
-type Editing = { destination?: ExportDestination } | null;
+/** The dialog open: a new sync, an edit, or signing in here to take another device's over. */
+type Editing = { destination?: ExportDestination; takeOver?: boolean } | null;
 
 /** Settings › Sync › Git: keep the workspace in a Git repository, both ways. Notes and tasks are
  *  markdown files, canvases JSON; what changes in Companion is committed and pushed, and what
  *  changes in the repository — edits made in another editor, on another machine, by a script —
  *  comes back in. The core does the syncing (core/export/gitsink); one device runs each sync,
- *  and the rest hold its settings, ready to take over. */
+ *  and every device lists it and can pause or remove it, or (a desktop) take it over. */
 export function GitSyncSettings() {
   const { core, exports } = useCore();
   const sync = useSync();
   const [available, setAvailable] = useState<boolean | null>(null);
   const [destinations, setDestinations] = useState<ExportDestination[]>([]);
   const [editing, setEditing] = useState<Editing>(null);
+  const [confirmTakeOver, setConfirmTakeOver] = useState<ExportDestination | null>(null);
+  const [takeOverError, setTakeOverError] = useState<string | null>(null);
+
+  // Taking over needs the sign-in on this device: straight away when it's here, through the
+  // dialog when it isn't (an account without end-to-end encryption keeps it where it was typed).
+  const takeOver = (d: ExportDestination) => {
+    setTakeOverError(null);
+    if (d.hasCredential) setConfirmTakeOver(d);
+    else setEditing({ destination: d, takeOver: true });
+  };
 
   const refresh = useCallback(() => {
     void exports
@@ -163,11 +175,7 @@ export function GitSyncSettings() {
         <Text variant="eyebrow" tone="quaternary">
           Git
         </Text>
-        <SettingsNote>
-          Keep your workspace in a Git repository, both ways: notes and tasks as Markdown, canvases as JSON, attachments beside
-          them, a commit whenever something changes. Edit the files anywhere — another editor, another machine, a script — and the changes come back
-          into Companion.
-        </SettingsNote>
+        <SettingsNote>Keep your workspace in a Git repository.</SettingsNote>
       </View>
       {destinations.map((d) => (
         <GitRow
@@ -175,34 +183,53 @@ export function GitSyncSettings() {
           destination={d}
           canRun={available}
           onRun={(force) => void exports.run(d.id, force)}
-          onTakeOver={() => void exports.takeOver(d.id).then(() => sync.trigger())}
+          onResume={() => void exports.setEnabled(d.id, true).then(() => sync.trigger())}
+          onTakeOver={() => takeOver(d)}
           onEdit={() => setEditing({ destination: d })}
         />
       ))}
+      {takeOverError ? <SettingsNote tone="danger">{takeOverError}</SettingsNote> : null}
       {available ? (
         <View style={styles.buttonRow}>
           <Button label="Set up Git sync…" variant="secondary" onPress={() => setEditing({})} />
         </View>
       ) : (
-        <SettingsNote tone="secondary">
-          Git sync runs in the Companion desktop app. {destinations.length ? "These are set up there." : "Set it up there, under Settings › Sync."}
-        </SettingsNote>
+        <SettingsNote tone="secondary">Set up Git sync in the Companion desktop app.</SettingsNote>
       )}
-      <SettingsNote>
-        The repository holds plain, readable files, so it sits outside Companion’s end-to-end encryption: anyone who can read it
-        can read your notes, and anyone who can write to it can change them. Deleting a file there moves its note to the Trash.{" "}
-        {sync.encrypted
-          ? "The repository’s address and sign-in are synced to your other devices end-to-end encrypted, so any of them can take the sync over."
-          : "Because this account isn’t end-to-end encrypted, the sign-in stays on this device and isn’t synced."}
-      </SettingsNote>
+      <SettingsNote>Files synced with Git are not E2E encrypted.</SettingsNote>
       {editing ? (
         <GitDialog
           destination={editing.destination}
+          takeOver={editing.takeOver}
+          all={destinations}
+          onTakeOverInstead={(d) => {
+            setEditing(null);
+            takeOver(d);
+          }}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
             sync.trigger();
           }}
+        />
+      ) : null}
+      {confirmTakeOver ? (
+        <ConfirmDialog
+          portal
+          tone="primary"
+          title="Sync from this computer?"
+          message={`${exporterName(confirmTakeOver)} stops syncing when it next connects.`}
+          confirmLabel="Take over"
+          onConfirm={async () => {
+            try {
+              await exports.takeOver(confirmTakeOver.id);
+              sync.trigger();
+            } catch (e) {
+              setTakeOverError(e instanceof Error ? e.message : String(e));
+            }
+            setConfirmTakeOver(null);
+          }}
+          onClose={() => setConfirmTakeOver(null)}
         />
       ) : null}
     </View>
@@ -231,19 +258,21 @@ function GitRow({
   destination: d,
   canRun,
   onRun,
+  onResume,
   onTakeOver,
   onEdit,
 }: {
   destination: ExportDestination;
   canRun: boolean;
   onRun: (force: boolean) => void;
+  onResume: () => void;
   onTakeOver: () => void;
   onEdit: () => void;
 }) {
   const config = d.config as ExportGitConfig;
   const status = statusOf(d);
-  // The core pauses a sync that would bin a large share of the workspace, and says so.
-  const paused = !!d.lastError && d.lastError.includes("were deleted there");
+  // The core holds back a sync that would bin a large share of the workspace, and says so.
+  const heldBack = !!d.lastError && d.lastError.includes("were deleted there");
   return (
     <View style={styles.row}>
       <View style={styles.rowHead}>
@@ -252,13 +281,17 @@ function GitRow({
           {d.name}
         </Text>
         {!d.enabled ? <Badge tone="neutral" label="paused" /> : null}
-        {!d.thisDevice ? <Badge tone="info" label={`on ${d.deviceName || "another device"}`} /> : null}
+        {!d.thisDevice ? <Badge tone="info" label={`on ${exporterName(d)}`} /> : null}
         <View style={{ flex: 1 }} />
         {d.thisDevice && canRun ? (
-          <>
-            {paused ? <Button label="Sync anyway" variant="ghost" size="sm" disabled={d.running} onPress={() => onRun(true)} /> : null}
-            <Button label={d.running ? "Syncing…" : "Sync now"} variant="ghost" size="sm" disabled={d.running} onPress={() => onRun(false)} />
-          </>
+          d.enabled ? (
+            <>
+              {heldBack ? <Button label="Sync anyway" variant="ghost" size="sm" disabled={d.running} onPress={() => onRun(true)} /> : null}
+              <Button label={d.running ? "Syncing…" : "Sync now"} variant="ghost" size="sm" disabled={d.running} onPress={() => onRun(false)} />
+            </>
+          ) : (
+            <Button label="Resume" variant="ghost" size="sm" onPress={onResume} />
+          )
         ) : null}
         {canRun ? <Button label="Edit" variant="ghost" size="sm" onPress={onEdit} /> : null}
       </View>
@@ -271,15 +304,8 @@ function GitRow({
         </Text>
       ) : (
         <>
-          <Text variant="caption" tone="tertiary">
-            {d.deviceName || "Another device"} runs this sync; this one only holds its settings.
-            {d.hasCredential ? "" : " Its sign-in isn’t on this device — to sync from here, edit it and sign in again."}
-          </Text>
-          {canRun && d.hasCredential ? (
-            <View style={styles.buttonRow}>
-              <Button label="Sync from this computer instead" variant="secondary" size="sm" onPress={onTakeOver} />
-            </View>
-          ) : null}
+          <OtherDeviceStatus destination={d} scheduleWords={SCHEDULE_WORDS[d.schedule]} />
+          <OtherDeviceActions destination={d} onTakeOver={canRun ? onTakeOver : undefined} />
         </>
       )}
     </View>
@@ -288,7 +314,32 @@ function GitRow({
 
 // ---- dialog -----------------------------------------------------------------------------
 
-function GitDialog({ destination, onClose, onSaved }: { destination?: ExportDestination; onClose: () => void; onSaved: () => void }) {
+/** Whether an existing sync is with the repository and branch this form describes: the same
+ *  `owner/name` on the same host (over https or SSH alike), or the same address elsewhere. */
+function sameRepository(config: ExportGitConfig, provider: GitProvider, repository: string, branch: string): boolean {
+  if ((config.branch || "main") !== (branch.trim() || "main") || config.provider !== provider) return false;
+  if (provider === "other") return config.remoteUrl.trim() === repository.trim();
+  const path = repoPath(repository);
+  return !!path && repoPath(config.remoteUrl).toLowerCase() === path.toLowerCase();
+}
+
+function GitDialog({
+  destination,
+  takeOver,
+  all,
+  onTakeOverInstead,
+  onClose,
+  onSaved,
+}: {
+  destination?: ExportDestination;
+  /** Sign in here to take `destination` over from the device that runs it. */
+  takeOver?: boolean;
+  /** Every Git sync, to catch a second one with the same repository and branch. */
+  all: ExportDestination[];
+  onTakeOverInstead: (d: ExportDestination) => void;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const { exports } = useCore();
   const existing = destination?.config as ExportGitConfig | undefined;
   const [provider, setProvider] = useState<GitProvider>(existing?.provider ?? "github");
@@ -313,7 +364,10 @@ function GitDialog({ destination, onClose, onSaved }: { destination?: ExportDest
   const info = provider === "other" ? null : PROVIDERS[provider];
   // The stored credential still applies while the way of signing in is unchanged.
   const keepsCredential = !!destination?.hasCredential && existing?.auth === auth;
-  const publicKey = sshKey?.publicKey ?? (existing?.auth === "ssh" ? existing.publicKey : undefined);
+  // Taking over an SSH sync whose key isn't on this computer: it needs a key of its own.
+  const needsOwnKey = !!takeOver && auth === "ssh" && !keepsCredential;
+  const publicKey = sshKey?.publicKey ?? (existing?.auth === "ssh" && !needsOwnKey ? existing.publicKey : undefined);
+  const clash = destination ? undefined : all.find((d) => sameRepository(d.config as ExportGitConfig, provider, repository, branch));
 
   // A generated key that no save adopts is thrown away, whichever way the dialog goes.
   const pending = useRef<string | null>(null);
@@ -362,6 +416,7 @@ function GitDialog({ destination, onClose, onSaved }: { destination?: ExportDest
     if (!remoteFor(provider, auth, repository)) return info ? `Enter the repository as ${info.repoHint}.` : "Enter the repository’s address.";
     if (auth === "https" && !username.trim()) return "Enter the username.";
     if (auth !== "ssh" && !secret && !keepsCredential) return auth === "token" ? "Enter the access token." : "Enter the password.";
+    if (needsOwnKey && !sshKey) return "Still making this computer’s key. Try again in a moment.";
     return null;
   };
 
@@ -390,6 +445,8 @@ function GitDialog({ destination, onClose, onSaved }: { destination?: ExportDest
     try {
       await exports.save(input());
       adopted.current = true;
+      // Signed in here: now this computer can run it.
+      if (takeOver && destination) await exports.takeOver(destination.id);
       onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -403,7 +460,7 @@ function GitDialog({ destination, onClose, onSaved }: { destination?: ExportDest
       await navigator.clipboard.writeText(publicKey);
       setCopied(true);
     } catch {
-      setError("Couldn’t copy — select the key and copy it by hand.");
+      setError("Couldn’t copy. Select the key and copy it by hand.");
     }
   };
 
@@ -424,20 +481,27 @@ function GitDialog({ destination, onClose, onSaved }: { destination?: ExportDest
     );
   }
 
+  const who = destination ? exporterName(destination) : "";
   return (
     <Dialog
-      title={destination ? "Edit Git sync" : "Set up Git sync"}
+      title={takeOver ? "Sync from this computer" : destination ? "Edit Git sync" : "Set up Git sync"}
       width={500}
       onClose={busy ? undefined : onClose}
       footer={
         <>
-          {destination ? <Button label="Stop syncing…" variant="danger" onPress={() => setConfirmDelete(true)} /> : null}
+          {destination && !takeOver ? <Button label="Stop syncing…" variant="danger" onPress={() => setConfirmDelete(true)} /> : null}
           <View style={{ flex: 1 }} />
           <Button label="Cancel" variant="ghost" kbd={hints ? "esc" : undefined} onPress={onClose} />
-          <Button label={busy ? "Working…" : destination ? "Save" : "Start syncing"} kbd={hints ? "⏎" : undefined} disabled={busy} onPress={() => void save()} />
+          <Button
+            label={busy ? "Working…" : takeOver ? "Take over" : destination ? "Save" : "Start syncing"}
+            kbd={hints ? "⏎" : undefined}
+            disabled={busy}
+            onPress={() => void save()}
+          />
         </>
       }
     >
+      {takeOver && destination ? <SettingsNote tone="secondary">{`Sign in here to take this sync over from ${who}.`}</SettingsNote> : null}
       <SettingsField label="Where is the repository?">
         <Segmented fill options={PROVIDER_OPTIONS} value={provider} onChange={(p) => (setProvider(p), setChecked(null), setError(null))} />
       </SettingsField>
@@ -464,10 +528,22 @@ function GitDialog({ destination, onClose, onSaved }: { destination?: ExportDest
           autoCapitalize="none"
         />
       </SettingsField>
+      {clash ? (
+        <View style={styles.clash}>
+          <SettingsNote tone="secondary">
+            {clash.thisDevice ? "This computer already syncs this repository." : `${exporterName(clash)} already syncs this repository.`}
+          </SettingsNote>
+          {!clash.thisDevice ? (
+            <View style={styles.buttonRow}>
+              <Button label="Take it over instead" variant="secondary" size="sm" onPress={() => onTakeOverInstead(clash)} />
+            </View>
+          ) : null}
+        </View>
+      ) : null}
 
       {auth === "token" ? (
         <SettingsField label="Access token" help={info?.token ?? "A token that can write to this repository. It’s sent as the password; set a username under More options if your server wants a particular one."}>
-          <Input value={secret} onChangeText={setSecret} secureTextEntry autoCapitalize="none" placeholder={keepsCredential ? "Stored — leave blank to keep it" : ""} />
+          <Input value={secret} onChangeText={setSecret} secureTextEntry autoCapitalize="none" placeholder={keepsCredential ? "Stored. Leave blank to keep it." : ""} />
         </SettingsField>
       ) : null}
       {auth === "token" && /^(ghp_|gho_)/.test(secret) ? (
@@ -484,7 +560,7 @@ function GitDialog({ destination, onClose, onSaved }: { destination?: ExportDest
             <Input value={username} onChangeText={setUsername} autoCapitalize="none" />
           </SettingsField>
           <SettingsField label="Password">
-            <Input value={secret} onChangeText={setSecret} secureTextEntry autoCapitalize="none" placeholder={keepsCredential ? "Stored — leave blank to keep it" : ""} />
+            <Input value={secret} onChangeText={setSecret} secureTextEntry autoCapitalize="none" placeholder={keepsCredential ? "Stored. Leave blank to keep it." : ""} />
           </SettingsField>
         </>
       ) : null}
@@ -497,9 +573,13 @@ function GitDialog({ destination, onClose, onSaved }: { destination?: ExportDest
           {publicKey ? <CodeBlock>{publicKey}</CodeBlock> : <SettingsNote>Making a key…</SettingsNote>}
           <View style={styles.inline}>
             <Button label={copied ? "Copied" : "Copy key"} variant="secondary" size="sm" disabled={!publicKey} onPress={() => void copy()} />
-            {destination && existing?.auth === "ssh" ? <Button label="Make a new key" variant="ghost" size="sm" onPress={() => void generate()} /> : null}
+            {destination && existing?.auth === "ssh" && !needsOwnKey ? <Button label="Make a new key" variant="ghost" size="sm" onPress={() => void generate()} /> : null}
           </View>
-          {sshKey && existing?.auth === "ssh" ? <SettingsNote>The new key replaces the old one when you save; remove the old one from the host afterwards.</SettingsNote> : null}
+          {needsOwnKey ? (
+            <SettingsNote>This computer needs its own key. Add it to the repository, then take over.</SettingsNote>
+          ) : sshKey && existing?.auth === "ssh" ? (
+            <SettingsNote>The new key replaces the old one when you save. Remove the old one from the host afterwards.</SettingsNote>
+          ) : null}
         </SettingsField>
       ) : null}
 
@@ -536,7 +616,7 @@ function GitDialog({ destination, onClose, onSaved }: { destination?: ExportDest
           </SettingsField>
         </>
       ) : null}
-      {destination ? <CheckBox checked={enabled} onPress={() => setEnabled((v) => !v)} label="Keep syncing" /> : null}
+      {destination && !takeOver ? <CheckBox checked={enabled} onPress={() => setEnabled((v) => !v)} label="Keep syncing" /> : null}
 
       {checked ? <SettingsNote tone="secondary">{checked}</SettingsNote> : null}
       {error ? <SettingsNote tone="danger">{error}</SettingsNote> : null}
@@ -548,6 +628,7 @@ const styles = {
   section: { gap: space.md, marginTop: space.xxl },
   head: { gap: space.xs },
   buttonRow: { flexDirection: "row" as const },
+  clash: { gap: space.sm },
   inline: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.sm },
   row: {
     borderWidth: 1,

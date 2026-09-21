@@ -139,7 +139,7 @@ func (a *sshAuth) ClientConfig() (*ssh.ClientConfig, error) {
 			return nil
 		}
 		if key.Type() != pinned.Type() || string(key.Marshal()) != string(pinned.Marshal()) {
-			return errors.New("the Git host's SSH key has changed since this export was set up — if the host really did rotate its key, remove this export and schedule it again")
+			return errors.New("the Git host's SSH key has changed since this export was set up. If the host really did rotate its key, remove this export and schedule it again")
 		}
 		return nil
 	}
@@ -429,12 +429,12 @@ func nonFastForward(err error) bool {
 func friendly(err error) error {
 	switch {
 	case errors.Is(err, transport.ErrAuthenticationRequired), errors.Is(err, transport.ErrAuthorizationFailed):
-		return errors.New("the Git host refused the credential — check it, and that it can write to this repository")
+		return errors.New("the Git host refused the credential. Check it, and that it can write to this repository")
 	case errors.Is(err, transport.ErrRepositoryNotFound):
 		return errors.New("the Git host has no repository at that URL (or the token can't see it)")
 	}
 	if msg := err.Error(); strings.Contains(msg, "unable to authenticate") || strings.Contains(msg, "no supported methods remain") {
-		return errors.New("the Git host didn't accept the SSH key — add the public key to the repository with write access, then try again")
+		return errors.New("the Git host didn't accept the SSH key. Add the public key to the repository with write access, then try again")
 	}
 	return err
 }

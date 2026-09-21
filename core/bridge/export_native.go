@@ -103,6 +103,10 @@ type gitSyncSummary struct {
 	TooLarge int `json:"tooLarge,omitempty"`
 }
 
+func (s *gitSyncSummary) movedFiles() bool {
+	return s.Added+s.Updated+s.Removed+s.Pulled+s.Trashed+s.Conflicts > 0
+}
+
 // maxGitSyncAttempts is how often a cycle is rerun because the remote moved under it.
 const maxGitSyncAttempts = 3
 
@@ -124,10 +128,13 @@ func (c *Core) syncGit(ctx context.Context, dest *store.ExportDestination, cfg g
 	if err := c.requireFreshSync(ctx); err != nil {
 		return nil, false, err
 	}
-	// The server may just have said this export is someone else's now, or gone.
+	// The server may just have said this export is paused, someone else's now, or gone.
 	fresh, err := c.store.Exports.Get(dest.ID)
-	if err != nil || fresh == nil || !fresh.Enabled || !c.exportsHere(fresh) {
+	if err != nil {
 		return nil, false, err
+	}
+	if fresh == nil || !fresh.Enabled || !c.exportsHere(fresh) {
+		return nil, false, errExportSkipped
 	}
 	sink := c.gitSinkConfig(fresh, cfg, secret)
 	var total gitSyncSummary
