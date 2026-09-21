@@ -84,7 +84,7 @@ import { useExportScope } from "./export/ExportProvider";
 import { EXPORT_SCHEDULE_EVENT, REQUEST_SECTION, requestScheduledExport, type ExportRequestKind } from "./export/scheduling";
 import { SettingsScreen } from "./SettingsScreen";
 import { useSync } from "./SyncProvider";
-import { SyncHealthBanner } from "./SyncHealthBanner";
+import { SyncHealthChip, syncBlocker } from "./SyncHealthBanner";
 import { CommandPalette, paletteEnter } from "./CommandPalette";
 import { CAPTURE_NEW_EVENT, CAPTURE_NEW_KEYS, PALETTE_OPEN_EVENT } from "./capture";
 import type { PaletteCreateKind } from "./paletteModel";
@@ -659,8 +659,8 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
   const expanded = open || pinned || dragNearRail;
   const railWidth = expanded ? layout.railOpenW : layout.railW;
   // macOS traffic lights sit over the rail's padded top, but they're wider than the
-  // collapsed rail — push the toolbar (and the sync banner above it) past their right
-  // edge. Nothing to do once the rail is open, or on platforms with a native titlebar.
+  // collapsed rail — push the toolbar past their right edge. Nothing to do once the
+  // rail is open, or on platforms with a native titlebar.
   const chromeInset = windowControls ? Math.max(0, windowControls.left - railWidth) : 0;
   // And line the toolbar up with them vertically: pad it so its row is centred on the
   // lights, mirrored below so the content panel gets the same breathing room.
@@ -794,8 +794,6 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
         </View>
 
         <View style={{ flex: 1, minWidth: 0 }}>
-          {/* Sync health: prompts re-auth / unlock in Settings when sync is blocked (§7). */}
-          <SyncHealthBanner onOpenSettings={() => nav.openRef({ kind: "view", view: "settings", section: "sync" })} leftInset={chromeInset} />
           <Frame toolbar={<AppToolbar onCapture={() => setCapture("list")} leftInset={chromeInset} verticalInset={toolbarInset} />}>
             {/* Every tab's surface stays mounted and only the active one is shown, so an
                 editor's draft, a chat's scroll or a graph's layout survives a tab switch. */}
@@ -894,8 +892,10 @@ function NotificationsRouteScreen() {
 }
 
 /** The persistent mono status strip: sync state, server, open tabs, and what the machine
- * knows about itself. All 11px mono — none of it is the user's writing. */
+ * knows about itself. All 11px mono — none of it is the user's writing. When sync needs the
+ * user (unlock, or sign in again), a red chip leads it instead of the sync dot (§7). */
 function ShellStatusBar({ tabCount }: { tabCount: number }) {
+  const nav = useNav();
   const sync = useSync();
   // Re-render on a slow tick so "synced 12s ago" stays honest without a sync event.
   const [, setTick] = useState(0);
@@ -904,20 +904,25 @@ function ShellStatusBar({ tabCount }: { tabCount: number }) {
     return () => clearInterval(t);
   }, []);
 
+  const blocker = syncBlocker(sync);
   const state = !sync.connected
     ? { color: colors.textQuaternary, label: "local only" }
     : sync.status === "syncing"
       ? { color: colors.accent, label: "syncing…" }
-      : sync.status === "locked"
-        ? { color: colors.danger, label: "locked" }
-        : sync.status === "error" || sync.needsReauth
-          ? { color: colors.danger, label: sync.needsReauth ? "signed out" : "sync error" }
-          : { color: colors.success, label: sync.lastSyncedAt ? `synced ${agoLabel(sync.lastSyncedAt)} ago` : "connected" };
+      : sync.status === "error"
+        ? { color: colors.danger, label: "sync error" }
+        : { color: colors.success, label: sync.lastSyncedAt ? `synced ${agoLabel(sync.lastSyncedAt)} ago` : "connected" };
 
   return (
     <StatusBar>
-      <View style={[styles.statusDot, { backgroundColor: state.color }]} />
-      <StatusText>{state.label}</StatusText>
+      {blocker ? (
+        <SyncHealthChip blocker={blocker} onOpenSettings={() => nav.openRef({ kind: "view", view: "settings", section: "sync" })} />
+      ) : (
+        <>
+          <View style={[styles.statusDot, { backgroundColor: state.color }]} />
+          <StatusText>{state.label}</StatusText>
+        </>
+      )}
       {sync.connected && sync.baseUrl ? (
         <>
           <Divider vertical style={styles.statusDivider} />
