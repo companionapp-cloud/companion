@@ -37,6 +37,7 @@ import { ArchetypeChip, ObjectMetadataPanel, MetadataSidePanel } from "./Archety
 import { ConfirmDialog } from "./ConfirmDialog";
 import { NavContext } from "./nav-context";
 import { timeAgo } from "./NotificationRow";
+import { ExportMenu } from "./export/ExportMenu";
 import { isOverdue } from "./taskSchedule";
 
 export interface TaskEditorProps {
@@ -122,6 +123,7 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
           <IconButton label={showMeta ? "Hide metadata" : "Show metadata"} size={btn} active={showMeta} onPress={() => setShowMeta((v) => !v)}>
             <Icon name="panelRight" size={glyph} color={showMeta ? colors.textAccent : colors.textSecondary} />
           </IconButton>
+          <ExportMenu targets={[{ kind: "task", id: task.id }]} glyph={glyph} />
           {onPopOut ? (
             <IconButton label="Open in tab" size={btn} onPress={() => onPopOut(task.id)}>
               <Icon name="external" size={glyph} color={colors.textSecondary} />
@@ -1005,6 +1007,8 @@ const styles = {
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
     flexShrink: 0,
+    // Above the document beneath it, so the export menu drops over it.
+    zIndex: 2,
   },
   // Touch density: a 44px bar of `lg` buttons.
   subToolbarTouch: { height: row.touch, paddingLeft: space.xl, paddingRight: space.md },

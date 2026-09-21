@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { Platform, Pressable, View } from "react-native";
-import type { CalendarItem, CalendarItemKind } from "@companion/core-bridge";
+import { Platform, Pressable, ScrollView, View } from "react-native";
+import type { CalendarItem, CalendarItemKind, Task } from "@companion/core-bridge";
 import {
   Button,
   Icon,
+  IconButton,
   Input,
   Text,
   colors,
@@ -18,7 +19,10 @@ import {
   type IconName,
   type PressState,
 } from "@companion/design-system";
+import { AgendaGrid, type GridBlock } from "./AgendaGrid";
+import { AgendaPalette } from "./AgendaPalette";
 import { useCalendar } from "./CalendarProvider";
+import { DAY_MIN, POINT_MIN, fitsInDay, taskBlockPatch } from "./calendarLayout";
 import { EventEditorDialog, type EventEditorTarget } from "./EventEditorDialog";
 import { useTasks } from "./TasksProvider";
 
@@ -31,16 +35,19 @@ export function itemDay(item: CalendarItem): string {
   return localDay(new Date(item.startsAt));
 }
 
-/** Whether an item belongs in a day's all-day band: an all-day event or dated note, or a span
- *  — a task or project running from its start to its deadline (PLAN-scheduling.md §4). */
+/** Whether an item belongs in a day's all-day band: an all-day event or dated note, or
+ *  anything with a start and an end that doesn't fit inside one day — a task or project running
+ *  from its start to its deadline (PLAN-scheduling.md §4), an event that runs past midnight.
+ *  What does fit is a block of time, a task's start → deadline included (PLAN-agenda.md). */
 export function isAllDay(item: CalendarItem): boolean {
-  return item.allDay || !!item.span;
+  return item.allDay || !fitsInDay(item);
 }
 
-/** Every local day ('YYYY-MM-DD') a span covers, first to last: from the day it starts to the
- *  day of its deadline, in the viewer's timezone. Any other item covers just its `itemDay`. */
+/** Every local day ('YYYY-MM-DD') an item that doesn't fit in one covers, first to last: from
+ *  the day it starts to the day it ends, in the viewer's timezone. Any other item covers just
+ *  its `itemDay`. */
 export function itemDays(item: CalendarItem): string[] {
-  if (!item.span || !item.endsAt) return [itemDay(item)];
+  if (item.allDay || !item.endsAt || fitsInDay(item)) return [itemDay(item)];
   const start = new Date(item.startsAt);
   const last = localDay(new Date(item.endsAt));
   const days: string[] = [];
@@ -102,58 +109,238 @@ const TIME_W = 34;
 const TIME_W_ALL_DAY = 48;
 const TIME_W_TOUCH = 56;
 
-/** A single day's agenda: the merged items for `date`, one line each (time · kind · title).
- *  Used on the Today view (desktop aside + mobile panel) and mobile Calendar. Rows are
- *  pressable so a note/task can open; feed events aren't openable. */
+// A task given time from the agenda gets half an hour, in the grid's quarter-hour steps, from
+// nine on a day that isn't today.
+const BLOCK_MIN = 30;
+const BLOCK_STEP = 15;
+const BLOCK_START_HOUR = 9;
+// The rows above the day grid scroll past this many, so a busy day can't squeeze the grid out.
+const GRID_LIST_ROWS = 5.5;
+
+const minutesOf = (iso: string) => {
+  const d = new Date(iso);
+  return d.getHours() * 60 + d.getMinutes();
+};
+/** How long a timed item draws, in minutes: its own length, an hour for an event with no end,
+ *  `POINT_MIN` for a task that is only a deadline or a start. */
+const lengthOf = (it: CalendarItem) =>
+  it.endsAt ? (new Date(it.endsAt).getTime() - new Date(it.startsAt).getTime()) / 60_000 : it.kind === "event" ? 60 : POINT_MIN;
+
+/** The time something new takes on `date`. Clicked into the grid at `from` minutes, it starts
+ *  exactly there and runs half an hour, or up to whatever comes next (never under a quarter).
+ *  Otherwise it is the next free half hour: from the coming quarter today, from nine any other day. */
+function freeBlock(date: string, busy: { start: number; end: number }[], from?: number): { startsAt: string; endsAt: string } {
+  let start: number;
+  let len = BLOCK_MIN;
+  if (from != null) {
+    start = Math.min(from, DAY_MIN - BLOCK_STEP);
+    const next = Math.min(DAY_MIN, ...busy.filter((b) => b.start > start).map((b) => b.start));
+    len = Math.max(BLOCK_STEP, Math.min(BLOCK_MIN, next - start));
+  } else {
+    const now = new Date();
+    const first = date === localDay(now) ? Math.ceil((now.getHours() * 60 + now.getMinutes()) / BLOCK_STEP) * BLOCK_STEP : BLOCK_START_HOUR * 60;
+    start = Math.min(first, DAY_MIN - BLOCK_MIN);
+    for (let m = start; m + BLOCK_MIN <= DAY_MIN; m += BLOCK_STEP) {
+      if (!busy.some((b) => m < b.end && m + BLOCK_MIN > b.start)) {
+        start = m;
+        break;
+      }
+    }
+  }
+  const [y, mo, d] = date.split("-").map(Number);
+  const startsAt = new Date(y, mo - 1, d, Math.floor(start / 60), start % 60);
+  return { startsAt: startsAt.toISOString(), endsAt: new Date(startsAt.getTime() + len * 60_000).toISOString() };
+}
+
+/** A single day's agenda: the merged items for `date` — events, tasks, dated notes. Used on the
+ *  Today view (desktop aside + mobile panel) and mobile Calendar. Rows are pressable so a
+ *  note/task can open; an event in a writable calendar opens its editor.
+ *
+ *  Time-blocking needs nothing of its own (PLAN-agenda.md): a task's block is its start → its
+ *  deadline, an event's its start → end. What fits inside the day is a block of time; what
+ *  doesn't is an all-day line. */
 export function Agenda({
   date,
   onOpenItem,
   creatable = false,
+  grid = false,
+  visible = true,
 }: {
   date: string;
   onOpenItem?: (item: CalendarItem) => void;
-  /** Makes the agenda a place to add to the day (the Today view): a quick-add field for a task
-   *  due on `date`, and — once a writable calendar is connected — an "Add event" button. */
+  /** Makes the agenda a place to plan the day (the Today view): a quick-add field for a task
+   *  due on `date`, a palette (AgendaPalette) that finds an existing task or makes a new task or
+   *  event at a time on it, and — once a writable calendar is connected — an "Add event" button. */
   creatable?: boolean;
+  /** Lays the timed part of the day out as a quarter-hour grid that blocks are dragged and
+   *  stretched in, under the all-day rows. It fills its parent and scrolls itself, so the host
+   *  gives it a bounded height (the desktop Today aside). Without it everything is one list. */
+  grid?: boolean;
+  /** False while the host tab sits in the background; see AgendaGrid. */
+  visible?: boolean;
 }) {
-  const { range, revision, writableFeeds } = useCalendar();
+  const { range, revision, writableFeeds, updateEvent } = useCalendar();
+  const tasks = useTasks();
   const [items, setItems] = useState<CalendarItem[] | null>(null);
   const touch = useDensity() === "touch";
+  // The event being edited or made, and the palette (with the quarter hour it was opened
+  // from, when that was a click in the grid).
+  const [editor, setEditor] = useState<EventEditorTarget | null>(null);
+  const [picking, setPicking] = useState<{ from?: number } | null>(null);
 
   useEffect(() => {
     let alive = true;
     const { from, to } = dayBounds(date);
     void range(from, to).then((list) => {
-      // All-day lines lead the day: a span that starts mid-morning still reads "all day".
-      if (alive) setItems([...list.filter(isAllDay), ...list.filter((it) => !isAllDay(it))]);
+      if (alive) setItems(list);
     });
     return () => {
       alive = false;
     };
   }, [date, range, revision]);
 
-  const timeWidth = touch ? TIME_W_TOUCH : (items ?? []).some(isAllDay) ? TIME_W_ALL_DAY : TIME_W;
+  const taskById = useMemo(() => new Map(tasks.tasks.map((t) => [t.id, t])), [tasks.tasks]);
+  const taskOf = (it: CalendarItem) => (it.kind === "task" ? taskById.get(it.sourceId) : undefined);
+
+  // All-day lines lead the day: anything that doesn't fit inside it still reads "all day".
+  const allDay = (items ?? []).filter(isAllDay);
+  const timed = (items ?? []).filter((it) => !isAllDay(it));
+  const busy = timed.map((it) => ({ start: minutesOf(it.startsAt), end: minutesOf(it.startsAt) + lengthOf(it) }));
+
+  const open = (item: CalendarItem) => {
+    if (item.kind === "event" && item.editable) setEditor({ mode: "edit", item });
+    else onOpenItem?.(item);
+  };
+
+  // The time the palette is handing out: the quarter clicked in the grid, else the next free
+  // half hour.
+  const block = picking ? freeBlock(date, busy, picking.from) : null;
+
+  // An existing task put on the day takes that time. Its block is its start → deadline, so
+  // both are set; unless it is due after this day, when only its start moves here, its deadline
+  // is kept, and it reads all day until then.
+  const addTask = (task: Task) => {
+    if (!block) return;
+    const dueLater = !!task.dueAt && new Date(task.dueAt).getTime() >= new Date(dayBounds(date).to).getTime();
+    void tasks.update(task.id, dueLater ? { startAt: block.startsAt } : { startAt: block.startsAt, dueAt: block.endsAt });
+    // A palette kept open (⇧⏎) hands the next pick the time after this one.
+    if (!dueLater) setPicking({ from: minutesOf(block.endsAt) || DAY_MIN - BLOCK_STEP });
+  };
+
+  // A block dropped at a new time, or stretched. The block moves at once; the write follows,
+  // and a refused one (the core says why) snaps back on the re-query.
+  const moveBlock = (block: GridBlock, startsAt: string, endsAt: string) => {
+    const item = timed.find((it) => it.id === block.id);
+    if (!item) return;
+    const snapBack = () => setItems((prev) => (prev ? [...prev] : prev));
+    if (item.kind === "event") {
+      setItems((prev) => prev?.map((it) => (it.id === item.id ? { ...it, startsAt, endsAt } : it)) ?? prev);
+      return void updateEvent(item.sourceId, { startsAt, endsAt, allDay: false }).catch(snapBack);
+    }
+    const task = taskOf(item);
+    if (!task) return;
+    const stretched = new Date(endsAt).getTime() - new Date(startsAt).getTime() !== lengthOf(item) * 60_000;
+    const patch = taskBlockPatch(task, startsAt, endsAt, stretched);
+    const moved = patch.startAt && patch.dueAt ? { startsAt, endsAt, span: true } : { startsAt };
+    setItems((prev) => prev?.map((it) => (it.id === item.id ? { ...it, ...moved } : it)) ?? prev);
+    void tasks.update(task.id, patch).catch(snapBack);
+  };
+
+  const blocks: GridBlock[] = grid
+    ? timed.map((it) => {
+        const task = taskOf(it);
+        return {
+          id: it.id,
+          kind: it.kind,
+          title: it.title,
+          startsAt: it.startsAt,
+          endsAt: it.endsAt ?? new Date(new Date(it.startsAt).getTime() + lengthOf(it) * 60_000).toISOString(),
+          color: it.color,
+          movable: it.kind === "event" ? !!it.editable && !it.recurring : creatable && task?.status === "open",
+          pending: it.pending,
+          done: !!task && task.status !== "open",
+        };
+      })
+    : [];
+
+  const listed = grid ? allDay : [...allDay, ...timed];
+  const timeWidth = touch ? TIME_W_TOUCH : listed.some(isAllDay) ? TIME_W_ALL_DAY : TIME_W;
+  const rows = (
+    <View style={styles.rows}>
+      {listed.map((it) => {
+        const task = taskOf(it);
+        // Tasks/notes open everywhere, and so does an event that can be edited. Any other event
+        // opens to a detail subview on native, but on web isn't linkable (no local entity).
+        const openable = it.kind === "event" ? !!it.editable || (!!onOpenItem && Platform.OS !== "web") : !!onOpenItem;
+        return (
+          <AgendaRow
+            key={it.id}
+            kind={it.kind}
+            title={it.title}
+            time={timeLabel(it)}
+            color={it.color}
+            done={!!task && task.status !== "open"}
+            onPress={openable ? () => open(it) : undefined}
+            timeWidth={timeWidth}
+            touch={touch}
+          />
+        );
+      })}
+    </View>
+  );
+
+  // Open tasks that aren't on the day already.
+  const candidates = useMemo(() => {
+    if (!picking) return [];
+    const onDay = new Set((items ?? []).filter((it) => it.kind === "task").map((it) => it.sourceId));
+    return tasks.tasks.filter((t) => t.status === "open" && !onDay.has(t.id));
+  }, [picking, tasks.tasks, items]);
 
   return (
-    <View>
+    <View style={grid ? styles.fill : null}>
       <View style={styles.headerRow}>
         <Text variant="eyebrow" tone="quaternary" style={styles.headerLabel}>
           Agenda · {shortDate(date)}
         </Text>
         {creatable && writableFeeds.length > 0 ? <AgendaAddEvent date={date} /> : null}
       </View>
-      {creatable ? <AgendaTaskInput date={date} /> : null}
-      {items && items.length === 0 ? (
+      {creatable ? <AgendaTaskInput date={date} onFind={() => setPicking({})} touch={touch} /> : null}
+      {grid ? (
+        <>
+          {listed.length > 0 ? <ScrollView style={[styles.gridList, { maxHeight: GRID_LIST_ROWS * (row.h + 1) }]}>{rows}</ScrollView> : null}
+          <View style={styles.gridFrame}>
+            <AgendaGrid
+              date={date}
+              blocks={blocks}
+              visible={visible}
+              onPressBlock={(block) => {
+                const item = timed.find((it) => it.id === block.id);
+                if (item) open(item);
+              }}
+              onMove={moveBlock}
+              onPressSlot={creatable ? (from) => setPicking({ from }) : undefined}
+            />
+          </View>
+        </>
+      ) : items && listed.length === 0 ? (
         <Text variant="caption" tone="tertiary" style={styles.empty}>
           Clear day. Enjoy the whitespace.
         </Text>
       ) : (
-        <View style={styles.rows}>
-          {(items ?? []).map((it) => (
-            <AgendaRow key={it.id} item={it} onOpenItem={onOpenItem} timeWidth={timeWidth} touch={touch} />
-          ))}
-        </View>
+        rows
       )}
+      {editor ? <EventEditorDialog target={editor} onClose={() => setEditor(null)} /> : null}
+      {picking && block ? (
+        <AgendaPalette
+          block={block}
+          candidates={candidates}
+          canAddEvent={writableFeeds.length > 0}
+          onPickTask={addTask}
+          onNewTask={(title) => void tasks.create({ title, startAt: block.startsAt, dueAt: block.endsAt })}
+          onNewEvent={(title) => setEditor({ mode: "create", startsAt: new Date(block.startsAt), endsAt: new Date(block.endsAt), title })}
+          onClose={() => setPicking(null)}
+        />
+      ) : null}
     </View>
   );
 }
@@ -166,8 +353,8 @@ const EVENT_START_HOUR = 9;
 
 /** Quick-add for the day, like the input over the task list: type a title, press Enter, and the
  *  task lands in the agenda, due on `date`. Focus stays in the field, so a run of tasks can be
- *  typed one after another. */
-function AgendaTaskInput({ date }: { date: string }) {
+ *  typed one after another. The button beside it looks up a task that already exists instead. */
+function AgendaTaskInput({ date, onFind, touch }: { date: string; onFind: () => void; touch: boolean }) {
   const tasks = useTasks();
   const [draft, setDraft] = useState("");
   const add = () => {
@@ -179,15 +366,21 @@ function AgendaTaskInput({ date }: { date: string }) {
   };
   return (
     <View style={styles.quickAdd}>
-      <Input
-        size="sm"
-        placeholder="Add a task, press Enter"
-        value={draft}
-        onChangeText={setDraft}
-        onSubmitEditing={add}
-        keepFocusOnSubmit
-        leadingIcon={<Icon name="plus" size={icon.sm} color={colors.textQuaternary} />}
-      />
+      <View style={styles.quickAddField}>
+        <Input
+          size="sm"
+          placeholder="Add a task, press Enter"
+          value={draft}
+          onChangeText={setDraft}
+          onSubmitEditing={add}
+          keepFocusOnSubmit
+          leadingIcon={<Icon name="plus" size={icon.sm} color={colors.textQuaternary} />}
+        />
+      </View>
+      {/* The other way to add to the day: the palette, to look up a task that already exists. */}
+      <IconButton label="Find a task to add" size={touch ? undefined : "sm"} onPress={onFind}>
+        <Icon name="search" size={touch ? icon.md : icon.sm} color={colors.textTertiary} />
+      </IconButton>
     </View>
   );
 }
@@ -293,7 +486,18 @@ export function UpcomingAgenda({
             </Text>
             <View style={styles.rows}>
               {list.map((it) => (
-                <AgendaRow key={it.id} item={it} onOpenItem={onOpenItem} timeWidth={timeWidth} touch={touch} />
+                <AgendaRow
+                  key={it.id}
+                  kind={it.kind}
+                  title={it.title}
+                  time={timeLabel(it)}
+                  color={it.color}
+                  // Tasks/notes open everywhere; feed events open to a detail subview on native,
+                  // but on web they aren't linkable (no local entity).
+                  onPress={onOpenItem && (it.kind !== "event" || Platform.OS !== "web") ? () => onOpenItem(it) : undefined}
+                  timeWidth={timeWidth}
+                  touch={touch}
+                />
               ))}
             </View>
           </View>
@@ -313,47 +517,55 @@ export function UpcomingAgenda({
   );
 }
 
-/** One agenda line: time · kind · title. With a pointer, hovering highlights the row. Tapping
- *  opens the item when the host wired `onOpenItem`. Pointer rows are 24px; touch rows 44px. */
+/** One agenda line: time · kind · title. With a pointer, hovering highlights the row. Pressing opens the item when the host gave it somewhere to go. Pointer rows are
+ *  24px; touch rows 44px. */
 function AgendaRow({
-  item,
-  onOpenItem,
+  kind,
+  title,
+  time,
+  color,
+  done = false,
+  onPress,
   timeWidth,
   touch,
 }: {
-  item: CalendarItem;
-  onOpenItem?: (item: CalendarItem) => void;
+  kind: CalendarItemKind;
+  title: string;
+  /** The mono time column: 'HH:mm' or 'all day'. */
+  time: string;
+  /** A feed's own swatch, for events. */
+  color?: string | null;
+  /** A finished task: struck through. */
+  done?: boolean;
+  onPress?: () => void;
   timeWidth: number;
   touch: boolean;
 }) {
-  // Tasks/notes open everywhere. Feed events open to a detail subview on native, but on web
-  // they aren't linkable (no local entity).
-  const openable = !!onOpenItem && (item.kind !== "event" || Platform.OS !== "web");
   const gap = touch ? space.ml : space.md;
   return (
     <Pressable
-      disabled={!openable}
-      onPress={() => onOpenItem?.(item)}
+      disabled={!onPress}
+      onPress={onPress}
       style={({ hovered, pressed }: PressState) => [
         styles.row,
         transition("background-color", motion.instant),
         {
           minHeight: touch ? row.touch : row.h,
-          backgroundColor: pressed && openable ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent",
+          backgroundColor: pressed && onPress ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent",
         },
       ]}
     >
       <View style={[styles.rowMain, { gap }]}>
         <Text variant="mono" tone="quaternary" style={{ width: timeWidth, flexShrink: 0 }} numberOfLines={1}>
-          {timeLabel(item)}
+          {time}
         </Text>
         {touch ? (
-          <View style={[styles.dot, { backgroundColor: item.color ?? KIND_COLOR[item.kind] }]} />
+          <View style={[styles.dot, { backgroundColor: color ?? KIND_COLOR[kind] }]} />
         ) : (
-          <Icon name={KIND_ICON[item.kind]} size={icon.sm} color={item.color ?? colors.textQuaternary} />
+          <Icon name={KIND_ICON[kind]} size={icon.sm} color={color ?? colors.textQuaternary} />
         )}
-        <Text variant="label" style={styles.title} numberOfLines={1}>
-          {item.title || "Untitled"}
+        <Text variant="label" tone={done ? "tertiary" : undefined} style={[styles.title, done ? styles.struck : null]} numberOfLines={1}>
+          {title || "Untitled"}
         </Text>
       </View>
     </Pressable>
@@ -373,7 +585,20 @@ const styles = {
     minHeight: control.sm + space.md + 3,
   },
   headerLabel: { flex: 1 },
-  quickAdd: { paddingHorizontal: space.sm, paddingTop: space.xs, paddingBottom: space.sm },
+  quickAdd: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: space.xs,
+    paddingHorizontal: space.sm,
+    paddingTop: space.xs,
+    paddingBottom: space.sm,
+  },
+  quickAddField: { flex: 1, minWidth: 0 },
+  // Grid mode: the agenda fills what its host gives it; the all-day rows keep to a few lines
+  // and the day grid takes the rest, scrolling on its own.
+  fill: { flex: 1, minHeight: 0 },
+  gridList: { flexGrow: 0, flexShrink: 0, marginBottom: space.xs },
+  gridFrame: { flex: 1, minHeight: 0, borderTopWidth: 1, borderTopColor: colors.borderSubtle },
   empty: { paddingHorizontal: space.sm, paddingVertical: space.md },
   dayHeading: { paddingHorizontal: space.sm, paddingTop: space.md, paddingBottom: 3 },
   more: { flexDirection: "row" as const, paddingTop: space.md },
@@ -383,6 +608,7 @@ const styles = {
     paddingHorizontal: space.sm,
     borderRadius: radius.sm,
   },
+  struck: { textDecorationLine: "line-through" as const },
   rowMain: { flexDirection: "row" as const, alignItems: "center" as const },
   dot: { width: 7, height: 7, flexShrink: 0, borderRadius: radius.full },
   title: { flex: 1, minWidth: 0 },

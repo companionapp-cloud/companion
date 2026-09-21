@@ -22,9 +22,10 @@ const importThingsEvent = "import.things"
 const thingsGroupContainer = "JLMPQHK86H.com.culturedcode.ThingsMac"
 
 // applicationMenu is the macOS default menu (app, File, Edit, View, Window, Help) with New
-// Note / Task / Canvas (palette.go) and an Import submenu in File. newItem shows the window and
-// opens the palette on that command; openImport shows it and opens the import modal.
-func applicationMenu(newItem func(what string), openImport func()) *application.Menu {
+// Note / Task / Canvas (palette.go) and Import and Export submenus in File. newItem shows the
+// window and opens the palette on that command; openImport shows it and opens the import modal;
+// exports owns the Export submenu (export.go).
+func applicationMenu(newItem func(what string), openImport func(), exports *exportService) *application.Menu {
 	menu := application.NewMenu()
 	if runtime.GOOS == "darwin" {
 		menu.AddRole(application.AppMenu)
@@ -36,6 +37,7 @@ func applicationMenu(newItem func(what string), openImport func()) *application.
 	}
 	file.AddSeparator()
 	file.AddSubmenu("Import").Add("Things 3…").OnClick(func(*application.Context) { openImport() })
+	exports.addMenu(file)
 	file.AddSeparator()
 	if runtime.GOOS == "darwin" {
 		file.AddRole(application.CloseWindow)

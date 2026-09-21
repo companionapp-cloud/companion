@@ -201,6 +201,10 @@ func main() {
 	// start(app) below, once the app exists.
 	shortcuts := newShortcutManager(shortcutPrefsPath(dbPath), openCaptureWindow)
 
+	// File › Export and the save panel its files go through (export.go). Built before the app,
+	// like the shortcut manager, so the asset handler can route to it.
+	exports := newExportService(func() *application.App { return app })
+
 	// The notifications service only starts inside a signed .app bundle (it needs a bundle
 	// identifier); registering it from `go run` aborts startup. Skip it in dev so the app
 	// still runs — reminders then no-op until launched via `make desktop-app-run`.
@@ -240,7 +244,7 @@ func main() {
 				tableCtxMenu.handleOpen(w, r)
 			}, shortcuts.handleShortcuts, windowChromeHandler(func() *application.WebviewWindow { return mainWindow }), updates.handleState,
 				pickThingsHandler(func() *application.App { return app }),
-				paletteOpenHandler(updates.openApp, handler.OnEvent)),
+				paletteOpenHandler(updates.openApp, handler.OnEvent), exports),
 		},
 	})
 
@@ -309,7 +313,7 @@ func main() {
 	}, func() {
 		updates.openApp()
 		handler.OnEvent(importThingsEvent, nil)
-	}))
+	}, exports))
 
 	// Register the native table context menu now that the app + window exist. The /table-menu
 	// route (set up above, capturing tableCtxMenu by reference) drives it.
@@ -331,7 +335,7 @@ func main() {
 // (/invoke, /events) to the bridge handler. /window spawns a focus-mode window for a
 // document (the workspace's expand/pop-out action) — browser window.open can't create a
 // real app window in the Wails webview, so the frontend asks the Go side here.
-func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusWindow func(url string), openTableMenu http.HandlerFunc, shortcuts http.HandlerFunc, chrome http.HandlerFunc, updates http.HandlerFunc, pickThings http.HandlerFunc, paletteOpen http.HandlerFunc) http.Handler {
+func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusWindow func(url string), openTableMenu http.HandlerFunc, shortcuts http.HandlerFunc, chrome http.HandlerFunc, updates http.HandlerFunc, pickThings http.HandlerFunc, paletteOpen http.HandlerFunc, exports *exportService) http.Handler {
 	frontend, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {
 		log.Fatalf("mount frontend assets: %v", err)
@@ -365,6 +369,12 @@ func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusW
 	mux.HandleFunc("/import/things/pick", pickThings)
 	// The quick-capture palette opening a result in the main window (palette.go).
 	mux.HandleFunc("/palette/open", paletteOpen)
+	// File › Export (export.go): which formats the menu offers, and the save-panel session the
+	// exported files are written through.
+	mux.HandleFunc("/export/menu", exports.handleMenu)
+	mux.HandleFunc("/export/begin", exports.handleBegin)
+	mux.HandleFunc("/export/write", exports.handleWrite)
+	mux.HandleFunc("/export/end", exports.handleEnd)
 	mux.Handle("/", files)
 	return mux
 }

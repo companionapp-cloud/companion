@@ -26,7 +26,6 @@ import { useNoteInk } from "./useNoteInk";
 import { tableMenuPresenter } from "./tableMenu";
 import { useNav } from "./nav-context";
 import { useNotes } from "./NotesProvider";
-import { useSync } from "./SyncProvider";
 import { useTasks } from "./TasksProvider";
 import { useLinkSource } from "./useLinkSource";
 import { useQuickCreateLink } from "./useQuickCreateLink";
@@ -341,67 +340,22 @@ function DailyNoteBody({
   );
 }
 
-/** Desktop aside wrapper: the mini calendar, the selected day's agenda and the sync state in
- *  a scrollable side panel. The SplitView draws the hairline; this pane is flat. */
+/** Desktop aside wrapper: the mini calendar over the selected day's agenda. The agenda owns
+ *  the rest of the pane's height — its day grid scrolls on its own — so the pane itself doesn't
+ *  scroll. Sync state lives in the shell's status bar, not here. The SplitView draws the
+ *  hairline; this pane is flat. */
 function CalendarPane(props: {
   selected: string;
   today: string;
-  /** False while this tab sits in the background — pauses the sync section's clock. */
+  /** False while this tab sits in the background — pauses the agenda grid's clock. */
   visible: boolean;
   onSelect: (date: string) => void;
   onOpenItem?: (item: CalendarItem) => void;
 }) {
   return (
-    <ScrollView style={styles.aside} contentContainerStyle={styles.asideContent}>
+    <View style={styles.aside}>
       <TodayCalendar selected={props.selected} today={props.today} onSelect={props.onSelect} />
-      <Agenda date={props.selected} onOpenItem={props.onOpenItem} creatable />
-      <SyncSection visible={props.visible} />
-    </ScrollView>
-  );
-}
-
-/** '12s' / '4m' / '3h' / '2d' since `at` — mono metadata, so terse and lowercase. */
-function agoLabel(at: number): string {
-  const s = Math.max(0, Math.round((Date.now() - at) / 1000));
-  if (s < 60) return `${s}s`;
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  if (s < 86_400) return `${Math.floor(s / 3600)}h`;
-  return `${Math.floor(s / 86_400)}d`;
-}
-
-/** The aside's sync line: a 5px state dot and what the machine knows, in mono. Mirrors the
- *  shell status bar's states so the two never disagree. */
-function SyncSection({ visible }: { visible: boolean }) {
-  const sync = useSync();
-  // Re-render on a slow tick so "12s ago" stays honest without a sync event.
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (!visible) return;
-    const t = setInterval(() => setTick((n) => n + 1), 15_000);
-    return () => clearInterval(t);
-  }, [visible]);
-
-  const state = !sync.connected
-    ? { color: colors.textQuaternary, label: "local only" }
-    : sync.status === "syncing"
-      ? { color: colors.accent, label: "syncing…" }
-      : sync.status === "locked"
-        ? { color: colors.danger, label: "locked" }
-        : sync.status === "error" || sync.needsReauth
-          ? { color: colors.danger, label: sync.needsReauth ? "signed out" : "sync error" }
-          : { color: colors.success, label: sync.lastSyncedAt ? `synced · ${agoLabel(sync.lastSyncedAt)} ago` : "connected" };
-
-  return (
-    <View>
-      <Text variant="eyebrow" tone="quaternary" style={styles.sectionLabel}>
-        Sync
-      </Text>
-      <View style={styles.syncRow}>
-        <View style={[styles.syncDot, { backgroundColor: state.color }]} />
-        <Text variant="mono" tone="tertiary" numberOfLines={1}>
-          {state.label}
-        </Text>
-      </View>
+      <Agenda date={props.selected} onOpenItem={props.onOpenItem} creatable grid visible={props.visible} />
     </View>
   );
 }
@@ -610,17 +564,7 @@ const styles = {
   headingTouch: { fontSize: font.size["2xl"], lineHeight: 24, letterSpacing: -0.5 },
   meta: { marginTop: space.xs, marginBottom: space.xl },
 
-  aside: { flex: 1, backgroundColor: colors.surfaceCard },
-  asideContent: { padding: space.ml },
-  sectionLabel: { paddingHorizontal: space.sm, paddingTop: space.md, paddingBottom: 3 },
-  syncRow: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: space.sm,
-    paddingHorizontal: space.sm,
-    minHeight: 18,
-  },
-  syncDot: { width: 5, height: 5, flexShrink: 0, borderRadius: radius.full },
+  aside: { flex: 1, minHeight: 0, padding: space.ml, paddingBottom: 0, backgroundColor: colors.surfaceCard },
 
   calHeader: {
     flexDirection: "row" as const,

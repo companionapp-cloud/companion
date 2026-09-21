@@ -91,11 +91,11 @@ The chain ends when the rule's `UNTIL` passes, or when the newest copy is delete
 ## 3. Calendar — `core/store/calendar.go`
 
 `rangeItems` selects task spans by overlap (`start_at < to AND due_at >= from`) and every other
-dated task as a point on its deadline, then open projects with both dates as `ItemProject`
+dated task as a point on its deadline — or, with no deadline, on its start (PLAN-agenda.md) — then open projects with both dates as `ItemProject`
 spans. A project's own calendar (`RangeForProject`) includes the project itself.
 
-Clients: `itemDays(item)` / `isAllDay(item)` (`CalendarAgenda.tsx`). The week grid buckets a
-span into every day it covers; the day agenda lists all-day lines first; the hover card reads
+Clients: `itemDays(item)` / `isAllDay(item)` (`CalendarAgenda.tsx`). A span that fits inside one
+day is a block of time (PLAN-agenda.md); the week grid buckets any other into every day it covers; the day agenda lists all-day lines first; the hover card reads
 "Thu, Oct 1 – Fri, Oct 9"; a project item opens the project.
 
 ---

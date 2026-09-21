@@ -7,10 +7,11 @@ import { useTasks } from "./TasksProvider";
 import { useCanvases } from "./canvas/CanvasesProvider";
 import { BulkAssignPicker } from "./BulkAssignPicker";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { ExportMenu } from "./export/ExportMenu";
 
 /** The detail-pane sub-toolbar shown while a multiselection is active (PLAN §4): a count,
- *  bulk "Move to…" (an area or a project) and "Delete" (type-to-confirm), and a cancel that clears the
- *  selection. Rendered above the selection stack in the workspace and project detail panes,
+ *  bulk "Export…" (one file each, in a chosen format), "Move to…" (an area or a project) and
+ *  "Delete" (type-to-confirm), and a cancel that clears the selection. Rendered above the selection stack in the workspace and project detail panes,
  *  replacing the single-item editor's own sub-toolbar. */
 export function MultiSelectBar() {
   const ms = useMultiSelect();
@@ -44,6 +45,7 @@ export function MultiSelectBar() {
           {ms.count} selected
         </Text>
         <View style={{ flex: 1 }} />
+        <ExportMenu variant="button" targets={ms.selectedIds.map((id) => ({ kind: ms.kind, id }))} />
         <Button label="Move to…" variant="ghost" size={size} onPress={() => setShowAssign(true)} />
         <Button label="Delete" variant="danger" size={size} onPress={() => setConfirmDelete(true)} />
       </View>
@@ -85,6 +87,8 @@ const styles = {
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
     flexShrink: 0,
+    // Above the selection stack beneath it, so the export menu drops over it.
+    zIndex: 2,
   },
   barTouch: { height: row.touch, paddingHorizontal: space.md },
 };

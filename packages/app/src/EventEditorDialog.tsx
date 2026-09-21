@@ -10,8 +10,9 @@ import { DateField } from "./DateField";
 import { CheckBox, Segmented, SettingsField, SettingsNote } from "./settingsUi";
 
 export type EventEditorTarget =
-  /** Create a new event starting at `startsAt` (a local instant), optionally all-day. */
-  | { mode: "create"; startsAt: Date; endsAt?: Date; allDay?: boolean }
+  /** Create a new event starting at `startsAt` (a local instant), optionally all-day, its
+   *  title seeded with what was already typed (the agenda's palette). */
+  | { mode: "create"; startsAt: Date; endsAt?: Date; allDay?: boolean; title?: string }
   /** Edit an existing occurrence from `calendar.range`. */
   | { mode: "edit"; item: CalendarItem };
 
@@ -90,7 +91,7 @@ export function EventEditorDialog({
   const editing = target.mode === "edit" ? target.item : null;
   const recurring = !!editing?.recurring;
 
-  const [title, setTitle] = useState(editing?.title ?? "");
+  const [title, setTitle] = useState(editing?.title ?? (target.mode === "create" ? target.title : undefined) ?? "");
   const [feedId, setFeedId] = useState<string>(editing?.feedId ?? writableFeeds[0]?.id ?? "");
   const [times, setTimes] = useState<Times>(() => initialTimes(target));
   const [timesTouched, setTimesTouched] = useState(false);

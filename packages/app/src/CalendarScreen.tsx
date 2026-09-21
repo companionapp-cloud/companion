@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PanResponder, Pressable, ScrollView, View, type PanResponderGestureState } from "react-native";
-import type { CalendarItem, CalendarItemKind } from "@companion/core-bridge";
+import type { CalendarItem } from "@companion/core-bridge";
 import {
   Button,
   Divider,
@@ -21,6 +21,7 @@ import {
 import { useCalendar } from "./CalendarProvider";
 import { isAllDay, itemDay, itemDays } from "./CalendarAgenda";
 import { CalendarItemInfo } from "./CalendarItemInfo";
+import { DAY_MIN, KIND, layoutLanes, spanOf, taskBlockPatch, type Lane } from "./calendarLayout";
 import { EventEditorDialog, type EventEditorTarget } from "./EventEditorDialog";
 import { useProjectCalendars } from "./ProjectCalendars";
 import { useTasks } from "./TasksProvider";
@@ -45,7 +46,6 @@ const ALL_DAY_MAX = 2;
 const CARD_W = 220;
 // The grid spans the whole day; it scrolls to reveal any hour (00:00–24:00).
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
-const DAY_MIN = 24 * 60;
 // Where the grid scrolls to on open when the week has no earlier event (~7am).
 const DEFAULT_SCROLL_HOUR = 7;
 
@@ -56,16 +56,6 @@ function hourLabel(h: number): string {
   if (h === 12) return "12p";
   return `${h - 12}p`;
 }
-
-// Per-kind block palette. Events are ink (tinted by their feed color on the left bar), tasks
-// read blue, dated notes take the success green — matching the legend and the agenda so a
-// note reads the same everywhere. Roles, not ramp literals, so the blocks survive dark mode.
-const KIND: Record<CalendarItemKind, { bg: string; fg: string; bar: string }> = {
-  event: { bg: colors.textPrimary, fg: colors.textInverse, bar: colors.textTertiary },
-  task: { bg: colors.infoSoft, fg: colors.infoActive, bar: colors.info },
-  note: { bg: colors.surfaceApp, fg: colors.textSecondary, bar: colors.success },
-  project: { bg: colors.accentSoft, fg: colors.accentActive, bar: colors.accent },
-};
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -86,49 +76,6 @@ function isoWeek(d: Date): number {
   t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7)); // that week's Thursday
   const yearStart = Date.UTC(t.getUTCFullYear(), 0, 1);
   return Math.ceil(((t.getTime() - yearStart) / 86_400_000 + 1) / 7);
-}
-
-/** A timed item's span inside its day column, in minutes since local midnight. An item with
- *  no end reads as an hour; nothing draws shorter than half a row or past midnight. */
-function spanOf(item: CalendarItem): { start: number; end: number } {
-  const s = new Date(item.startsAt);
-  const start = s.getHours() * 60 + s.getMinutes();
-  const mins = item.endsAt ? Math.max(30, (new Date(item.endsAt).getTime() - s.getTime()) / 60_000) : 60;
-  return { start, end: Math.max(start + 15, Math.min(DAY_MIN, start + mins)) };
-}
-
-type Lane = { lane: number; lanes: number };
-
-/** Concurrency layout for one day. Sort by start, group into clusters of mutually overlapping
- *  blocks, give each block the first lane it fits in, and let the cluster's lane count set
- *  the width every block in it takes. */
-function layoutLanes(items: CalendarItem[]): Map<string, Lane> {
-  const spans = items
-    .map((item) => ({ id: item.id, ...spanOf(item) }))
-    .sort((a, b) => a.start - b.start || b.end - a.end);
-  const out = new Map<string, Lane>();
-  let cluster: typeof spans = [];
-  let clusterEnd = -1;
-  const flush = () => {
-    const laneEnds: number[] = [];
-    const placed: { id: string; lane: number }[] = [];
-    for (const it of cluster) {
-      let lane = laneEnds.findIndex((end) => end <= it.start);
-      if (lane === -1) lane = laneEnds.push(it.end) - 1;
-      else laneEnds[lane] = it.end;
-      placed.push({ id: it.id, lane });
-    }
-    for (const p of placed) out.set(p.id, { lane: p.lane, lanes: laneEnds.length });
-    cluster = [];
-    clusterEnd = -1;
-  };
-  for (const it of spans) {
-    if (cluster.length && it.start >= clusterEnd) flush();
-    cluster.push(it);
-    clusterEnd = Math.max(clusterEnd, it.end);
-  }
-  if (cluster.length) flush();
-  return out;
 }
 
 /** The week grid. With `projectId` it is that project's calendar: the events of the calendars it
@@ -260,7 +207,11 @@ export function CalendarScreen({ projectId }: { projectId?: string } = {}) {
         void updateEvent(item.sourceId, { startsAt: iso, endsAt, allDay: false }).catch(() => setItems((prev) => [...prev]));
         return;
       }
-      void tasks.update(item.sourceId, { dueAt: iso });
+      // A task's block is its start → deadline: one that has both moves whole, a point moves
+      // the one date it has (PLAN-agenda.md).
+      const task = tasks.tasks.find((t) => t.id === item.sourceId);
+      const endIso = new Date(newStart.getTime() + durationMs).toISOString();
+      void tasks.update(item.sourceId, task ? taskBlockPatch(task, iso, endIso, false) : { dueAt: iso });
     },
     [colWidth, weekDays, tasks, updateEvent],
   );
@@ -603,7 +554,7 @@ function TimedBlock({
   const [drag, setDrag] = useState<{ dx: number; dy: number } | null>(null);
   const movable = item.kind === "task" || (item.kind === "event" && !!item.editable && !item.recurring);
   const draggable = movable && !!onReschedule && !!colWidth;
-  // Only events have a length to change (a task is a point in time).
+  // Only events stretch here; a task's length is set in the Today agenda's day grid.
   const resizable = movable && item.kind === "event" && !!onResize;
   const [resizeDy, setResizeDy] = useState<number | null>(null);
 

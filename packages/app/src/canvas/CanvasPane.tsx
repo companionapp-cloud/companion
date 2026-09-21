@@ -3,6 +3,7 @@ import { Platform, TextInput, View } from "react-native";
 import { Center, Icon, IconButton, Text, colors, font, icon, layout, row, space, useDensity } from "@companion/design-system";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { MembershipPicker } from "../MembershipPicker";
+import { ExportMenu } from "../export/ExportMenu";
 import { useCanvases } from "./CanvasesProvider";
 import { CanvasEditor } from "./CanvasEditor";
 import type { CanvasRefKind } from "./host";
@@ -65,6 +66,7 @@ export function CanvasPane({ canvasId, onDeleted, onOpenRef }: { canvasId: strin
         <IconButton label="Projects" size={touch ? undefined : "sm"} active={showProjects} onPress={() => setShowProjects((v) => !v)}>
           <Icon name="folder" size={touch ? icon.lg : 13} color={showProjects ? colors.textAccent : colors.textSecondary} />
         </IconButton>
+        <ExportMenu targets={[{ kind: "canvas", id: canvas.id }]} glyph={touch ? icon.lg : 13} />
         <IconButton label="Delete canvas" size={touch ? undefined : "sm"} onPress={() => setConfirmDelete(true)}>
           <Icon name="trash" size={touch ? icon.lg : 13} color={colors.textSecondary} />
         </IconButton>
@@ -102,6 +104,8 @@ const styles = {
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
     backgroundColor: colors.surfaceCard,
+    // Above the board beneath it, so the export menu drops over it.
+    zIndex: 2,
   },
   headerTouch: { height: row.touch, paddingLeft: space.lg, gap: space.md },
   // The board's name, edited in place: borderless like a document field, but at the

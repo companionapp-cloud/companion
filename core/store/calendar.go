@@ -836,20 +836,22 @@ func (r *CalendarEventsRepo) rangeItems(from, to time.Time, projectID string) ([
 	rows.Close()
 
 	// Tasks (not trashed/tombstoned/cancelled). An open task with both a start and a deadline
-	// is a span over every day between them (PLAN-scheduling.md §4); any other task with a
-	// deadline sits on it, as a point.
+	// is a span from one to the other (PLAN-scheduling.md §4) — a block of time when that fits
+	// in a day, else a line on every day it covers; the client tells which. Any other task is a
+	// point: on its deadline, or with no deadline on its start.
 	const taskSpans = `status = 'open' AND start_at IS NOT NULL AND due_at IS NOT NULL AND start_at <= due_at`
+	const taskPoint = `COALESCE(due_at, start_at)`
 	tasksIn, taskArgs := "", []any{fromTS, toTS, toTS, fromTS}
 	if projectID != "" {
 		tasksIn = ` AND id IN (` + projectMemberIDs + `)`
 		taskArgs = append(taskArgs, projectID, domain.NodeTask)
 	}
 	rows, err = r.db.Query(
-		`SELECT id, title, start_at, due_at, (`+taskSpans+`) AS span FROM tasks
-		  WHERE ((NOT (`+taskSpans+`) AND due_at IS NOT NULL AND due_at >= ? AND due_at < ?)
+		`SELECT id, title, start_at, `+taskPoint+`, (`+taskSpans+`) AS span FROM tasks
+		  WHERE ((NOT (`+taskSpans+`) AND `+taskPoint+` IS NOT NULL AND `+taskPoint+` >= ? AND `+taskPoint+` < ?)
 		      OR ((`+taskSpans+`) AND start_at < ? AND due_at >= ?))
 		    AND deleted_at IS NULL AND deleting_at IS NULL AND status != 'cancelled'`+tasksIn+`
-		  ORDER BY due_at ASC;`, taskArgs...)
+		  ORDER BY `+taskPoint+` ASC;`, taskArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("range tasks: %w", err)
 	}
@@ -961,7 +963,7 @@ func sortItemsByStart(items []*domain.CalendarItem) {
 }
 
 // scheduledItem builds the calendar item of a task or project: a span from its start to its
-// deadline, or a point on the deadline.
+// deadline, or a point on dueAt (for a task with no deadline, the caller passes its start).
 func scheduledItem(kind domain.ItemKind, id, title, startAt, dueAt string, span bool) (*domain.CalendarItem, error) {
 	item := &domain.CalendarItem{ID: string(kind) + ":" + id, Kind: kind, Title: title, SourceID: id, Span: span}
 	due, err := time.Parse(timeFormat, dueAt)

@@ -180,6 +180,38 @@
       ],
       "port": 5374,
       "autoPort": false
+    },
+    {
+      "name": "web-agenda",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@companion/web",
+        "--",
+        "--port",
+        "5385",
+        "--strictPort"
+      ],
+      "port": 5385,
+      "autoPort": false
+    },
+    {
+      "name": "web-export",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@companion/web",
+        "--",
+        "--port",
+        "5396",
+        "--strictPort"
+      ],
+      "port": 5396,
+      "autoPort": false
     }
   ]
 }

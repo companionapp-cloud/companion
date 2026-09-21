@@ -14,6 +14,8 @@ import {
   setTableMenuPresenter,
   setShortcutStore,
   setThingsSourcePicker,
+  setExportSinkOpener,
+  setExportMenuHost,
 } from "@companion/app";
 import type { ShortcutBinding, ShortcutId, WindowControls } from "@companion/app";
 import { createHttpBridge, documentsApi } from "@companion/core-bridge";
@@ -21,6 +23,7 @@ import type { CoreBridge } from "@companion/core-bridge";
 import type { DocumentSource } from "@companion/editor";
 import { desktopNotificationScheduler } from "./notifications";
 import { desktopTableMenuPresenter } from "./tableMenu";
+import { desktopExportMenu, desktopExportSink } from "./exports";
 
 // Double-clicking the window chrome (any `--wails-draggable: drag` region, e.g. the
 // toolbar or rail) zooms the window, matching native macOS titlebar behaviour. The
@@ -112,6 +115,14 @@ setThingsSourcePicker(async () => {
 // presenter posts the menu state to /table-menu and runs the chosen action on the "table:action"
 // event (see ./tableMenu.ts + apps/desktop/table_menu.go).
 setTableMenuPresenter(desktopTableMenuPresenter());
+
+// Export (./exports.ts + apps/desktop/export.go): files are written through the native save
+// panel instead of downloaded, and File › Export drives the same exporter as the in-page buttons.
+// Only inside Wails — a plain browser on the dev server keeps the download fallback.
+if (typeof window !== "undefined" && (window as unknown as { _wails?: unknown })._wails) {
+  setExportSinkOpener(desktopExportSink);
+  setExportMenuHost(desktopExportMenu());
+}
 
 // macOS uses a transparent titlebar (main.go MacTitleBarHiddenInset), so content draws
 // under the traffic lights and the shell has to keep clear of them: the rail pads its top

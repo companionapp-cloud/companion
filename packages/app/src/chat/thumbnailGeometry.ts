@@ -77,6 +77,9 @@ export interface EdgeShape {
   /** The edge's own color; null means the board's default stroke. */
   color: string | null;
   marks: EndMark[];
+  /** The point halfway along the line, where the board sets the edge's label. */
+  mid: Vec;
+  label: string;
 }
 
 /** The ending `end` drawn with its tip at `at`, pointing along `dir` (a unit vector). */
@@ -116,6 +119,7 @@ export function edgeShapes(nodes: CanvasNode[], edges: CanvasEdge[], f: Fit): Ed
     let leave = OUTWARD[fromSide];
     let arrive = { x: -OUTWARD[toSide].x, y: -OUTWARD[toSide].y };
     let d: string;
+    let mid: Vec = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
     switch (e.style) {
       case "straight": {
         const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
@@ -132,8 +136,10 @@ export function edgeShapes(nodes: CanvasNode[], edges: CanvasEdge[], f: Fit): Ed
           d = `M ${fmt(a.x)} ${fmt(a.y)} V ${fmt(my)} H ${fmt(b.x)} V ${fmt(b.y)}`;
         } else if (horizontal(fromSide)) {
           d = `M ${fmt(a.x)} ${fmt(a.y)} H ${fmt(b.x)} V ${fmt(b.y)}`;
+          mid = { x: b.x, y: a.y };
         } else {
           d = `M ${fmt(a.x)} ${fmt(a.y)} V ${fmt(b.y)} H ${fmt(b.x)}`;
+          mid = { x: a.x, y: b.y };
         }
         break;
       }
@@ -143,6 +149,8 @@ export function edgeShapes(nodes: CanvasNode[], edges: CanvasEdge[], f: Fit): Ed
         const c1 = { x: a.x + OUTWARD[fromSide].x * k, y: a.y + OUTWARD[fromSide].y * k };
         const c2 = { x: b.x + OUTWARD[toSide].x * k, y: b.y + OUTWARD[toSide].y * k };
         d = `M ${fmt(a.x)} ${fmt(a.y)} C ${fmt(c1.x)} ${fmt(c1.y)} ${fmt(c2.x)} ${fmt(c2.y)} ${fmt(b.x)} ${fmt(b.y)}`;
+        // The curve at t = ½.
+        mid = { x: (a.x + 3 * c1.x + 3 * c2.x + b.x) / 8, y: (a.y + 3 * c1.y + 3 * c2.y + b.y) / 8 };
       }
     }
     const marks: EndMark[] = [];
@@ -151,7 +159,7 @@ export function edgeShapes(nodes: CanvasNode[], edges: CanvasEdge[], f: Fit): Ed
     const end = endMark(e.toEnd, b, arrive, size);
     if (start) marks.push(start);
     if (end) marks.push(end);
-    out.push({ id: e.id, d, color: e.color ?? null, marks });
+    out.push({ id: e.id, d, color: e.color ?? null, marks, mid, label: e.label ?? "" });
   }
   return out;
 }

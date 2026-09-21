@@ -79,7 +79,8 @@ import { TrashScreen } from "./TrashScreen";
 import { LogbookScreen } from "./LogbookScreen";
 import { ChatsScreen } from "./ChatScreen";
 import { DndProvider, useDnd } from "./DndContext";
-import { MultiSelectProvider } from "./MultiSelectProvider";
+import { MultiSelectProvider, useMultiSelect } from "./MultiSelectProvider";
+import { useExportScope } from "./export/ExportProvider";
 import { SettingsScreen } from "./SettingsScreen";
 import { useSync } from "./SyncProvider";
 import { SyncHealthBanner } from "./SyncHealthBanner";
@@ -451,6 +452,7 @@ function NavBridge({
       <PaletteNavigationBridge />
       <ThingsImportHost />
       <MultiSelectProvider>
+        <ExportScope />
         <DndProvider>
           <Shell topInset={topInset} windowControls={windowControls} />
         </DndProvider>
@@ -481,6 +483,17 @@ function ReminderNavigationBridge() {
       off();
     };
   }, [nav, core]);
+  return null;
+}
+
+/** Tells the desktop's File › Export what it would export here: the multiselection while one is
+ *  active, else the document the active tab shows (a note, a task or a canvas — also one selected
+ *  inside a project or an area). */
+function ExportScope() {
+  const nav = useNav();
+  const ms = useMultiSelect();
+  const doc = docOfRef(nav.activeTab.ref);
+  useExportScope(ms.active ? ms.selectedIds.map((id) => ({ kind: ms.kind, id })) : doc ? [doc] : null);
   return null;
 }
 

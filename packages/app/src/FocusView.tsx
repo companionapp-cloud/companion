@@ -6,6 +6,7 @@ import { useTasks } from "./TasksProvider";
 import { NoteEditor } from "./NoteEditor";
 import { TaskEditor } from "./TaskEditor";
 import type { FocusTarget } from "./focus";
+import { useExportScope } from "./export/ExportProvider";
 
 export interface FocusViewProps {
   target: FocusTarget;
@@ -17,6 +18,8 @@ export interface FocusViewProps {
  * tabs. Rendered when the URL requests ?note=<id> / ?task=<id> (its own tab/window). The
  * expand/pop-out action in the workspace opens this. */
 export function FocusView({ target, topInset = 0 }: FocusViewProps) {
+  // The desktop's File › Export exports this window's document.
+  useExportScope([target]);
   return (
     <View style={styles.root}>
       {topInset > 0 ? <View style={[dragRegion, { height: topInset }]} /> : null}

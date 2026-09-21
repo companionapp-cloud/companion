@@ -20,6 +20,7 @@ import { NoteConflictDialog } from "./NoteConflictDialog";
 import { useNoteSyncGuard } from "./useNoteSyncGuard";
 import { NavContext } from "./nav-context";
 import { timeAgo } from "./NotificationRow";
+import { ExportMenu } from "./export/ExportMenu";
 import { DocTitleField } from "./TaskEditor";
 
 export interface NoteEditorProps {
@@ -210,6 +211,7 @@ export function NoteEditor({
         >
           <Icon name="panelRight" size={glyph} color={showMeta ? colors.textAccent : colors.textSecondary} />
         </IconButton>
+        <ExportMenu targets={[{ kind: "note", id: note.id }]} glyph={glyph} />
         {onPopOut ? (
           <IconButton label="Open in tab" size={btn} onPress={() => onPopOut(note.id)}>
             <Icon name="external" size={glyph} color={colors.textSecondary} />
@@ -375,6 +377,8 @@ const styles = {
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
     flexShrink: 0,
+    // Above the document beneath it, so the export menu drops over it.
+    zIndex: 2,
   },
   // Touch density: a 44px bar of `lg` buttons.
   subToolbarTouch: { height: row.touch, paddingLeft: space.xl, paddingRight: space.md },

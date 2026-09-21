@@ -109,8 +109,8 @@ func TestProjectSchedulingFields(t *testing.T) {
 	}
 }
 
-// An open task or project with both a start and a deadline spans its days; anything else with a
-// deadline is a point on it.
+// An open task or project with both a start and a deadline spans its days; any other task is a
+// point on its deadline, or with no deadline on its start.
 func TestCalendarRangeSpans(t *testing.T) {
 	clk := &fixedClock{t: time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)}
 	s := newTestStore(t, clk)
@@ -129,6 +129,8 @@ func TestCalendarRangeSpans(t *testing.T) {
 	s.Tasks.Create(CreateTaskInput{Title: "Point", DueAt: day(5, 15)})
 	s.Tasks.Create(CreateTaskInput{Title: "Done span", StartAt: day(4, 9), DueAt: day(5, 16), Status: domain.TaskDone})
 	s.Tasks.Create(CreateTaskInput{Title: "Later", StartAt: day(7, 9), DueAt: day(8, 17)})
+	s.Tasks.Create(CreateTaskInput{Title: "Starts", StartAt: day(5, 10)})
+	s.Tasks.Create(CreateTaskInput{Title: "Starts later", StartAt: day(7, 10)})
 
 	items, err := s.CalendarEvents.Range(*day(5, 0), *day(6, 0))
 	if err != nil {
@@ -138,8 +140,11 @@ func TestCalendarRangeSpans(t *testing.T) {
 	for _, it := range items {
 		got[it.Title] = it
 	}
-	if len(got) != 4 {
-		t.Fatalf("items on the 5th = %v, want Launch, Draft, Point and Done span", got)
+	if len(got) != 5 {
+		t.Fatalf("items on the 5th = %v, want Launch, Draft, Point, Done span and Starts", got)
+	}
+	if it := got["Starts"]; it == nil || it.Span || it.EndsAt != nil || !it.StartsAt.Equal(*day(5, 10)) {
+		t.Errorf("Starts = %+v, want a point on its start", it)
 	}
 	if it := got["Launch"]; it == nil || it.Kind != domain.ItemProject || !it.Span || it.SourceID != launch.ID ||
 		!it.StartsAt.Equal(*day(1, 9)) || it.EndsAt == nil || !it.EndsAt.Equal(*day(9, 17)) {
