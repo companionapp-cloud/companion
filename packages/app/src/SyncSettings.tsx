@@ -106,7 +106,7 @@ export function SyncSettings() {
       <View style={styles.section}>
         <SettingsField
           label="Save your recovery code"
-          help="This is the only way to recover your notes if you forget your password. Store it somewhere safe — it won’t be shown again."
+          help="This is the only way to recover your notes if you forget your password. Store it somewhere safe. It won’t be shown again."
         >
           <View style={styles.codeBox}>
             <Text variant="mono" style={styles.recoveryCode}>
@@ -125,7 +125,7 @@ export function SyncSettings() {
   if (sync.connected && sync.status === "locked") {
     return (
       <View style={styles.section}>
-        <StatusStrip tone="danger" text="locked — unlock to sync" />
+        <StatusStrip tone="danger" text="locked · unlock to sync" />
         <SettingsField label="Unlock encryption" help={`Enter your password to unlock ${sync.email} on this device.`}>
           <View style={styles.control}>
             <Input
@@ -151,7 +151,7 @@ export function SyncSettings() {
   if (sync.connected && sync.needsReauth) {
     return (
       <View style={styles.section}>
-        <StatusStrip tone="danger" text="signed out — session expired" />
+        <StatusStrip tone="danger" text="signed out · session expired" />
         <SettingsField label="Session expired" help={`Your session for ${sync.email} ended. Enter your password to sign back in.`}>
           <View style={styles.control}>
             <Input
@@ -197,7 +197,7 @@ export function SyncSettings() {
           label="Encryption"
           help={
             sync.encrypted
-              ? "End-to-end encrypted — the server stores ciphertext and never sees your notes."
+              ? "End-to-end encrypted: the server stores ciphertext and never sees your notes."
               : "Not encrypted (legacy account)."
           }
         >
@@ -227,9 +227,9 @@ export function SyncSettings() {
           label="Password"
           help={
             changing && sync.encrypted
-              ? "Your notes won’t be re-encrypted — only the key is rewrapped, so this is instant."
+              ? "Your notes won’t be re-encrypted. Only the key is rewrapped, so this is instant."
               : changed
-                ? `Password changed.${sync.encrypted ? " Your data stayed encrypted — no re-upload needed." : ""}`
+                ? `Password changed.${sync.encrypted ? " Your data stayed encrypted, with no re-upload needed." : ""}`
                 : undefined
           }
         >
@@ -274,11 +274,11 @@ export function SyncSettings() {
     <View style={styles.section}>
       <SettingsNote tone="secondary">
         Point web, desktop, and mobile at the same server + account to sync everything. New accounts are end-to-end
-        encrypted — the server can’t read your notes.
+        encrypted, so the server can’t read your notes.
       </SettingsNote>
       <ThisDevice />
       <Divider />
-      <SettingsField label="Sync" help="Not signed in — everything stays on this device. Use Companion Cloud, or a server you host yourself.">
+      <SettingsField label="Sync" help="Not signed in, so everything stays on this device. Use Companion Cloud, or a server you host yourself.">
         <View style={styles.row}>
           <Button label="Sign in" onPress={() => setSigningIn(true)} />
         </View>
@@ -322,7 +322,7 @@ function baseUrlLabel(url: string): string {
 function statusText(sync: ReturnType<typeof useSync>): string {
   if (sync.status === "error") return sync.lastError ?? "error";
   if (sync.status === "syncing") return "syncing…";
-  if (sync.status === "locked") return "locked — unlock to sync";
+  if (sync.status === "locked") return "locked · unlock to sync";
   if (sync.lastSyncedAt) return `synced ${ago(sync.lastSyncedAt)} ago`;
   return "connected · not synced yet";
 }

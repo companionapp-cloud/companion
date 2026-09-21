@@ -29,9 +29,11 @@ type deviceShell struct {
 func (c *Core) SetDeviceInfo(platform, defaultName string, canHost bool) {
 	c.device = deviceShell{platform: platform, defaultName: defaultName, canHost: canHost}
 	_ = c.store.SetDeviceInfo("", platform)
-	// Legacy pre-agents rows (a device-scoped Ollama URL) become agents hosted here.
+	// Legacy pre-agents rows (a device-scoped Ollama URL) become agents hosted here, and folder
+	// exports made before they synced become exports run here.
 	if info, err := c.store.DeviceInfo(); err == nil {
 		_, _ = c.store.Agents.ClaimUnhosted(info.ID, c.deviceDisplayName(info))
+		c.claimFolderExports(info)
 	}
 }
 
@@ -88,10 +90,13 @@ func (c *Core) devicesRename(payload []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Agents hosted here carry a display copy of the host name; refresh it so other devices
-	// see the new name after sync.
+	// Agents hosted here carry a display copy of the host name, and so do the exports run here;
+	// refresh both so other devices see the new name after sync.
 	_ = c.store.Agents.SetHostName(info.ID, name)
 	c.emitAgentsChanged()
+	if err := c.store.Exports.SetDeviceName(info.ID, name); err == nil {
+		c.emitExportChanged("")
+	}
 	return c.devicesThis()
 }
 
@@ -118,8 +123,20 @@ func (c *Core) deviceOnline(deviceID string) bool {
 	return c.presence.devices[deviceID].online
 }
 
-// setPresence records a device's state and notifies the UI when it changed.
-func (c *Core) setPresence(deviceID string, e presenceEntry) {
+// devicePresence is what presence knows of a device, if it has heard of it.
+func (c *Core) devicePresence(deviceID string) (presenceEntry, bool) {
+	if deviceID == "" {
+		return presenceEntry{}, false
+	}
+	c.presence.mu.Lock()
+	defer c.presence.mu.Unlock()
+	e, ok := c.presence.devices[deviceID]
+	return e, ok
+}
+
+// setPresence records a device's state and notifies the UI when it went on- or offline. It
+// reports whether anything about the device changed, its last sync included.
+func (c *Core) setPresence(deviceID string, e presenceEntry) bool {
 	c.presence.mu.Lock()
 	if c.presence.devices == nil {
 		c.presence.devices = map[string]presenceEntry{}
@@ -132,6 +149,7 @@ func (c *Core) setPresence(deviceID string, e presenceEntry) {
 		c.emit(eventDevicesPresence, p)
 		c.emitAgentsChanged()
 	}
+	return !had || prev.online != e.online || !prev.lastSeenAt.Equal(e.lastSeenAt)
 }
 
 // devicesList returns this device plus every other device known from presence.

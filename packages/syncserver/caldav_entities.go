@@ -20,6 +20,9 @@ var (
 	// A scheduled Git export (core/export) is the same kind of courier job: the server never
 	// contacts the Git host, and the row's repository, settings and credential are ciphertext.
 	gitExportHandler = opaqueRowHandler(protocol.EntityGitExport, "git_exports")
+	// A scheduled folder export only travels so the user's other devices know about it; the
+	// folder's path and name are ciphertext.
+	folderExportHandler = opaqueRowHandler(protocol.EntityFolderExport, "folder_exports")
 )
 
 // opaqueRowMeta is the only part of an opaque body the server reads.

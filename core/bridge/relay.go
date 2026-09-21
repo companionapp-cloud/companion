@@ -314,6 +314,9 @@ func (c *Core) refreshPresence(ctx context.Context) error {
 	}
 	me, _ := c.store.EnsureDeviceID()
 	mk := c.getMasterKey()
+	changed := map[string]bool{}
+	// Exports show how their exporters are doing; tell them when one of those changed.
+	defer func() { c.exportOwnersChanged(changed) }()
 	for _, d := range list {
 		if d.ID == me {
 			continue
@@ -329,7 +332,9 @@ func (c *Core) refreshPresence(ctx context.Context) error {
 		} else if cryptopkg.IsEnvelope(name) {
 			name = d.Platform
 		}
-		c.setPresence(d.ID, presenceEntry{online: d.Online, lastSeenAt: d.LastSeenAt, name: name, platform: d.Platform, canHost: d.CanHost})
+		if c.setPresence(d.ID, presenceEntry{online: d.Online, lastSeenAt: d.LastSeenAt, name: name, platform: d.Platform, canHost: d.CanHost}) {
+			changed[d.ID] = true
+		}
 	}
 	return nil
 }
@@ -382,7 +387,13 @@ func (c *Core) startRemoteTurn(chat *domain.Chat, agent *domain.Agent, text stri
 	}, &ack); err != nil {
 		cancel()
 		if errors.Is(err, errHostOffline) {
-			c.setPresence(*agent.HostDeviceID, presenceEntry{online: false, lastSeenAt: time.Now()})
+			// Offline now; what else presence knew of it (its name, its last sync) still holds.
+			offline, known := c.devicePresence(*agent.HostDeviceID)
+			if !known {
+				offline.lastSeenAt = time.Now()
+			}
+			offline.online = false
+			c.setPresence(*agent.HostDeviceID, offline)
 			return fmt.Errorf("%s is offline right now", agentHost(agent))
 		}
 		return err

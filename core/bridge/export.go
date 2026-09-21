@@ -27,15 +27,18 @@ import (
 // (StartExportScheduler) runs them — when things change, or hourly, daily or weekly — and every
 // run reports itself with an "export.changed" event so Settings › Export stays live.
 //
-// A folder destination is this device's alone. A Git destination syncs (domain.GitExport,
-// migration 0029) — repository, schedule and credential, the credential sealed under the
-// end-to-end encryption key — so it is set up once for every device; but only one device, its
-// exporter (DeviceID), ever runs it. Two devices with different sync states pushing to one
-// branch would fight; the others hold the settings and can take the export over in one step.
+// Every destination syncs (migrations 0029, 0030), but only one device, its exporter (DeviceID),
+// ever runs it: a folder is on one device's disk, and two devices with different sync states
+// pushing to one Git branch would fight. A Git destination carries its repository and credential
+// (sealed under the end-to-end encryption key), so it is set up once for every device; a folder
+// one carries its path. Either way the other devices see what is being exported where, by which
+// device, and how its last run went (the exporter reports it: reportExportRun), and any of them
+// can pause it, resume it or remove it — the exporter picks that up the next time it syncs — or,
+// where exports can run, take it over.
 //
-// Only a shell that can host exports turns the feature on, by giving it somewhere to keep its
-// bare Git repositories (SetExportDir — the desktop). Everywhere else export.capabilities
-// answers no and the settings page says where exports live.
+// Only a shell that can host exports turns running them on, by giving the feature somewhere to
+// keep its bare Git repositories (SetExportDir — the desktop). Everywhere else export.capabilities
+// answers no: the settings pages list the exports other devices run, and manage them from afar.
 
 const exportChangedEvent = "export.changed"
 
@@ -52,7 +55,14 @@ const (
 	gitPollInterval = 5 * time.Minute
 	// exportTimeout bounds one run's network time.
 	exportTimeout = 3 * time.Minute
+	// exportReportInterval is how stale the exporter lets its last report to the other devices
+	// get while nothing else happens (reportExportRun).
+	exportReportInterval = time.Hour
 )
+
+// errExportSkipped: a run found on the way that it shouldn't happen after all (the export was
+// paused, handed to another device or removed meanwhile). Nothing is recorded for it.
+var errExportSkipped = errors.New("export skipped")
 
 var exportIntervals = map[string]time.Duration{
 	store.ExportHourly: time.Hour,
@@ -128,9 +138,17 @@ type exportView struct {
 	// its credential — an account without end-to-end encryption keeps it on the device it was
 	// typed into.
 	HasCredential bool `json:"hasCredential"`
-	// ThisDevice: this device is the one that runs the export (always, for a folder).
+	// ThisDevice: this device is the one that runs the export.
 	ThisDevice bool `json:"thisDevice"`
 	Running    bool `json:"running"`
+	// Another device's export, as far as presence knows that device: whether it is online now,
+	// and when it last synced. Both unset when presence hasn't heard of it (no server, say).
+	OwnerOnline     bool       `json:"ownerOnline,omitempty"`
+	OwnerLastSeenAt *time.Time `json:"ownerLastSeenAt,omitempty"`
+	// Pending: the settings changed after the exporter last synced, so it hasn't picked the
+	// change up yet — a pause still to take effect, say. Only ever set for another device's
+	// export, and only when presence has heard of that device.
+	Pending bool `json:"pending,omitempty"`
 }
 
 // SetExportDir turns scheduled exports on for this shell and says where their bare Git
@@ -158,7 +176,20 @@ func (c *Core) exportView(d *store.ExportDestination) exportView {
 	c.exports.mu.Lock()
 	running := c.exports.running[d.ID]
 	c.exports.mu.Unlock()
-	return exportView{ExportDestination: d, HasCredential: c.exportCredential(d) != "", ThisDevice: c.exportsHere(d), Running: running}
+	v := exportView{ExportDestination: d, HasCredential: c.exportCredential(d) != "", ThisDevice: c.exportsHere(d), Running: running}
+	if !v.ThisDevice {
+		if owner, known := c.devicePresence(d.DeviceID); known {
+			v.OwnerOnline = owner.online
+			if !owner.lastSeenAt.IsZero() {
+				seen := owner.lastSeenAt
+				v.OwnerLastSeenAt = &seen
+				// Only a change made elsewhere can be waiting for the exporter: its own changes
+				// reach the server with it, whatever its clock says.
+				v.Pending = d.ChangedBy != "" && d.ChangedBy != d.DeviceID && seen.Before(d.UpdatedAt)
+			}
+		}
+	}
+	return v
 }
 
 // exportDeviceID is this device's id, as the devices list knows it.
@@ -170,16 +201,28 @@ func (c *Core) exportDeviceID() string {
 	return info.ID
 }
 
-// exportsHere reports whether this device is the one that runs a destination.
+// exportsHere reports whether this device is the one that runs a destination. (No device at all
+// is a folder destination made before they synced, which ClaimFolders gives to this device.)
 func (c *Core) exportsHere(d *store.ExportDestination) bool {
-	return d.Kind != store.ExportKindGit || d.DeviceID == "" || d.DeviceID == c.exportDeviceID()
+	return d.DeviceID == "" || d.DeviceID == c.exportDeviceID()
 }
 
-// claimExport makes this device a Git destination's exporter.
+// claimExport makes this device a destination's exporter.
 func (c *Core) claimExport(d *store.ExportDestination) {
 	if info, err := c.store.DeviceInfo(); err == nil {
 		d.DeviceID, d.DeviceName = info.ID, c.deviceDisplayName(info)
 	}
+}
+
+// claimFolderExports gives this device the folder exports made on it before they synced, and
+// keeps the name the other devices see on its exports current. Called when the device's
+// identity is set or renamed.
+func (c *Core) claimFolderExports(info store.DeviceInfo) {
+	name := c.deviceDisplayName(info)
+	if n, _ := c.store.Exports.ClaimFolders(info.ID, name); n > 0 {
+		c.emitExportChanged("")
+	}
+	_ = c.store.Exports.SetDeviceName(info.ID, name)
 }
 
 // exportCredential is a Git destination's secret — token, password or SSH private key — from
@@ -274,6 +317,10 @@ func (c *Core) exportDestinationsSave(payload []byte) ([]byte, error) {
 		if existing == nil {
 			return nil, errors.New("that export doesn't exist anymore")
 		}
+		// A folder is on its exporter's disk; its path means nothing here.
+		if existing.Kind == store.ExportKindFolder && !c.exportsHere(existing) {
+			return nil, fmt.Errorf("this folder is on %s; take the export over to export from this computer instead", firstNonEmpty(existing.DeviceName, "another device"))
+		}
 		dest, previous = existing, existing.Config
 	}
 	if args.Enabled != nil {
@@ -294,14 +341,11 @@ func (c *Core) exportDestinationsSave(payload []byte) ([]byte, error) {
 	var sshKey []byte
 	switch dest.Kind {
 	case store.ExportKindFolder:
-		path := strings.TrimSpace(args.Path)
-		if path == "" || !filepath.IsAbs(path) {
-			return nil, errors.New("choose a folder to export to")
+		path, err := exportFolderPath(args.Path)
+		if err != nil {
+			return nil, err
 		}
-		if info, err := os.Stat(path); err != nil || !info.IsDir() {
-			return nil, fmt.Errorf("%q isn't a folder that exists", path)
-		}
-		dest.Config, _ = json.Marshal(folderConfig{Path: filepath.Clean(path)})
+		dest.Config, _ = json.Marshal(folderConfig{Path: path})
 		if strings.TrimSpace(args.Name) == "" {
 			args.Name = filepath.Base(path)
 		}
@@ -346,7 +390,7 @@ func (c *Core) exportDestinationsSave(payload []byte) ([]byte, error) {
 		return nil, fmt.Errorf("unknown export kind %q", dest.Kind)
 	}
 	dest.Name = strings.TrimSpace(args.Name)
-	if dest.Kind == store.ExportKindGit && dest.DeviceID == "" {
+	if dest.DeviceID == "" {
 		c.claimExport(dest)
 	}
 
@@ -379,6 +423,19 @@ func (c *Core) exportDestinationsSave(payload []byte) ([]byte, error) {
 		c.runExportAsync(dest.ID, false)
 	}
 	return json.Marshal(c.exportView(dest))
+}
+
+// exportFolderPath checks where a folder export writes on this device: an absolute path to a
+// folder that exists (an unplugged drive isn't a cue to create one somewhere else).
+func exportFolderPath(raw string) (string, error) {
+	path := strings.TrimSpace(raw)
+	if path == "" || !filepath.IsAbs(path) {
+		return "", errors.New("choose a folder to export to")
+	}
+	if info, err := os.Stat(path); err != nil || !info.IsDir() {
+		return "", fmt.Errorf("%q isn't a folder on this computer", path)
+	}
+	return filepath.Clean(path), nil
 }
 
 // exportTargetChanged reports whether an edit moved the destination (a new folder, remote or
@@ -466,7 +523,7 @@ func validateGitRemote(remote, auth string) error {
 	case auth == gitAuthSSH:
 		return errors.New("an SSH export needs the repository's SSH address, like git@github.com:you/notes.git")
 	case ssh:
-		return errors.New("that's an SSH address — choose SSH, or use the repository's https:// address")
+		return errors.New("that's an SSH address: choose SSH, or use the repository's https:// address")
 	case strings.HasPrefix(remote, "https://"), strings.HasPrefix(remote, "http://"), filepath.IsAbs(remote):
 		return nil
 	}
@@ -498,7 +555,7 @@ func (c *Core) pendingSSHKey(keyID string) ([]byte, error) {
 	}
 	key, err := c.secrets.GetSecret(pendingKeyRef(keyID))
 	if err != nil || key == "" {
-		return nil, errors.New("that SSH key isn't available anymore — generate a new one")
+		return nil, errors.New("that SSH key isn't available anymore; generate a new one")
 	}
 	return []byte(key), nil
 }
@@ -560,15 +617,21 @@ func (c *Core) exportDestinationsDelete(payload []byte) ([]byte, error) {
 	return json.Marshal(map[string]bool{"ok": true})
 }
 
-// exportDestinationsTakeOver makes this device a Git destination's exporter. It starts from a
-// clean slate here — no manifest, no local repository — so its first run adopts the remote's
-// head and writes the whole workspace over it.
+// exportDestinationsTakeOver makes this device a destination's exporter, and starts it if it was
+// paused: taking an export over is choosing to run it from here. The device that ran it stops
+// the next time it syncs — a Git sync can't push after that anyway, since it always syncs with
+// the server first. This device starts from a clean slate — no manifest, no run state, no local
+// repository — so its first run writes the whole workspace: into the folder it names (a folder
+// export; the same folder, when a cloud drive syncs it to both), or over the repository's head,
+// adopting what is there (a Git sync, adoptGitHead).
 func (c *Core) exportDestinationsTakeOver(payload []byte) ([]byte, error) {
 	if !c.exportsEnabled() {
 		return nil, errors.New("scheduled exports aren't available on this device")
 	}
 	var args struct {
 		ID string `json:"id"`
+		// Path is where a folder export writes on this device.
+		Path string `json:"path"`
 	}
 	if err := unmarshal(payload, &args); err != nil {
 		return nil, err
@@ -577,25 +640,88 @@ func (c *Core) exportDestinationsTakeOver(payload []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if dest == nil || dest.Kind != store.ExportKindGit {
+	if dest == nil {
 		return nil, errors.New("that export doesn't exist anymore")
 	}
-	if c.exportCredential(dest) == "" {
-		return nil, errors.New("this device doesn't have that export's credential — edit the export and enter it here first")
+	switch dest.Kind {
+	case store.ExportKindFolder:
+		path, err := exportFolderPath(args.Path)
+		if err != nil {
+			return nil, err
+		}
+		dest.Config, _ = json.Marshal(folderConfig{Path: path})
+	case store.ExportKindGit:
+		if c.exportCredential(dest) == "" {
+			return nil, errors.New("this device doesn't have the sign-in for that repository; edit the sync and sign in here first")
+		}
 	}
 	c.claimExport(dest)
-	if err := c.store.Exports.ClearManifest(dest.ID); err != nil {
+	dest.Enabled = true
+	if err := c.store.Exports.ResetRunState(dest.ID); err != nil {
 		return nil, err
 	}
 	c.removeExportRepo(dest.ID)
 	if err := c.store.Exports.Save(dest); err != nil {
 		return nil, err
 	}
+	if dest, err = c.store.Exports.Get(dest.ID); err != nil || dest == nil {
+		return nil, errors.New("that export doesn't exist anymore")
+	}
 	c.emitExportChanged(dest.ID)
-	if dest.Enabled && dest.Schedule != store.ExportManual {
+	if dest.Schedule != store.ExportManual {
 		c.runExportAsync(dest.ID, false)
 	}
 	return json.Marshal(c.exportView(dest))
+}
+
+// exportDestinationsSetEnabled pauses or resumes an export from any device — its exporter's or
+// another's, the phones and the web included, which run none themselves. Like any settings
+// change it reaches the exporter the next time that device syncs; until then the view says it's
+// pending.
+func (c *Core) exportDestinationsSetEnabled(payload []byte) ([]byte, error) {
+	var args struct {
+		ID      string `json:"id"`
+		Enabled bool   `json:"enabled"`
+	}
+	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	dest, err := c.store.Exports.Get(args.ID)
+	if err != nil {
+		return nil, err
+	}
+	if dest == nil {
+		return nil, errors.New("that export doesn't exist anymore")
+	}
+	if dest.Enabled != args.Enabled {
+		dest.Enabled = args.Enabled
+		if err := c.store.Exports.Save(dest); err != nil {
+			return nil, err
+		}
+	}
+	c.emitExportChanged(dest.ID)
+	if dest.Enabled && dest.Schedule != store.ExportManual && c.exportsHere(dest) && c.exportsEnabled() {
+		c.runExportAsync(dest.ID, false)
+	}
+	return json.Marshal(c.exportView(dest))
+}
+
+// exportOwnersChanged refreshes the exports views when presence has news of a device that runs
+// one of them: it came online or went offline, or synced — which may be it picking up a pause.
+func (c *Core) exportOwnersChanged(devices map[string]bool) {
+	if len(devices) == 0 {
+		return
+	}
+	list, err := c.store.Exports.List()
+	if err != nil {
+		return
+	}
+	for _, d := range list {
+		if devices[d.DeviceID] {
+			c.emitExportChanged("")
+			return
+		}
+	}
 }
 
 func (c *Core) exportDestinationsRun(payload []byte) ([]byte, error) {
@@ -616,6 +742,9 @@ func (c *Core) exportDestinationsRun(payload []byte) ([]byte, error) {
 	}
 	if !c.exportsHere(dest) {
 		return nil, fmt.Errorf("this export runs on %s", firstNonEmpty(dest.DeviceName, "another device"))
+	}
+	if !dest.Enabled {
+		return nil, errors.New("this export is paused; resume it first")
 	}
 	return json.Marshal(map[string]bool{"started": c.runExportAsync(args.ID, args.Force)})
 }
@@ -713,27 +842,52 @@ func (c *Core) runExportAsync(id string, force bool) bool {
 }
 
 // runExport is one run: render the workspace, diff it against what the destination holds, apply
-// the difference, and record how it went.
+// the difference, and record how it went — and, when the other devices would want to know,
+// report it to them.
 func (c *Core) runExport(id string, force bool) {
 	dest, err := c.store.Exports.Get(id)
-	if err != nil || dest == nil {
+	if err != nil || dest == nil || !c.exportsHere(dest) {
 		return
 	}
 	started := time.Now()
 	summary, pushPending, err := c.flushExport(dest, force)
-	var success *time.Time
-	message := ""
+	if errors.Is(err, errExportSkipped) {
+		return
+	}
+	run := store.ExportRun{RanAt: started, PushPending: pushPending}
 	if err != nil {
-		message = err.Error()
+		run.Error = err.Error()
 	} else {
 		now := time.Now()
-		success = &now
+		run.Success = &now
 	}
-	var summaryJSON json.RawMessage
 	if summary != nil && !isNilPointer(summary) {
-		summaryJSON, _ = json.Marshal(summary)
+		run.Summary, _ = json.Marshal(summary)
 	}
-	_ = c.store.Exports.RecordRun(id, started, success, message, summaryJSON, pushPending)
+	run.Report = reportExportRun(dest, started, run.Error, summary)
+	_ = c.store.Exports.RecordRun(id, c.exportDeviceID(), run)
+}
+
+// reportExportRun decides whether a run's outcome goes out to the other devices. It does when
+// something they show has changed — an error came, changed or went, the first success, a run
+// that moved files in either direction — and otherwise once the last report is an hour old, so
+// "last exported" stays roughly true of a quiet export without a sync after every run.
+func reportExportRun(prev *store.ExportDestination, now time.Time, runError string, summary any) bool {
+	switch {
+	case runError != prev.LastError:
+		return true
+	case runError != "":
+		return false
+	case prev.LastSuccessAt == nil, exportMovedFiles(summary):
+		return true
+	}
+	return prev.ReportedAt == nil || now.Sub(*prev.ReportedAt) >= exportReportInterval
+}
+
+// exportMovedFiles reports whether a run wrote, removed or brought in anything.
+func exportMovedFiles(summary any) bool {
+	s, ok := summary.(interface{ movedFiles() bool })
+	return ok && s.movedFiles()
 }
 
 // exportAttachments reads a document's bytes for the exporter: from the local blob store,
@@ -797,6 +951,8 @@ type folderSummary struct {
 	// Waiting: attachments whose bytes aren't on this device yet; they go out on a later run.
 	Waiting int `json:"waiting,omitempty"`
 }
+
+func (s *folderSummary) movedFiles() bool { return s.Added+s.Updated+s.Removed > 0 }
 
 func (c *Core) exportManifest(id string) ([]export.ManifestEntry, error) {
 	rows, err := c.store.Exports.Manifest(id)
@@ -957,22 +1113,26 @@ func (c *Core) exportTick(now time.Time, startup bool) {
 	c.exports.mu.Lock()
 	changedAt, startedAt := c.exports.changedAt, c.exports.startedAt
 	c.exports.mu.Unlock()
-	live := map[string]bool{}
+	ours := map[string]bool{}
 	for _, d := range list {
-		live[d.ID] = true
+		// An export runs on its exporter alone; everywhere else it is only settings.
+		if !c.exportsHere(d) {
+			continue
+		}
+		ours[d.ID] = true
 		if d.Kind == store.ExportKindGit && now.Sub(startedAt) < exportStartupGrace {
 			continue
 		}
-		// A Git export runs on its exporter device alone; here it is only settings.
-		if c.exportsHere(d) && exportDue(d, now, changedAt, startup) {
+		if exportDue(d, now, changedAt, startup) {
 			c.runExportAsync(d.ID, false)
 		}
 	}
-	c.pruneExportRepos(live)
+	c.pruneExportRepos(ours)
 }
 
-// pruneExportRepos removes the local bare repositories of destinations that no longer exist —
-// deleted on another device, which this one only hears of through sync.
+// pruneExportRepos removes the local bare repositories of Git syncs this device no longer runs:
+// deleted, or taken over by another device — which this one only hears of through sync. (Taking
+// one back starts from a fresh repository anyway.)
 func (c *Core) pruneExportRepos(live map[string]bool) {
 	dir := filepath.Join(c.exportDir(), "export")
 	entries, err := os.ReadDir(dir)
@@ -1072,7 +1232,7 @@ func (c *Core) requireFreshSync(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-deadline.C:
-			return errors.New("couldn't sync with the Companion server first, so nothing was sent to Git — it will try again")
+			return errors.New("couldn't sync with the Companion server first, so nothing was sent to Git. It will try again")
 		case <-tick.C:
 			if fresh() {
 				return nil

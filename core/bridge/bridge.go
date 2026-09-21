@@ -515,6 +515,8 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.exportDestinationsCheck(payload)
 	case "export.destinations.takeOver":
 		return c.exportDestinationsTakeOver(payload)
+	case "export.destinations.setEnabled":
+		return c.exportDestinationsSetEnabled(payload)
 	case "export.sshKey.generate":
 		return c.exportSSHKeyGenerate()
 	case "export.sshKey.discard":

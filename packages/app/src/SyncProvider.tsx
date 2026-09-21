@@ -191,7 +191,7 @@ export function SyncProvider({
       if (cfg.expiresAt && Date.now() >= cfg.expiresAt - REFRESH_SKEW_MS) {
         if (!(await refreshTokens())) {
           setNeedsReauth(true);
-          throw new Error("Session expired — please sign in again.");
+          throw new Error("Session expired. Please sign in again.");
         }
       }
       // Never sync an encrypted account whose key isn't loaded — that would leak plaintext.
