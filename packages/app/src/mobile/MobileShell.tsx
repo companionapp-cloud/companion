@@ -38,6 +38,7 @@ import { GraphScreen } from "./GraphScreen";
 import { HabitsScreen, LogbookRouteScreen, NotificationsRouteScreen, TrashRouteScreen } from "./UtilityScreens";
 import { ThingsImportHost } from "../ThingsImport";
 import { IOSPWAInstallBanner } from "../push/IOSPWAInstallBanner";
+import { NotificationsPromptBanner } from "../push/NotificationsPromptBanner";
 import { InstallGuideRouteScreen } from "../push/InstallGuide";
 import { OnboardingProvider } from "../onboarding/OnboardingProvider";
 import type { Place, TourHost } from "../onboarding/host";
@@ -367,6 +368,7 @@ function MobileNavBridge({
         <View style={[styles.root, { paddingTop: topInset }]}>
           <SyncHealthBanner onOpenSettings={() => nav.openRef({ kind: "view", view: "settings", section: "sync" })} />
           <IOSPWAInstallBanner />
+          <NotificationsPromptBanner />
           <View style={styles.content}>{children}</View>
         </View>
       </OnboardingProvider>

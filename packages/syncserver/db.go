@@ -529,6 +529,40 @@ CREATE TABLE IF NOT EXISTS relay_requests (
   expires_at     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_relay_requests_user ON relay_requests (user_id, created_at);
+
+-- Web Push (push.go): one row per browser registered for reminder pushes. The endpoint is a
+-- capability URL at the browser's push service (whoever holds it can address that browser), and
+-- p256dh/auth are the keys messages are encrypted to (RFC 8291). device_id is the install that
+-- registered it; a device keeps one subscription.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  device_id  TEXT NOT NULL DEFAULT '',
+  endpoint   TEXT NOT NULL UNIQUE,
+  p256dh     TEXT NOT NULL,
+  auth       TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions (user_id);
+
+-- Reminder fires already pushed, so each goes out once however many sweeps (or instances) see it.
+-- Rows age out after a day; created_at is fixed-width UTC so it compares as text.
+CREATE TABLE IF NOT EXISTS push_deliveries (
+  user_id    TEXT NOT NULL,
+  task_id    TEXT NOT NULL,
+  fire_at    TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, task_id, fire_at)
+);
+CREATE INDEX IF NOT EXISTS idx_push_deliveries_created ON push_deliveries (created_at);
+
+-- Values the server generates for itself and must keep, e.g. its VAPID key pair (push.go).
+CREATE TABLE IF NOT EXISTS server_settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 `
 
 // OpenDB opens the store, choosing the driver from the DSN: a postgres:// URL uses

@@ -22,6 +22,7 @@ import { captureRequested } from "./capture";
 import { ExportProvider } from "./export/ExportProvider";
 import { OnboardingStateProvider } from "./onboarding/OnboardingState";
 import { WelcomeSheet } from "./onboarding/WelcomeSheet";
+import { WebPushProvider } from "./push/WebPushProvider";
 
 /** Mounts the shell matching the viewport: under-desktop widths get the mobile stacked
  * shell, everything else the desktop rail + workspace (see shellMode.ts). A host that is
@@ -128,7 +129,9 @@ export function App({
           </NotesProvider>
         ) : (
           <OnboardingStateProvider>
-            <ShellSwitch shell={shell} topInset={topInset} windowControls={windowControls} notificationScheduler={notificationScheduler} />
+            <WebPushProvider>
+              <ShellSwitch shell={shell} topInset={topInset} windowControls={windowControls} notificationScheduler={notificationScheduler} />
+            </WebPushProvider>
           </OnboardingStateProvider>
         )}
         </ExportProvider>

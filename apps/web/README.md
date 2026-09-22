@@ -51,6 +51,24 @@ Set it in the shell or an `apps/web/.env` file for `vite build`/`vite dev`, or p
 `--build-arg PORTAL_URL=…` to the Docker build. The same name works for the desktop
 frontend and the mobile app (Expo inlines `EXPO_PUBLIC_*` natively).
 
+## Notifications: web push
+
+Reminders fire from an in-tab scheduler while a tab is open. For reminders while the app is
+closed, the user turns on **Settings → Notifications**: the web app subscribes through its
+service worker (`public/sw.js`) and registers the subscription with the sync server, which pushes
+each reminder as it comes due (see `apps/server/README.md` → Web push). From then on this device
+shows only the pushed notifications, never its own local ones as well.
+
+iPhone and iPad only allow web push for a web app on the Home Screen (iOS 16.4+). Safari there
+offers installing (`IOSPWAInstallBanner` → the `/install` guide); once Companion runs from the
+Home Screen and is signed in to sync, `NotificationsPromptBanner` and the guide's installed view
+offer turning notifications on.
+
+In production the app must be served over **HTTPS at the root of its origin** (the manifest's
+`start_url`, `scope` and `id` are `/`, which is also where iOS launches the Home Screen app), and
+`sw.js` + `manifest.webmanifest` must not be cached long-term: `Caddyfile` revalidates both on
+every load so a new service worker reaches users on their next visit.
+
 ## Build / typecheck
 
 ```bash

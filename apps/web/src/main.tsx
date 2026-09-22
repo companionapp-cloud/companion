@@ -1,5 +1,5 @@
 import { AppRegistry } from "react-native";
-import { App, webNotificationScheduler, activateReminder } from "@companion/app";
+import { App, webNotificationScheduler, activateReminder, setWebPushHost } from "@companion/app";
 import { documentsApi } from "@companion/core-bridge";
 import {
   createWaSqliteDriver,
@@ -52,6 +52,9 @@ async function boot() {
   // refocus/reopen the app and deep-link. Best-effort — fires only while a tab is open.
   const registration = await registerServiceWorker();
   wireReminderActivation();
+  // Web push (PLAN §6.4): the sync server pushes reminders to a subscription on this same worker,
+  // so an installed app — on iOS the only kind that can be notified — is reminded while closed.
+  if (registration) setWebPushHost({ registration });
 
   const notificationScheduler = webNotificationScheduler({ registration });
 

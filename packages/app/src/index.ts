@@ -74,6 +74,9 @@ export { ToolVisibilityProvider, useToolVisibility, TOOLS } from "./ToolVisibili
 export type { ToolVisibilityStore, ToolsStorage, ToolId, ToolDef } from "./ToolVisibilityProvider";
 export { ToolSettings } from "./ToolSettings";
 export { activateReminder, setReminderActivationHandler } from "./reminderNav";
+export { setWebPushHost } from "./push/webPush";
+export { WebPushProvider, useWebPush } from "./push/WebPushProvider";
+export type { WebPushController } from "./push/WebPushProvider";
 export type { ReminderActivation } from "./reminderNav";
 export { ProjectsProvider, useProjects } from "./ProjectsProvider";
 export type { ProjectsStore } from "./ProjectsProvider";

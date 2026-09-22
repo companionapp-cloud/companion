@@ -50,6 +50,9 @@ func main() {
 	// Per-minute repeat-task generator: creates each seed's occurrence just in time, only
 	// once its due instant has arrived (never ahead); seed writes also check on push (PLAN §6.4).
 	srv.StartRepeatMaterializer(context.Background())
+	// Reminder pushes: every browser that subscribed (an installed web app, above all on iOS) is
+	// sent each task reminder as it comes due, open or not. VAPID_* configure it (see .env.example).
+	srv.StartPushDispatcher(context.Background())
 	// Calendar ICS fetching now happens on the client (PLAN §E2EE), so there is no server-side
 	// fetch sweep — clients push their own expanded, encrypted events.
 

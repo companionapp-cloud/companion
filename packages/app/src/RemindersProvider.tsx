@@ -2,6 +2,8 @@ import { useEffect, useMemo, type ReactNode } from "react";
 import type { TaskNotification } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
 import { activateReminder } from "./reminderNav";
+import { cachePlan } from "./push/planCache";
+import { pushDelivering } from "./push/webPush";
 
 /** A per-platform notification scheduler. The plan is computed in core (PLAN §6.4); the
  *  scheduler turns it into real OS fires. `reconcile` is cancel-and-reschedule: it is
@@ -14,6 +16,9 @@ export interface NotificationScheduler {
    *  completed/removed so its lingering banner clears (PLAN §6.4). Pending fires are handled
    *  by `reconcile`; this is the delivered-notification counterpart. Optional. */
   dismiss?(taskIds: string[]): void;
+  /** How many days ahead this scheduler wants the plan, overriding the provider's default (the
+   *  web one caches a week of fires for pushed reminders to be worded from). */
+  horizonDays?: number;
 }
 
 /** Reconciles task reminders into scheduled notifications after every task change or sync
@@ -35,6 +40,7 @@ export function RemindersProvider({
 }) {
   const { core, notify } = useCore();
   const sched = useMemo(() => scheduler ?? webNotificationScheduler(), [scheduler]);
+  const days = sched.horizonDays ?? horizonDays;
 
   useEffect(() => {
     let cancelled = false;
@@ -44,7 +50,7 @@ export function RemindersProvider({
       // approach.
       let plan: TaskNotification[];
       try {
-        plan = await notify.plan(horizonDays);
+        plan = await notify.plan(days);
       } catch {
         // Transient failure computing the plan: leave whatever is already scheduled in
         // place. Reconciling with [] here would tell a native scheduler to cancel every
@@ -58,7 +64,7 @@ export function RemindersProvider({
       // completed/removed, so a stale banner doesn't linger (PLAN §6.4).
       if (sched.dismiss) {
         try {
-          const ids = await notify.dismissed(horizonDays);
+          const ids = await notify.dismissed(days);
           if (!cancelled && ids.length) sched.dismiss(ids);
         } catch {
           // Best-effort; leave shown notifications as-is on a hiccup.
@@ -74,7 +80,7 @@ export function RemindersProvider({
       offData();
       sched.reconcile([]); // clear on unmount
     };
-  }, [core, notify, sched, horizonDays]);
+  }, [core, notify, sched, days]);
 
   return <>{children}</>;
 }
@@ -91,6 +97,13 @@ export function RemindersProvider({
  *  it has since closed — and routed back to `activateReminder` via a postMessage the shell
  *  wires up. Without a registration it falls back to `new Notification` + an inline onclick.
  *
+ *  With a registration the same fires may also arrive as pushes from the sync server (web push,
+ *  push/webPush.ts). Once this device is registered for them, the server delivers every reminder
+ *  and this scheduler shows none itself (iOS would stack the two copies, ignoring the shared
+ *  `tag`); before that, it skips a fire whose push is already on screen. Each plan is cached for the
+ *  service worker (push/planCache.ts), which words a push the server couldn't title (an encrypted
+ *  account).
+ *
  *  No-ops on platforms without the Notification API (e.g. React Native), so it stays a safe
  *  default everywhere — native shells inject their own scheduler instead. */
 export function webNotificationScheduler(options?: { registration?: ServiceWorkerRegistration | null }): NotificationScheduler {
@@ -101,6 +114,20 @@ export function webNotificationScheduler(options?: { registration?: ServiceWorke
   const NotificationCtor = typeof globalThis !== "undefined" ? (globalThis as { Notification?: typeof Notification }).Notification : undefined;
   const registration = options?.registration ?? null;
   const DAY_MS = 24 * 60 * 60 * 1000;
+
+  // Shows a fire through the SW — unless this device is registered for server pushes, which
+  // deliver it instead, or its push is already on screen.
+  const showViaWorker = async (reg: ServiceWorkerRegistration, n: TaskNotification) => {
+    if (pushDelivering()) return;
+    const fireAt = Date.parse(n.fireAt);
+    const onScreen = await reg.getNotifications({ tag: n.taskId }).catch(() => [] as Notification[]);
+    const same = (shown: Notification) => {
+      const data = shown.data as { taskId?: string; fireAt?: string } | null;
+      return data?.taskId === n.taskId && Date.parse(data.fireAt ?? "") === fireAt;
+    };
+    if (onScreen.some(same)) return;
+    await reg.showNotification(n.title, { body: n.body, tag: n.taskId, data: { taskId: n.taskId, fireAt: n.fireAt } });
+  };
 
   const dismiss = (taskIds: string[]) => {
     for (const id of taskIds) {
@@ -125,9 +152,12 @@ export function webNotificationScheduler(options?: { registration?: ServiceWorke
 
   return {
     dismiss,
+    // A week of fires for the push cache; timers below still only arm the next day's.
+    horizonDays: registration ? 7 : undefined,
     reconcile(plan) {
       for (const t of timers.values()) clearTimeout(t);
       timers.clear();
+      if (registration) void cachePlan(plan);
       if (!NotificationCtor) return;
       if (plan.length && NotificationCtor.permission === "default") void NotificationCtor.requestPermission();
 
@@ -143,7 +173,7 @@ export function webNotificationScheduler(options?: { registration?: ServiceWorke
             if (registration) {
               // Shown by the SW so its notificationclick can reopen/focus the app; the SW
               // relays the taskId back to activateReminder (PLAN §6.4).
-              void registration.showNotification(n.title, { body: n.body, tag: n.taskId, data: { taskId: n.taskId } });
+              void showViaWorker(registration, n);
               return;
             }
             const notification = new NotificationCtor(n.title, { body: n.body, tag: n.taskId });
