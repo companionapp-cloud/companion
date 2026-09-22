@@ -15,6 +15,8 @@ import { NoteEditorScreen } from './screens/NoteEditorScreen';
 import { TasksListScreen } from './screens/TasksListScreen';
 import { CanvasesListScreen } from './screens/CanvasesListScreen';
 import { CanvasScreen } from './screens/CanvasScreen';
+import { NotebooksListScreen } from './screens/NotebooksListScreen';
+import { NotebookScreen } from './screens/NotebookScreen';
 import { NotificationsScreen } from './screens/NotificationsScreen';
 import { TrashRouteScreen } from './screens/TrashRouteScreen';
 import { LogbookRouteScreen } from './screens/LogbookRouteScreen';
@@ -54,6 +56,8 @@ export type RootStackParamList = {
   Tasks: undefined;
   Canvases: undefined;
   Canvas: { id: string };
+  Notebooks: undefined;
+  Notebook: { id: string; page?: number };
   Habits: undefined;
   Calendar: undefined;
   CalendarEvent: { item: CalendarItem };
@@ -160,6 +164,8 @@ export function MobileShell() {
             <RootStack.Screen name="Tasks" component={TasksListScreen} options={{ title: 'Tasks', headerShadowVisible: false }} />
             <RootStack.Screen name="Canvases" component={CanvasesListScreen} options={{ title: 'Canvases' }} />
             <RootStack.Screen name="Canvas" component={CanvasScreen} options={{ title: 'Canvas' }} />
+            <RootStack.Screen name="Notebooks" component={NotebooksListScreen} options={{ title: 'Notebooks' }} />
+            <RootStack.Screen name="Notebook" component={NotebookScreen} options={{ title: 'Notebook' }} />
             <RootStack.Screen name="Habits" component={PlaceholderScreen} options={{ title: 'Habits' }} />
             <RootStack.Screen name="Calendar" component={CalendarScreen} options={{ title: 'Calendar' }} />
             <RootStack.Screen name="CalendarEvent" component={CalendarEventScreen} options={{ title: 'Event' }} />

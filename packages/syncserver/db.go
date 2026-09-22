@@ -299,6 +299,58 @@ CREATE TABLE IF NOT EXISTS note_ink (
 CREATE INDEX IF NOT EXISTS idx_note_ink_user_seq ON note_ink (user_id, server_seq);
 CREATE INDEX IF NOT EXISTS idx_note_ink_note ON note_ink (note_id);
 
+-- Notebooks (PLAN-notebooks.md): the book (trashable), its pages, and the ink on each page.
+-- Title, settings, page text and ink are encrypted envelopes on an encrypted account;
+-- notebook_id stays plaintext on pages and ink for the purge cascade.
+CREATE TABLE IF NOT EXISTS notebooks (
+  id                TEXT PRIMARY KEY,
+  user_id           TEXT NOT NULL,
+  title             TEXT NOT NULL DEFAULT '',
+  cover_color       TEXT NOT NULL DEFAULT 'ink',
+  cover_document_id TEXT,
+  settings_json     TEXT NOT NULL DEFAULT '{}',
+  sort_order        BIGINT NOT NULL DEFAULT 0,
+  created_at        TEXT NOT NULL,
+  updated_at        TEXT NOT NULL,
+  deleting_at       TEXT,
+  deleted_at        TEXT,
+  version           BIGINT NOT NULL DEFAULT 1,
+  server_seq        BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notebooks_user_seq ON notebooks (user_id, server_seq);
+
+CREATE TABLE IF NOT EXISTS notebook_pages (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL,
+  notebook_id   TEXT NOT NULL,
+  sort_order    BIGINT NOT NULL DEFAULT 0,
+  paper_kind    TEXT NOT NULL DEFAULT 'lined',
+  paper_spacing BIGINT NOT NULL DEFAULT 28,
+  content_md    TEXT NOT NULL DEFAULT '',
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL,
+  deleted_at    TEXT,
+  version       BIGINT NOT NULL DEFAULT 1,
+  server_seq    BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notebook_pages_user_seq ON notebook_pages (user_id, server_seq);
+CREATE INDEX IF NOT EXISTS idx_notebook_pages_notebook ON notebook_pages (notebook_id);
+
+CREATE TABLE IF NOT EXISTS notebook_page_ink (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  notebook_id TEXT NOT NULL,
+  page_id     TEXT NOT NULL,
+  data_json   TEXT NOT NULL DEFAULT '{}',
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  deleted_at  TEXT,
+  version     BIGINT NOT NULL DEFAULT 1,
+  server_seq  BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notebook_page_ink_user_seq ON notebook_page_ink (user_id, server_seq);
+CREATE INDEX IF NOT EXISTS idx_notebook_page_ink_notebook ON notebook_page_ink (notebook_id);
+
 CREATE TABLE IF NOT EXISTS chats (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL,
