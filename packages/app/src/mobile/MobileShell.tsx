@@ -37,6 +37,8 @@ import { SettingsListScreen, SettingsSectionScreen } from "./SettingsScreens";
 import { GraphScreen } from "./GraphScreen";
 import { HabitsScreen, LogbookRouteScreen, NotificationsRouteScreen, TrashRouteScreen } from "./UtilityScreens";
 import { ThingsImportHost } from "../ThingsImport";
+import { PushPromptBanner } from "../push/PushPromptBanner";
+import { InstallGuideRouteScreen } from "../push/InstallGuide";
 
 // ---------------------------------------------------------------------------
 // The mobile web shell (phone-width browsers / PWA). Same information architecture as
@@ -90,6 +92,7 @@ function mobileLinking(): LinkingOptions<ParamListBase> | undefined {
         settings: "settings",
         settingsSection: "settings/:section",
         notifications: "notifications",
+        install: "install",
         project: "project/:projectId/:section?/:itemId?/:subItemId?",
         area: "area/:areaId/:section?",
       },
@@ -341,6 +344,7 @@ function MobileNavBridge({
       <ThingsImportHost />
       <View style={[styles.root, { paddingTop: topInset }]}>
         <SyncHealthBanner onOpenSettings={() => nav.openRef({ kind: "view", view: "settings", section: "sync" })} />
+        <PushPromptBanner />
         <View style={styles.content}>{children}</View>
       </View>
     </NavContext.Provider>
@@ -404,6 +408,7 @@ export function MobileWebShell({ topInset = 0, notificationScheduler, toolsStora
                         <Nav.Screen name="settings" component={SettingsListScreen} />
                         <Nav.Screen name="settingsSection" component={SettingsSectionScreen} />
                         <Nav.Screen name="notifications" component={NotificationsRouteScreen} />
+                        <Nav.Screen name="install" component={InstallGuideRouteScreen} />
                         <Nav.Screen name="project" component={ProjectScreen} />
                         <Nav.Screen name="area" component={AreaScreen} />
                       </Nav.Navigator>

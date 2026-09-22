@@ -37,6 +37,7 @@ const VIEW_META: Record<SurfaceViewId, { label: string; icon: IconName }> = {
   trash: { label: "Trash", icon: "trash" },
   settings: { label: "Settings", icon: "settings" },
   notifications: { label: "Notifications", icon: "bell" },
+  install: { label: "Add to Home Screen", icon: "smartphone" },
 };
 
 const SECTION_META: Record<WorkspaceSection, { label: string; icon: IconName }> = {

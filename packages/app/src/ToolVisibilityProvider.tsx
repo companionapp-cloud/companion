@@ -4,7 +4,7 @@ import type { ViewId } from "./nav-context";
 
 /** The rail tools a user can hide. Settings is deliberately not hideable (it's how you get
  *  back), and notifications has no rail item — its entry point is the toolbar bell. */
-export type ToolId = Exclude<ViewId, "settings" | "notifications">;
+export type ToolId = Exclude<ViewId, "settings" | "notifications" | "install">;
 
 export interface ToolDef {
   id: ToolId;
