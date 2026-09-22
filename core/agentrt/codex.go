@@ -69,12 +69,12 @@ func (r *CodexRunner) Run(ctx context.Context, req agents.RunRequest, onDelta fu
 	err := runJSONL(ctx, req.Cwd, r.Path, args, env, prompt, p.line)
 	if err != nil {
 		if p.errText != "" {
-			return nil, errors.New(p.errText)
+			return nil, sessionErr(req, errors.New(p.errText))
 		}
-		return nil, err
+		return nil, sessionErr(req, err)
 	}
 	if p.errText != "" && p.text.Len() == 0 {
-		return nil, errors.New(p.errText)
+		return nil, sessionErr(req, errors.New(p.errText))
 	}
 	return &agents.RunResult{SessionID: p.sessionID, Text: p.text.String(), Usage: p.usage}, nil
 }

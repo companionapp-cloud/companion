@@ -209,6 +209,19 @@ export function ChatView({
     void chats.cancel(chatId).catch(() => {});
   }, [chats, chatId]);
 
+  // Escape cancels the running turn (web/desktop). Keys something else already handled —
+  // the `[[` popup, a dialog — arrive defaultPrevented and are left alone.
+  useEffect(() => {
+    if (!working || Platform.OS !== "web" || typeof window === "undefined") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      e.preventDefault();
+      stop();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [working, stop]);
+
   // `raw` is the editor's exact content on Enter; the send button passes draftRef instead.
   const send = useCallback(async (raw?: string) => {
     const text = (raw ?? draftRef.current).trim();
@@ -368,6 +381,8 @@ export function ChatView({
                     clearSignal={sendTick}
                     linkSource={linkSource}
                     onOpenRef={(ref) => onOpenEntity?.(ref.type, ref.id)}
+                    minHeight={60}
+                    maxHeight={240}
                   />
                 </ComposerField>
                 {working ? (
@@ -397,7 +412,7 @@ export function ChatView({
   );
 }
 
-/** The desktop composer shell: the same box as `Input` (hairline, 4px radius, focus edge +
+/** The desktop composer shell: a textarea-shaped box styled like `Input` (hairline, 4px radius, focus edge +
  *  ring) around the growing editor, with the ⏎ hint in the trailing slot. */
 function ComposerField({ children }: { children: ReactNode }) {
   const [focused, setFocused] = useState(false);
@@ -809,6 +824,8 @@ function Composer({
   clearSignal,
   linkSource,
   onOpenRef,
+  minHeight = 24,
+  maxHeight = 120,
 }: {
   placeholder: string;
   onChangeMarkdown: (md: string) => void;
@@ -816,6 +833,8 @@ function Composer({
   clearSignal: unknown;
   linkSource: LinkSource;
   onOpenRef: (ref: LinkRef) => void;
+  minHeight?: number;
+  maxHeight?: number;
 }) {
   // A chip typed into the message drags like one in the thread (web/desktop).
   const refDrag = useEditorRefDrag();
@@ -830,8 +849,8 @@ function Composer({
       linkSource={linkSource}
       onOpenRef={onOpenRef}
       onRefDragStart={refDrag}
-      minHeight={24}
-      maxHeight={120}
+      minHeight={minHeight}
+      maxHeight={maxHeight}
       debounceMs={120}
     />
   );
@@ -1151,8 +1170,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-end",
     gap: space.sm,
-    minHeight: control.md,
     paddingHorizontal: space.sm,
+    paddingVertical: space.xs,
     backgroundColor: colors.surfaceCard,
     borderWidth: 1,
     borderColor: colors.borderDefault,
@@ -1160,7 +1179,7 @@ const styles = StyleSheet.create({
   },
   fieldFocused: { borderColor: colors.borderFocus },
   fieldInput: { flex: 1, minWidth: 0, justifyContent: "center", paddingVertical: 1 },
-  fieldTrailing: { height: control.md - 2, justifyContent: "center" },
+  fieldTrailing: { justifyContent: "flex-end", paddingBottom: 2 },
   // --- floating (touch) composer: floats over the thread, so it is the one shadowed thing here
   floatingWrap: { paddingHorizontal: space.lg, paddingTop: space.xs, paddingBottom: space.lg, flexShrink: 0 },
   floatingBar: {

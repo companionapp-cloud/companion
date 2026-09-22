@@ -284,3 +284,64 @@ func TestMarkAllForReencryptionIncludesAgents(t *testing.T) {
 		t.Fatal("a tombstoned agent should be left alone")
 	}
 }
+
+// TestCalendarRangeAllDayByLocalDate: an all-day event is a date (stored as midnight UTC), so it
+// lands on the viewer's local days, not on whichever local days its midnight-UTC instant falls in.
+// In UTC−3 a Sept 23 all-day event's 00:00Z marker falls inside Sept 22's local window
+// (03:00Z–03:00Z); in UTC+3 Sept 23's window (Sept 22 21:00Z–Sept 23 21:00Z) holds it but also the
+// date-only notes of the 22nd would read as the 21st by UTC date.
+func TestCalendarRangeAllDayByLocalDate(t *testing.T) {
+	clk := &fixedClock{t: time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)}
+	s := newTestStore(t, clk)
+	f, _ := s.CalendarFeeds.Create(CreateFeedInput{Name: "Cal", URL: "https://example.com/c.ics"})
+
+	start := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 0, 1)
+	if err := s.CalendarEvents.Apply(&domain.CalendarEvent{
+		ID: "e1", FeedID: f.ID, ICSUID: "u1", Title: "Off", StartsAt: start, EndsAt: &end, AllDay: true,
+		CreatedAt: clk.t, UpdatedAt: clk.t, Version: 1,
+	}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	// Two-day all-day event, Sept 25–26 (DTEND Sept 27).
+	start2 := time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)
+	end2 := start2.AddDate(0, 0, 2)
+	s.CalendarEvents.Apply(&domain.CalendarEvent{
+		ID: "e2", FeedID: f.ID, ICSUID: "u2", Title: "Trip", StartsAt: start2, EndsAt: &end2, AllDay: true,
+		CreatedAt: clk.t, UpdatedAt: clk.t, Version: 1,
+	})
+	date := "2026-09-22"
+	if _, err := s.Notes.Create(CreateNoteInput{Title: date, ContentMD: "hi", Date: &date}); err != nil {
+		t.Fatalf("note: %v", err)
+	}
+
+	titles := func(zone *time.Location, day string) []string {
+		d, _ := time.ParseInLocation("2006-01-02", day, zone)
+		next := d.AddDate(0, 0, 1)
+		items, err := s.CalendarEvents.RangeIn(RangeWindow{From: d, To: next, FromDate: day, ToDate: next.Format("2006-01-02")}, "")
+		if err != nil {
+			t.Fatalf("range: %v", err)
+		}
+		out := []string{}
+		for _, it := range items {
+			out = append(out, it.Title)
+		}
+		return out
+	}
+	for _, zone := range []*time.Location{time.FixedZone("ADT", -3*3600), time.FixedZone("EAT", 3*3600)} {
+		for day, want := range map[string]string{
+			"2026-09-22": date, "2026-09-23": "Off", "2026-09-24": "",
+			"2026-09-25": "Trip", "2026-09-26": "Trip", "2026-09-27": "",
+		} {
+			got := titles(zone, day)
+			if (want == "" && len(got) != 0) || (want != "" && (len(got) != 1 || got[0] != want)) {
+				t.Errorf("%s %s: got %v, want %q", zone, day, got, want)
+			}
+		}
+	}
+
+	// Item's one-second window still finds an all-day event.
+	if it, err := s.CalendarEvents.Item("e1"); err != nil || !it.AllDay {
+		t.Fatalf("item: %+v %v", it, err)
+	}
+}

@@ -243,8 +243,20 @@ func (c *Core) chatsSend(payload []byte) ([]byte, error) {
 			cancel()
 			return nil, err
 		}
+		// The turns before this one, for when there is no CLI session to carry them (a fresh
+		// agent on an existing chat, or a session the CLI has since dropped).
+		msgs, err := c.store.ChatMessages.ListForChat(chat.ID)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+		history := historyBeforeLastUser(msgs)
+		prompt := args.Text
+		if chat.AgentSessionID == nil {
+			prompt = withCompactedHistory(history, prompt)
+		}
 		req := agents.RunRequest{
-			Prompt:     args.Text,
+			Prompt:     prompt,
 			Model:      chatDerefStr(chat.Model),
 			SessionID:  chatDerefStr(chat.AgentSessionID),
 			AllowSystem: agent.AllowSystem,
@@ -252,7 +264,7 @@ func (c *Core) chatsSend(payload []byte) ([]byte, error) {
 			MCP:        c.mcpEndpointFor(agent),
 		}
 		c.setWorking(chat.ID, cancel)
-		go c.runCLIChat(ctx, chat.ID, runner, req)
+		go c.runCLIChat(ctx, chat.ID, runner, req, withCompactedHistory(history, args.Text))
 	default:
 		engine, err := c.buildEngine(agent, chatDerefStr(chat.Model))
 		if err != nil {
@@ -308,8 +320,10 @@ func (c *Core) runChat(ctx context.Context, chatID string, engine *llm.Engine, h
 // runCLIChat drives one turn of a CLI agent (Claude Code, Codex). The CLI owns the
 // conversation state; we stream its text and tool uses as the same events the built-in engine
 // emits, then persist the final reply (with the tools it used, as an assistant tool_calls list)
-// and remember the CLI session so the next turn resumes it.
-func (c *Core) runCLIChat(ctx context.Context, chatID string, runner agents.Runner, req agents.RunRequest) {
+// and remember the CLI session so the next turn resumes it. If the session it resumes has
+// expired, the turn is retried once in a fresh session with compactedPrompt (the earlier
+// transcript, compacted, ahead of the user's message).
+func (c *Core) runCLIChat(ctx context.Context, chatID string, runner agents.Runner, req agents.RunRequest, compactedPrompt string) {
 	defer c.finishRun(chatID)
 
 	onDelta := func(text string) {
@@ -329,6 +343,13 @@ func (c *Core) runCLIChat(ctx context.Context, chatID string, runner agents.Runn
 	}
 
 	res, err := runner.Run(ctx, req, onDelta, onTool)
+	if err != nil && errors.Is(err, agents.ErrSessionExpired) && ctx.Err() == nil {
+		_ = c.store.Chats.SetAgentSession(chatID, nil)
+		req.SessionID = ""
+		req.Prompt = compactedPrompt
+		used = nil
+		res, err = runner.Run(ctx, req, onDelta, onTool)
+	}
 	if err != nil {
 		if ctx.Err() == nil {
 			c.emitLLMError(chatID, err)

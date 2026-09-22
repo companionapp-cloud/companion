@@ -4,7 +4,10 @@
 // process-spawning implementation lives in core/agentrt behind a shell-injected seam.
 package agents
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // Status of a discovered agent.
 const (
@@ -31,6 +34,11 @@ type Discovered struct {
 	// InstalledAgentID is set when an agent row on this device already points at this tool.
 	InstalledAgentID *string `json:"installedAgentId,omitempty"`
 }
+
+// ErrSessionExpired is returned (wrapped) by a Runner when RunRequest.SessionID names a
+// conversation the CLI no longer has — pruned, expired, or created on another machine. The
+// caller should start a fresh session and carry the history over itself.
+var ErrSessionExpired = errors.New("agent session expired")
 
 // Discoverer scans the local machine for supported AI tools.
 type Discoverer interface {

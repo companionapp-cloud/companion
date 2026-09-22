@@ -69,6 +69,13 @@ export interface UpdateEventInput {
  *  read-only subscriptions; CalDAV accounts are two-way. Event edits only ever change local rows —
  *  they show at once and reach the provider on the next `push` (from this device if it is native,
  *  otherwise from one of the user's native devices, via sync). */
+/** The local calendar day ('YYYY-MM-DD') an ISO instant falls on in this device's timezone. */
+function localDate(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 export function calendarApi(core: CoreBridge) {
   return {
     feeds: {
@@ -83,7 +90,15 @@ export function calendarApi(core: CoreBridge) {
      *  `projectId` it is that project's calendar: events from the calendars it holds, and its own
      *  tasks and notes. */
     range: (from: string, to: string, opts?: { projectId?: string }) =>
-      core.invoke<CalendarItem[]>("calendar.range", { from, to, ...(opts?.projectId ? { projectId: opts.projectId } : {}) }),
+      core.invoke<CalendarItem[]>("calendar.range", {
+        from,
+        to,
+        // Dated notes and all-day events are dates, not instants: the core places them on the
+        // viewer's local days, which only this side of the bridge knows.
+        fromDate: localDate(from),
+        toDate: localDate(to),
+        ...(opts?.projectId ? { projectId: opts.projectId } : {}),
+      }),
     /** Force the server to re-fetch this account's ICS feeds now, then pull the results
      *  (the calendar view's manual refresh). `synced` is false when running local-only. */
     refresh: () => core.invoke<{ ok: boolean; synced: boolean }>("calendar.refresh"),

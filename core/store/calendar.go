@@ -732,17 +732,45 @@ func scanEvent(rows Rows) (*domain.CalendarEvent, error) {
 // desktop, web, and mobile can never diverge. (Habit occurrences will join it with §16.)
 //
 // Timestamps are compared as RFC3339Nano UTC text — the format every writer uses — so a
-// lexical comparison is a chronological one. Notes carry only a 'YYYY-MM-DD' local marker;
-// they are matched against the window's date bounds.
+// lexical comparison is a chronological one. Dated notes and all-day events carry a date, not
+// an instant (an all-day event's is stored as midnight UTC), so they are matched against the
+// window's dates instead — see RangeWindow. Range takes those dates as the UTC days the
+// instants touch, which is exact for a UTC-midnight window.
 func (r *CalendarEventsRepo) Range(from, to time.Time) ([]*domain.CalendarItem, error) {
-	return r.rangeItems(from, to, "")
+	return r.rangeItems(UTCWindow(from, to), "")
 }
 
 // RangeForProject is Range narrowed to one project (PLAN §6.6, "Calendars"): events from the
 // calendars the project holds — each one it was given, plus every calendar of each account it
 // was given — and the tasks and notes that are its members.
 func (r *CalendarEventsRepo) RangeForProject(from, to time.Time, projectID string) ([]*domain.CalendarItem, error) {
-	return r.rangeItems(from, to, projectID)
+	return r.rangeItems(UTCWindow(from, to), projectID)
+}
+
+// RangeWindow is a calendar window as both instants and dates. From/To bound timed items;
+// FromDate/ToDate ('YYYY-MM-DD', half-open) bound the date-only ones — dated notes and all-day
+// events — and must be the viewer's *local* days, which the instants alone can't recover: local
+// midnight in UTC−3 is 03:00Z the same day, in UTC+3 21:00Z the day before. Matching an all-day
+// event's midnight-UTC marker against the instants instead lands it a day early or late.
+type RangeWindow struct {
+	From, To         time.Time
+	FromDate, ToDate string
+}
+
+// UTCWindow is the window whose dates are the UTC days [from, to) touches.
+func UTCWindow(from, to time.Time) RangeWindow {
+	return RangeWindow{
+		From: from, To: to,
+		FromDate: from.UTC().Format(dateLayout),
+		// Round the end up so a sub-day window (Item's one second) still covers its day.
+		ToDate: to.UTC().Add(-time.Nanosecond).AddDate(0, 0, 1).Format(dateLayout),
+	}
+}
+
+// RangeIn is Range over a window with explicit local dates, optionally narrowed to a project
+// ("" for everything). The calendar views use it so all-day items land on the viewer's days.
+func (r *CalendarEventsRepo) RangeIn(w RangeWindow, projectID string) ([]*domain.CalendarItem, error) {
+	return r.rangeItems(w, projectID)
 }
 
 // projectFeedIDs selects the ids of the calendars a project holds, directly or through an
@@ -758,17 +786,18 @@ const projectFeedIDs = `SELECT entity_id FROM project_members
 const projectMemberIDs = `SELECT entity_id FROM project_members WHERE project_id = ? AND entity_type = ? AND deleted_at IS NULL`
 
 // rangeItems is Range, optionally narrowed to a project ("" for everything).
-func (r *CalendarEventsRepo) rangeItems(from, to time.Time, projectID string) ([]*domain.CalendarItem, error) {
-	fromTS := from.UTC().Format(timeFormat)
-	toTS := to.UTC().Format(timeFormat)
-	fromDate := from.UTC().Format(dateLayout)
-	toDate := to.UTC().Format(dateLayout)
+func (r *CalendarEventsRepo) rangeItems(w RangeWindow, projectID string) ([]*domain.CalendarItem, error) {
+	fromTS := w.From.UTC().Format(timeFormat)
+	toTS := w.To.UTC().Format(timeFormat)
+	fromDate, toDate := w.FromDate, w.ToDate
 
 	out := []*domain.CalendarItem{}
 
-	// Feed events: overlap the window. A NULL ends_at is treated as an instantaneous event
-	// (ends == starts). Skip events whose feed was deleted.
-	eventsIn, eventArgs := "", []any{toTS, fromTS}
+	// Feed events: overlap the window. A timed event with a NULL ends_at is treated as
+	// instantaneous (ends == starts). An all-day event overlaps by date: its days run from its
+	// start date up to its (exclusive, as in iCalendar) end date — at least one day. Skip events
+	// whose feed was deleted.
+	eventsIn, eventArgs := "", []any{toTS, fromTS, toDate, fromDate}
 	if projectID != "" {
 		eventsIn = ` AND e.feed_id IN (` + projectFeedIDs + `)`
 		eventArgs = append(eventArgs, projectID, projectID)
@@ -780,7 +809,9 @@ func (r *CalendarEventsRepo) rangeItems(from, to time.Time, projectID string) ([
 		   JOIN calendar_feeds f ON f.id = e.feed_id
 		   LEFT JOIN calendar_objects o ON o.feed_id = e.feed_id AND o.uid = e.ics_uid AND o.deleted_at IS NULL
 		  WHERE e.deleted_at IS NULL AND f.deleted_at IS NULL
-		    AND e.starts_at < ? AND COALESCE(e.ends_at, e.starts_at) >= ?`+eventsIn+`
+		    AND ((e.all_day = 0 AND e.starts_at < ? AND COALESCE(e.ends_at, e.starts_at) >= ?)
+		      OR (e.all_day != 0 AND substr(e.starts_at, 1, 10) < ?
+		          AND MAX(COALESCE(substr(e.ends_at, 1, 10), ''), date(substr(e.starts_at, 1, 10), '+1 day')) > ?))`+eventsIn+`
 		  ORDER BY e.starts_at ASC;`, eventArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("range events: %w", err)

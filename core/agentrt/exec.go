@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"companion/core/agents"
 )
 
 // maxLine bounds one JSONL line from a CLI (a tool result can embed a whole file).
@@ -74,6 +76,27 @@ func runJSONL(ctx context.Context, cwd, path string, args []string, env []string
 		return readErr
 	}
 	return nil
+}
+
+// sessionErr marks a failed resume as agents.ErrSessionExpired when the CLI says the
+// conversation is gone, so the bridge can retry with a fresh session. Other errors pass through.
+func sessionErr(req agents.RunRequest, err error) error {
+	if err == nil || req.SessionID == "" || !sessionMissing(err.Error()) {
+		return err
+	}
+	return fmt.Errorf("%w: %v", agents.ErrSessionExpired, err)
+}
+
+// sessionMissing matches the CLIs' "unknown session" errors: Claude Code's "No conversation
+// found with session ID: …" and Codex's "no rollout found for thread id …" / "thread not found".
+func sessionMissing(msg string) bool {
+	m := strings.ToLower(msg)
+	for _, s := range []string{"no conversation found", "no rollout found", "thread not found", "session not found", "conversation not found"} {
+		if strings.Contains(m, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // tailBuffer keeps the last few KB written to it, so a chatty stderr can't grow unbounded but

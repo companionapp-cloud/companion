@@ -5,6 +5,7 @@ package agentrt
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -248,5 +249,21 @@ func TestFactoryWorkDirAndRunnerFor(t *testing.T) {
 	}
 	if _, err := f.RunnerFor("ollama", bin); err == nil {
 		t.Error("ollama is not a CLI runtime")
+	}
+}
+
+func TestSessionErr(t *testing.T) {
+	resume := agents.RunRequest{SessionID: "abc"}
+	if err := sessionErr(resume, errors.New("claude: No conversation found with session ID: abc")); !errors.Is(err, agents.ErrSessionExpired) {
+		t.Fatalf("claude missing session not detected: %v", err)
+	}
+	if err := sessionErr(resume, errors.New("no rollout found for thread id abc")); !errors.Is(err, agents.ErrSessionExpired) {
+		t.Fatalf("codex missing thread not detected: %v", err)
+	}
+	if err := sessionErr(resume, errors.New("Please run claude login")); errors.Is(err, agents.ErrSessionExpired) {
+		t.Fatal("unrelated error marked expired")
+	}
+	if err := sessionErr(agents.RunRequest{}, errors.New("No conversation found")); errors.Is(err, agents.ErrSessionExpired) {
+		t.Fatal("a fresh run can't have an expired session")
 	}
 }

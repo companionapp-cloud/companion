@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"companion/core/calendar"
-	"companion/core/domain"
 	"companion/core/store"
 )
 
@@ -151,8 +150,12 @@ func (c *Core) fetchFeeds() error {
 // its own tasks and notes (PLAN §6.6).
 func (c *Core) calendarRange(payload []byte) ([]byte, error) {
 	var args struct {
-		From      string `json:"from"`
-		To        string `json:"to"`
+		From string `json:"from"`
+		To   string `json:"to"`
+		// The viewer's local days for the window ('YYYY-MM-DD', half-open), which place dated
+		// notes and all-day events. Optional: without them the UTC days are used.
+		FromDate  string `json:"fromDate"`
+		ToDate    string `json:"toDate"`
 		ProjectID string `json:"projectId"`
 	}
 	if err := unmarshal(payload, &args); err != nil {
@@ -166,12 +169,17 @@ func (c *Core) calendarRange(payload []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	var items []*domain.CalendarItem
-	if args.ProjectID != "" {
-		items, err = c.store.CalendarEvents.RangeForProject(from, to, args.ProjectID)
-	} else {
-		items, err = c.store.CalendarEvents.Range(from, to)
+	w := store.UTCWindow(from, to)
+	if args.FromDate != "" && args.ToDate != "" {
+		if _, err := time.Parse("2006-01-02", args.FromDate); err != nil {
+			return nil, err
+		}
+		if _, err := time.Parse("2006-01-02", args.ToDate); err != nil {
+			return nil, err
+		}
+		w.FromDate, w.ToDate = args.FromDate, args.ToDate
 	}
+	items, err := c.store.CalendarEvents.RangeIn(w, args.ProjectID)
 	if err != nil {
 		return nil, err
 	}
