@@ -36,6 +36,9 @@ type authResponse struct {
 	RefreshToken string `json:"refreshToken"`
 	ExpiresAt    string `json:"expiresAt"` // RFC3339, when Token expires
 	UserID       string `json:"userId"`
+	// Reactivated is set only on the sign-in that took back a pending account deletion
+	// (account_deletion.go), so the client can tell the user their account is safe again.
+	Reactivated bool `json:"reactivated,omitempty"`
 }
 
 type refreshRequest struct {
@@ -92,17 +95,36 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	email := strings.TrimSpace(strings.ToLower(req.Email))
 
 	var uid, hash string
-	err := s.queryRow(`SELECT id, password_hash FROM users WHERE email = ?;`, email).Scan(&uid, &hash)
+	var deletingAt sql.NullString
+	err := s.queryRow(`SELECT id, password_hash, deleting_at FROM users WHERE email = ?;`, email).Scan(&uid, &hash, &deletingAt)
 	if err != nil || bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)) != nil {
 		writeErr(w, http.StatusUnauthorized, "invalid email or password")
 		return
+	}
+	// Signing in during an account's deletion grace period takes the deletion back
+	// (account_deletion.go). Past its deletion instant the account is as good as gone, so it
+	// gets exactly the answer an unknown address would while the sweep finishes erasing it.
+	reactivated := false
+	if deletingAt.Valid {
+		restored, err := s.cancelAccountDeletion(r.Context(), uid, deletingAt.String)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "account restore failed")
+			return
+		}
+		if !restored {
+			writeErr(w, http.StatusUnauthorized, "invalid email or password")
+			return
+		}
+		reactivated = true
 	}
 	session, err := s.newSession(uid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "session failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, session.response(uid))
+	resp := session.response(uid)
+	resp.Reactivated = reactivated
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleRefresh exchanges a valid refresh token for a fresh access token. The
@@ -127,6 +149,21 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	exp, perr := time.Parse(timeFormat, expiresAt)
 	if perr != nil || !s.clock.Now().UTC().Before(exp) {
 		writeErr(w, http.StatusUnauthorized, "refresh token expired")
+		return
+	}
+	// Defense in depth: requesting account deletion revokes every refresh token, so a scheduled
+	// account has none to present. Refusing anyway closes the race with a refresh that was in
+	// flight as the request committed; only a sign-in takes a deletion back.
+	var deletingAt sql.NullString
+	switch err := s.queryRow(`SELECT deleting_at FROM users WHERE id = ?;`, uid).Scan(&deletingAt); {
+	case err == sql.ErrNoRows:
+		writeErr(w, http.StatusUnauthorized, "invalid refresh token")
+		return
+	case err != nil:
+		writeErr(w, http.StatusInternalServerError, "session failed")
+		return
+	case deletingAt.Valid:
+		writeErr(w, http.StatusUnauthorized, "account scheduled for deletion")
 		return
 	}
 	session, err := s.newSession(uid)

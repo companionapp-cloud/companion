@@ -134,6 +134,9 @@ type adminUser struct {
 	IsAdmin            bool   `json:"isAdmin"`
 	EmailVerified      bool   `json:"emailVerified"`
 	SubscriptionStatus string `json:"subscriptionStatus"`
+	// DeletingAt is when a user who asked to delete their account will be purged (unset for
+	// active accounts); signing in before then restores the account.
+	DeletingAt string `json:"deletingAt,omitempty"`
 }
 
 func (a *admin) handleUsers(w http.ResponseWriter, r *http.Request) {
@@ -141,7 +144,7 @@ func (a *admin) handleUsers(w http.ResponseWriter, r *http.Request) {
 		SELECT u.id, u.email, u.first_name, u.last_name, u.created_at,
 		       CASE WHEN a.user_id IS NULL THEN 0 ELSE 1 END AS is_admin,
 		       CASE WHEN u.email_verified_at IS NULL THEN 0 ELSE 1 END AS verified,
-		       COALESCE(s.status, 'none') AS sub_status
+		       COALESCE(s.status, 'none') AS sub_status, u.deleting_at
 		FROM users u
 		LEFT JOIN admin_users a ON a.user_id = u.id
 		LEFT JOIN subscriptions s ON s.user_id = u.id
@@ -155,12 +158,14 @@ func (a *admin) handleUsers(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var u adminUser
 		var isAdmin, verified int
-		if err := rows.Scan(&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.CreatedAt, &isAdmin, &verified, &u.SubscriptionStatus); err != nil {
+		var deletingAt sql.NullString
+		if err := rows.Scan(&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.CreatedAt, &isAdmin, &verified, &u.SubscriptionStatus, &deletingAt); err != nil {
 			writeErr(w, http.StatusInternalServerError, "scan failed")
 			return
 		}
 		u.IsAdmin = isAdmin == 1
 		u.EmailVerified = verified == 1
+		u.DeletingAt = deletingAt.String
 		out = append(out, u)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"users": out})
@@ -170,10 +175,10 @@ func (a *admin) handleUsers(w http.ResponseWriter, r *http.Request) {
 func (a *admin) handleUser(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var u adminUser
-	var verifiedAt sql.NullString
+	var verifiedAt, deletingAt sql.NullString
 	err := a.db.QueryRowContext(r.Context(), a.rebind(
-		`SELECT id, email, first_name, last_name, created_at, email_verified_at FROM users WHERE id = ?;`), id).
-		Scan(&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.CreatedAt, &verifiedAt)
+		`SELECT id, email, first_name, last_name, created_at, email_verified_at, deleting_at FROM users WHERE id = ?;`), id).
+		Scan(&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.CreatedAt, &verifiedAt, &deletingAt)
 	if err == sql.ErrNoRows {
 		writeErr(w, http.StatusNotFound, "user not found")
 		return
@@ -184,6 +189,7 @@ func (a *admin) handleUser(w http.ResponseWriter, r *http.Request) {
 	}
 	u.IsAdmin = a.isAdmin(id)
 	u.EmailVerified = verifiedAt.Valid
+	u.DeletingAt = deletingAt.String
 
 	sub := a.subscriptionFor(r, id)
 	writeJSON(w, http.StatusOK, map[string]any{"user": u, "subscription": sub})

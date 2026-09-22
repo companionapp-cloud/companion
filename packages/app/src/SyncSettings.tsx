@@ -177,6 +177,13 @@ export function SyncSettings() {
   if (sync.connected) {
     return (
       <View style={styles.section}>
+        {sync.reactivated ? (
+          <StatusStrip
+            tone="success"
+            text="welcome back · account deletion cancelled"
+            action={<Button label="OK" size="sm" variant="secondary" onPress={sync.dismissReactivated} />}
+          />
+        ) : null}
         <StatusStrip
           tone={sync.status === "error" ? "danger" : sync.status === "syncing" ? "warning" : "success"}
           text={statusText(sync)}

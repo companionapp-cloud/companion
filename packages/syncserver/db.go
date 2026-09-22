@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS users (
   email_verified_at         TEXT,             -- NULL until the address is confirmed
   password_reset_token      TEXT,             -- rotated on each forgot-password request
   password_reset_expires_at TEXT,
-  created_at                TEXT NOT NULL
+  created_at                TEXT NOT NULL,
+  deleting_at               TEXT              -- account deletion: NULL = active, else the purge instant
 );
 
 -- One-time email verification tokens. The email is captured at issue time so a later
@@ -643,6 +644,8 @@ func migrate(db *sql.DB, dialect string) error {
 		`ALTER TABLE projects ADD COLUMN completed_at TEXT`,
 		`ALTER TABLE projects ADD COLUMN repeat_rule TEXT`,
 		`ALTER TABLE projects ADD COLUMN repeat_after TEXT`,
+		// Account deletion grace period (account_deletion.go), retrofitted onto older DBs.
+		`ALTER TABLE users ADD COLUMN deleting_at TEXT`,
 	}
 	for _, alter := range alters {
 		if dialect == "postgres" {

@@ -33,6 +33,9 @@ type billing struct {
 
 	webhookSecret string // STRIPE_WEBHOOK_SECRET: verifies inbound webhook signatures
 	baseURL       string // CLOUD_BASE_URL: origin used to build Checkout return URLs
+
+	// subs stands in for Stripe's subscription API in tests; nil means live Stripe (stripeSubs).
+	subs subscriptionAPI
 }
 
 // newBilling reads Stripe configuration from the environment and sets the global API key.
@@ -168,17 +171,19 @@ type subscriptionState struct {
 
 	source string // 'stripe' | 'admin' — comped accounts aren't ours to cancel
 	subID  string // Stripe subscription id; empty until a checkout records one
+	// pausedForDeletion: renewal is off only because the account is scheduled for deletion.
+	pausedForDeletion bool
 }
 
 // state reads the caller's subscription. A user with no row has status "none".
 func (b *billing) state(ctx context.Context, userID string) (subscriptionState, error) {
 	st := subscriptionState{Status: "none"}
 	var periodEnd, source, subID sql.NullString
-	var cancelAtPeriodEnd int64
+	var cancelAtPeriodEnd, pausedForDeletion int64
 	err := b.db.QueryRowContext(ctx, b.rebind(`
-		SELECT status, current_period_end, source, stripe_subscription_id, cancel_at_period_end
+		SELECT status, current_period_end, source, stripe_subscription_id, cancel_at_period_end, paused_for_deletion
 		FROM subscriptions WHERE user_id = ?;`), userID).
-		Scan(&st.Status, &periodEnd, &source, &subID, &cancelAtPeriodEnd)
+		Scan(&st.Status, &periodEnd, &source, &subID, &cancelAtPeriodEnd, &pausedForDeletion)
 	if err == sql.ErrNoRows {
 		return st, nil
 	}
@@ -187,6 +192,7 @@ func (b *billing) state(ctx context.Context, userID string) (subscriptionState, 
 	}
 	st.CurrentPeriodEnd, st.source, st.subID = periodEnd.String, source.String, subID.String
 	st.CancelAtPeriodEnd = cancelAtPeriodEnd == 1
+	st.pausedForDeletion = pausedForDeletion == 1
 	switch stripe.SubscriptionStatus(st.Status) {
 	case stripe.SubscriptionStatusActive, stripe.SubscriptionStatusTrialing:
 		st.Cancelable = st.source == "stripe" && st.subID != ""
@@ -464,7 +470,8 @@ func (b *billing) applyCheckoutSession(ctx context.Context, cs *stripe.CheckoutS
 
 // upsertByUser records or refreshes a Stripe-sourced subscription after checkout. Keyed by
 // user_id so a repeat checkout replaces the prior linkage — including any cancellation the
-// user had scheduled on the subscription this one supersedes.
+// user had scheduled on the subscription this one supersedes, and any renewal pause that
+// account deletion put on it.
 func (b *billing) upsertByUser(ctx context.Context, userID, planID, customerID, subID, status, periodEnd string) {
 	now := time.Now().UTC().Format(timeFormat)
 	_, err := b.db.ExecContext(ctx, b.rebind(`
@@ -477,6 +484,7 @@ func (b *billing) upsertByUser(ctx context.Context, userID, planID, customerID, 
 		  stripe_subscription_id = excluded.stripe_subscription_id,
 		  status = excluded.status,
 		  cancel_at_period_end = 0,
+		  paused_for_deletion = 0,
 		  updated_at = excluded.updated_at;`),
 		userID, nullify(planID), nullify(customerID), nullify(subID), status, nullify(periodEnd), now, now)
 	if err != nil {

@@ -21,7 +21,8 @@ const trashSweepInterval = time.Hour
 
 // StartTrashCollector sweeps expired Trash once immediately and then every hour until ctx
 // is cancelled. Sweep errors are logged rather than fatal: a transient DB error simply
-// retries on the next tick.
+// retries on the next tick. Every sweep, the first included, runs in the background, because
+// an account purge calls out to the billing hook, and a slow provider must not hold up boot.
 func (s *Server) StartTrashCollector(ctx context.Context) {
 	sweep := func() {
 		if n, err := s.PurgeExpired(); err != nil {
@@ -33,9 +34,18 @@ func (s *Server) StartTrashCollector(ctx context.Context) {
 		if err := s.ExpireRelayRequests(ctx); err != nil {
 			log.Printf("relay expiry: %v", err)
 		}
+		// So does erasing accounts whose deletion grace period has run out
+		// (account_deletion.go). Failures are per account and retried on the next tick.
+		n, err := s.PurgeDeletedAccounts(ctx)
+		if err != nil {
+			log.Printf("account purge: %v", err)
+		}
+		if n > 0 {
+			log.Printf("account purge: deleted %d account(s)", n)
+		}
 	}
-	sweep()
 	go func() {
+		sweep()
 		t := time.NewTicker(trashSweepInterval)
 		defer t.Stop()
 		for {

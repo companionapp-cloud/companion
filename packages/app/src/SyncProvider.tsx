@@ -62,6 +62,8 @@ export type AuthMode = "login" | "register";
  *  data (the server holds only ciphertext). */
 export interface ConnectResult {
   recoveryCode: string | null;
+  /** This login cancelled the account's scheduled deletion. */
+  reactivated: boolean;
 }
 
 export interface SyncController {
@@ -85,6 +87,13 @@ export interface SyncController {
   /** Change the account password. For an encrypted account this always rewraps the master key
    *  (never re-encrypting content); for a plaintext account it's a normal change. */
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  /** Schedule the account for deletion after confirming its password. The server deletes it 30
+   *  days later and signs every device out now; this one disconnects, keeping its local data.
+   *  Signing in again before then cancels the deletion. Resolves with when the account goes. */
+  deleteAccount: (password: string) => Promise<{ deletingAt: string }>;
+  /** The last sign-in cancelled a scheduled account deletion, until dismissed. */
+  reactivated: boolean;
+  dismissReactivated: () => void;
   disconnect: () => void;
   /** Debounced sync — called on mutations and navigation. */
   trigger: () => void;
@@ -123,6 +132,7 @@ export function SyncProvider({
   const [status, setStatus] = useState<SyncStatus>(config ? "idle" : "disconnected");
   const [lastError, setLastError] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  const [reactivated, setReactivated] = useState(false);
   // needsReauth is set when the session is truly dead (refresh token missing/expired/revoked), as
   // opposed to a transient network error — so the UI can show a "sign in again" banner only when
   // re-authentication is actually required, not on every sync blip.
@@ -380,6 +390,8 @@ export function SyncProvider({
     saveConfig(cfg, storageRef.current);
     setLastError(null);
     setNeedsReauth(false);
+    const reactivated = res.reactivated === true;
+    setReactivated(reactivated);
 
     if (migratePlaintext) {
       recoveryCode = await runEncryptionMigration(password);
@@ -387,7 +399,7 @@ export function SyncProvider({
       setStatus("idle");
       setConfig(cfg); // effect re-configures + syncs
     }
-    return { recoveryCode };
+    return { recoveryCode, reactivated };
   }, [crypto, runEncryptionMigration]);
 
   // unlock re-derives the master key for a locked encrypted account (a web reload, typically),
@@ -414,9 +426,9 @@ export function SyncProvider({
   const enableEncryption = useCallback(async (password: string): Promise<ConnectResult> => {
     const cfg = configRef.current;
     if (!cfg) throw new Error("not connected");
-    if (cfg.encrypted) return { recoveryCode: null };
+    if (cfg.encrypted) return { recoveryCode: null, reactivated: false };
     const recoveryCode = await runEncryptionMigration(password);
-    return { recoveryCode };
+    return { recoveryCode, reactivated: false };
   }, [runEncryptionMigration]);
 
   // changePassword always rewraps for an encrypted account: the master key (held unlocked in
@@ -469,6 +481,7 @@ export function SyncProvider({
     setLastError(null);
     setLastSyncedAt(null);
     setNeedsReauth(false);
+    setReactivated(false);
   }, [crypto, api]);
 
   const request = useCallback(
@@ -493,6 +506,39 @@ export function SyncProvider({
     [refreshTokens],
   );
 
+  // deleteAccount confirms the password the way login does (an encrypted account's credential is
+  // the auth key derived from it, as in changePassword), asks the server to schedule the deletion,
+  // then disconnects: the server has already signed every device out, this one included. What is
+  // on this device stays; clearing it is a separate choice.
+  const deleteAccount = useCallback(async (password: string): Promise<{ deletingAt: string }> => {
+    let cfg = configRef.current;
+    if (!cfg) throw new Error("not connected");
+    // A page left open past the access token's life refreshes it first rather than failing.
+    if (cfg.expiresAt && Date.now() >= cfg.expiresAt - REFRESH_SKEW_MS) {
+      if (!(await refreshTokens())) {
+        setNeedsReauth(true);
+        throw new Error("Your session expired. Sign in again first.");
+      }
+      cfg = configRef.current ?? cfg;
+    }
+    let credential = password;
+    if (cfg.encrypted) {
+      const km = await keys.fetchKeys(cfg.baseUrl, cfg.token);
+      if (!km) throw new Error("missing key material for this account");
+      const derived = await crypto.deriveAuthKey(password, km.kdfSalt, {
+        time: km.kdfTime,
+        memoryK: km.kdfMemoryK,
+        threads: km.kdfThreads,
+      });
+      credential = derived.authKeyHex;
+    }
+    const { deletingAt } = await auth.deleteAccount(cfg.baseUrl, cfg.token, credential);
+    disconnect();
+    return { deletingAt };
+  }, [crypto, refreshTokens, disconnect]);
+
+  const dismissReactivated = useCallback(() => setReactivated(false), []);
+
   const value = useMemo<SyncController>(
     () => ({
       connected: !!config,
@@ -507,11 +553,30 @@ export function SyncProvider({
       unlock,
       enableEncryption,
       changePassword,
+      deleteAccount,
+      reactivated,
+      dismissReactivated,
       disconnect,
       trigger,
       request,
     }),
-    [config, status, needsReauth, lastError, lastSyncedAt, connect, unlock, enableEncryption, changePassword, disconnect, trigger, request],
+    [
+      config,
+      status,
+      needsReauth,
+      lastError,
+      lastSyncedAt,
+      connect,
+      unlock,
+      enableEncryption,
+      changePassword,
+      deleteAccount,
+      reactivated,
+      dismissReactivated,
+      disconnect,
+      trigger,
+      request,
+    ],
   );
 
   return <SyncCtx.Provider value={value}>{children}</SyncCtx.Provider>;

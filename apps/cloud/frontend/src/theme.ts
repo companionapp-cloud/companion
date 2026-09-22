@@ -13,6 +13,7 @@ export const colors = {
   success: "#2f9e44",
   successSoft: "#e7f5ec",
   danger: "#d92d20",
+  dangerSoft: "#fdecea",
   toolbar: "#ffffff",
 };
 

@@ -2,6 +2,7 @@ import { render } from "@react-email/render";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { VerifyEmail } from "./VerifyEmail";
 import { ResetPassword } from "./ResetPassword";
+import { AccountDeletion } from "./AccountDeletion";
 
 // Renders each email template to static HTML with {{placeholder}} props. The Go sync server
 // (packages/syncserver, shared by the open-core server and the cloud) embeds these files and
@@ -15,6 +16,10 @@ const templates: { file: string; html: Promise<string> }[] = [
   {
     file: "reset-password.html",
     html: render(<ResetPassword resetUrl="{{resetUrl}}" firstName="{{firstName}}" />, { pretty: true }),
+  },
+  {
+    file: "account-deletion.html",
+    html: render(<AccountDeletion firstName="{{firstName}}" deleteDate="{{deleteDate}}" />, { pretty: true }),
   },
 ];
 

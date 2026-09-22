@@ -88,6 +88,8 @@ export { datesApi } from "./dates";
 export type { DatesApi, ParsedDate } from "./dates";
 export { trashApi } from "./trash";
 export type { TrashApi } from "./trash";
+export { dataApi } from "./data";
+export type { DataApi, DataKind, DataSummary } from "./data";
 export { objectTypesApi } from "./objecttypes";
 export type { ObjectTypesApi, CreateObjectTypeInput, UpdateObjectTypeInput } from "./objecttypes";
 export { projectsApi } from "./projects";

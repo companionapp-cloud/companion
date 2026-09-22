@@ -6,6 +6,7 @@ import {
   oauthApi,
   canvasesApi,
   chatsApi,
+  dataApi,
   datesApi,
   graphApi,
   importsApi,
@@ -28,6 +29,7 @@ import {
   type CanvasesApi,
   type ChatsApi,
   type CoreBridge,
+  type DataApi,
   type DatesApi,
   type GraphApi,
   type ImportsApi,
@@ -73,6 +75,8 @@ interface CoreValue {
   importFiles: ImportFilesApi;
   /** Which guided tours the user has finished or skipped (synced). */
   onboarding: OnboardingApi;
+  /** Counts and permanent clears behind Settings › Danger Zone. */
+  data: DataApi;
 }
 
 const CoreCtx = createContext<CoreValue | null>(null);
@@ -103,6 +107,7 @@ export function CoreProvider({ core, children }: { core: CoreBridge; children: R
       exports: exportsApi(core),
       importFiles: importFilesApi(core),
       onboarding: onboardingApi(core),
+      data: dataApi(core),
     }),
     [core],
   );

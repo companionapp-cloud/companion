@@ -29,7 +29,8 @@ async function req(path: string, opts: RequestInit = {}): Promise<any> {
 
 // ---- auth -----------------------------------------------------------------
 
-export type AuthResult = { token: string; userId: string };
+// reactivated is set only on the sign-in that took back a pending account deletion.
+export type AuthResult = { token: string; userId: string; reactivated?: boolean };
 
 export function register(
   email: string,
@@ -212,6 +213,8 @@ export type AdminUser = {
   isAdmin: boolean;
   emailVerified: boolean;
   subscriptionStatus: string;
+  /** When an account scheduled for deletion will be purged; absent for active accounts. */
+  deletingAt?: string;
 };
 
 export function adminUsers(): Promise<{ users: AdminUser[] }> {

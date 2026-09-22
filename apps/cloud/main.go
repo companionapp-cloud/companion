@@ -75,6 +75,9 @@ func main() {
 			Verify: func(token string) string { return baseURL + "/verify?token=" + token },
 			Reset:  func(token string) string { return baseURL + "/reset?token=" + token },
 		}),
+		// Account deletion: renewal pauses for the grace period, resumes if the user signs back
+		// in, and the subscription is cancelled for good before the account is purged.
+		syncserver.WithAccountLifecycle(bill.accountLifecycle()),
 	)
 	adm := newAdmin(db, dialect, bill, srv)
 	srv.StartTrashCollector(context.Background())

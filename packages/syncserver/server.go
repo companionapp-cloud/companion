@@ -61,6 +61,9 @@ type Server struct {
 	vapidSubject   string
 	pushEndpointOK func(endpoint string) error
 	pushLimiter    *RateLimiter
+	// lifecycle lets a wrapping binary react to account deletion (the cloud pauses and then
+	// cancels billing). Every hook is optional; the open-core server sets none.
+	lifecycle AccountLifecycle
 }
 
 // Default public/app URLs when a binary doesn't configure them (local dev).
@@ -155,6 +158,21 @@ func WithAppURL(u string) Option {
 // with its own web frontend (the cloud) points them at that frontend's pages.
 func WithEmailLinks(l EmailLinks) Option {
 	return func(s *Server) { s.links = l }
+}
+
+// AccountLifecycle lets a wrapping binary react to account deletion (the cloud stops and
+// cancels billing). Every field is optional. Purge runs again on every sweep until the
+// account is gone, so it must be idempotent.
+type AccountLifecycle struct {
+	DeletionRequested func(ctx context.Context, userID string, deletingAt time.Time) // after scheduling; errors are the hook's to log
+	DeletionCancelled func(ctx context.Context, userID string)                       // after a sign-in reactivates the account
+	Purge             func(ctx context.Context, userID string) error                 // before the account's data is deleted; an error skips the account until the next sweep
+}
+
+// WithAccountLifecycle installs hooks that run when an account is scheduled for deletion,
+// reactivated by a sign-in during its grace period, and finally purged (account_deletion.go).
+func WithAccountLifecycle(l AccountLifecycle) Option {
+	return func(s *Server) { s.lifecycle = l }
 }
 
 // New builds a Server over a SQL store (Postgres or SQLite). Options layer optional
@@ -254,6 +272,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/account/profile", s.authed(s.handleUpdateProfile))
 	mux.Handle("POST /v1/account/email", s.authed(s.handleUpdateEmail))
 	mux.Handle("POST /v1/account/password", s.authed(s.handleUpdatePassword))
+	// Account deletion re-checks the password, so it is limited per user like a credential
+	// route. It is deliberately not sync-guarded: a lapsed subscriber can still delete.
+	mux.Handle("POST /v1/account/delete", s.authed(func(w http.ResponseWriter, r *http.Request) {
+		s.authLimiter.Limit(UserKey, s.handleDeleteAccount).ServeHTTP(w, r)
+	}))
 	mux.Handle("GET /v1/sync/pull", s.authed(s.handlePull))
 	mux.Handle("POST /v1/sync/push", s.authed(s.handlePush))
 	mux.Handle("GET /v1/sync/events", s.authed(s.handleEvents))

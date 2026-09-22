@@ -26,6 +26,8 @@ export default function App() {
   const [sub, setSub] = useState<api.Subscription | null>(null);
   const [admin, setAdmin] = useState(false);
   const [error, setError] = useState("");
+  // One-line notice after a sign-in, e.g. that it took back a pending account deletion.
+  const [notice, setNotice] = useState("");
 
   useAnalytics(account);
 
@@ -87,6 +89,7 @@ export default function App() {
     setAccount(null);
     setSub(null);
     setAdmin(false);
+    setNotice("");
     setView("home");
     navigate("/");
     setScreen("auth");
@@ -121,7 +124,8 @@ export default function App() {
     return (
       <View style={g.screen}>
         <Auth
-          onAuthed={() => {
+          onAuthed={(reactivated) => {
+            setNotice(reactivated ? "Welcome back. Your account is no longer scheduled for deletion." : "");
             setScreen("loading");
             load();
           }}
@@ -155,6 +159,9 @@ export default function App() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: 20 }} style={{ flex: 1 }}>
         {error ? (
           <Text style={[g.error, { textAlign: "center", paddingTop: 12 }]}>{error}</Text>
+        ) : null}
+        {notice ? (
+          <Text style={[g.success, { textAlign: "center", paddingTop: 12 }]}>{notice}</Text>
         ) : null}
         {view === "settings" && account ? (
           <Settings account={account} onBack={() => setView("home")} onAccountChanged={setAccount} />

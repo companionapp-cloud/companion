@@ -6,8 +6,9 @@ import { styles as g } from "./theme";
 type Mode = "login" | "register" | "forgot";
 
 // Sign in / sign up / forgot-password card. Registration optionally collects a name;
-// "forgot" emails a reset link (handled at /reset).
-export default function Auth(props: { onAuthed: () => void }) {
+// "forgot" emails a reset link (handled at /reset). onAuthed learns whether the sign-in
+// took back a pending account deletion.
+export default function Auth(props: { onAuthed: (reactivated: boolean) => void }) {
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -40,7 +41,7 @@ export default function Auth(props: { onAuthed: () => void }) {
       api.setToken(res.token);
       // The server sends the first verification email on registration itself (when SMTP is
       // configured); the VerifyScreen's "Resend" covers dev setups that only log the link.
-      props.onAuthed();
+      props.onAuthed(!!res.reactivated);
     } catch (e: any) {
       setError(e.message);
       setBusy(false);

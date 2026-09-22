@@ -276,6 +276,22 @@
       ],
       "port": 5429,
       "autoPort": false
+    },
+    {
+      "name": "web-danger",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@companion/web",
+        "--",
+        "--port",
+        "5437",
+        "--strictPort"
+      ],
+      "port": 5437,
+      "autoPort": false
     }
   ]
 }

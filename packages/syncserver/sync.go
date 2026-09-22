@@ -24,6 +24,16 @@ func isSeedRow(raw json.RawMessage) bool {
 	return t.IsRepeatSeed()
 }
 
+// isTombstoneRow reports whether a pushed row is a tombstone (deletedAt set). deletedAt is sync
+// metadata, so it stays plaintext even on an encrypted account, where only protected fields
+// like a filename are sealed. A decode failure is treated as "not a tombstone".
+func isTombstoneRow(raw json.RawMessage) bool {
+	var row struct {
+		DeletedAt *time.Time `json:"deletedAt"`
+	}
+	return json.Unmarshal(raw, &row) == nil && row.DeletedAt != nil
+}
+
 // isRepeatingProjectRow reports whether a pushed project row carries a repeat definition, so
 // its next copy is checked for at once. A decode failure is treated as "doesn't repeat".
 func isRepeatingProjectRow(raw json.RawMessage) bool {
@@ -149,6 +159,7 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 	var maxSeq int64
 	seedIDs := map[string]bool{}    // repeating-task seeds touched by this push
 	projectIDs := map[string]bool{} // repeating projects touched by this push
+	var deletedDocs []string        // documents this push deleted for good
 	for _, ch := range req.Changes {
 		e := handlers[ch.EntityType]
 		if e == nil {
@@ -170,7 +181,20 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 		if res.Status == protocol.StatusAccepted && ch.EntityType == protocol.EntityProject && isRepeatingProjectRow(ch.Row) {
 			projectIDs[ch.ID] = true
 		}
+		if res.Status == protocol.StatusAccepted && ch.EntityType == protocol.EntityDocument && isTombstoneRow(ch.Row) {
+			deletedDocs = append(deletedDocs, ch.ID)
+		}
 		results = append(results, res)
+	}
+	// A document deleted for good on a device ("delete forever", or clearing its data) releases
+	// its bytes now: the Trash collector only reaches rows that expire out of the Trash (PLAN
+	// §6.9). This runs after the whole batch, so a row in the same push that still names the
+	// hash keeps the bytes. Best-effort like the collector's GC: a failure leaves an orphaned
+	// object and never fails the push.
+	for _, id := range deletedDocs {
+		if err := s.gcDocumentBlob(uid, id); err != nil {
+			log.Printf("push: blob gc for document %s: %v", id, err)
+		}
 	}
 	// Calendar feeds and events are now fetched and pushed by the client (PLAN §E2EE), so the
 	// server no longer reacts to a feed push — the client's own push carries the expanded events.

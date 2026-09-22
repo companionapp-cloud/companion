@@ -9,6 +9,8 @@ export interface AuthResult {
   /** RFC3339 timestamp at which `token` expires. */
   expiresAt: string;
   userId: string;
+  /** Set on a login that cancelled the account's scheduled deletion (see deleteAccount). */
+  reactivated?: boolean;
 }
 
 async function authFetch(baseUrl: string, path: "login" | "register", email: string, password: string): Promise<AuthResult> {
@@ -93,6 +95,23 @@ export async function changePassword(
     throw new Error(data?.error || `password change failed (${res.status})`);
   }
   return data as AuthResult;
+}
+
+/** Schedule the account for deletion. The server deletes it and everything in it 30 days later,
+ *  and signs out every device now, this one included; logging in again before then cancels the
+ *  deletion (the login result says `reactivated`). `credential` is what login takes: the password,
+ *  or for an encrypted account the auth key derived from it. Resolves with when the account goes. */
+export async function deleteAccount(baseUrl: string, token: string, credential: string): Promise<{ deletingAt: string }> {
+  const res = await fetch(`${trimSlash(baseUrl)}/v1/account/delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ password: credential }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.error || `account deletion failed (${res.status})`);
+  }
+  return data as { deletingAt: string };
 }
 
 /** Request a password-reset email for an address (cloud-only; open-core servers may 404). Always

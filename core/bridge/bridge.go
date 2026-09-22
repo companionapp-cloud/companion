@@ -257,6 +257,10 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.trashPurge(payload)
 	case "trash.empty":
 		return c.trashEmpty()
+	case "data.summary":
+		return c.dataSummary()
+	case "data.clear":
+		return c.dataClear(payload)
 	case "areas.list":
 		return c.areasList()
 	case "areas.create":

@@ -32,6 +32,7 @@ export function UsersList() {
             <View style={[s.cell, s.grow]}>
               <Text style={s.email}>{u.email}</Text>
               {u.isAdmin ? <Text style={s.adminTag}>admin</Text> : null}
+              {u.deletingAt ? <DeletingBadge at={u.deletingAt} /> : null}
             </View>
             <Text style={[s.cell, s.colName, s.muted]}>{fullName(u) || "—"}</Text>
             <View style={[s.cell, s.colStatus]}>
@@ -145,6 +146,7 @@ export function UserDetail(props: { id: string }) {
 
       <View style={g.card}>
         <Text style={g.cardTitle}>Edit user</Text>
+        {user.deletingAt ? <DeletingBadge at={user.deletingAt} /> : null}
         <Labeled label="Email">
           <TextInput style={g.input} value={email} onChangeText={setEmail} autoCapitalize="none" />
         </Labeled>
@@ -231,6 +233,18 @@ export function SubBadge(props: { status: string }) {
   return (
     <View style={[g.badge, { backgroundColor: active ? colors.successSoft : "#f3f3f0" }]}>
       <Text style={[g.badgeText, { color: active ? colors.success : colors.muted }]}>{props.status}</Text>
+    </View>
+  );
+}
+
+// DeletingBadge flags an account its owner asked to delete, with the day it will be purged
+// (signing in before then restores it).
+function DeletingBadge(props: { at: string }) {
+  return (
+    <View style={[g.badge, { backgroundColor: colors.dangerSoft, marginTop: 4 }]}>
+      <Text style={[g.badgeText, { color: colors.danger, textTransform: "none" }]}>
+        Deleting {shortDate(props.at)}
+      </Text>
     </View>
   );
 }

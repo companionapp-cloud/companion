@@ -11,6 +11,7 @@ import { ExportSettings } from "./ExportSettings";
 import { GitSyncSettings } from "./GitSyncSettings";
 import { shortcutStore } from "./shortcuts";
 import { TourSettings } from "./onboarding/TourSettings";
+import { DangerZoneSettings } from "./DangerZoneSettings";
 import { toursAvailable } from "./onboarding/OnboardingProvider";
 import { NotificationSettings } from "./push/NotificationSettings";
 import { webPushHost } from "./push/webPush";
@@ -36,7 +37,8 @@ export type SettingsSectionId =
   | "export"
   | "tools"
   | "shortcuts"
-  | "tutorials";
+  | "tutorials"
+  | "danger";
 
 /** One entry in the settings navigation list (PLAN §3.1 shell). Each section is a
  *  self-contained component that reads its own data through the app providers, so the
@@ -130,6 +132,14 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
     Component: TourSettings,
     // Wherever a shell runs the tutorials (all of them do; a focus or capture window doesn't).
     available: toursAvailable,
+  },
+  {
+    // Last, where a destructive page is expected and least likely to be opened by accident.
+    id: "danger",
+    label: "Danger Zone",
+    description: "Permanently delete data or your account",
+    icon: "alert",
+    Component: DangerZoneSettings,
   },
 ];
 
