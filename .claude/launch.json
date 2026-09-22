@@ -228,6 +228,22 @@
       ],
       "port": 5407,
       "autoPort": false
+    },
+    {
+      "name": "web-mobile",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@companion/web",
+        "--",
+        "--port",
+        "5410",
+        "--strictPort"
+      ],
+      "port": 5410,
+      "autoPort": false
     }
   ]
 }

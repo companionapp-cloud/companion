@@ -1,4 +1,5 @@
 import type { TableMenuItem } from "./tableCommands";
+import { visibleArea } from "./viewport";
 
 // The built-in web/desktop-webview HTML popup for the table menu. Desktop (Wails) and iOS
 // present a *native* menu from the same model instead (see tableMenu.ts / the host shells);
@@ -78,13 +79,13 @@ export function openTableMenu(req: TableMenuRequest): void {
   for (const item of req.items) root.appendChild(renderItem(item, pick));
   document.body.appendChild(root);
 
-  // Clamp within the viewport.
-  const { innerWidth, innerHeight } = window;
+  // Clamp within the visible part of the viewport (an on-screen keyboard's not included).
+  const area = visibleArea();
   const rect = root.getBoundingClientRect();
-  const x = Math.min(req.anchor.x, innerWidth - rect.width - 8);
-  const y = Math.min(req.anchor.y, innerHeight - rect.height - 8);
-  root.style.left = `${Math.max(8, x)}px`;
-  root.style.top = `${Math.max(8, y)}px`;
+  const x = Math.min(req.anchor.x, area.right - rect.width - 8);
+  const y = Math.min(req.anchor.y, area.bottom - rect.height - 8);
+  root.style.left = `${Math.max(area.left + 8, x)}px`;
+  root.style.top = `${Math.max(area.top + 8, y)}px`;
 
   const onDocMouseDown = (e: MouseEvent) => {
     if (!root.contains(e.target as Node)) close();

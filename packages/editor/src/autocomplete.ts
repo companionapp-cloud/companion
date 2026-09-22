@@ -4,6 +4,7 @@ import type { Schema } from "prosemirror-model";
 import { wikilinkNode, LINK_TYPES, normalizeLinkType } from "./wikilink";
 import { detectTrigger, triggerKey as key, type Trigger } from "./wikilinkTrigger";
 import type { LinkSource, LinkSuggestion, LinkType } from "./types";
+import { visibleArea } from "./viewport";
 
 // The `[[` autocomplete (web/desktop). Typing `[[` (or `![[` for an embed) anchors a
 // floating result list at the caret. Unlike the old popup, focus stays in the editor: what
@@ -74,21 +75,22 @@ export function wikilinkAutocomplete(linkSource: LinkSource, schema: Schema): Pl
     }
     const margin = 8;
     const rect = ui.root.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+    // The visible edges, not the window's: under an iOS keyboard the window still reaches the
+    // bottom of the screen, and a picker placed down there opens behind the keys.
+    const area = visibleArea();
 
     // Horizontal: align under the caret, then pull back inside the right/left edges.
     let left = coords.left;
-    if (left + rect.width + margin > vw) left = vw - rect.width - margin;
-    if (left < margin) left = margin;
+    if (left + rect.width + margin > area.right) left = area.right - rect.width - margin;
+    if (left < area.left + margin) left = area.left + margin;
 
     // Vertical: below the caret by default; flip above when it wouldn't fit below but
     // would above; otherwise clamp to the bottom edge.
     const below = coords.bottom + 4;
     const above = coords.top - rect.height - 4;
     let top = below;
-    if (below + rect.height + margin > vh && above >= margin) top = above;
-    else if (top + rect.height + margin > vh) top = Math.max(margin, vh - rect.height - margin);
+    if (below + rect.height + margin > area.bottom && above >= area.top + margin) top = above;
+    else if (top + rect.height + margin > area.bottom) top = Math.max(area.top + margin, area.bottom - rect.height - margin);
 
     ui.root.style.left = `${Math.round(left)}px`;
     ui.root.style.top = `${Math.round(top)}px`;
@@ -117,6 +119,9 @@ export function wikilinkAutocomplete(linkSource: LinkSource, schema: Schema): Pl
       document.addEventListener("mousedown", onDocMouseDown, true);
       window.addEventListener("resize", onViewportChange);
       window.addEventListener("scroll", onViewportChange, true);
+      // The keyboard coming up (or changing height) moves the visible edges without a window resize.
+      window.visualViewport?.addEventListener("resize", onViewportChange);
+      window.visualViewport?.addEventListener("scroll", onViewportChange);
     }
     // Re-run the search only when the query actually changed (or on first open); the caret
     // may have moved either way, so always reposition.
@@ -137,6 +142,8 @@ export function wikilinkAutocomplete(linkSource: LinkSource, schema: Schema): Pl
     document.removeEventListener("mousedown", onDocMouseDown, true);
     window.removeEventListener("resize", onViewportChange);
     window.removeEventListener("scroll", onViewportChange, true);
+    window.visualViewport?.removeEventListener("resize", onViewportChange);
+    window.visualViewport?.removeEventListener("scroll", onViewportChange);
   }
 
   function runSearch(): void {

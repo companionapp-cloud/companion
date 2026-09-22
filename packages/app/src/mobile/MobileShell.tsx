@@ -37,7 +37,7 @@ import { SettingsListScreen, SettingsSectionScreen } from "./SettingsScreens";
 import { GraphScreen } from "./GraphScreen";
 import { HabitsScreen, LogbookRouteScreen, NotificationsRouteScreen, TrashRouteScreen } from "./UtilityScreens";
 import { ThingsImportHost } from "../ThingsImport";
-import { PushPromptBanner } from "../push/PushPromptBanner";
+import { IOSPWAInstallBanner } from "../push/IOSPWAInstallBanner";
 import { InstallGuideRouteScreen } from "../push/InstallGuide";
 
 // ---------------------------------------------------------------------------
@@ -344,7 +344,7 @@ function MobileNavBridge({
       <ThingsImportHost />
       <View style={[styles.root, { paddingTop: topInset }]}>
         <SyncHealthBanner onOpenSettings={() => nav.openRef({ kind: "view", view: "settings", section: "sync" })} />
-        <PushPromptBanner />
+        <IOSPWAInstallBanner />
         <View style={styles.content}>{children}</View>
       </View>
     </NavContext.Provider>

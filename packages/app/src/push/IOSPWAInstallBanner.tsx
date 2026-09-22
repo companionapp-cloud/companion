@@ -8,7 +8,7 @@ import { detectIos, dismissInstallPrompt, shouldOfferInstall } from "./iosInstal
  *  Safari on an iPhone or iPad (iOS 16.4+), the only way to launch it full screen with its own
  *  icon, no address bar. Dismissing it snoozes it for a while. Nothing shows anywhere else, or
  *  on the install guide itself. */
-export function PushPromptBanner({ leftInset = 0 }: { leftInset?: number }) {
+export function IOSPWAInstallBanner({ leftInset = 0 }: { leftInset?: number }) {
   const nav = useNav();
   const touch = useDensity() === "touch";
   const [offerInstall, setOfferInstall] = useState(() => shouldOfferInstall());
