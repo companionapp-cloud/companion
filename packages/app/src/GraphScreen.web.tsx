@@ -7,6 +7,7 @@ import { useStyledGraph } from "./useStyledGraph";
 // counterpart, so it is only ever imported by other .web files. The suffix lets tsc and
 // Vite resolve it while native bundlers never reach it.
 import { GraphEmpty, GraphView, graphCodeStyle } from "./GraphView.web";
+import { TourAnchor } from "./onboarding/anchors";
 
 // The whole-knowledgebase graph (PLAN §5.3), a top-level nav screen. React Flow is
 // DOM-only, so this is the .web variant; native gets a placeholder (GraphScreen.tsx).
@@ -29,16 +30,17 @@ export function GraphScreen() {
     return core.on("data.changed", () => void refresh());
   }, [core, refresh]);
 
-  if (loaded && graph.nodes.length === 0) {
-    return (
-      <GraphEmpty>
-        Your graph is empty. Create a few notes and link them with{" "}
-        <code style={graphCodeStyle}>[[note:&lt;id&gt;]]</code> — linked notes will appear here connected.
-      </GraphEmpty>
-    );
-  }
-
+  // The graph tour lights up the whole canvas (or its empty state).
   return (
-    <GraphView graph={styledGraph} menu onOpenNode={openNode} />
+    <TourAnchor id="graph.canvas" style={{ flex: 1 }}>
+      {loaded && graph.nodes.length === 0 ? (
+        <GraphEmpty>
+          Your graph is empty. Create a few notes and link them with{" "}
+          <code style={graphCodeStyle}>[[note:&lt;id&gt;]]</code> — linked notes will appear here connected.
+        </GraphEmpty>
+      ) : (
+        <GraphView graph={styledGraph} menu onOpenNode={openNode} />
+      )}
+    </TourAnchor>
   );
 }

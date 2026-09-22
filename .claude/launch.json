@@ -244,6 +244,22 @@
       ],
       "port": 5410,
       "autoPort": false
+    },
+    {
+      "name": "web-onboarding",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@companion/web",
+        "--",
+        "--port",
+        "5418",
+        "--strictPort"
+      ],
+      "port": 5418,
+      "autoPort": false
     }
   ]
 }

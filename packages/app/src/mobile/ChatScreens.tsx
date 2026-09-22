@@ -9,6 +9,7 @@ import { useCalendarItemSheet } from "./CalendarScreens";
 import { useNav } from "../nav-context";
 import { timeAgo } from "../NotificationRow";
 import { Card, CardRow, EmptyCaption, FAB_CLEARANCE, Fab, NavAction, NavBar, ROW_ICON_INSET, RowIcon } from "./ui";
+import { TourAnchor } from "../onboarding/anchors";
 
 // Mobile web chat — ports of the native app's ChatListScreen/ChatScreen: a full-screen
 // grouped list of conversations that pushes to the conversation screen. A working chat
@@ -49,6 +50,7 @@ export function ChatListScreen() {
   return (
     <View style={styles.root}>
       <NavBar title="Chat" />
+      <TourAnchor id="chat.surface" style={styles.surface}>
       <ScrollView contentContainerStyle={styles.list}>
         {list.length ? (
           <Card>
@@ -80,6 +82,7 @@ export function ChatListScreen() {
           <EmptyCaption>No chats yet. Start one.</EmptyCaption>
         )}
       </ScrollView>
+      </TourAnchor>
       <Fab label="New chat" onPress={() => void newChat()} />
     </View>
   );
@@ -140,6 +143,8 @@ export function ChatConversationScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.surfaceApp },
+  // The list's area under the bar: what the chat tutorial points at.
+  surface: { flex: 1, minHeight: 0 },
   list: { paddingHorizontal: space.ml, paddingTop: space.ml, paddingBottom: FAB_CLEARANCE, flexGrow: 1 },
   // Matches the delete button's box so rows don't shift when a reply starts generating.
   working: { width: 30, height: 30, alignItems: "center", justifyContent: "center" },

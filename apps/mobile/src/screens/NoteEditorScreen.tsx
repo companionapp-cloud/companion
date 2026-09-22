@@ -2,7 +2,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useCore, useNotes, useTasks, MembershipPicker, ConfirmDialog, NoteConflictDialog, useNoteSyncGuard, useQuickCreateLink, ArchetypeChip, ObjectMetadataPanel, timeAgo, useNoteInk, useDrawingTool, DrawingBar, DocTitleField } from '@companion/app';
+import { TourAnchor, useCore, useNotes, useTasks, MembershipPicker, ConfirmDialog, NoteConflictDialog, useNoteSyncGuard, useQuickCreateLink, ArchetypeChip, ObjectMetadataPanel, timeAgo, useNoteInk, useDrawingTool, DrawingBar, DocTitleField } from '@companion/app';
 import { Center, Icon, IconButton, Text, colors, space } from '@companion/design-system';
 import type { ObjectProps } from '@companion/core-bridge';
 import { Editor, type EditorController, type InkState, type LinkRef, type LinkSource } from '@companion/editor';
@@ -145,8 +145,12 @@ export function NoteEditorScreen() {
       headerRight: () => (
         <NavActions>
           <NavAction icon="folder" label="Add to projects" onPress={() => setShowProjects(true)} />
-          <NavAction icon="pen" label={drawing ? 'Stop drawing' : 'Draw on note'} active={drawing} onPress={() => setDrawing((v) => !v)} />
-          <NavAction icon="graph" label="Show note graph" onPress={() => nav.navigate('NoteGraph', { id: noteId })} />
+          <TourAnchor id="note.ink">
+            <NavAction icon="pen" label={drawing ? 'Stop drawing' : 'Draw on note'} active={drawing} onPress={() => setDrawing((v) => !v)} />
+          </TourAnchor>
+          <TourAnchor id="note.graph">
+            <NavAction icon="graph" label="Show note graph" onPress={() => nav.navigate('NoteGraph', { id: noteId })} />
+          </TourAnchor>
           <NavAction icon="panelRight" label="Show metadata" onPress={() => setShowMeta(true)} />
           <NavAction icon="trash" label="Delete note" onPress={() => setConfirmDelete(true)} />
         </NavActions>
@@ -178,7 +182,9 @@ export function NoteEditorScreen() {
           }}
         />
       </View>
-      {body}
+      <TourAnchor id="note.body" style={styles.body}>
+        {body}
+      </TourAnchor>
       {drawing ? (
         <DrawingBar
           tool={tool}
@@ -273,6 +279,8 @@ function NoteMetadataSheet({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceCard },
+  // The editor under the title: what the notes tutorial's Markdown step points at.
+  body: { flex: 1 },
   // Centered in the same 720px column as the editor body (.pm-wrap in
   // packages/editor/src/styles.ts), with its 20px / 28px inset (wider above 640px), so the
   // title lines up with the content beneath it on a phone and an iPad alike.

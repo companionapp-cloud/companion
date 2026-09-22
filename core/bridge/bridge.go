@@ -521,6 +521,12 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.exportSSHKeyGenerate()
 	case "export.sshKey.discard":
 		return c.exportSSHKeyDiscard(payload)
+	case "onboarding.list":
+		return c.onboardingList()
+	case "onboarding.record":
+		return c.onboardingRecord(payload)
+	case "onboarding.reset":
+		return c.onboardingReset(payload)
 	default:
 		return nil, fmt.Errorf("unknown method %q", method)
 	}

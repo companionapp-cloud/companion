@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
+import { NavigationContainer, StackActions, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { colors } from '@companion/design-system';
-import { SyncHealthBanner, useSync } from '@companion/app';
+import { OnboardingProvider, SyncHealthBanner, useSync, type ToolPlace, type TourHost, type TourPlace } from '@companion/app';
 import { stackHeader } from './ui/native';
 import { HomeScreen } from './screens/HomeScreen';
 import { TodayScreen } from './screens/TodayScreen';
@@ -96,6 +96,53 @@ export type AreaTabParamList = {
 
 const RootStack = createNativeStackNavigator<RootStackParamList>();
 
+/** The route each tool opens on, for the tutorials' replays. */
+const TOOL_ROUTE: Record<ToolPlace, keyof RootStackParamList> = {
+  home: 'Home',
+  today: 'Today',
+  chat: 'Chat',
+  calendar: 'Calendar',
+  notes: 'Notes',
+  tasks: 'Tasks',
+  graph: 'Graph',
+};
+
+/** A screen, in the tutorials' terms: the stack's route, and for an area or a project the tab
+ *  inside it (its overview has a tutorial, its sections don't). */
+function tourPlace(root: string, leaf: string): TourPlace {
+  switch (root) {
+    case 'Home':
+      return 'home';
+    case 'Today':
+      return 'today';
+    case 'Chat':
+      return 'chat';
+    case 'Calendar':
+      return 'calendar';
+    case 'Notes':
+      return 'notes';
+    case 'NoteEditor':
+      return 'note';
+    case 'Tasks':
+      return 'tasks';
+    case 'TaskEditor':
+      return 'task';
+    case 'Graph':
+      return 'graph';
+    case 'Area':
+      return leaf === 'Area' || leaf === 'AreaOverview' ? 'area' : 'area-section';
+    case 'Project':
+      return leaf === 'Project' || leaf === 'ProjectOverview' ? 'project' : 'project-section';
+    case 'Settings':
+    case 'SettingsSection':
+      return 'settings';
+    default:
+      return 'other';
+  }
+}
+
+type RouteParams = { id?: string; areaId?: string; projectId?: string } | undefined;
+
 export function MobileShell() {
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
   const insets = useSafeAreaInsets();
@@ -105,6 +152,45 @@ export function MobileShell() {
   const sync = useSync();
   const bannerShown = sync.connected && (sync.status === 'locked' || sync.needsReauth);
   const navInsets = useMemo(() => (bannerShown ? { ...insets, top: 0 } : insets), [bannerShown, insets]);
+
+  // Where the user is, for the tutorials: the stack's top route and the tab inside it. The app
+  // opens on Home, which stands in until the container is ready.
+  const [route, setRoute] = useState<{ root: string; leaf: string; params: RouteParams }>({ root: 'Home', leaf: 'Home', params: undefined });
+  const readRoute = useCallback(() => {
+    if (!navigationRef.isReady()) return;
+    const state = navigationRef.getRootState();
+    const top = state.routes[state.index];
+    const leaf = navigationRef.getCurrentRoute();
+    setRoute({ root: top.name, leaf: leaf?.name ?? top.name, params: top.params as RouteParams });
+  }, [navigationRef]);
+  const tourHost = useMemo<TourHost>(() => {
+    const { root, leaf, params } = route;
+    const push = (name: keyof RootStackParamList, p: object) => {
+      if (navigationRef.isReady()) navigationRef.dispatch(StackActions.push(name, p));
+    };
+    return {
+      layout: 'mobile',
+      place: tourPlace(root, leaf),
+      placeKey: `${root}:${leaf}:${params?.id ?? params?.areaId ?? params?.projectId ?? ''}`,
+      doc: (root === 'NoteEditor' || root === 'TaskEditor') && params?.id ? { kind: root === 'NoteEditor' ? 'note' : 'task', id: params.id } : null,
+      insets: { top: insets.top, bottom: insets.bottom },
+      go: (to) => {
+        if (navigationRef.isReady()) navigationRef.navigate(TOOL_ROUTE[to] as never);
+      },
+      openNote: (id) => push('NoteEditor', { id }),
+      openTask: (id) => push('TaskEditor', { id }),
+      openArea: (areaId) => push('Area', { areaId }),
+      openProject: (projectId) => push('Project', { projectId }),
+      openSettings: (section) => {
+        if (!navigationRef.isReady()) return;
+        if (section) navigationRef.navigate('SettingsSection', { section });
+        else navigationRef.navigate('Settings');
+      },
+      back: () => {
+        if (navigationRef.isReady() && navigationRef.canGoBack()) navigationRef.goBack();
+      },
+    };
+  }, [route, insets.top, insets.bottom, navigationRef]);
 
   // Deep-link a tapped reminder to its task (PLAN §6.4). navigate() is safe to call once the
   // container is ready; guard because a cold-start tap can resolve before that.
@@ -143,7 +229,9 @@ export function MobileShell() {
           carries the top safe-area inset so it clears the status bar when visible (§7). */}
       <SyncHealthBanner onOpenSettings={() => navigationRef.navigate('Settings')} topInset={insets.top} />
       <SafeAreaInsetsContext.Provider value={navInsets}>
-        <NavigationContainer ref={navigationRef} onReady={() => void 0}>
+        {/* The tutorials: one per tool, each started the first time the user opens it. */}
+        <OnboardingProvider host={tourHost}>
+        <NavigationContainer ref={navigationRef} onReady={readRoute} onStateChange={readRoute}>
           <RootStack.Navigator
             screenOptions={{
               header: stackHeader,
@@ -151,7 +239,8 @@ export function MobileShell() {
             }}
           >
             <RootStack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
-            <RootStack.Screen name="Today" component={TodayScreen} options={{ title: 'Today' }} />
+            {/* Today hangs its Note/Agenda segments under the bar, like Notes and Tasks below. */}
+            <RootStack.Screen name="Today" component={TodayScreen} options={{ title: 'Today', headerShadowVisible: false }} />
             <RootStack.Screen name="Chat" component={ChatListScreen} options={{ title: 'Chat' }} />
             <RootStack.Screen name="ChatConversation" component={ChatScreen} options={{ title: 'Chat' }} />
             {/* Notes and Tasks hang their segmented filter under the bar, so the bar's hairline
@@ -178,6 +267,7 @@ export function MobileShell() {
             <RootStack.Screen name="SettingsSection" component={SettingsSectionScreen} options={{ title: 'Settings' }} />
           </RootStack.Navigator>
         </NavigationContainer>
+        </OnboardingProvider>
       </SafeAreaInsetsContext.Provider>
     </View>
   );

@@ -22,6 +22,7 @@ import { NavContext } from "./nav-context";
 import { timeAgo } from "./NotificationRow";
 import { ExportMenu } from "./export/ExportMenu";
 import { DocTitleField } from "./TaskEditor";
+import { TourAnchor } from "./onboarding/anchors";
 
 export interface NoteEditorProps {
   note: Note;
@@ -184,25 +185,29 @@ export function NoteEditor({
         <IconButton label="Move to an area or project" size={btn} onPress={() => setShowProjects(true)}>
           <Icon name="folder" size={glyph} color={colors.textSecondary} />
         </IconButton>
-        <IconButton
-          label={drawing ? "Stop drawing" : "Draw on note"}
-          size={btn}
-          active={drawing && !showGraph}
-          onPress={() => {
-            setShowGraph(false);
-            setDrawing(!drawing || showGraph);
-          }}
-        >
-          <Icon name="pen" size={glyph} color={drawing && !showGraph ? colors.textAccent : colors.textSecondary} />
-        </IconButton>
-        <IconButton
-          label={showGraph ? "Show document" : "Show note graph"}
-          size={btn}
-          active={showGraph}
-          onPress={() => setShowGraph((v) => !v)}
-        >
-          <Icon name="graph" size={glyph} color={showGraph ? colors.textAccent : colors.textSecondary} />
-        </IconButton>
+        <TourAnchor id="note.ink">
+          <IconButton
+            label={drawing ? "Stop drawing" : "Draw on note"}
+            size={btn}
+            active={drawing && !showGraph}
+            onPress={() => {
+              setShowGraph(false);
+              setDrawing(!drawing || showGraph);
+            }}
+          >
+            <Icon name="pen" size={glyph} color={drawing && !showGraph ? colors.textAccent : colors.textSecondary} />
+          </IconButton>
+        </TourAnchor>
+        <TourAnchor id="note.graph">
+          <IconButton
+            label={showGraph ? "Show document" : "Show note graph"}
+            size={btn}
+            active={showGraph}
+            onPress={() => setShowGraph((v) => !v)}
+          >
+            <Icon name="graph" size={glyph} color={showGraph ? colors.textAccent : colors.textSecondary} />
+          </IconButton>
+        </TourAnchor>
         <IconButton
           label={showMeta ? "Hide metadata" : "Show metadata"}
           size={btn}
@@ -236,7 +241,7 @@ export function NoteEditor({
             </View>
           ) : (
             <ScrollView style={{ flex: 1 }} contentContainerStyle={touch ? styles.pageTouch : styles.page}>
-              <View style={styles.doc}>
+              <TourAnchor id="note.body" style={styles.doc}>
                 <DocTitleField
                   value={title}
                   placeholder="Untitled"
@@ -306,7 +311,7 @@ export function NoteEditor({
                     }}
                   />
                 </View>
-              </View>
+              </TourAnchor>
             </ScrollView>
           )}
 

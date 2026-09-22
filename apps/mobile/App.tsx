@@ -4,7 +4,7 @@ import { useURL } from 'expo-linking';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import EventSource from 'react-native-sse';
-import { CoreProvider, NotesProvider, TasksProvider, RemindersProvider, NotificationsProvider, ProjectsProvider, ObjectTypesProvider, CalendarProvider, CanvasesProvider, SyncProvider, ToolVisibilityProvider, RecoveryResetScreen, type NotificationScheduler } from '@companion/app';
+import { CoreProvider, NotesProvider, TasksProvider, RemindersProvider, NotificationsProvider, ProjectsProvider, ObjectTypesProvider, CalendarProvider, CanvasesProvider, SyncProvider, ToolVisibilityProvider, RecoveryResetScreen, OnboardingStateProvider, WelcomeSheet, type NotificationScheduler } from '@companion/app';
 import { createNativeSyncNotifier, type CoreBridge, type SyncNotifier } from '@companion/core-bridge';
 import { DensityProvider, Spinner, Text, colors, space } from '@companion/design-system';
 import { MobileShell } from './src/MobileShell';
@@ -13,12 +13,14 @@ import { nativeSyncStorage } from './src/syncStorage';
 import { nativeToolsStorage } from './src/toolsStorage';
 import { registerIcsFilePicker } from './src/icsFilePicker';
 import { registerThingsSourcePicker } from './src/thingsSourcePicker';
+import { registerTourMeasurer } from './src/tourMeasure';
 import { WatchTasksBridge } from './src/WatchTasksBridge';
 
 // Register the native .ics file picker so the shared CalendarSettings can upload calendars
 // on mobile (web uses its own DOM picker). Module-scope: runs once at import.
 registerIcsFilePicker();
 registerThingsSourcePicker();
+registerTourMeasurer();
 
 // Opens the on-device SQLite database via the shared core singleton, wraps it in the
 // shared CoreBridge, then mounts the shared data layer (Core/Sync/Notes providers)
@@ -106,7 +108,12 @@ function Root() {
                           no-op elsewhere). Sits inside Tasks/Projects/Calendar since it reads all three. */}
                       <WatchTasksBridge />
                       <ToolVisibilityProvider storage={nativeToolsStorage}>
-                        <MobileShell />
+                        {/* Everyone reads the welcome sheet once before the app is theirs; the
+                            tutorials it asks about run inside the shell. */}
+                        <OnboardingStateProvider>
+                          <MobileShell />
+                          <WelcomeSheet />
+                        </OnboardingStateProvider>
                       </ToolVisibilityProvider>
                     </CanvasesProvider>
                     </CalendarProvider>

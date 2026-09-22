@@ -16,6 +16,7 @@ import {
   type PressState,
 } from "@companion/design-system";
 import { useNav } from "../nav-context";
+import { useTourAnchor } from "../onboarding/anchors";
 
 // Building blocks for the mobile *web* shell — a port of the native app's inset-grouped
 // cards (apps/mobile/src/ui/native.tsx) minus the per-OS branches: on the web we always
@@ -165,10 +166,15 @@ export function Checkbox({ checked, onPress, label }: { checked: boolean; onPres
   );
 }
 
-/** The accent circular create button, floated over a screen's bottom-right corner. */
-export function Fab({ label, onPress, icon = "plus" }: { label: string; onPress: () => void; icon?: IconName }) {
+/** The accent circular create button, floated over a screen's bottom-right corner. `anchor` makes
+ *  it a tutorial anchor (it floats, so it can't be wrapped in one). */
+export function Fab({ label, onPress, icon = "plus", anchor }: { label: string; onPress: () => void; icon?: IconName; anchor?: string }) {
+  const anchorRef = useTourAnchor(anchor ?? "");
+  // `ref` isn't in the shared RN typing's Pressable props, hence the spread.
+  const refProps = (anchor ? { ref: anchorRef } : {}) as Record<string, unknown>;
   return (
     <Pressable
+      {...refProps}
       onPress={onPress}
       aria-label={label}
       style={({ hovered, pressed }: PressState) => [

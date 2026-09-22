@@ -36,6 +36,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { useCore } from "./CoreContext";
 import { useLinkSource } from "./useLinkSource";
 import { useNav } from "./nav-context";
+import { TourAnchor } from "./onboarding/anchors";
 import { timeAgo } from "./NotificationRow";
 import { useSync } from "./SyncProvider";
 
@@ -283,9 +284,11 @@ export function ChatView({
               </Text>
               {hasProvider ? selector("header") : null}
               {onConfigure ? (
-                <IconButton label="Model settings" size="sm" onPress={onConfigure}>
-                  <Icon name="settings" size={13} color={colors.textSecondary} />
-                </IconButton>
+                <TourAnchor id="chat.setup">
+                  <IconButton label="Model settings" size="sm" onPress={onConfigure}>
+                    <Icon name="settings" size={13} color={colors.textSecondary} />
+                  </IconButton>
+                </TourAnchor>
               ) : null}
               {onDelete ? (
                 <IconButton label="Delete chat" size="sm" disabled={working} onPress={() => setConfirmDelete(true)}>
@@ -609,34 +612,38 @@ export function ChatsScreen() {
 
   // Rendered directly (no Frame) — the AppShell already wraps every screen in a Frame card,
   // so self-wrapping here would produce a card-inside-a-card (double border + gray inset).
-  return noProvider ? (
-    <EmptyState onConfigure={openSettings} />
-  ) : (
-    <SplitView
-      aside={<ChatList chats={chats} selectedId={selectedId} onSelect={setSelectedId} onNew={newChat} />}
-      storageKey="companion.chat.listWidth"
-      defaultWidth={220}
-      minWidth={180}
-      maxWidth={320}
-    >
-      <View style={styles.detail}>
-        {selectedId ? (
-          <ChatView
-            chatId={selectedId}
-            onOpenEntity={onOpen}
-            onOpenEvent={openEvent}
-            onConfigure={openSettings}
-            onDelete={() => removeChat(selectedId)}
-          />
-        ) : (
-          <View style={styles.center}>
-            <Text variant="caption" tone="tertiary" style={styles.hint}>
-              Pick a chat from the list, or start a new one.
-            </Text>
+  return (
+    <TourAnchor id="chat.surface" style={styles.root}>
+      {noProvider ? (
+        <EmptyState onConfigure={openSettings} />
+      ) : (
+        <SplitView
+          aside={<ChatList chats={chats} selectedId={selectedId} onSelect={setSelectedId} onNew={newChat} />}
+          storageKey="companion.chat.listWidth"
+          defaultWidth={220}
+          minWidth={180}
+          maxWidth={320}
+        >
+          <View style={styles.detail}>
+            {selectedId ? (
+              <ChatView
+                chatId={selectedId}
+                onOpenEntity={onOpen}
+                onOpenEvent={openEvent}
+                onConfigure={openSettings}
+                onDelete={() => removeChat(selectedId)}
+              />
+            ) : (
+              <View style={styles.center}>
+                <Text variant="caption" tone="tertiary" style={styles.hint}>
+                  Pick a chat from the list, or start a new one.
+                </Text>
+              </View>
+            )}
           </View>
-        )}
-      </View>
-    </SplitView>
+        </SplitView>
+      )}
+    </TourAnchor>
   );
 }
 
@@ -1058,7 +1065,9 @@ function EmptyState({ onConfigure }: { onConfigure?: () => void }) {
         Anthropic / OpenAI key. Then pick a model here.
       </Text>
       {onConfigure ? (
-        <Button label="Set up in Settings" onPress={onConfigure} icon={<Icon name="settings" size={iconSize.sm} color={colors.onAccent} />} />
+        <TourAnchor id="chat.setup">
+          <Button label="Set up in Settings" onPress={onConfigure} icon={<Icon name="settings" size={iconSize.sm} color={colors.onAccent} />} />
+        </TourAnchor>
       ) : null}
     </View>
   );

@@ -274,6 +274,8 @@ func New(st *store.Store, t Transport, clock domain.Clock) *Engine {
 	// Scheduled exports: each runs on one device, and syncs so the others know and can take over.
 	e.register(newRepoSyncer[*domain.GitExport](st.Exports.Git(), clock))
 	e.register(newRepoSyncer[*domain.FolderExport](st.Exports.Folder(), clock))
+	// Onboarding: which guided tours are settled, so a tour seen on one device stays seen.
+	e.register(newRepoSyncer[*domain.Onboarding](st.Onboarding, clock))
 	return e
 }
 

@@ -19,6 +19,7 @@ import { CanvasesList } from "./canvas/CanvasesList";
 import { CanvasPane } from "./canvas/CanvasPane";
 import { useCanvases } from "./canvas/CanvasesProvider";
 import { timeAgo } from "./NotificationRow";
+import { TourAnchor } from "./onboarding/anchors";
 
 /** One tab's workspace: a split of a browse list (notes, tasks or canvases — whichever
  * section this tab is in) beside the tab's document, or an empty "Nothing selected" state.
@@ -209,7 +210,7 @@ function NotesList() {
   if (store.loading) return <Spinner label="Loading your notes…" />;
 
   return (
-    <View style={styles.list}>
+    <TourAnchor id="notes.list" style={styles.list}>
       <View style={styles.listHeader}>
         <View style={{ flex: 1 }}>
           <ListFilterMenu
@@ -267,7 +268,7 @@ function NotesList() {
           </Text>
         )}
       </ScrollView>
-    </View>
+    </TourAnchor>
   );
 }
 
@@ -322,7 +323,7 @@ function TasksList() {
   return (
     <View style={styles.list}>
       <View style={styles.listHeader}>
-        <View style={{ flex: 1 }}>
+        <TourAnchor id="tasks.filters" style={{ flex: 1 }}>
           <ListFilterMenu
             value={store.filter}
             onChange={store.setFilter}
@@ -335,12 +336,12 @@ function TasksList() {
               { value: "someday", label: "Someday tasks" },
             ]}
           />
-        </View>
+        </TourAnchor>
         <Text variant="mono" tone="quaternary">
           {open.length}
         </Text>
       </View>
-      <View style={styles.search}>
+      <TourAnchor id="tasks.quickAdd" style={styles.search}>
         <Input
           size="sm"
           placeholder="Add a task, press Enter"
@@ -349,7 +350,7 @@ function TasksList() {
           onSubmitEditing={() => void add()}
           leadingIcon={<Icon name="plus" size={icon.sm} color={colors.textQuaternary} />}
         />
-      </View>
+      </TourAnchor>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll}>
         {open.length || store.filter === "upcoming" ? (
           <ScheduledTasks

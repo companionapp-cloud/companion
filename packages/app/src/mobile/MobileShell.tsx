@@ -39,6 +39,8 @@ import { HabitsScreen, LogbookRouteScreen, NotificationsRouteScreen, TrashRouteS
 import { ThingsImportHost } from "../ThingsImport";
 import { IOSPWAInstallBanner } from "../push/IOSPWAInstallBanner";
 import { InstallGuideRouteScreen } from "../push/InstallGuide";
+import { OnboardingProvider } from "../onboarding/OnboardingProvider";
+import type { Place, TourHost } from "../onboarding/host";
 
 // ---------------------------------------------------------------------------
 // The mobile web shell (phone-width browsers / PWA). Same information architecture as
@@ -333,6 +335,24 @@ function MobileNavBridge({
   // Sync on navigation (§5.4), same contract as the desktop Shell. Depend on the stable
   // `trigger`, not the whole `sync` memo (see AppShell for the loop this avoids).
   const locKey = routeName + (params.id ?? "") + (params.areaId ?? "") + (params.projectId ?? "") + (params.chatId ?? "") + (params.section ?? "");
+
+  // The tutorials' view of this shell: the route as a place, and the navigator's moves.
+  const tourHost = useMemo<TourHost>(
+    () => ({
+      layout: "mobile",
+      place: mobilePlace(routeName, params.section),
+      placeKey: locKey,
+      doc: (routeName === "note" || routeName === "task") && params.id ? { kind: routeName, id: params.id } : null,
+      go: (to) => (to === "home" ? navigation.navigate("home") : nav.goView(to)),
+      openNote: nav.openNote,
+      openTask: nav.openTask,
+      openArea: nav.openArea,
+      openProject: nav.openProject,
+      openSettings: (section) => (section ? navigation.navigate("settingsSection", { section }) : navigation.navigate("settings")),
+      back: nav.back,
+    }),
+    [routeName, params.section, params.id, locKey, navigation, nav],
+  );
   const syncTrigger = useSync().trigger;
   useEffect(() => {
     syncTrigger();
@@ -342,13 +362,40 @@ function MobileNavBridge({
     <NavContext.Provider value={nav}>
       <MobileReminderBridge />
       <ThingsImportHost />
-      <View style={[styles.root, { paddingTop: topInset }]}>
-        <SyncHealthBanner onOpenSettings={() => nav.openRef({ kind: "view", view: "settings", section: "sync" })} />
-        <IOSPWAInstallBanner />
-        <View style={styles.content}>{children}</View>
-      </View>
+      <OnboardingProvider host={tourHost}>
+        <View style={[styles.root, { paddingTop: topInset }]}>
+          <SyncHealthBanner onOpenSettings={() => nav.openRef({ kind: "view", view: "settings", section: "sync" })} />
+          <IOSPWAInstallBanner />
+          <View style={styles.content}>{children}</View>
+        </View>
+      </OnboardingProvider>
     </NavContext.Provider>
   );
+}
+
+/** A route, in the tutorials' terms (see onboarding/host.ts). */
+function mobilePlace(routeName: string, section: string | undefined): Place {
+  switch (routeName) {
+    case "home":
+    case "today":
+    case "chat":
+    case "calendar":
+    case "notes":
+    case "note":
+    case "tasks":
+    case "task":
+    case "graph":
+      return routeName;
+    case "area":
+      return section ? "area-section" : "area";
+    case "project":
+      return section ? "project-section" : "project";
+    case "settings":
+    case "settingsSection":
+      return "settings";
+    default:
+      return "other";
+  }
 }
 
 /** Bridges a tapped reminder to navigation (PLAN §6.4): the web `Notification` onclick

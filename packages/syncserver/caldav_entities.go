@@ -23,6 +23,8 @@ var (
 	// A scheduled folder export only travels so the user's other devices know about it; the
 	// folder's path and name are ciphertext.
 	folderExportHandler = opaqueRowHandler(protocol.EntityFolderExport, "folder_exports")
+	// Which guided tours the user has settled: nothing the server acts on.
+	onboardingHandler = opaqueRowHandler(protocol.EntityOnboarding, "onboarding")
 )
 
 // opaqueRowMeta is the only part of an opaque body the server reads.

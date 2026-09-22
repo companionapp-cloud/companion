@@ -9,6 +9,7 @@ import { useCalendar } from "../CalendarProvider";
 import { useNav } from "../nav-context";
 import { ProjectCalendarsPanel, ProjectCalendarsPicker } from "../ProjectCalendars";
 import { BottomSheet, NavAction, NavBar } from "./ui";
+import { TourAnchor } from "../onboarding/anchors";
 
 // Mobile web Calendar (PLAN §6.7) — a port of the native app's CalendarScreen. The
 // 7-column week grid the desktop shows is too cramped on a phone, so this is a stacked
@@ -69,15 +70,17 @@ export function CalendarScreen() {
         }
       />
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.calCard}>
-          <TodayCalendar selected={selected} today={today} onSelect={setSelected} allowFuture />
-        </View>
-        <Text variant="mono" tone="tertiary" style={styles.dateLabel}>
-          {formatFullDate(selected)}
-        </Text>
-        <View style={styles.agenda}>
-          <Agenda date={selected} onOpenItem={openItem} />
-        </View>
+        <TourAnchor id="calendar.day">
+          <View style={styles.calCard}>
+            <TodayCalendar selected={selected} today={today} onSelect={setSelected} allowFuture />
+          </View>
+          <Text variant="mono" tone="tertiary" style={styles.dateLabel}>
+            {formatFullDate(selected)}
+          </Text>
+          <View style={styles.agenda}>
+            <Agenda date={selected} onOpenItem={openItem} />
+          </View>
+        </TourAnchor>
       </ScrollView>
       {sheet}
     </View>

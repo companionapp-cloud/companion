@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { GraphCanvas, useCore } from '@companion/app';
+import { GraphCanvas, TourAnchor, useCore } from '@companion/app';
 import type { Graph } from '@companion/core-bridge';
 import { useOpenGraphNode } from '../useOpenGraphNode';
 
@@ -18,5 +18,9 @@ export function GraphScreen() {
     return core.on('data.changed', () => void refresh());
   }, [core, refresh]);
 
-  return <GraphCanvas graph={graph} onOpenNode={openNode} />;
+  return (
+    <TourAnchor id="graph.canvas" style={{ flex: 1 }}>
+      <GraphCanvas graph={graph} onOpenNode={openNode} />
+    </TourAnchor>
+  );
 }

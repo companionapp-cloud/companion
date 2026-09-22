@@ -1,9 +1,10 @@
 import { useLayoutEffect } from 'react';
 import { StyleSheet } from 'react-native';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createBottomTabNavigator, type BottomTabBarButtonProps } from '@react-navigation/bottom-tabs';
+import { PlatformPressable } from '@react-navigation/elements';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useProjects } from '@companion/app';
+import { TourAnchor, useProjects } from '@companion/app';
 import { Icon, colors, font, type IconName } from '@companion/design-system';
 import type { AreaTabParamList, RootStackParamList } from '../MobileShell';
 import { AreaContext } from '../ProjectContext';
@@ -14,11 +15,12 @@ import { CanvasesListScreen } from './CanvasesListScreen';
 
 const Tabs = createBottomTabNavigator<AreaTabParamList>();
 
-const TAB: Record<keyof AreaTabParamList, { label: string; icon: IconName }> = {
-  AreaOverview: { label: 'Overview', icon: 'folder' },
-  AreaNotes: { label: 'Notes', icon: 'notes' },
-  AreaTasks: { label: 'Tasks', icon: 'tasks' },
-  AreaCanvases: { label: 'Canvases', icon: 'canvas' },
+// `section` names the tab the way the area page does everywhere, so the tutorial finds it.
+const TAB: Record<keyof AreaTabParamList, { label: string; icon: IconName; section: string }> = {
+  AreaOverview: { label: 'Overview', icon: 'folder', section: 'overview' },
+  AreaNotes: { label: 'Notes', icon: 'notes', section: 'notes' },
+  AreaTasks: { label: 'Tasks', icon: 'tasks', section: 'tasks' },
+  AreaCanvases: { label: 'Canvases', icon: 'canvas', section: 'canvases' },
 };
 
 /** An area's page (PLAN-areas.md §3): an Overview tab, then the three things an area holds
@@ -46,6 +48,12 @@ export function AreaScreen({ route }: NativeStackScreenProps<RootStackParamList,
           tabBarLabelStyle: styles.tabLabel,
           tabBarLabel: TAB[tabRoute.name as keyof AreaTabParamList].label,
           tabBarIcon: ({ color }) => <Icon name={TAB[tabRoute.name as keyof AreaTabParamList].icon} size={20} color={color} />,
+          // Each tab is a tutorial anchor (the area tutorial walks the bar).
+          tabBarButton: (props: BottomTabBarButtonProps) => (
+            <TourAnchor id={`page.section.${TAB[tabRoute.name as keyof AreaTabParamList].section}`} style={styles.tab}>
+              <PlatformPressable {...props} />
+            </TourAnchor>
+          ),
         })}
       >
         <Tabs.Screen name="AreaOverview" component={ContainerOverviewScreen} />
@@ -67,4 +75,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0,
   },
   tabLabel: { fontFamily: font.mono, fontSize: font.size['2xs'] },
+  // The anchor takes the tab's place in the bar.
+  tab: { flex: 1 },
 });

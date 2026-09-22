@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SETTINGS_SECTIONS, settingsSection } from '@companion/app';
+import { settingsSection, visibleSettingsSections } from '@companion/app';
 import { Icon, colors, space } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
 import { Card, CardRow, IconTile } from '../ui/native';
@@ -14,10 +14,12 @@ import { Card, CardRow, IconTile } from '../ui/native';
 export function SettingsScreen() {
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const insets = useSafeAreaInsets();
+  // Only the sections that apply here (no system-wide shortcuts on a phone).
+  const sections = visibleSettingsSections();
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + space.xxl }]}>
       <Card>
-        {SETTINGS_SECTIONS.map((s, i) => (
+        {sections.map((s, i) => (
           <CardRow
             key={s.id}
             leading={
@@ -27,7 +29,7 @@ export function SettingsScreen() {
             }
             title={s.label}
             subtitle={s.description}
-            isLast={i === SETTINGS_SECTIONS.length - 1}
+            isLast={i === sections.length - 1}
             onPress={() => nav.navigate('SettingsSection', { section: s.id })}
           />
         ))}

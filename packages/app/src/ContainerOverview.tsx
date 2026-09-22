@@ -11,6 +11,7 @@ import { useQuickCreateLink } from "./useQuickCreateLink";
 import { useDocumentSource } from "./DocumentSourceContext";
 import { useTasks } from "./TasksProvider";
 import { DocTitleField } from "./TaskEditor";
+import { TourAnchor } from "./onboarding/anchors";
 
 /** The page an area or a project opens on (PLAN-areas.md §1, §3): an optional cover image, an
  *  optional emoji, the name, a rich-text description — the same markdown editor a note uses,
@@ -111,17 +112,17 @@ export function ContainerOverview({
     <View style={styles.root}>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll}>
         {coverDocumentId ? (
-          <View style={[styles.cover, touch ? styles.coverTouch : null]}>
+          <TourAnchor id="page.cover" style={[styles.cover, touch ? styles.coverTouch : null]}>
             {cover ? <Image source={{ uri: cover }} resizeMode="cover" style={styles.coverImage} accessibilityLabel="Cover image" /> : null}
             <View style={styles.coverActions}>
               {documentSource ? <Button label={coverBusy ? "Adding…" : "Change cover"} variant="secondary" size="sm" disabled={coverBusy} onPress={() => void changeCover()} /> : null}
               <Button label="Remove" variant="secondary" size="sm" onPress={() => onUpdatePage({ coverDocumentId: "" })} />
             </View>
-          </View>
+          </TourAnchor>
         ) : null}
 
         <View style={[styles.column, touch ? styles.columnTouch : null]}>
-          <View style={styles.identity}>
+          <TourAnchor id="page.icon" style={styles.identity}>
             <Pressable
               onPress={() => setPicking((v) => !v)}
               aria-label={icon ? "Change icon" : "Add icon"}
@@ -140,7 +141,7 @@ export function ContainerOverview({
                 <GhostAction icon="image" label={coverBusy ? "Adding cover…" : "Add cover"} onPress={() => void changeCover()} />
               ) : null}
             </View>
-          </View>
+          </TourAnchor>
           {picking ? (
             <EmojiPicker
               value={icon}
@@ -176,7 +177,7 @@ export function ContainerOverview({
 
           {meta}
 
-          <View style={styles.description}>
+          <TourAnchor id="page.description" style={styles.description}>
             <Editor
               ref={editorRef}
               markdown={descriptionMd}
@@ -194,7 +195,7 @@ export function ContainerOverview({
               tableMenuPresenter={tableMenuPresenter()}
               linkRevision={tasks.tasks}
             />
-          </View>
+          </TourAnchor>
 
           {children ? <View style={styles.cards}>{children}</View> : null}
           {footer ? <View style={styles.footer}>{footer}</View> : null}

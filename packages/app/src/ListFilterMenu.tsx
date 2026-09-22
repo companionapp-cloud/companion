@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import { Icon, Text, colors, control, font, icon, radius, row, shadow, space, transition, motion, useDensity, type PressState } from "@companion/design-system";
+import { TourAnchor } from "./onboarding/anchors";
 
 export interface FilterOption<T extends string> {
   value: T;
@@ -78,6 +79,7 @@ export function ListFilterTabs<T extends string>({
   options,
   onChange,
   scroll,
+  anchorPrefix,
 }: {
   value: T;
   options: FilterOption<T>[];
@@ -85,12 +87,14 @@ export function ListFilterTabs<T extends string>({
   /** More segments than a phone is wide (the task lists' six): keep them full size and let the
    *  track scroll sideways instead of squeezing every label. */
   scroll?: boolean;
+  /** Make each segment a tutorial anchor, `<prefix><value>` (a page's sections). */
+  anchorPrefix?: string;
 }) {
   const touch = useDensity() === "touch";
   if (scroll) {
     return (
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={tabStyles.scroller}>
-        <ListFilterTabs value={value} options={options} onChange={onChange} />
+        <ListFilterTabs value={value} options={options} onChange={onChange} anchorPrefix={anchorPrefix} />
       </ScrollView>
     );
   }
@@ -98,7 +102,7 @@ export function ListFilterTabs<T extends string>({
     <View style={tabStyles.track}>
       {options.map((o) => {
         const active = o.value === value;
-        return (
+        const segment = (
           <Pressable
             key={o.value}
             onPress={() => onChange(o.value)}
@@ -113,6 +117,13 @@ export function ListFilterTabs<T extends string>({
               {o.label}
             </Text>
           </Pressable>
+        );
+        return anchorPrefix ? (
+          <TourAnchor key={o.value} id={`${anchorPrefix}${o.value}`} style={tabStyles.anchor}>
+            {segment}
+          </TourAnchor>
+        ) : (
+          segment
         );
       })}
     </View>
@@ -136,6 +147,8 @@ const tabStyles = {
     borderColor: colors.borderSubtle,
     borderRadius: radius.md,
   },
+  // A segment wrapped as a tutorial anchor: the wrapper takes the segment's place in the row.
+  anchor: { flexShrink: 1, minWidth: 0 },
   segment: {
     flexShrink: 1,
     alignItems: "center" as const,
