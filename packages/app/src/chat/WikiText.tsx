@@ -27,7 +27,7 @@ export function WikiText({ value }: { value: string }) {
   return <RNText style={[styles.body, threadLayout === "bubbles" ? styles.bodyBubble : null]}>{parts}</RNText>;
 }
 
-function LinkChip({ type, id }: { type: string; id: string }) {
+export function LinkChip({ type, id }: { type: string; id: string }) {
   const { graph } = useCore();
   const openEntity = useContext(OpenEntityContext);
   const [title, setTitle] = useState<string | null>(null);

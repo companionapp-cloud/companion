@@ -31,6 +31,7 @@ import { useCalendar } from "./CalendarProvider";
 import { OpenEntityContext, OpenEventContext, ThreadLayoutContext } from "./chat/context";
 import { ChatPreview } from "./chat/previews";
 import { previewOf, type Preview } from "./chat/renderTools";
+import { ChatMarkdown } from "./chat/ChatMarkdown";
 import { WikiText } from "./chat/WikiText";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useCore } from "./CoreContext";
@@ -263,7 +264,7 @@ export function ChatView({
     (live?.actions ?? []).forEach((a, i) => threadRows.push(<ChatItem key={`la${i}`} item={toolItem(a)} />));
     threadRows.push(
       <Message key="live" role="assistant" working>
-        {live?.text ? <WikiText value={live.text} /> : <RNText style={styles.thinking}>Thinking…</RNText>}
+        {live?.text ? <ChatMarkdown value={live.text} /> : <RNText style={styles.thinking}>Thinking…</RNText>}
       </Message>,
     );
   }
@@ -711,7 +712,7 @@ function ChatItem({ item }: { item: DisplayItem }) {
   if (item.type === "preview") return <ChatPreview preview={item.preview} />;
   return (
     <Message role={item.type}>
-      <WikiText value={item.text} />
+      {item.type === "assistant" ? <ChatMarkdown value={item.text} /> : <WikiText value={item.text} />}
     </Message>
   );
 }
