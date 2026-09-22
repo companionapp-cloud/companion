@@ -14,6 +14,10 @@ import { PAGE, PAGE_GAP, paperBackground, paperTypographyCss, sheetHeightFor } f
 const RULER = 20;
 const STAGE_PAD = 32;
 const PHONE_W = 640;
+// A page turn: how long the leaving page flips for, and what counts as a swipe.
+const TURN_MS = 420;
+const SWIPE_MIN_PX = 56;
+const SWIPE_MAX_MS = 700;
 
 export type { NotebookZoom, NotebookViewState, NotebookViewController, NotebookViewProps } from "./viewTypes";
 import type { NotebookViewController, NotebookViewProps } from "./viewTypes";
@@ -26,11 +30,23 @@ function ensureStyles() {
   el.textContent = `
 .nb-root { position: absolute; inset: 0; display: flex; flex-direction: column; background: ${colors.surfaceSunken}; }
 .nb-stage { position: relative; flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
-.nb-flow { display: flex; gap: ${PAGE_GAP}px; padding: ${STAGE_PAD}px; box-sizing: border-box; min-width: min-content; min-height: 100%; }
+.nb-flow { position: relative; display: flex; gap: ${PAGE_GAP}px; padding: ${STAGE_PAD}px; box-sizing: border-box; min-width: min-content; min-height: 100%; perspective: 1800px; }
+.nb-stage[data-swipe="true"] { touch-action: pan-y; }
 .nb-flow[data-mode="spread"] { flex-direction: row; justify-content: center; align-items: flex-start; }
 .nb-flow[data-mode="scroll"] { flex-direction: column; align-items: center; }
 .nb-rulers .nb-flow { padding-top: ${STAGE_PAD + RULER}px; padding-left: ${STAGE_PAD + RULER}px; }
 .nb-slot { position: relative; flex-shrink: 0; }
+.nb-slot.nb-leaving { position: absolute; z-index: 4; pointer-events: none; animation-duration: ${TURN_MS}ms; animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1); animation-fill-mode: forwards; }
+.nb-leaving[data-turn="flip-next"] { transform-origin: left center; animation-name: nb-flip-next; }
+.nb-leaving[data-turn="flip-prev"] { transform-origin: right center; animation-name: nb-flip-prev; }
+.nb-leaving[data-turn="fade"] { animation-name: nb-fade-out; }
+.nb-leaving[data-turn^="flip"] .nb-sheet { box-shadow: 0 0 0 1px ${colors.borderDefault}, -12px 0 30px rgba(17, 17, 16, 0.18); }
+.nb-slot.nb-entering { animation: nb-enter ${TURN_MS}ms cubic-bezier(0.2, 0, 0.2, 1) both; }
+@keyframes nb-flip-next { from { transform: rotateY(0deg); } 55% { opacity: 1; } to { transform: rotateY(-100deg); opacity: 0; } }
+@keyframes nb-flip-prev { from { transform: rotateY(0deg); } 55% { opacity: 1; } to { transform: rotateY(100deg); opacity: 0; } }
+@keyframes nb-fade-out { to { opacity: 0; } }
+@keyframes nb-enter { from { opacity: 0.35; } 40% { opacity: 0.35; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .nb-slot.nb-leaving { animation-duration: 1ms; } .nb-slot.nb-entering { animation: none; } }
 .nb-sheet {
   position: absolute; left: 0; top: 0; transform-origin: 0 0; box-sizing: border-box; overflow: hidden;
   width: ${PAGE.width}px; padding: ${PAGE.marginTop}px ${PAGE.marginX}px ${PAGE.marginBottom}px;
@@ -83,6 +99,8 @@ function PageSheet({
   onPinch,
   onGuideDrag,
   onHeight,
+  leaving,
+  entering,
 }: {
   host: NotebookHost;
   page: NotebookPage;
@@ -101,6 +119,10 @@ function PageSheet({
   onPinch(factor: number): void;
   onGuideDrag(guide: NotebookGuide, e: ReactPointerEvent): void;
   onHeight(pageId: string, height: number): void;
+  /** A page turn (spread mode): this page is leaving, pinned where it was and flipping or
+   *  fading out, or entering the new spread. */
+  leaving?: { left: number; top: number; turn: "flip-next" | "flip-prev" | "fade" };
+  entering?: boolean;
 }) {
   const [loaded, setLoaded] = useState<{ md: string; ink: InkGroupRecord[] } | null>(null);
   const [ink, setInk] = useState<InkGroupRecord[]>([]);
@@ -148,7 +170,12 @@ function PageSheet({
   };
 
   return (
-    <div className="nb-slot" style={{ width: PAGE.width * scale, height: height * scale }} data-page={index}>
+    <div
+      className={leaving ? "nb-slot nb-leaving" : entering ? "nb-slot nb-entering" : "nb-slot"}
+      style={{ width: PAGE.width * scale, height: height * scale, ...(leaving ? { left: leaving.left, top: leaving.top } : null) }}
+      data-page={leaving ? undefined : index}
+      data-turn={leaving?.turn}
+    >
       <div
         ref={sheetRef}
         className="nb-sheet"
@@ -271,6 +298,10 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
   const [scroll, setScroll] = useState({ x: 0, y: 0 });
   const [near, setNear] = useState<Set<number>>(() => new Set([0, 1]));
   const [draft, setDraft] = useState<{ axis: "x" | "y"; client: number } | null>(null);
+  // A page turn in progress: the pages of the spread being left, pinned where they were.
+  const [turn, setTurn] = useState<{ dir: 1 | -1; leaving: { id: string; index: number; left: number; top: number; flip: boolean }[] } | null>(null);
+  const turnTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const swipe = useRef<{ id: number; x: number; y: number; t: number } | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const editors = useRef(new Map<string, EditorController>());
   const heights = useRef(new Map<string, number>());
@@ -358,19 +389,89 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
     el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
   }, [zoom, stage.w, scale, doc]);
 
+  /** Turn the page: in a spread the leaving pages stay put and flip away (the outer one of the
+   *  pair hinges on the spine; its partner fades) while the new spread comes in beneath. */
+  const startTurn = useCallback(
+    (dir: 1 | -1) => {
+      const flow = stageRef.current?.querySelector<HTMLElement>(".nb-flow");
+      if (!flow) return;
+      const leaving: { id: string; index: number; left: number; top: number; flip: boolean }[] = [];
+      visible.forEach((p, i) => {
+        const slot = flow.querySelector<HTMLElement>(`[data-sheet="${p.id}"] .nb-slot`);
+        if (!slot) return;
+        const flip = dir === 1 ? i === visible.length - 1 : i === 0;
+        leaving.push({ id: p.id, index: visibleOffset + i, left: slot.offsetLeft, top: slot.offsetTop, flip });
+      });
+      if (turnTimer.current) clearTimeout(turnTimer.current);
+      setTurn({ dir, leaving });
+      turnTimer.current = setTimeout(() => setTurn(null), TURN_MS);
+    },
+    [visible, visibleOffset],
+  );
+  useEffect(() => () => {
+    if (turnTimer.current) clearTimeout(turnTimer.current);
+  }, []);
+
   const goTo = useCallback(
     (page: number) => {
       const i = Math.max(0, Math.min(page, pages.length - 1));
+      if (mode === "spread") {
+        const nextStart = i - (i % 2);
+        if (nextStart !== spreadStart) startTurn(nextStart > spreadStart ? 1 : -1);
+      }
       setCurrent(i);
       if (pages[i]) setActiveId(pages[i].id);
       if (mode === "scroll") {
+        // The list turns by scrolling to the page, smoothly.
         const el = stageRef.current?.querySelector<HTMLElement>(`[data-page="${i}"]`);
-        el?.scrollIntoView({ block: "start" });
-        stageRef.current?.scrollBy({ top: -(STAGE_PAD / 2 + (rulers ? RULER : 0)) });
+        // Smooth scrolling never progresses in a hidden page (no animation frames), so a
+        // background tab jumps instead; the folio would otherwise report a page not on screen.
+        if (el) stageRef.current?.scrollTo({ top: el.offsetTop - (STAGE_PAD / 2 + (rulers ? RULER : 0)), behavior: document.hidden ? "auto" : "smooth" });
       }
     },
-    [pages, mode, rulers],
+    [pages, mode, rulers, spreadStart, startTurn],
   );
+
+  // Arrow and Page keys turn pages when the keyboard isn't in a text field. Only a visible
+  // view answers (background tabs keep their editors mounted).
+  useEffect(() => {
+    const step = mode === "spread" ? 2 : 1;
+    const onKey = (e: KeyboardEvent) => {
+      if (stageRef.current?.offsetParent === null) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "ArrowRight" || e.key === "PageDown") {
+        e.preventDefault();
+        goTo((mode === "spread" ? spreadStart : current) + step);
+      } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
+        e.preventDefault();
+        goTo((mode === "spread" ? spreadStart : current) - step);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [goTo, mode, spreadStart, current]);
+
+  // A single finger swiped sideways turns the page, on any touch screen, unless a drawing
+  // tool is active (fingers then draw or pan) or the page is zoomed in (a sideways drag then
+  // pans the sheet). At fit zoom the stage gives up horizontal panning so the swipe is clean.
+  const swipeOn = !tool && zoom === "fit";
+  const onSwipeDown = (e: ReactPointerEvent) => {
+    if (!swipeOn || e.pointerType !== "touch") return;
+    swipe.current = e.isPrimary && !swipe.current ? { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now() } : null;
+  };
+  const onSwipeEnd = (e: ReactPointerEvent) => {
+    const s = swipe.current;
+    if (!s || e.pointerId !== s.id) return;
+    swipe.current = null;
+    if (e.type === "pointercancel") return;
+    const dx = e.clientX - s.x;
+    const dy = e.clientY - s.y;
+    if (Date.now() - s.t > SWIPE_MAX_MS || Math.abs(dx) < SWIPE_MIN_PX || Math.abs(dx) < Math.abs(dy) * 1.8) return;
+    const step = mode === "spread" ? 2 : 1;
+    goTo((mode === "spread" ? spreadStart : current) + (dx < 0 ? step : -step));
+  };
 
   const addPage = useCallback(async () => {
     const after = activePage ?? pages[pages.length - 1] ?? null;
@@ -482,7 +583,7 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
 
   return (
     <div className={rulers ? "nb-root nb-rulers" : "nb-root"}>
-      <div ref={stageRef} className="nb-stage" onScroll={onScroll}>
+      <div ref={stageRef} className="nb-stage" onScroll={onScroll} data-swipe={swipeOn} onPointerDown={onSwipeDown} onPointerUp={onSwipeEnd} onPointerCancel={onSwipeEnd}>
         <div className="nb-flow" data-mode={mode}>
           {visible.map((page, i) => {
             const index = visibleOffset + i;
@@ -521,10 +622,47 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
                     heights.current.set(id, h);
                     bumpHeights((n) => n + 1);
                   }}
+                  entering={!!turn && mode === "spread"}
                 />
               </div>
             );
           })}
+          {turn && mode === "spread"
+            ? turn.leaving
+                .filter((l) => !visible.some((p) => p.id === l.id))
+                .map((l) => {
+                  const page = pages.find((p) => p.id === l.id);
+                  if (!page) return null;
+                  // Same key as before the turn, so the sheet (and its editor) is moved, not remade.
+                  return (
+                    <div key={page.id} data-sheet={page.id} style={{ display: "contents" }}>
+                      <PageSheet
+                        host={host}
+                        page={page}
+                        index={l.index}
+                        scale={scale}
+                        tool={null}
+                        penTool={null}
+                        active={false}
+                        guides={guides}
+                        showGuides={rulers}
+                        onActivate={() => {}}
+                        onEditor={(ctrl) => {
+                          if (ctrl) editors.current.set(page.id, ctrl);
+                          else editors.current.delete(page.id);
+                        }}
+                        onFormatState={() => {}}
+                        onInkState={() => {}}
+                        onExitDrawing={() => {}}
+                        onPinch={() => {}}
+                        onGuideDrag={() => {}}
+                        onHeight={() => {}}
+                        leaving={{ left: l.left, top: l.top, turn: l.flip ? (turn.dir === 1 ? "flip-next" : "flip-prev") : "fade" }}
+                      />
+                    </div>
+                  );
+                })
+            : null}
           {doc && mode === "spread" && visible.length === 1 ? (
             <button className="nb-slot nb-blank" style={{ width: PAGE.width * scale, height: PAGE.height * scale }} onClick={() => void addPage()}>
               Add page
