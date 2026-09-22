@@ -68,6 +68,30 @@ export function splitListItemKeepingType(itemType: NodeType): Command {
   };
 }
 
+/** Enter on an empty last item of a top-level list that the document's trailing empty
+ * paragraph follows (see trailingParagraphPlugin): drop the item and step into that paragraph,
+ * instead of lifting the item out as a *second* blank line above it. A lone empty item takes
+ * its whole list with it (a list can't be empty). Falls through everywhere else. */
+export function exitListIntoTrailingParagraph(itemType: NodeType): Command {
+  return function (state: EditorState, dispatch?: Dispatch) {
+    const { $from, empty } = state.selection;
+    if (!empty || $from.depth != 3 || $from.parent.content.size != 0) return false;
+    const item = $from.node(-1),
+      list = $from.node(-2);
+    if (item.type != itemType || item.childCount != 1 || $from.index(-2) != list.childCount - 1) return false;
+    const after = state.doc.resolve($from.after(-2)).nodeAfter;
+    if (!after || !after.isTextblock || after.content.size != 0 || $from.indexAfter(-3) != state.doc.childCount - 1)
+      return false;
+    if (dispatch) {
+      const [from, to] = list.childCount > 1 ? [$from.before(-1), $from.after(-1)] : [$from.before(-2), $from.after(-2)];
+      const tr = state.tr.delete(from, to);
+      tr.setSelection(Selection.near(tr.doc.resolve(tr.mapping.map(to))));
+      dispatch(tr.scrollIntoView());
+    }
+    return true;
+  };
+}
+
 /** Wrap the selected block(s) in a list of `listType`. Ported from prosemirror-schema-list
  * (not a dependency), matching how the split/lift/sink commands above are ported. Used by the
  * formatting toolbar's list buttons. */

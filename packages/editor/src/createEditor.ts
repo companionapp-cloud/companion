@@ -6,7 +6,7 @@ import { history, undo, redo } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap, chainCommands, splitBlock } from "prosemirror-commands";
 import { tableEditing, goToNextCell, isInTable } from "prosemirror-tables";
-import { splitListItemKeepingType, liftListItem, sinkListItem } from "./listCommands";
+import { splitListItemKeepingType, exitListIntoTrailingParagraph, liftListItem, sinkListItem } from "./listCommands";
 import { tableMenuPlugin, type TableMenuPresenter } from "./tableMenu";
 import { createTable, tableFromGrid, tableFromMarkdownCommand } from "./tables";
 import type { ClipboardWriter } from "./tableCommands";
@@ -150,17 +150,16 @@ const enterInCell: Command = (state, dispatch) => {
   return true;
 };
 
-// Some blocks have no keyboard way to escape below them when they end the document — a table, a
-// code block (Enter just adds a line inside), or a blockquote. Keep an empty trailing paragraph
-// after any of them so the caret can always land past it. Runs reactively on any transaction
-// (including the selection change from clicking in, and the toolbar insert), so the escape hatch is
-// always present. Only appends when missing, so it can't loop; the empty paragraph serializes to
-// nothing, so it doesn't churn the note.
-//
-// Lists are intentionally excluded: they already have a natural keyboard exit — pressing Enter in
-// an empty last item lifts it out of the list (splitListItemKeepingType → liftListItem). A trailing
-// paragraph there would just leave a redundant blank line after that lift.
-const TRAILING_ESCAPE_BLOCKS = new Set(["table", "code_block", "blockquote"]);
+// Some blocks have no reliable way to escape below them when they end the document — a table, a
+// code block (Enter just adds a line inside), a blockquote, or a list (Enter on an empty item
+// exits on desktop, but there's nothing to click/tap or arrow down to below it, and soft-keyboard
+// Enter on mobile doesn't always reach the keymap). Keep an empty trailing paragraph after any of
+// them so the caret can always land past it. Runs reactively on any transaction (including the
+// selection change from clicking in, and the toolbar insert), so the escape hatch is always
+// present. Only appends when missing, so it can't loop; the empty paragraph serializes to nothing,
+// so it doesn't churn the note. Enter on an empty last list item steps into this paragraph
+// (exitListIntoTrailingParagraph) rather than lifting out a second blank line above it.
+const TRAILING_ESCAPE_BLOCKS = new Set(["table", "code_block", "blockquote", "bullet_list", "ordered_list"]);
 function trailingParagraphPlugin(): Plugin {
   return new Plugin({
     appendTransaction(_trs, _oldState, newState) {
@@ -303,6 +302,7 @@ export function createEditor(
             tableFromMarkdownCommand(schema),
             enterInCell,
             splitListItemKeepingType(schema.nodes.list_item),
+            exitListIntoTrailingParagraph(schema.nodes.list_item),
             liftListItem(schema.nodes.list_item),
           ),
           Tab: chainCommands(goToNextCell(1), sinkListItem(schema.nodes.list_item)),
