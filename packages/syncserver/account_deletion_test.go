@@ -443,7 +443,7 @@ func TestPurgeHookErrorSkipsAccount(t *testing.T) {
 // The email names the recipient and the purge day in UTC (not the server's zone), with no
 // placeholder left behind.
 func TestAccountDeletionEmail(t *testing.T) {
-	srv := New(nil, "sqlite")
+	_, srv := newServerAPI(t)
 	// 23:30 on October 21 at UTC-5 is already October 22 in UTC.
 	at := time.Date(2026, 10, 21, 23, 30, 0, 0, time.FixedZone("UTC-5", -5*60*60))
 	html, err := srv.accountDeletionEmail("Dee", at)

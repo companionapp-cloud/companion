@@ -514,3 +514,39 @@ func TestVAPIDKeysPersistAndOverride(t *testing.T) {
 		t.Fatalf("configured keys ignored: %s %s", c.vapid.publicKey(), c.vapidSubject)
 	}
 }
+
+// An account scheduled for deletion gets no reminders, whichever browsers are still subscribed
+// (its devices were signed out server-side, so they can't unsubscribe), and a sign-in that takes
+// the deletion back brings them back.
+func TestPushPausedWhileAccountIsScheduledForDeletion(t *testing.T) {
+	ts, srv, clk := pushTestServer(t)
+	token := register(t, ts.URL, "leaving@b.co", "password")
+	push := newFakePushService(t)
+	push.subscribe(t, ts.URL, token, "/sub/phone", "phone-1")
+	c := newClient(t, ts.URL, token, "devA")
+	c.store.Tasks.Create(store.CreateTaskInput{Title: "During the grace period", DueAt: at(time.Hour)})
+	later, _ := c.store.Tasks.Create(store.CreateTaskInput{Title: "After coming back", DueAt: at(3 * time.Hour)})
+	if err := c.engine.Sync(); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	if status, out := requestDeletion(t, ts.URL, token, "password"); status != http.StatusOK {
+		t.Fatalf("delete status = %d %v", status, out)
+	}
+	clk.t = base.Add(time.Hour + 2*time.Second)
+	if n := sweep(t, srv); n != 0 || len(push.take()) != 0 {
+		t.Fatalf("sent %d reminder(s) to an account scheduled for deletion", n)
+	}
+
+	var login map[string]any
+	if resp := postJSON(t, ts.URL+"/v1/auth/login", map[string]string{"email": "leaving@b.co", "password": "password"}, &login); resp.StatusCode != http.StatusOK || login["reactivated"] != true {
+		t.Fatalf("login = %d %v, want a reactivating 200", resp.StatusCode, login)
+	}
+	clk.t = base.Add(3*time.Hour + 2*time.Second)
+	if n := sweep(t, srv); n != 1 {
+		t.Fatalf("sent %d after reactivation, want 1", n)
+	}
+	if got := push.take(); len(got) != 1 || got[0].payload.TaskID != later.ID {
+		t.Fatalf("received %+v, want the task due after coming back", got)
+	}
+}

@@ -497,11 +497,14 @@ func (s *Server) SendDueReminders(ctx context.Context) (int, error) {
 
 // pushCandidateTasks loads, per account with a push subscription, the open tasks that can fire:
 // the same rows the apps plan from (repeat seeds excluded, as in store.TasksRepo.List), narrowed to
-// those with a deadline or reminders.
+// those with a deadline or reminders. An account scheduled for deletion gets none: every one of its
+// devices was signed out, and a sign-in that takes the deletion back resumes its reminders
+// (account_deletion.go).
 func (s *Server) pushCandidateTasks() (map[string][]*domain.Task, error) {
 	rows, err := s.query(
 		`SELECT user_id, id, title, due_at, reminders_json, updated_at FROM tasks
 		 WHERE user_id IN (SELECT DISTINCT user_id FROM push_subscriptions)
+		   AND user_id NOT IN (SELECT id FROM users WHERE deleting_at IS NOT NULL)
 		   AND status = 'open' AND deleted_at IS NULL AND deleting_at IS NULL
 		   AND NOT (repeat_rule IS NOT NULL AND repeat_seed_id IS NULL)
 		   AND (due_at IS NOT NULL OR reminders_json <> '[]');`)

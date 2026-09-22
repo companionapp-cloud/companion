@@ -61,6 +61,8 @@ var userTables = []string{
 	"onboarding",
 	// Devices and what is routed through them.
 	"relay_requests",
+	"push_deliveries",
+	"push_subscriptions",
 	"agents",
 	"devices",
 	// Account-level state.
