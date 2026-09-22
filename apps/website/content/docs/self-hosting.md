@@ -7,7 +7,7 @@ order: 2
 excerpt: Run the sync server yourself.
 badge: Companion Cloud
 readTime: 4 min read
-updated: Jul 2026
+updated: Sep 2026
 related: [using-our-cloud, app-wont-sync]
 ---
 
@@ -50,6 +50,18 @@ The server sends two kinds of email: an address-confirmation link after sign-up,
 Port 465 uses implicit TLS; 587 and 25 upgrade with STARTTLS when the relay offers it. Set `COMPANION_PUBLIC_URL` to the address your users type into the app — the emailed links are built from it. Leave `SMTP_HOST` unset and nothing is sent; the server logs each link instead, which is handy while you're setting up.
 
 The reset link opens a small page on your server that hands off to the Companion app, because an encrypted account's password can only be changed where the recovery code is: on the device. If you host the web app somewhere, set `COMPANION_APP_URL` to it so that hand-off opens your instance instead of the desktop or mobile app.
+
+## Reminder notifications
+
+The server sends task reminders to any browser that turns on **Settings → Notifications**. On an iPhone or iPad, that's the only way the web app gets them. It works out of the box: the server generates its push keys on first start and keeps them in the database. Give the push services (Apple's, Google's, Mozilla's) a contact address for you:
+
+```
+-e VAPID_SUBJECT=mailto:you@example.com
+```
+
+Without it, the server uses `COMPANION_PUBLIC_URL` when that's `https://`, else your `SMTP_FROM` address. Apple refuses placeholder contacts like `no-reply@localhost`, so reminders to iPhones and iPads fail until you set a real one; the server logs a warning at startup when it's using one.
+
+To pin the push keys yourself (to share them between servers, say), set `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` (`npx web-push generate-vapid-keys` makes a pair). Don't change them once people have turned notifications on: every device is subscribed with the old key and stops getting reminders until Companion re-subscribes it, which it does by itself the next time it's opened.
 
 ## Point your devices at it
 

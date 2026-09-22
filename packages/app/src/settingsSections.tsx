@@ -12,6 +12,8 @@ import { GitSyncSettings } from "./GitSyncSettings";
 import { shortcutStore } from "./shortcuts";
 import { TourSettings } from "./onboarding/TourSettings";
 import { toursAvailable } from "./onboarding/OnboardingProvider";
+import { NotificationSettings } from "./push/NotificationSettings";
+import { webPushHost } from "./push/webPush";
 
 /** Sync has two halves: the Companion server, which keeps devices in step, and — beside it, not
  *  instead of it — a Git repository the workspace is mirrored with, both ways. */
@@ -24,7 +26,17 @@ function SyncSection() {
   );
 }
 
-export type SettingsSectionId = "sync" | "ai" | "objects" | "calendar" | "import" | "export" | "tools" | "shortcuts" | "tutorials";
+export type SettingsSectionId =
+  | "sync"
+  | "notifications"
+  | "ai"
+  | "objects"
+  | "calendar"
+  | "import"
+  | "export"
+  | "tools"
+  | "shortcuts"
+  | "tutorials";
 
 /** One entry in the settings navigation list (PLAN §3.1 shell). Each section is a
  *  self-contained component that reads its own data through the app providers, so the
@@ -47,6 +59,16 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
     description: "Sync across devices, and with a Git repository",
     icon: "refresh",
     Component: SyncSection,
+  },
+  {
+    id: "notifications",
+    label: "Notifications",
+    description: "Reminders on this device, even when Companion is closed",
+    icon: "bell",
+    Component: NotificationSettings,
+    // Web only: reminders pushed by the sync server. The desktop and mobile apps schedule their
+    // own notifications, and never register the service worker pushes arrive through.
+    available: () => webPushHost() !== null,
   },
   {
     id: "ai",

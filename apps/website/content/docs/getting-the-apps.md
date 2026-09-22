@@ -38,17 +38,19 @@ Companion keeps itself up to date. When a new version comes out, it downloads it
 
 ## Use Companion on the web
 
-Nothing to install: open [web.companionapp.cloud](https://web.companionapp.cloud) and start writing. Everything lives in your browser — notes, tasks, projects, the graph — and keeps working offline. No sign-up, no server, nothing leaves the machine. It's also the way to use Companion on a phone until the iOS and Android apps ship.
+Nothing to install: open [web.companionapp.cloud](https://web.companionapp.cloud) and start writing. Everything lives in your browser (notes, tasks, projects, the graph) and keeps working offline. No sign-up, no server, nothing leaves the machine. It's also the way to use Companion on a phone until the iOS and Android apps ship: on an iPhone or iPad, add it to your Home Screen and it opens like any other app. Companion shows you how, step by step for your version of iOS, the first time you open it in Safari.
 
 The catch is the obvious one — a workspace held in one browser stays in that browser. Sign in and it follows you.
 
-A few things need the desktop app, because a browser tab can't do them: the global quick-capture shortcut, reminder notifications that fire with no tab open, and hosting AI agents that run on your computer, like Claude Code, Codex, and Ollama. Once the desktop app hosts an agent, you can chat with it from the web too — through your sync server, while that computer is on.
+A few things need the desktop app, because a browser tab can't do them: the global quick-capture shortcut, and hosting AI agents that run on your computer, like Claude Code, Codex, and Ollama. Once the desktop app hosts an agent, you can chat with it from the web too, through your sync server, while that computer is on.
+
+Reminders can reach the web app with no tab open, though. Sign in to sync and turn on **Settings → Notifications**, and your sync server sends each reminder to that browser as it comes due. On an iPhone or iPad this works once Companion is on your Home Screen, and needs iOS 16.4 or later.
 
 ## Sync when you want it
 
 To keep two devices in step, connect a server in **Settings → Sync**: either [Companion Cloud](/docs/using-our-cloud) or [one you host yourself](/docs/self-hosting). New accounts are end-to-end encrypted, so the server stores your notes without being able to read them.
 
-A couple of features need a server, because they're computed there: repeating tasks, and calendar feed refreshes.
+A few features need a server, because they're computed there: repeating tasks, calendar feed refreshes, and reminders that reach the web app while it's closed.
 
 ## Next steps
 

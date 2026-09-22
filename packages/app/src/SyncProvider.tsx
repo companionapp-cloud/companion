@@ -88,6 +88,10 @@ export interface SyncController {
   disconnect: () => void;
   /** Debounced sync — called on mutations and navigation. */
   trigger: () => void;
+  /** An authenticated JSON call to the connected server (e.g. /v1/push/…): the current access
+   *  token, refreshed on expiry and retried once on a 401. Throws when signed out, or with the
+   *  server's error message. */
+  request: <T = unknown>(method: "GET" | "POST", path: string, body?: unknown) => Promise<T>;
 }
 
 const SyncCtx = createContext<SyncController | null>(null);
@@ -155,18 +159,29 @@ export function SyncProvider({
   }, [notifier]);
 
   // Refresh the access token and reconfigure the core with it. Returns false if the
-  // refresh token is missing/expired/revoked (the user must sign in again).
-  const refreshTokens = useCallback(async (): Promise<boolean> => {
-    const cfg = configRef.current;
-    if (!cfg?.refreshToken) return false;
-    try {
-      const res = await auth.refresh(cfg.baseUrl, cfg.refreshToken);
-      applyRotatedTokens(res);
-      await api.configure(cfg.baseUrl, res.token);
-      return true;
-    } catch {
-      return false;
-    }
+  // refresh token is missing/expired/revoked (the user must sign in again). Concurrent callers
+  // (a sync and a server request) share one refresh: the refresh token rotates on use, so a
+  // second refresh with the same token would fail and read as a dead session.
+  const refreshing = useRef<Promise<boolean> | null>(null);
+  const refreshTokens = useCallback((): Promise<boolean> => {
+    if (refreshing.current) return refreshing.current;
+    const run = (async () => {
+      const cfg = configRef.current;
+      if (!cfg?.refreshToken) return false;
+      try {
+        const res = await auth.refresh(cfg.baseUrl, cfg.refreshToken);
+        applyRotatedTokens(res);
+        await api.configure(cfg.baseUrl, res.token);
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    refreshing.current = run;
+    void run.finally(() => {
+      if (refreshing.current === run) refreshing.current = null;
+    });
+    return run;
   }, [api, applyRotatedTokens]);
 
   // For an encrypted account, make sure the master key is in memory before any sync. Native
@@ -456,6 +471,28 @@ export function SyncProvider({
     setNeedsReauth(false);
   }, [crypto, api]);
 
+  const request = useCallback(
+    async <T,>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> => {
+      const send = () => {
+        const cfg = configRef.current;
+        if (!cfg) throw new Error("Not signed in to sync.");
+        return fetch(`${cfg.baseUrl.replace(/\/+$/, "")}${path}`, {
+          method,
+          headers: { Authorization: `Bearer ${cfg.token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+      };
+      const cfg = configRef.current;
+      if (cfg?.expiresAt && Date.now() >= cfg.expiresAt - REFRESH_SKEW_MS) await refreshTokens();
+      let res = await send();
+      if (res.status === 401 && (await refreshTokens())) res = await send();
+      const data = (await res.json().catch(() => null)) as { error?: unknown } | null;
+      if (!res.ok) throw new Error(typeof data?.error === "string" && data.error ? data.error : `Request failed (${res.status})`);
+      return data as T;
+    },
+    [refreshTokens],
+  );
+
   const value = useMemo<SyncController>(
     () => ({
       connected: !!config,
@@ -472,8 +509,9 @@ export function SyncProvider({
       changePassword,
       disconnect,
       trigger,
+      request,
     }),
-    [config, status, needsReauth, lastError, lastSyncedAt, connect, unlock, enableEncryption, changePassword, disconnect, trigger],
+    [config, status, needsReauth, lastError, lastSyncedAt, connect, unlock, enableEncryption, changePassword, disconnect, trigger, request],
   );
 
   return <SyncCtx.Provider value={value}>{children}</SyncCtx.Provider>;

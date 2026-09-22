@@ -29,7 +29,7 @@ A task has two dates, both optional. **Add start** is when you mean to begin; **
 
 With no reminders set, a task with a deadline nudges you once, when it's due. Adding reminders replaces that nudge with yours; add **At deadline** if you want both.
 
-Two honest caveats. On the web, notifications only fire while a Companion tab is open — the desktop app is what makes them reliable. And reminders exist for tasks only; notes and events don't nudge you.
+Two honest caveats. On the web, notifications fire while a Companion tab is open, unless you turn on **Settings → Notifications**: then your sync server sends each reminder as it comes due, tab or no tab. On an iPhone or iPad that takes Companion on your Home Screen first, and the app walks you through it. And reminders exist for tasks only; notes and events don't nudge you.
 
 > **Tip:** Missed nudges aren't lost. Anything that fired while you were away is waiting in the notifications feed.
 

@@ -54,6 +54,13 @@ type Server struct {
 	// links, when set, overrides how email links are built (the cloud points them at its
 	// portal instead of the server's own landing pages).
 	links EmailLinks
+	// Web Push (push.go): the VAPID key pair browser subscriptions are bound to, the operator
+	// contact every push names, the check a subscription's endpoint must pass (tests swap in a
+	// local fake push service), and the limit on test notifications.
+	vapid          *vapidKeys
+	vapidSubject   string
+	pushEndpointOK func(endpoint string) error
+	pushLimiter    *RateLimiter
 }
 
 // Default public/app URLs when a binary doesn't configure them (local dev).
@@ -82,6 +89,12 @@ type EmailLinks struct {
 const (
 	authRatePerMinute = 20
 	authBurst         = 10
+)
+
+// Per-user limit on test notifications: a human checking their device, not a notification cannon.
+const (
+	pushTestRatePerMinute = 6
+	pushTestBurst         = 3
 )
 
 // Option customizes a Server at construction. The open-core binary passes none; the
@@ -161,9 +174,16 @@ func New(db *sql.DB, dialect string, opts ...Option) *Server {
 		mailer:       &Mailer{}, // unconfigured: logs instead of sending
 		publicURL:    defaultPublicURL,
 		appURL:       defaultAppURL,
+
+		pushEndpointOK: validatePushEndpoint,
+		pushLimiter:    NewRateLimiter(pushTestRatePerMinute, pushTestBurst),
 	}
 	for _, opt := range opts {
 		opt(s)
+	}
+	// After the options: the VAPID contact falls back to the public URL and the mail sender.
+	if err := s.loadPushConfig(); err != nil {
+		log.Fatalf("web push: %v", err)
 	}
 	return s
 }
@@ -261,6 +281,14 @@ func (s *Server) Handler() http.Handler {
 	// Document bytes: content-addressed, streamed to/from object storage (PLAN §6.9).
 	mux.Handle("PUT /v1/blobs/{sha256}", s.authed(s.handleBlobPut))
 	mux.Handle("GET /v1/blobs/{sha256}", s.authed(s.handleBlobGet))
+	// Web Push (push.go): a browser registers its subscription and the server pushes each task
+	// reminder as it comes due, so an installed web app is reminded while it is closed.
+	mux.Handle("GET /v1/push/config", s.authed(s.handlePushConfig))
+	mux.Handle("POST /v1/push/subscribe", s.authed(s.handlePushSubscribe))
+	mux.Handle("POST /v1/push/unsubscribe", s.authed(s.handlePushUnsubscribe))
+	mux.Handle("POST /v1/push/test", s.authed(func(w http.ResponseWriter, r *http.Request) {
+		s.pushLimiter.Limit(UserKey, s.handlePushTest).ServeHTTP(w, r)
+	}))
 	cors := s.corsMW
 	if cors == nil {
 		cors = CORS([]string{"*"}) // dev-friendly default (open-core server)

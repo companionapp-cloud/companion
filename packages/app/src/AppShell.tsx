@@ -86,6 +86,7 @@ import { SettingsScreen } from "./SettingsScreen";
 import { useSync } from "./SyncProvider";
 import { SyncHealthChip, syncBlocker } from "./SyncHealthBanner";
 import { IOSPWAInstallBanner } from "./push/IOSPWAInstallBanner";
+import { NotificationsPromptBanner } from "./push/NotificationsPromptBanner";
 import { InstallGuideScreen } from "./push/InstallGuide";
 import { CommandPalette, paletteEnter } from "./CommandPalette";
 import { CAPTURE_NEW_EVENT, CAPTURE_NEW_KEYS, PALETTE_OPEN_EVENT } from "./capture";
@@ -854,6 +855,8 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
         <View style={{ flex: 1, minWidth: 0 }}>
           {/* iPad Safari in landscape lands here: offer installing to the Home Screen. */}
           <IOSPWAInstallBanner leftInset={chromeInset} />
+          {/* Once installed and signed in: offer turning reminder notifications on (web push). */}
+          <NotificationsPromptBanner leftInset={chromeInset} />
           <Frame toolbar={<AppToolbar onCapture={() => setCapture("list")} leftInset={chromeInset} verticalInset={toolbarInset} />}>
             {/* Every tab's surface stays mounted and only the active one is shown, so an
                 editor's draft, a chat's scroll or a graph's layout survives a tab switch. */}

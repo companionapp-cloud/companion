@@ -79,6 +79,8 @@ func main() {
 	adm := newAdmin(db, dialect, bill, srv)
 	srv.StartTrashCollector(context.Background())
 	srv.StartRepeatMaterializer(context.Background())
+	// Reminder pushes to subscribed browsers, held back (like sync) for accounts the gate refuses.
+	srv.StartPushDispatcher(context.Background())
 	// Calendar ICS fetching moved to the client (PLAN §E2EE); no server-side fetch sweep.
 
 	// CLOUD_ADMIN_EMAILS bootstraps the admin_users table: any already-registered user with

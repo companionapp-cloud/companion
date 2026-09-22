@@ -2,9 +2,11 @@ import { useMemo, useState, type ReactNode } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
 import { BrandMark, Button, Icon, Text, colors, font, radius, space, type IconName } from "@companion/design-system";
 import { useNav } from "../nav-context";
+import { useSync } from "../SyncProvider";
 import { Segmented } from "../settingsUi";
 import { NavBar } from "../mobile/ui";
 import { detectIos, iosSupportsWebPush, safariEra, type IosDevice, type SafariEra } from "./iosInstall";
+import { useWebPush } from "./WebPushProvider";
 
 // The install guide: how to put Companion on the Home Screen of an iPhone or iPad, so it launches
 // full screen like any other app instead of a Safari tab. The steps follow what the reader is
@@ -95,8 +97,8 @@ export function InstallGuide({ onDone }: { onDone: () => void }) {
   } else if (env?.browser === "in-app") {
     intro = (
       <Para>
-        You’re in another app’s built-in browser, which can’t add anything to your Home Screen. Open this page in <B>Safari</B> first —
-        most apps have an <B>Open in Safari</B> (or <B>Open in browser</B>) option in their <B>···</B> menu — or copy the link and paste
+        You’re in another app’s built-in browser, which can’t add anything to your Home Screen. Open this page in <B>Safari</B> first:
+        most apps have an <B>Open in Safari</B> (or <B>Open in browser</B>) option in their <B>···</B> menu. Or copy the link and paste
         it into Safari.
       </Para>
     );
@@ -165,8 +167,13 @@ export function InstallGuide({ onDone }: { onDone: () => void }) {
   );
 }
 
-/** Reached from the Home Screen app itself (or opened there): installing is done. */
+/** Reached from the Home Screen app itself (or opened there): installing is done, and what's left
+ *  is turning reminder notifications on (web push), when this device can and hasn't yet. */
 function Installed({ onDone, deviceName }: { onDone: () => void; deviceName: string }) {
+  const push = useWebPush();
+  const sync = useSync();
+  const nav = useNav();
+  const canEnable = push.support === "supported" && !push.enabled && push.permission !== "denied";
   return (
     <View style={styles.body}>
       <View style={styles.hero}>
@@ -175,12 +182,33 @@ function Installed({ onDone, deviceName }: { onDone: () => void; deviceName: str
           Companion is on your Home Screen
         </Text>
         <Text variant="body" tone="secondary" style={styles.center}>
-          Launch it from there like any other app on your {deviceName} — full screen, no browser bar.
+          {push.enabled
+            ? `Notifications are on. Reminders reach this ${deviceName} even when Companion is closed.`
+            : canEnable
+              ? "One last step: allow notifications so reminders reach you when Companion is closed."
+              : `Launch it from there like any other app on your ${deviceName}: full screen, no browser bar.`}
         </Text>
       </View>
       <View style={styles.actions}>
-        <Button label="Done" onPress={onDone} />
+        {canEnable && sync.connected ? (
+          <Button label={push.busy ? "Turning on…" : "Turn on notifications"} disabled={push.busy} onPress={push.enable} />
+        ) : null}
+        {canEnable && !sync.connected ? (
+          <Button label="Sign in to sync" onPress={() => nav.openRef({ kind: "view", view: "settings", section: "sync" })} />
+        ) : null}
+        <Button label={canEnable ? "Not now" : "Done"} variant={canEnable ? "ghost" : "primary"} onPress={onDone} />
       </View>
+      {canEnable && !sync.connected ? <Para center>Reminders are sent by your sync server, so sign in to sync first.</Para> : null}
+      {push.permission === "denied" ? (
+        <Para center>
+          Notifications are blocked. Open the Settings app › <B>Notifications</B> › <B>Companion</B> to allow them.
+        </Para>
+      ) : null}
+      {push.error ? (
+        <Text variant="caption" tone="danger" style={styles.center}>
+          {push.error}
+        </Text>
+      ) : null}
     </View>
   );
 }
