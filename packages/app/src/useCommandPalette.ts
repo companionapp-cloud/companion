@@ -400,7 +400,8 @@ export function useCommandPalette({ onClose, onOpen, initialMode, container = nu
 
   const back = useCallback(() => {
     if (mode.kind !== "root") {
-      enter({ kind: "root" });
+      // Backing out of a create keeps the title typed so far; the next Esc clears it.
+      enter({ kind: "root" }, mode.kind === "create" ? query : "");
       return true;
     }
     if (query) {
