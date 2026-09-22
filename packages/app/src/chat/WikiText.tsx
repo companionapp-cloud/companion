@@ -2,13 +2,15 @@ import { useContext, useEffect, useState, type ReactNode } from "react";
 import { StyleSheet, Text as RNText } from "react-native";
 import { colors, font } from "@companion/design-system";
 import { useCore } from "../CoreContext";
+import { useRefDrag } from "../DndContext";
 import { OpenEntityContext, ThreadLayoutContext } from "./context";
 
 // --- wikilink rendering ----------------------------------------------------
 
 const WIKILINK = /!?\[\[(note|task|habit|project|canvas):([^\]|]+)(?:\|[^\]]+)?\]\]/g;
 
-/** Chat prose with its [[type:id]] wikilinks drawn as clickable chips titled live. */
+/** Chat prose with its [[type:id]] wikilinks drawn as clickable chips titled live. A chip also
+ *  drags what it points at (onto a project or an area, a task onto the Today agenda). */
 export function WikiText({ value }: { value: string }) {
   const threadLayout = useContext(ThreadLayoutContext);
   const parts: ReactNode[] = [];
@@ -41,8 +43,9 @@ function LinkChip({ type, id }: { type: string; id: string }) {
       alive = false;
     };
   }, [graph, id]);
+  const drag = useRefDrag(type, id, title ?? "");
   return (
-    <RNText style={styles.chip} onPress={() => openEntity?.(type, id)}>
+    <RNText {...drag} style={[styles.chip, drag ? styles.chipDraggable : null]} onPress={() => openEntity?.(type, id)}>
       {title ?? type}
     </RNText>
   );
@@ -52,4 +55,6 @@ const styles = StyleSheet.create({
   body: { fontFamily: font.sans, fontSize: font.size.md, lineHeight: 21, color: colors.textPrimary },
   bodyBubble: { lineHeight: 20 },
   chip: { color: colors.textAccent, fontWeight: font.weight.medium, textDecorationLine: "underline", textDecorationColor: colors.accentSoftBorder },
+  // A press on a draggable chip is a click or a drag, never the start of a text selection.
+  chipDraggable: { userSelect: "none" },
 });

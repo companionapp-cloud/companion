@@ -32,6 +32,8 @@ Type in the field to add a new task due that day. To plan around a task you alre
 
 A task's place in the grid is simply its start and its deadline: one that starts at 10:00 and is due at 10:45 is a 45-minute block. Drag a block to move it and drag its bottom edge to make it longer or shorter; both snap to fifteen minutes, and the task's dates follow. Click an empty spot in the grid and the same palette opens for that time: pick a task, or type a name and choose **New task** or **New event**. Shift+Enter adds a task and keeps the palette open for the next one.
 
+Tasks can also be dragged in: a task's chip in a note (today's included), a task in a chat, a task card on a canvas, or a row in the task list. Hover the grid to see where it will land, then drop it on a quarter hour. A task already in the grid moves there whole. To reach Today from another tab, rest the drag on the **Today** tab, or on **Today** in the sidebar, and it opens. Notes and canvases don't go on the agenda.
+
 Anything that doesn't fit inside the day — a task running Monday to Friday, an all-day event — sits in the list at the top instead. A task you pick that's due on a later day keeps its deadline: it starts today and reads "all day" until it's due.
 
 On a phone the agenda stays a list; open a task to change its start and deadline.

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { PanResponder, Pressable, ScrollView, View, type PanResponderGestureState } from "react-native";
 import type { CalendarItemKind } from "@companion/core-bridge";
 import { Text, colors, font, motion, radius, shadow, space, transition, type PressState } from "@companion/design-system";
 import { DAY_MIN, KIND, layoutLanes, type Lane } from "./calendarLayout";
+import { useDropTarget, useOptionalDnd, type DragPayload } from "./DndContext";
 
 // The Today agenda's day grid (PLAN-agenda.md): what fits inside the day, in one column, midnight to midnight, ruled every
 // fifteen minutes — the step everything in it moves and stretches by. A sibling of the Calendar
@@ -18,6 +19,11 @@ const HOURS = Array.from({ length: 24 }, (_, h) => h);
 const QUARTERS = [0, 1, 2, 3];
 // Where the grid opens when the day isn't today and holds nothing earlier (~7am).
 const DEFAULT_SCROLL_HOUR = 7;
+// The space above midnight's rule (the content's top padding).
+const CONTENT_TOP = space.md;
+// A drag held this close to the grid's top or bottom edge scrolls it, up to this fast (px/frame).
+const EDGE = 28;
+const EDGE_SPEED = 14;
 
 /** Something drawn in the grid: a calendar event, or a task from its start to its deadline. */
 export interface GridBlock {
@@ -57,6 +63,24 @@ function minutesOf(iso: string): number {
 
 const snap = (min: number) => Math.round(min / SLOT_MIN) * SLOT_MIN;
 
+/** What a drop from the app's drag layer would make at a quarter hour: where its block starts
+ *  and how long it runs, in minutes, and a word for when that isn't a block (a task due on a
+ *  later day only takes a start here, and reads all day). */
+export interface GridDropPlan {
+  start: number;
+  length: number;
+  note?: string;
+}
+
+/** Drops from the app's drag layer onto the grid (a task dragged in from a note, a chat, a
+ *  canvas card or a list): which payloads it takes, what one would make at a quarter hour
+ *  (drawn under the pointer while it hovers), and the drop itself. */
+export interface GridDrop {
+  accepts: (payload: DragPayload) => boolean;
+  plan: (payload: DragPayload, minutes: number) => GridDropPlan | null;
+  onDrop: (payload: DragPayload, minutes: number) => void;
+}
+
 export function AgendaGrid({
   date,
   blocks,
@@ -64,6 +88,7 @@ export function AgendaGrid({
   onPressBlock,
   onMove,
   onPressSlot,
+  drop,
 }: {
   /** The day shown, 'YYYY-MM-DD'. */
   date: string;
@@ -75,6 +100,8 @@ export function AgendaGrid({
   onMove?: (block: GridBlock, startsAt: string, endsAt: string) => void;
   /** An empty quarter hour was clicked: minutes since midnight. */
   onPressSlot?: (minutes: number) => void;
+  /** Take drops from the app's drag layer; see GridDrop. */
+  drop?: GridDrop;
 }) {
   // A ticking clock so the "now" line tracks real time; only a visible tab keeps it.
   const [now, setNow] = useState(() => new Date());
@@ -107,33 +134,159 @@ export function AgendaGrid({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
+  // Drops from the drag layer. The grid's frame is the target; where in the day a drop lands
+  // is read off the pointer, the frame's top and how far the grid is scrolled.
+  const dropRef = useRef(drop);
+  dropRef.current = drop;
+  const dropId = useId();
+  const target = useDropTarget(
+    `agenda:${dropId}`,
+    (payload, _x, y) => {
+      const minutes = minutesAt(y);
+      if (minutes != null) dropRef.current?.onDrop(payload, minutes);
+    },
+    { accepts: (payload) => !!dropRef.current?.accepts(payload) },
+  );
+  /** The quarter hour under a window y, or null when y is off the grid (the layout can shift
+   *  under a drag: the all-day rows above arrive) or the grid can't be read (not on web). */
+  const minutesAt = (y: number): number | null => {
+    const frame = target.ref.current as DomNode | null;
+    const scroller = scrollerOf(scrollRef.current);
+    const rect = frame?.getBoundingClientRect?.();
+    if (!rect || !scroller || y < rect.top || y > rect.bottom) return null;
+    const offset = y - rect.top + scroller.scrollTop - CONTENT_TOP;
+    return Math.min(DAY_MIN - SLOT_MIN, Math.max(0, Math.floor(((offset / HOUR_H) * 60) / SLOT_MIN) * SLOT_MIN));
+  };
+  const hovering = useDropHover(target.isOver, target.ref, scrollRef, minutesAt);
+  const dnd = useOptionalDnd();
+  const plan = hovering != null && dnd?.dragging && drop ? drop.plan(dnd.dragging, hovering) : null;
+
   return (
-    <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={styles.content}>
-      <View style={styles.gridRow}>
-        <View style={{ width: GUTTER }}>
-          {HOURS.map((h) => (
-            <View key={h} style={{ height: HOUR_H }}>
-              <Text variant="mono" tone="quaternary" style={styles.hourLabel}>
-                {hourLabel(h)}
-              </Text>
-            </View>
-          ))}
+    <View ref={target.ref} style={styles.frame}>
+      <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={styles.content}>
+        <View style={styles.gridRow}>
+          <View style={{ width: GUTTER }}>
+            {HOURS.map((h) => (
+              <View key={h} style={{ height: HOUR_H }}>
+                <Text variant="mono" tone="quaternary" style={styles.hourLabel}>
+                  {hourLabel(h)}
+                </Text>
+              </View>
+            ))}
+          </View>
+          <View style={styles.column}>
+            {HOURS.map((h) =>
+              QUARTERS.map((q) => <Slot key={h * 4 + q} minutes={h * 60 + q * SLOT_MIN} quarter={q} onPress={onPressSlot} />),
+            )}
+            {blocks.map((b) => (
+              <Block key={b.id} block={b} lane={lanes.get(b.id)} onPress={onPressBlock} onMove={onMove} />
+            ))}
+            {isToday ? (
+              <View style={[styles.nowLine, { top: (nowMin / 60) * HOUR_H }]} pointerEvents="none">
+                <View style={styles.nowDot} />
+              </View>
+            ) : null}
+            {plan && dnd?.dragging ? <DropPreview plan={plan} title={dnd.dragging.label} /> : null}
+          </View>
         </View>
-        <View style={styles.column}>
-          {HOURS.map((h) =>
-            QUARTERS.map((q) => <Slot key={h * 4 + q} minutes={h * 60 + q * SLOT_MIN} quarter={q} onPress={onPressSlot} />),
-          )}
-          {blocks.map((b) => (
-            <Block key={b.id} block={b} lane={lanes.get(b.id)} onPress={onPressBlock} onMove={onMove} />
-          ))}
-          {isToday ? (
-            <View style={[styles.nowLine, { top: (nowMin / 60) * HOUR_H }]} pointerEvents="none">
-              <View style={styles.nowDot} />
-            </View>
-          ) : null}
-        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+/** The DOM behind a react-native-web view, as far as a drop needs it. */
+type DomNode = {
+  getBoundingClientRect?: () => { top: number; bottom: number };
+  scrollTop: number;
+  scrollBy?: (x: number, y: number) => void;
+  addEventListener?: (type: "scroll", cb: () => void) => void;
+  removeEventListener?: (type: "scroll", cb: () => void) => void;
+};
+/** The element a react-native-web ScrollView scrolls, or null off the web. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function scrollerOf(scrollView: any): DomNode | null {
+  const node = scrollView?.getScrollableNode?.() as DomNode | undefined;
+  return node && typeof node.scrollTop === "number" ? node : null;
+}
+
+/** The quarter hour a drag hovering the grid points at, or null when none does. Follows the
+ *  pointer and the grid's scroll (a wheel turned mid-drag moves the day under a resting
+ *  pointer), and scrolls the grid while the pointer is held near its top or bottom edge. */
+function useDropHover(
+  over: boolean,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  frameRef: { current: any },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  scrollRef: { current: any },
+  minutesAt: (y: number) => number | null,
+): number | null {
+  const dnd = useOptionalDnd();
+  const [minutes, setMinutes] = useState<number | null>(null);
+  const minutesAtRef = useRef(minutesAt);
+  minutesAtRef.current = minutesAt;
+  const subscribe = dnd?.subscribeMove;
+  useEffect(() => {
+    const scroller = scrollerOf(scrollRef.current);
+    if (!over || !subscribe || !scroller) {
+      setMinutes(null);
+      return;
+    }
+    // The pointer's window y, once it has moved over the grid.
+    let pointerY: number | null = null;
+    const reread = () => {
+      if (pointerY != null) setMinutes(minutesAtRef.current(pointerY));
+    };
+    let speed = 0;
+    let frame: number | null = null;
+    const tick = () => {
+      frame = null;
+      if (!speed) return;
+      // The scroll event rereads the spot; the browser stops the scroll at either end.
+      if (scroller.scrollBy) scroller.scrollBy(0, speed);
+      else scroller.scrollTop += speed;
+      frame = requestAnimationFrame(tick);
+    };
+    const unsubscribe = subscribe((_x, y) => {
+      pointerY = y;
+      reread();
+      const rect = (frameRef.current as DomNode | null)?.getBoundingClientRect?.();
+      speed = !rect
+        ? 0
+        : y < rect.top + EDGE
+          ? -Math.ceil(EDGE_SPEED * Math.min(1, (rect.top + EDGE - y) / EDGE))
+          : y > rect.bottom - EDGE
+            ? Math.ceil(EDGE_SPEED * Math.min(1, (y - (rect.bottom - EDGE)) / EDGE))
+            : 0;
+      if (speed && frame == null) frame = requestAnimationFrame(tick);
+    });
+    scroller.addEventListener?.("scroll", reread);
+    return () => {
+      unsubscribe();
+      scroller.removeEventListener?.("scroll", reread);
+      if (frame != null) cancelAnimationFrame(frame);
+    };
+  }, [over, subscribe, frameRef, scrollRef]);
+  return minutes;
+}
+
+/** Where a drop would land: the block it would make, outlined, with its times (or a word on
+ *  why it won't read as a block). */
+function DropPreview({ plan, title }: { plan: GridDropPlan; title: string }) {
+  const top = (plan.start / 60) * HOUR_H;
+  const height = Math.max(SLOT_H, (Math.min(plan.length, DAY_MIN - plan.start) / 60) * HOUR_H);
+  const tight = height < SLOT_H * 3;
+  const k = KIND.task;
+  return (
+    <View pointerEvents="none" style={[styles.preview, { top: top + 1, height: height - 1 }]}>
+      <View style={[styles.previewInner, tight ? styles.blockInnerTight : null, { backgroundColor: k.bg, borderColor: k.bar }]}>
+        <Text variant="caption" style={[styles.blockTitle, tight ? styles.blockTitleTight : null, { color: k.fg }]} numberOfLines={1}>
+          {title || "Untitled"}
+        </Text>
+        <Text variant="mono" style={[styles.blockTime, { color: k.fg }]} numberOfLines={1}>
+          {plan.note ?? `${clockLabel(plan.start)}–${clockLabel(Math.min(DAY_MIN, Math.round(plan.start + plan.length)))}`}
+        </Text>
       </View>
-    </ScrollView>
+    </View>
   );
 }
 
@@ -307,8 +460,9 @@ function Block({
 const styles = {
   // minHeight:0 lets this flex child shrink below its content height so it scrolls instead of
   // growing the pane (RNW/flexbox gotcha).
+  frame: { flex: 1, minHeight: 0 },
   scroll: { flex: 1, minHeight: 0 },
-  content: { height: HOURS.length * HOUR_H + space.md, paddingTop: space.md },
+  content: { height: HOURS.length * HOUR_H + CONTENT_TOP, paddingTop: CONTENT_TOP },
   gridRow: { flexDirection: "row" as const },
   hourLabel: { fontSize: font.size["2xs"], textAlign: "right" as const, paddingRight: space.sm, marginTop: -5 },
   column: { flex: 1, minWidth: 0, position: "relative" as const },
@@ -343,6 +497,18 @@ const styles = {
     zIndex: 2,
     cursor: "ns-resize",
   } as Record<string, unknown>,
+  // A drop's landing spot: the block it would make, dashed, over everything but the clock.
+  preview: { position: "absolute" as const, left: 0, right: 0, paddingLeft: 2, paddingRight: 4, zIndex: 70 },
+  previewInner: {
+    flex: 1,
+    overflow: "hidden" as const,
+    borderWidth: 1,
+    borderStyle: "dashed" as const,
+    borderRadius: radius.sm,
+    paddingHorizontal: space.xs,
+    paddingVertical: space.xxs,
+    opacity: 0.9,
+  },
   nowLine: {
     position: "absolute" as const,
     left: 0,

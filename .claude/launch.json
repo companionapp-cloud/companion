@@ -292,6 +292,22 @@
       ],
       "port": 5437,
       "autoPort": false
+    },
+    {
+      "name": "web-dragrefs",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@companion/web",
+        "--",
+        "--port",
+        "5448",
+        "--strictPort"
+      ],
+      "port": 5448,
+      "autoPort": false
     }
   ]
 }

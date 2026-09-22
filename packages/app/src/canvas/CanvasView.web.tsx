@@ -14,6 +14,7 @@ import {
   type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type Ref,
 } from "react";
 import {
@@ -198,6 +199,9 @@ interface CanvasActions {
   refreshPreview: (id: string) => void;
   /** Persist an edge's label / ends / color. */
   updateEdge: (id: string, patch: Partial<Pick<CanvasEdge, "label" | "fromEnd" | "toEnd" | "color">>) => void;
+  /** Carry an embedded note or task off the board (a card's grip); absent without a host drag
+   *  layer, and the cards then show no grip. */
+  dragRef?: (ref: { type: "note" | "task"; id: string; label: string }, x: number, y: number) => void;
 }
 const ActionsCtx = createContext<CanvasActions | null>(null);
 
@@ -317,6 +321,9 @@ const CANVAS_CSS = `
 .canvas-swatch:disabled { opacity: 0.4; cursor: default; }
 .canvas-check { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 12px; height: 12px; flex-shrink: 0; margin-top: 3px; padding: 0; border: 1px solid ${colors.borderStrong}; border-radius: ${radius.xs}px; background: ${colors.surfaceCard}; cursor: pointer; transition: background-color ${motion.fast}ms ${motion.ease}, border-color ${motion.fast}ms ${motion.ease}; }
 .canvas-check.on { border-color: ${colors.accent}; background: ${colors.accent}; }
+.canvas-grip { position: absolute; top: 3px; right: 3px; display: flex; align-items: center; justify-content: center; width: 16px; height: 18px; border-radius: ${radius.sm}px; background: ${colors.surfaceCard}; cursor: grab; touch-action: none; opacity: 0; transition: opacity ${motion.fast}ms ${motion.ease}, background-color ${motion.instant}ms ${motion.ease}; }
+.canvas-grip:hover { background: ${colors.surfaceHover}; }
+.react-flow__node:hover .canvas-grip, .react-flow__node.selected .canvas-grip { opacity: 1; }
 .canvas-input { box-sizing: border-box; height: ${control.sm}px; padding: 0 ${space.sm}px; border: 1px solid ${colors.borderDefault}; border-radius: ${radius.md}px; background: ${colors.surfaceCard}; color: ${colors.textPrimary}; font: ${font.size.sm}px ${font.sans}; outline: 0; transition: border-color ${motion.fast}ms ${motion.ease}, box-shadow ${motion.fast}ms ${motion.ease}; }
 .canvas-input:focus { border-color: ${colors.borderFocus}; box-shadow: 0 0 0 2px ${colors.focusRing}; }
 .canvas-row { display: flex; width: 100%; align-items: center; gap: ${space.sm}px; box-sizing: border-box; min-height: ${row.h}px; padding: 0 ${space.sm}px; border: 0; border-radius: ${radius.sm}px; background: transparent; color: ${colors.textPrimary}; font: ${font.weight.medium} ${font.size.base}px ${font.sans}; text-align: left; cursor: pointer; transition: background-color ${motion.fast}ms ${motion.ease}; }
@@ -612,6 +619,7 @@ function NoteCard({ node, refs }: { node: CanvasNode; refs: CanvasRefs }) {
           </div>
           <div style={{ ...monoMeta, flexShrink: 0 }}>note</div>
           <div style={{ ...cardBody, flex: 1, minHeight: 0 }}>{ref.excerpt || "No additional text"}</div>
+          {node.refId ? <RefGrip type="note" id={node.refId} label={ref.title || "Untitled"} /> : null}
         </>
       )}
     </div>
@@ -656,8 +664,49 @@ function TaskCard({ node, refs }: { node: CanvasNode; refs: CanvasRefs }) {
               task{ref.dueAt ? ` · due ${new Date(ref.dueAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }).toLowerCase()}` : ""}
             </div>
           </div>
+          {node.refId ? <RefGrip type="task" id={node.refId} label={ref.title || "Untitled task"} /> : null}
         </>
       )}
+    </div>
+  );
+}
+
+/** How far (px) a press on a card's grip travels before it becomes a drag. */
+const GRIP_SLOP = 4;
+
+/** The grip in an embedded note's or task's top-right corner, shown on hover: drag it to carry
+ *  the card's note or task off the board, onto a project or an area (a task onto the Today
+ *  agenda too). Dragging the card anywhere else still moves it on the board. Only where the
+ *  host has a drag layer (web/desktop). */
+function RefGrip({ type, id, label }: { type: "note" | "task"; id: string; label: string }) {
+  const actions = useActions();
+  const drag = actions.dragRef;
+  if (!drag) return null;
+  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    // The board neither selects nor pans from here (nodrag / nopan), and no text selection starts.
+    e.preventDefault();
+    e.stopPropagation();
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    const move = (ev: PointerEvent) => {
+      if (Math.abs(ev.clientX - x0) < GRIP_SLOP && Math.abs(ev.clientY - y0) < GRIP_SLOP) return;
+      stop();
+      drag({ type, id, label }, ev.clientX, ev.clientY);
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", move, true);
+      window.removeEventListener("pointerup", stop, true);
+      window.removeEventListener("pointercancel", stop, true);
+    };
+    window.addEventListener("pointermove", move, true);
+    window.addEventListener("pointerup", stop, true);
+    window.addEventListener("pointercancel", stop, true);
+  };
+  const hint = type === "task" ? "Drag to a project, an area or the agenda" : "Drag to a project or area";
+  return (
+    <div className="canvas-grip nodrag nopan" role="button" aria-label={hint} title={hint} onPointerDown={onPointerDown} onDoubleClick={(e) => e.stopPropagation()}>
+      <Icon name="grip" size={12} color={colors.textTertiary} strokeWidth={2.5} />
     </div>
   );
 }
@@ -1582,8 +1631,9 @@ function CanvasSurface({ host, canvasId, touch: touchProp, toolsRef, handleRef }
         pushHistory();
         void upsertEdges([edgeInput({ ...fe.data.edge, ...patch })]);
       },
+      dragRef: host.dragRef ? (ref, x, y) => host.dragRef?.(ref, canvasId, x, y) : undefined,
     }),
-    [updateNode, pushHistory, upsertNodes, upsertEdges, host, reload, setNodes, fetchPreview],
+    [updateNode, pushHistory, upsertNodes, upsertEdges, host, canvasId, reload, setNodes, fetchPreview],
   );
 
   // ---- selection toolbar ----

@@ -3,6 +3,7 @@ export type {
   EditorProps,
   EditorController,
   LinkRef,
+  RefDragStart,
   LinkSource,
   LinkSuggestion,
   DocumentSource,

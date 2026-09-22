@@ -98,9 +98,13 @@ function ListIndexRow({ list, dragging, drag, onPress }: { list: List; dragging:
   const { addTask } = useLists();
   const items = useListItems(list.id);
   // Dropping a dragged task on a list appends it (and joins the project if needed).
-  const { ref, isOver } = useDropTarget(`list:${list.id}`, (p) => {
-    if (p.kind === "task") void addTask(list.id, p.id);
-  });
+  const { ref, isOver } = useDropTarget(
+    `list:${list.id}`,
+    (p) => {
+      if (p.kind === "task") void addTask(list.id, p.id);
+    },
+    { accepts: (p) => p.kind === "task" },
+  );
   const taskCount = items.filter((i) => i.kind === "task").length;
   return (
     <View ref={ref} style={[dragging ? styles.rowDragging : null, isOver ? styles.rowOver : null]}>

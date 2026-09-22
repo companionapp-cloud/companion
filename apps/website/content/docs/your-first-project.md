@@ -40,6 +40,8 @@ The toolbar beside **Overview** opens the full lists. A project has Notes, Tasks
 
 Anything can be filed after the fact — there's no need to decide up front. With a note, task or canvas open, click the **folder** icon in its toolbar and pick where it lives: an area, or a project. You can also drag a note or task from the list straight onto an area or a project in the sidebar, and select several at once to move them in one go.
 
+Links drag the same way: a chip in a note or a task, a link or a preview in a chat, or a note or task card on a canvas (by the grip in its corner). Drop it on an area or a project to file what it points to. Drop a link to a project on an area to move the project into that area.
+
 Everything lives in one place. Filing something in a project takes it out of wherever it was, so "which project is this in?" always has one answer. Not everything belongs to a project, which is what areas are for: a loose "book the dentist" can simply live in "Health".
 
 Nothing has to be filed at all. The **Unsorted** filter at the top of Notes and Tasks is precisely the pile of things you haven't sorted — a useful place to work from, not a mess to feel bad about.

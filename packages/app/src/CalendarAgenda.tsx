@@ -19,10 +19,11 @@ import {
   type IconName,
   type PressState,
 } from "@companion/design-system";
-import { AgendaGrid, type GridBlock } from "./AgendaGrid";
+import { AgendaGrid, clockLabel, type GridBlock, type GridDrop } from "./AgendaGrid";
 import { AgendaPalette } from "./AgendaPalette";
 import { useCalendar } from "./CalendarProvider";
 import { DAY_MIN, POINT_MIN, fitsInDay, taskBlockPatch } from "./calendarLayout";
+import type { DragPayload } from "./DndContext";
 import { EventEditorDialog, type EventEditorTarget } from "./EventEditorDialog";
 import { useTasks } from "./TasksProvider";
 
@@ -216,22 +217,28 @@ export function Agenda({
   // half hour.
   const block = picking ? freeBlock(date, busy, picking.from) : null;
 
-  // An existing task put on the day takes that time. Its block is its start → deadline, so
-  // both are set; unless it is due after this day, when only its start moves here, its deadline
-  // is kept, and it reads all day until then.
+  // An existing task put on the day takes a time. Its block is its start → deadline, so both
+  // are set; unless it is due after this day, when only its start moves here, its deadline is
+  // kept, and it reads all day until then. True when it became a block.
+  const dueAfterDay = (task: Task) => !!task.dueAt && new Date(task.dueAt).getTime() >= new Date(dayBounds(date).to).getTime();
+  const placeTask = (task: Task, at: { startsAt: string; endsAt: string }): boolean => {
+    const dueLater = dueAfterDay(task);
+    void tasks.update(task.id, dueLater ? { startAt: at.startsAt } : { startAt: at.startsAt, dueAt: at.endsAt });
+    return !dueLater;
+  };
   const addTask = (task: Task) => {
     if (!block) return;
-    const dueLater = !!task.dueAt && new Date(task.dueAt).getTime() >= new Date(dayBounds(date).to).getTime();
-    void tasks.update(task.id, dueLater ? { startAt: block.startsAt } : { startAt: block.startsAt, dueAt: block.endsAt });
     // A palette kept open (⇧⏎) hands the next pick the time after this one.
-    if (!dueLater) setPicking({ from: minutesOf(block.endsAt) || DAY_MIN - BLOCK_STEP });
+    if (placeTask(task, block)) setPicking({ from: minutesOf(block.endsAt) || DAY_MIN - BLOCK_STEP });
   };
 
   // A block dropped at a new time, or stretched. The block moves at once; the write follows,
   // and a refused one (the core says why) snaps back on the re-query.
   const moveBlock = (block: GridBlock, startsAt: string, endsAt: string) => {
     const item = timed.find((it) => it.id === block.id);
-    if (!item) return;
+    if (item) moveItem(item, startsAt, endsAt);
+  };
+  const moveItem = (item: CalendarItem, startsAt: string, endsAt: string) => {
     const snapBack = () => setItems((prev) => (prev ? [...prev] : prev));
     if (item.kind === "event") {
       setItems((prev) => prev?.map((it) => (it.id === item.id ? { ...it, startsAt, endsAt } : it)) ?? prev);
@@ -244,6 +251,50 @@ export function Agenda({
     const moved = patch.startAt && patch.dueAt ? { startsAt, endsAt, span: true } : { startsAt };
     setItems((prev) => prev?.map((it) => (it.id === item.id ? { ...it, ...moved } : it)) ?? prev);
     void tasks.update(task.id, patch).catch(snapBack);
+  };
+
+  // A task dragged in from elsewhere (a link chip in a note or a chat, a chat preview, a canvas
+  // card, a list row) and dropped on a quarter hour. One that is a block on the day already
+  // moves there whole, as if dragged in the grid; any other takes the time a click on that
+  // quarter hands out (freeBlock), by placeTask's rules. Only an open task takes time; notes
+  // and canvases don't go on the agenda.
+  const openTaskOf = (p: DragPayload) => {
+    const task = p.kind === "task" ? tasks.byId(p.id) : undefined;
+    return task?.status === "open" ? task : undefined;
+  };
+  const blockOf = (task: Task) => timed.find((it) => it.kind === "task" && it.sourceId === task.id);
+  const drop: GridDrop = {
+    accepts: (p) => !!openTaskOf(p),
+    plan: (p, from) => {
+      const task = openTaskOf(p);
+      if (!task) return null;
+      const onDay = blockOf(task);
+      if (onDay) {
+        const length = lengthOf(onDay);
+        return { start: Math.max(0, Math.min(from, DAY_MIN - Math.ceil(length))), length };
+      }
+      const at = freeBlock(date, busy, from);
+      const start = minutesOf(at.startsAt);
+      if (task.dueAt && dueAfterDay(task)) {
+        const due = new Date(task.dueAt).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }).toLowerCase();
+        return { start, length: BLOCK_STEP, note: `starts ${clockLabel(start)} · due ${due}` };
+      }
+      return { start, length: (new Date(at.endsAt).getTime() - new Date(at.startsAt).getTime()) / 60_000 };
+    },
+    onDrop: (p, from) => {
+      const task = openTaskOf(p);
+      if (!task) return;
+      const onDay = blockOf(task);
+      if (!onDay) {
+        placeTask(task, freeBlock(date, busy, from));
+        return;
+      }
+      const length = lengthOf(onDay);
+      const start = Math.max(0, Math.min(from, DAY_MIN - Math.ceil(length)));
+      const [y, m, d] = date.split("-").map(Number);
+      const startsAt = new Date(y, m - 1, d, Math.floor(start / 60), start % 60);
+      moveItem(onDay, startsAt.toISOString(), new Date(startsAt.getTime() + length * 60_000).toISOString());
+    },
   };
 
   const blocks: GridBlock[] = grid
@@ -319,6 +370,7 @@ export function Agenda({
               }}
               onMove={moveBlock}
               onPressSlot={creatable ? (from) => setPicking({ from }) : undefined}
+              drop={creatable ? drop : undefined}
             />
           </View>
         </>

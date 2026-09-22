@@ -43,7 +43,7 @@ The strip at the top of the board adds everything else. Each button has a one-ke
 
 Note, task and event cards aren't copies. They show the real thing: tick a task on the board and it's done everywhere, and double-clicking a card opens the note or task itself. Deleting a card only takes it off the board — the note or task behind it is untouched.
 
-Two shortcuts save a trip to the strip. **Paste** a web address to get a link card, or an image to get an image card. And you can **drag** a note or a task out of any list and drop it straight onto the board.
+Two shortcuts save a trip to the strip. **Paste** a web address to get a link card, or an image to get an image card. And you can **drag** a note or a task out of any list and drop it straight onto the board. To take one the other way, hover its card and drag the grip in the top-right corner onto an area or a project in the sidebar, or a task onto the agenda on [Today](/docs/today-home-base).
 
 ## Connect things
 

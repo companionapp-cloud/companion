@@ -1,3 +1,4 @@
+import { useRef, type ReactNode } from "react";
 import { ScrollView, View } from "react-native";
 import {
   Avatar,
@@ -25,7 +26,7 @@ import { useProjects } from "./ProjectsProvider";
 import { useSync } from "./SyncProvider";
 import { useCanvases } from "./canvas/CanvasesProvider";
 import { NotificationsBell } from "./NotificationsBell";
-import { Draggable } from "./DndContext";
+import { Draggable, useSpringTarget } from "./DndContext";
 import { TourAnchor } from "./onboarding/anchors";
 
 const VIEW_META: Record<SurfaceViewId, { label: string; icon: IconName }> = {
@@ -113,7 +114,8 @@ export function AppToolbar({
           const { label, icon: glyph } = describe(tab.ref);
           const doc = docOfRef(tab.ref);
           const el = (
-            <Tab
+            <StripTab
+              uid={tab.uid}
               label={label}
               active={i === nav.activeIndex}
               icon={glyph ? <Icon name={glyph} size={11} color={colors.textQuaternary} /> : undefined}
@@ -158,6 +160,28 @@ export function AppToolbar({
       <NotificationsBell />
       {sync.email ? <Avatar name={sync.email} size="sm" /> : null}
     </Toolbar>
+  );
+}
+
+/** One tab in the strip. Resting a drag on a tab that isn't showing opens it (spring-loading),
+ *  so whatever is being dragged can reach a surface in another tab: a task from a chat onto the
+ *  Today agenda, a note onto a board. */
+function StripTab({ uid, active, ...tab }: { uid: string; label: string; active: boolean; icon?: ReactNode; onPress: () => void; onExpand?: () => void; onClose: () => void }) {
+  const nav = useNav();
+  const navRef = useRef(nav);
+  navRef.current = nav;
+  const { ref, isOver } = useSpringTarget(
+    `tab:${uid}`,
+    () => {
+      const index = navRef.current.tabs.findIndex((t) => t.uid === uid);
+      if (index >= 0) navRef.current.selectTab(index);
+    },
+    () => !active,
+  );
+  return (
+    <View ref={ref}>
+      <Tab {...tab} active={active} highlighted={isOver} />
+    </View>
   );
 }
 

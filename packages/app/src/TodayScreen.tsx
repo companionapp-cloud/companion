@@ -28,6 +28,7 @@ import { useNav } from "./nav-context";
 import { useNotes } from "./NotesProvider";
 import { useTasks } from "./TasksProvider";
 import { useLinkSource } from "./useLinkSource";
+import { useEditorRefDrag } from "./DndContext";
 import { useQuickCreateLink } from "./useQuickCreateLink";
 import { useDocumentSource } from "./DocumentSourceContext";
 import { TourAnchor } from "./onboarding/anchors";
@@ -178,6 +179,9 @@ function DailyNoteBody({
   const tasks = useTasks();
   const touch = useDensity() === "touch";
   const linkSource = useLinkSource();
+  // A link chip dragged out of the document (web/desktop): onto a project or area, a task onto
+  // the Today agenda.
+  const refDrag = useEditorRefDrag();
   // File embedding (PLAN §6.9): present on web (OPFS blob store), undefined elsewhere.
   const documentSource = useDocumentSource();
 
@@ -296,6 +300,7 @@ function DailyNoteBody({
         linkRevision={tasks.tasks}
         placeholder="Start today’s note…"
         onOpenRef={onOpenRef}
+        onRefDragStart={refDrag}
         onQuickCreate={quickCreate.onQuickCreate}
         onFormatStateChange={setFormatState}
         onFocusChange={handleFocusChange}

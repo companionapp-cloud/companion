@@ -5,6 +5,7 @@ import { useCore } from "../CoreContext";
 import { useTasks } from "../TasksProvider";
 import { useSync } from "../SyncProvider";
 import { useDocumentSource } from "../DocumentSourceContext";
+import { usePointerDrag } from "../DndContext";
 import type { CanvasHost, CanvasRefKind } from "./host";
 import { RefPicker } from "./RefPicker";
 import { EventPicker } from "./EventPicker";
@@ -38,6 +39,10 @@ export function useCanvasHost({ onOpenRef, onNewCanvas }: CanvasHostOptions): { 
   newCanvasRef.current = onNewCanvas;
   const docRef = useRef(documentSource);
   docRef.current = documentSource;
+  // The shell's drag layer (web/desktop): a card's grip carries its note or task off the board.
+  const pointerDrag = usePointerDrag();
+  const pointerDragRef = useRef(pointerDrag);
+  pointerDragRef.current = pointerDrag;
 
   const host = useMemo<CanvasHost>(
     () => ({
@@ -116,10 +121,14 @@ export function useCanvasHost({ onOpenRef, onNewCanvas }: CanvasHostOptions): { 
         }),
       linkPreview: (url) => canvases.linkPreview(url),
       newCanvas: onNewCanvas ? () => newCanvasRef.current?.() : undefined,
+      dragRef: pointerDrag
+        ? (ref, canvasId, x, y) =>
+            pointerDragRef.current?.({ kind: ref.type, id: ref.id, label: ref.label, source: `canvas:${canvasId}` }, x, y)
+        : undefined,
     }),
     // documentSource identity feeds the optional ingestImage; everything else reads refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canvases, core, syncTrigger, !!documentSource?.ingest, !!onNewCanvas],
+    [canvases, core, syncTrigger, !!documentSource?.ingest, !!onNewCanvas, !!pointerDrag],
   );
 
   const finishPick = (v: { id: string; label: string; data?: Record<string, unknown> } | null) => {

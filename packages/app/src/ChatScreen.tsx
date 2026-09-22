@@ -35,6 +35,7 @@ import { WikiText } from "./chat/WikiText";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useCore } from "./CoreContext";
 import { useLinkSource } from "./useLinkSource";
+import { useEditorRefDrag } from "./DndContext";
 import { useNav } from "./nav-context";
 import { TourAnchor } from "./onboarding/anchors";
 import { timeAgo } from "./NotificationRow";
@@ -816,6 +817,8 @@ function Composer({
   linkSource: LinkSource;
   onOpenRef: (ref: LinkRef) => void;
 }) {
+  // A chip typed into the message drags like one in the thread (web/desktop).
+  const refDrag = useEditorRefDrag();
   return (
     <Editor
       variant="simple"
@@ -826,6 +829,7 @@ function Composer({
       clearSignal={clearSignal}
       linkSource={linkSource}
       onOpenRef={onOpenRef}
+      onRefDragStart={refDrag}
       minHeight={24}
       maxHeight={120}
       debounceMs={120}

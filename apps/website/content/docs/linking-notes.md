@@ -7,7 +7,7 @@ order: 2
 excerpt: Markdown, wikilinks, tables, and attachments.
 badge: The basics
 readTime: 3 min read
-updated: Jul 2026
+updated: Sep 2026
 related: [your-first-note, using-the-graph]
 ---
 
@@ -26,6 +26,8 @@ Type `[[` and search. The menu spans notes *and* tasks, each row labelled with i
 ![The wikilink menu, searching across notes and tasks](/docs/note-wikilink.png)
 
 Under the hood a link is `[[note:<id>]]` — bound to the thing itself, not to its title. Rename a note and every link to it keeps working.
+
+On the desktop and the web, a chip also drags what it links to. Drop it on an area or a project in the sidebar to file it there, or drop a task's chip on the agenda on [Today](/docs/today-home-base) to give it time. The same goes for chips in a task's notes.
 
 ## Both directions
 

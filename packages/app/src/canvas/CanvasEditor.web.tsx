@@ -27,9 +27,14 @@ export function CanvasEditor({ canvasId, onOpenRef }: { canvasId: string; onOpen
   });
   // The board's add tools, for the canvases tutorial to point at.
   const toolsRef = useTourAnchor("canvas.tools");
-  const drop = useDropTarget(`canvas:${canvasId}`, (payload, x, y) => {
-    if (payload.kind === "note" || payload.kind === "task") view.current?.addRefAt({ type: payload.kind, id: payload.id }, x, y);
-  });
+  const drop = useDropTarget(
+    `canvas:${canvasId}`,
+    (payload, x, y) => {
+      if (payload.kind === "note" || payload.kind === "task") view.current?.addRefAt({ type: payload.kind, id: payload.id }, x, y);
+    },
+    // A card dragged off this board by its grip isn't added back to it.
+    { accepts: (payload) => (payload.kind === "note" || payload.kind === "task") && payload.source !== `canvas:${canvasId}` },
+  );
 
   return (
     <View ref={drop.ref} style={{ flex: 1, minHeight: 0 }}>

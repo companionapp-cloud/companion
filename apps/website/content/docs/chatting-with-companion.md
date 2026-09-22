@@ -42,7 +42,7 @@ On an [end-to-end encrypted account](/docs/using-our-cloud), a cloud agent's API
 
 The chat can read your workspace: it searches notes, lists tasks and projects, follows links and backlinks, reads a note in full, and queries [object types](/docs/object-types) by their fields. It reads your calendar too — events, plus the tasks due and daily notes on each day — and your canvases, card by card, with the groups and arrows between them. Claude Code and Codex get the same tools from the desktop app.
 
-When it points you to something, it shows it right in the chat instead of pasting it: a note, a task you can tick off there, an event, a miniature of a canvas, or a graph of everything linked to a note or task. Click one to open it.
+When it points you to something, it shows it right in the chat instead of pasting it: a note, a task you can tick off there, an event, a miniature of a canvas, or a graph of everything linked to a note or task. Click one to open it. Drag one, or a link in a reply, onto an area or a project in the sidebar to file it, or a task onto the agenda on [Today](/docs/today-home-base).
 
 Two switches on each agent decide what else it may do:
 

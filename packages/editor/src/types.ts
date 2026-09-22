@@ -75,6 +75,11 @@ export interface EditorProps {
   /** Called when the reader opens a wikilink chip (select it, then click again). The host
    * decides how — e.g. open the target in a new workspace tab. Omit and chips only select. */
   onOpenRef?: (ref: LinkRef) => void;
+  /** Web/desktop: a chip was pressed with a mouse or pen and dragged a few pixels. Return true
+   * to take the drag over: the host follows the pointer from here (onto a project, or a task
+   * onto the Today agenda) and the chip's click is skipped. Omit it, or return false, and
+   * chips don't drag. */
+  onRefDragStart?: (drag: RefDragStart) => boolean;
   /** Called when the reader double-clicks an unresolved `[[label]]` link, so the host can
    * offer to quick-create a note/task titled `label`. The host answers via the controller's
    * {@link EditorController.resolveQuickCreate}. Omit and empty links stay inert text. */
@@ -129,6 +134,16 @@ export interface EditorProps {
 export interface LinkRef {
   type: LinkType;
   id: string;
+}
+
+/** A chip being dragged out of the editor — the payload of {@link EditorProps.onRefDragStart}. */
+export interface RefDragStart {
+  ref: LinkRef;
+  /** The chip's label: its alias, else its id. */
+  label: string;
+  /** Where the pointer is now, in window coordinates. */
+  x: number;
+  y: number;
 }
 
 /** A link target the editor can offer or resolve — a slim projection, never a body. */

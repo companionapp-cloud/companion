@@ -30,6 +30,7 @@ import { REPEAT_PRESETS, repeatLabel } from "./repeat";
 import { MAX_REMINDERS, REMINDER_LEAD_PRESETS, reminderLabel, remindersSummary, sameReminder } from "./reminders";
 import { TourAnchor } from "./onboarding/anchors";
 import { useLinkSource } from "./useLinkSource";
+import { useEditorRefDrag } from "./DndContext";
 import { useQuickCreateLink } from "./useQuickCreateLink";
 import { DateTimeInput } from "./DateTimeInput";
 import { TaskGraph } from "./TaskGraph";
@@ -67,6 +68,9 @@ export interface TaskEditorProps {
 export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true, onOpenRef, onConnectSync }: TaskEditorProps) {
   const tasks = useTasks();
   const linkSource = useLinkSource();
+  // A link chip dragged out of the document (web/desktop): onto a project or area, a task onto
+  // the Today agenda.
+  const refDrag = useEditorRefDrag();
   const editorRef = useRef<EditorController>(null);
   // Empty `[[label]]` links in the notes double-click to a quick-create dialog.
   const quickCreate = useQuickCreateLink(editorRef);
@@ -287,6 +291,7 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
             onChangeMarkdown={(md) => debouncedSave("notes", { notesMd: md })}
             linkSource={linkSource}
             onOpenRef={onOpenRef}
+            onRefDragStart={refDrag}
             onQuickCreate={quickCreate.onQuickCreate}
             // `tasks.tasks` gets a fresh identity when any task changes, re-hydrating chips.
             linkRevision={tasks.tasks}

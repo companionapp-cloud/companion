@@ -13,12 +13,14 @@ export interface RailItemProps {
   /** Mono count shown at the row's trailing edge when expanded. */
   badge?: string;
   onPress?: () => void;
+  /** A drag is resting on the item, about to open its view (spring-loading). */
+  highlighted?: boolean;
 }
 
 /** One entry in the hover-reveal sidebar rail: a 28px icon square collapsed, an
  * icon + label row when the rail is expanded. Active uses the same soft-accent treatment
  * as a selected list row, so selection reads identically everywhere. */
-export function RailItem({ icon, label, active, expanded, badge, onPress }: RailItemProps) {
+export function RailItem({ icon, label, active, expanded, badge, onPress, highlighted }: RailItemProps) {
   return (
     <Pressable
       onPress={onPress}
@@ -31,7 +33,7 @@ export function RailItem({ icon, label, active, expanded, badge, onPress }: Rail
           width: expanded ? "100%" : 28,
           paddingHorizontal: expanded ? 7 : 0,
           justifyContent: expanded ? "flex-start" : "center",
-          backgroundColor: active
+          backgroundColor: active || highlighted
             ? colors.accentSoft
             : pressed
               ? colors.surfaceActive
@@ -44,7 +46,7 @@ export function RailItem({ icon, label, active, expanded, badge, onPress }: Rail
       <View style={styles.icon}>{icon}</View>
       {expanded ? (
         <>
-          <Text variant="label" tone={active ? "accent" : "secondary"} numberOfLines={1} style={styles.label}>
+          <Text variant="label" tone={active || highlighted ? "accent" : "secondary"} numberOfLines={1} style={styles.label}>
             {label}
           </Text>
           {badge ? (

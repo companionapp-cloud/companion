@@ -7,6 +7,7 @@ import { FormattingBar } from "./FormattingBar";
 import { EmojiPicker } from "./EmojiPicker";
 import { tableMenuPresenter } from "./tableMenu";
 import { useLinkSource } from "./useLinkSource";
+import { useEditorRefDrag } from "./DndContext";
 import { useQuickCreateLink } from "./useQuickCreateLink";
 import { useDocumentSource } from "./DocumentSourceContext";
 import { useTasks } from "./TasksProvider";
@@ -58,6 +59,9 @@ export function ContainerOverview({
   const contextSource = useDocumentSource();
   const documentSource = documentSourceProp ?? contextSource;
   const linkSource = useLinkSource();
+  // A link chip dragged out of the document (web/desktop): onto a project or area, a task onto
+  // the Today agenda.
+  const refDrag = useEditorRefDrag();
   const tasks = useTasks();
   const editorRef = useRef<EditorController>(null);
   const quickCreate = useQuickCreateLink(editorRef);
@@ -189,6 +193,7 @@ export function ContainerOverview({
               linkSource={linkSource}
               documentSource={documentSource}
               onOpenRef={onOpenRef}
+              onRefDragStart={refDrag}
               onQuickCreate={quickCreate.onQuickCreate}
               onFormatStateChange={setFormatState}
               onFocusChange={handleFocusChange}

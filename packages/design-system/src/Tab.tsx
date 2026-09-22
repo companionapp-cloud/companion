@@ -15,11 +15,13 @@ export interface TabProps {
    *  window/browser tab. */
   onExpand?: () => void;
   onClose?: () => void;
+  /** A drag is resting on the tab, about to open it (spring-loading): the drop-target fill. */
+  highlighted?: boolean;
 }
 
 /** One tab in the workspace strip — a document or a view. Active reads as a raised panel
  * (card fill + hairline); inactive stays quiet until hovered. */
-export function Tab({ label, active, icon, onPress, onExpand, onClose }: TabProps) {
+export function Tab({ label, active, icon, onPress, onExpand, onClose, highlighted }: TabProps) {
   return (
     <Pressable
       onPress={onPress}
@@ -30,13 +32,13 @@ export function Tab({ label, active, icon, onPress, onExpand, onClose }: TabProp
         styles.tab,
         transition("background-color, border-color", motion.fast),
         {
-          backgroundColor: active ? colors.surfaceCard : hovered ? colors.surfaceHover : "transparent",
-          borderColor: active ? colors.borderSubtle : "transparent",
+          backgroundColor: highlighted ? colors.accentSoft : active ? colors.surfaceCard : hovered ? colors.surfaceHover : "transparent",
+          borderColor: highlighted ? colors.accent : active ? colors.borderSubtle : "transparent",
         },
       ]}
     >
       {icon}
-      <Text variant="caption" tone={active ? "default" : "secondary"} numberOfLines={1} style={styles.label}>
+      <Text variant="caption" tone={highlighted ? "accent" : active ? "default" : "secondary"} numberOfLines={1} style={styles.label}>
         {label}
       </Text>
       {onExpand ? <Affordance label="Open in new window" icon="external" onPress={onExpand} /> : null}

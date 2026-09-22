@@ -78,7 +78,7 @@ import { CalendarProvider } from "./CalendarProvider";
 import { TrashScreen } from "./TrashScreen";
 import { LogbookScreen } from "./LogbookScreen";
 import { ChatsScreen } from "./ChatScreen";
-import { DndProvider, useDnd } from "./DndContext";
+import { DndProvider, useDnd, useSpringTarget } from "./DndContext";
 import { MultiSelectProvider, useMultiSelect } from "./MultiSelectProvider";
 import { useExportScope } from "./export/ExportProvider";
 import { EXPORT_SCHEDULE_EVENT, REQUEST_SECTION, requestScheduledExport, type ExportRequestKind } from "./export/scheduling";
@@ -762,8 +762,8 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
   // Sidebar badges count what needs sorting: notes in no project, and open tasks in no project.
   const badgeFor = (id: string) =>
     id === "notes" ? countLabel(notes.unsorted.length) : id === "tasks" ? countLabel(tasks.openUnsorted.length) : undefined;
-  const railIcon = (name: IconName, id: string) => (
-    <Icon name={name} size={icon.lg} color={nav.activeView === id ? colors.textAccent : colors.textSecondary} />
+  const railIcon = (name: IconName, id: string, highlighted = false) => (
+    <Icon name={name} size={icon.lg} color={nav.activeView === id || highlighted ? colors.textAccent : colors.textSecondary} />
   );
 
   return (
@@ -795,17 +795,21 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
 
           <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1 }}>
             <View style={{ gap: 1 }}>
-              {rail.map((n) => (
-                <RailItem
-                  key={n.id}
-                  icon={railIcon(n.icon, n.id)}
-                  label={n.label}
-                  badge={badgeFor(n.id)}
-                  active={nav.activeView === n.id}
-                  expanded={expanded}
-                  onPress={() => nav.goView(n.id)}
-                />
-              ))}
+              {rail.map((n) => {
+                const item = (highlighted = false) => (
+                  <RailItem
+                    key={n.id}
+                    icon={railIcon(n.icon, n.id, highlighted)}
+                    label={n.label}
+                    badge={badgeFor(n.id)}
+                    active={nav.activeView === n.id}
+                    highlighted={highlighted}
+                    expanded={expanded}
+                    onPress={() => nav.goView(n.id)}
+                  />
+                );
+                return n.id === "today" ? <TodaySpring key={n.id}>{item}</TodaySpring> : item();
+              })}
             </View>
             {/* Areas → projects tree, only when there's room to render labels. */}
             {expanded ? (
@@ -885,6 +889,26 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
       ) : null}
     </View>
   );
+}
+
+/** Wraps the rail's Today entry: resting a dragged task on it brings the Today view up (the
+ *  tab already showing it, else a new tab, so the surface the task came from stays open) for
+ *  the task to be dropped on the agenda. */
+function TodaySpring({ children }: { children: (highlighted: boolean) => ReactNode }) {
+  const nav = useNav();
+  const navRef = useRef(nav);
+  navRef.current = nav;
+  const { ref, isOver } = useSpringTarget(
+    "rail:today",
+    () => {
+      const { tabs, selectTab, openInNewTab } = navRef.current;
+      const index = tabs.findIndex((t) => t.ref?.kind === "view" && t.ref.view === "today");
+      if (index >= 0) selectTab(index);
+      else openInNewTab({ kind: "view", view: "today" });
+    },
+    (p) => p.kind === "task" && navRef.current.activeView !== "today",
+  );
+  return <View ref={ref}>{children(isOver)}</View>;
 }
 
 /** One tab's surface. Re-provides the nav context scoped to this tab — `current` and

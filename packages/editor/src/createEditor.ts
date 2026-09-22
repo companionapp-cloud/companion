@@ -21,7 +21,7 @@ import { wikilinkHostAutocomplete, type HostAutocompleteBridge } from "./hostAut
 import { wikilinkNodeView, type WikilinkView } from "./wikilinkView";
 import { documentNodeView, isDocumentEmbed } from "./documentView";
 import { buildFormatCommands, computeFormatState, type FormatName, type FormatState } from "./formatCommands";
-import type { DocumentSource, LinkRef, LinkSource, QuickCreateRequest, QuickCreateTarget } from "./types";
+import type { DocumentSource, LinkRef, LinkSource, QuickCreateRequest, QuickCreateTarget, RefDragStart } from "./types";
 import { InkLayer } from "./ink/layer";
 import type { InkCallbacks, InkGroupRecord, InkTool } from "./ink/types";
 
@@ -93,6 +93,9 @@ export interface CreateEditorOptions {
   /** Open a referenced entity when its chip is clicked (after it's selected). Wired to the
    * host's navigation (web opens a new tab; native posts the ref to the shell). */
   onOpenRef?: (ref: LinkRef) => void;
+  /** Hand a chip dragged with a mouse or pen to the host (web/desktop): return true to take
+   * the drag over. Omitted, chips don't drag. */
+  onRefDragStart?: (drag: RefDragStart) => boolean;
   /** Notified when an unresolved `[[label]]` link is double-clicked, so the host can offer a
    * quick-create. The host answers via {@link EditorHandle.resolveQuickCreate}. */
   onQuickCreate?: (req: QuickCreateRequest) => void;
@@ -322,6 +325,7 @@ export function createEditor(
   const wlView = wikilinkNodeView({
     linkSource,
     onOpenRef: options.onOpenRef,
+    onDragStart: options.onRefDragStart,
     register: (v) => {
       linkViews.add(v);
       return () => linkViews.delete(v);

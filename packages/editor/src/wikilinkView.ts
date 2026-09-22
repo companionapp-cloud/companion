@@ -1,18 +1,24 @@
 import { NodeSelection } from "prosemirror-state";
 import type { EditorView, NodeView } from "prosemirror-view";
 import type { Node } from "prosemirror-model";
-import type { LinkRef, LinkSource } from "./types";
+import type { LinkRef, LinkSource, RefDragStart } from "./types";
 
 // A NodeView for the wikilink chip. Non-task links render the same pill as toDOM; a
 // `[[task:…]]` chip additionally hydrates from the host (linkSource.lookup) to show the
 // task's done state and its due / reminder dates — so a referenced task reads like a todo
 // inline. Clicking follows a select-then-open gesture: the first click selects the chip
 // (so it can be edited/deleted like any atom); clicking the already-selected chip opens
-// the target via onOpenRef (the host puts it in a new tab).
+// the target via onOpenRef (the host puts it in a new tab). Pressing a chip and dragging it
+// a few pixels hands it to the host as a drag instead (onDragStart), where the host has one.
+
+/** How far (px) a press on a chip travels before it becomes a drag. */
+const DRAG_SLOP = 5;
 
 export interface WikilinkViewDeps {
   linkSource?: LinkSource;
   onOpenRef?: (ref: LinkRef) => void;
+  /** Take a chip dragged with a mouse or pen out of the editor; true when the host took it. */
+  onDragStart?: (drag: RefDragStart) => boolean;
   /** Register a live view so the host can re-hydrate task chips when the underlying task
    * data changes elsewhere (see {@link WikilinkView.rehydrate}). Returns an unregister fn. */
   register?: (view: WikilinkView) => () => void;
@@ -39,6 +45,11 @@ export class WikilinkView implements NodeView {
   // re-render can restore the broken visual immediately, before the re-check resolves.
   private broken = false;
   private unregister?: () => void;
+  // Whether the press that ends in the coming click was handed to the host as a drag (that
+  // click is then no select or open). Reset by every press.
+  private dragged = false;
+  // Stops following a press that may yet become a drag.
+  private stopPress?: () => void;
 
   constructor(
     private node: Node,
@@ -48,6 +59,7 @@ export class WikilinkView implements NodeView {
   ) {
     this.attrs = node.attrs as Attrs;
     this.dom = document.createElement("span");
+    this.dom.addEventListener("pointerdown", this.onPointerDown);
     this.dom.addEventListener("mousedown", this.onMouseDown);
     this.dom.addEventListener("click", this.onClick);
     this.render();
@@ -160,6 +172,37 @@ export class WikilinkView implements NodeView {
     else if (!broken && existing) existing.remove();
   }
 
+  // A press with a mouse or pen that travels past the slop becomes a drag the host carries
+  // (onto a project, a task onto the Today agenda). On touch a swipe across a chip is a
+  // scroll, so it never drags.
+  private onPointerDown = (e: PointerEvent): void => {
+    this.dragged = false;
+    this.stopPress?.();
+    if (!this.deps.onDragStart || e.button !== 0 || e.pointerType === "touch") return;
+    // Cancelling the press stops the browser sending its mouse events (mousedown / move / up)
+    // until release. The chip already ignores mousedown, but a host listening for mouse moves
+    // (react-native-web's gesture system) would otherwise hand this drag to whatever it crosses.
+    e.preventDefault();
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    const move = (ev: PointerEvent) => {
+      if (Math.abs(ev.clientX - x0) < DRAG_SLOP && Math.abs(ev.clientY - y0) < DRAG_SLOP) return;
+      stop();
+      const { type, id, alias } = this.attrs;
+      this.dragged = !!this.deps.onDragStart?.({ ref: { type: type as LinkRef["type"], id }, label: alias || id, x: ev.clientX, y: ev.clientY });
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", move, true);
+      window.removeEventListener("pointerup", stop, true);
+      window.removeEventListener("pointercancel", stop, true);
+      this.stopPress = undefined;
+    };
+    window.addEventListener("pointermove", move, true);
+    window.addEventListener("pointerup", stop, true);
+    window.addEventListener("pointercancel", stop, true);
+    this.stopPress = stop;
+  };
+
   // First click selects the chip; a click on the already-selected chip opens the target.
   // We drive selection ourselves (preventDefault on mousedown) so the gesture is
   // deterministic regardless of the browser's native atom-selection timing.
@@ -169,6 +212,10 @@ export class WikilinkView implements NodeView {
 
   private onClick = (e: MouseEvent): void => {
     e.preventDefault();
+    if (this.dragged) {
+      this.dragged = false;
+      return;
+    }
     const pos = this.getPos();
     if (pos == null) return;
     const sel = this.view.state.selection;
@@ -205,6 +252,8 @@ export class WikilinkView implements NodeView {
   destroy(): void {
     this.token++;
     this.unregister?.();
+    this.stopPress?.();
+    this.dom.removeEventListener("pointerdown", this.onPointerDown);
     this.dom.removeEventListener("mousedown", this.onMouseDown);
     this.dom.removeEventListener("click", this.onClick);
   }

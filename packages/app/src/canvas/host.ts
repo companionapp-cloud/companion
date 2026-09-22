@@ -53,6 +53,11 @@ export interface CanvasHost {
   linkPreview(url: string): Promise<LinkPreview>;
   /** Create a new board and open it (⌘⇧N); absent where the host can't navigate. */
   newCanvas?(): void;
+  /** Web/desktop only: carry an embedded note or task off `canvasId` through the app's drag
+   *  layer, onto a project or an area (a task onto the Today agenda too). Called once a card's
+   *  grip has been dragged a few pixels, with the pointer's window position; the host follows
+   *  the pointer from there. Absent where there is no drag layer, and the cards show no grip. */
+  dragRef?(ref: { type: "note" | "task"; id: string; label: string }, canvasId: string, x: number, y: number): void;
 }
 
 /** Default sizes for freshly added nodes, in canvas units. */

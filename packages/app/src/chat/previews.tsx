@@ -9,6 +9,7 @@ import {
   icon as iconSize,
   layout,
   motion,
+  noSelect,
   radius,
   space,
   transition,
@@ -18,6 +19,7 @@ import {
 } from "@companion/design-system";
 import { formatWhen } from "../CalendarItemInfo";
 import { useCore } from "../CoreContext";
+import { useRefDrag } from "../DndContext";
 import { nodeKey } from "../graphModel";
 import { reminderLabel } from "../reminders";
 import { repeatLabel } from "../repeat";
@@ -115,7 +117,13 @@ function NotePreview({ id }: { id: string }) {
   if (missing || !note) return null;
   const body = note.contentMd.trim();
   return (
-    <PreviewCard icon="file" title={note.title || "Untitled"} openLabel={note.title || "Note"} onOpen={openEntity ? () => openEntity("note", id) : undefined}>
+    <PreviewCard
+      icon="file"
+      title={note.title || "Untitled"}
+      openLabel={note.title || "Note"}
+      onOpen={openEntity ? () => openEntity("note", id) : undefined}
+      drag={{ type: "note", id }}
+    >
       {body ? <View style={[styles.body, styles.clip]}>{renderMarkdown(body, 16)}</View> : null}
     </PreviewCard>
   );
@@ -166,6 +174,7 @@ function TaskPreview({ id }: { id: string }) {
       titleStyle={done || cancelled ? styles.titleDone : null}
       openLabel={task.title || "Task"}
       onOpen={openEntity ? () => openEntity("task", task.id) : undefined}
+      drag={{ type: "task", id: task.id }}
       footer={cancelled ? "cancelled" : undefined}
     >
       {meta.length > 0 || notes ? (
@@ -257,6 +266,7 @@ function CanvasPreview({ id }: { id: string }) {
       title={doc.canvas.name || "Untitled canvas"}
       openLabel={doc.canvas.name || "Canvas"}
       onOpen={openEntity ? () => openEntity("canvas", id) : undefined}
+      drag={{ type: "canvas", id }}
       wide
       footer={footer}
     >
@@ -295,6 +305,7 @@ function GraphPreview({ root, id, depth }: { root: GraphRoot; id: string; depth:
       title={center.title || "Untitled"}
       openLabel={center.title || "Open"}
       onOpen={openEntity ? () => openEntity(root, id) : undefined}
+      drag={{ type: root, id }}
       interactiveBody
       wide
       footer={footer}
@@ -311,7 +322,8 @@ function GraphPreview({ root, id, depth }: { root: GraphRoot; id: string; depth:
 /** The chrome every preview shares: a hairlined card in the prose column, a sunken title bar —
  *  icon, title, and an open affordance — then the kind's body and an optional mono footer. The
  *  whole card opens the entity, unless the body is interactive itself (the graph), when only the
- *  title bar does. */
+ *  title bar does. What opens it also drags it (`drag`): onto a project or an area, a task onto
+ *  the Today agenda. */
 function PreviewCard({
   icon,
   iconColor,
@@ -320,6 +332,7 @@ function PreviewCard({
   titleStyle,
   openLabel,
   onOpen,
+  drag,
   interactiveBody = false,
   wide = false,
   footer,
@@ -333,6 +346,8 @@ function PreviewCard({
   titleStyle?: StyleProp<TextStyle>;
   openLabel: string;
   onOpen?: () => void;
+  /** The entity the card drags, where references drag (web/desktop, with a mouse). */
+  drag?: { type: string; id: string };
   interactiveBody?: boolean;
   /** Fill the column (the canvas and graph need the room) instead of fitting the content. */
   wide?: boolean;
@@ -356,32 +371,42 @@ function PreviewCard({
       </Text>
     </View>
   ) : null;
-  const card = [styles.card, wide ? styles.cardWide : null];
+  // What opens the card drags it: the whole card, or just its title bar when the body is
+  // interactive (the graph pans under a drag). The box carries the card's width, so the drag
+  // area never reaches past the card.
+  const dragProps = useRefDrag(drag?.type ?? "", drag?.id ?? "", title);
+  const whole = !interactiveBody ? dragProps : null;
+  const byHead = interactiveBody ? dragProps : null;
+  const box = [styles.box, wide ? styles.boxWide : null, whole ? noSelect : null];
   return (
     <View style={[styles.wrap, threadLayout === "transcript" ? styles.wrapTranscript : null]}>
-      {onOpen && !interactiveBody ? (
-        <Pressable
-          onPress={onOpen}
-          aria-label={`Open ${openLabel}`}
-          style={({ hovered, pressed }: PressState) => [card, transition("border-color", motion.fast), pressed || hovered ? styles.cardHover : null]}
-        >
-          {head}
-          {children}
-          {foot}
-        </Pressable>
-      ) : (
-        <View style={card}>
-          {onOpen ? (
-            <Pressable onPress={onOpen} aria-label={`Open ${openLabel}`} style={({ hovered, pressed }: PressState) => [pressed || hovered ? styles.headHover : null]}>
-              {head}
-            </Pressable>
-          ) : (
-            head
-          )}
-          {children}
-          {foot}
-        </View>
-      )}
+      <View {...whole} style={box}>
+        {onOpen && !interactiveBody ? (
+          <Pressable
+            onPress={onOpen}
+            aria-label={`Open ${openLabel}`}
+            style={({ hovered, pressed }: PressState) => [styles.card, transition("border-color", motion.fast), pressed || hovered ? styles.cardHover : null]}
+          >
+            {head}
+            {children}
+            {foot}
+          </Pressable>
+        ) : (
+          <View style={styles.card}>
+            <View {...byHead} style={byHead ? noSelect : null}>
+              {onOpen ? (
+                <Pressable onPress={onOpen} aria-label={`Open ${openLabel}`} style={({ hovered, pressed }: PressState) => [pressed || hovered ? styles.headHover : null]}>
+                  {head}
+                </Pressable>
+              ) : (
+                head
+              )}
+            </View>
+            {children}
+            {foot}
+          </View>
+        )}
+      </View>
     </View>
   );
 }
@@ -492,17 +517,16 @@ const styles = StyleSheet.create({
   // In the transcript, previews sit in the prose column (past the 18px mark).
   wrap: { width: "100%" },
   wrapTranscript: { maxWidth: 640, width: "100%", alignSelf: "center", paddingLeft: 18 + space.md },
+  // The card's place in the column: its own width up to most of it, or all of it when wide.
+  box: { alignSelf: "flex-start", maxWidth: "92%", minWidth: 240 },
+  boxWide: { alignSelf: "stretch", maxWidth: "100%" },
   card: {
-    alignSelf: "flex-start",
-    maxWidth: "92%",
-    minWidth: 240,
     backgroundColor: colors.surfaceCard,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
     borderRadius: radius.lg,
     overflow: "hidden",
   },
-  cardWide: { alignSelf: "stretch", maxWidth: "100%" },
   cardHover: { borderColor: colors.borderDefault },
   head: {
     flexDirection: "row",
