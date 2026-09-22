@@ -1,6 +1,9 @@
 {
+  "id": "/",
   "name": "Companion",
   "short_name": "Companion",
+  "start_url": "/",
+  "scope": "/",
   "theme_color": "#f76808",
   "background_color": "#f5f5f3",
   "display": "standalone",

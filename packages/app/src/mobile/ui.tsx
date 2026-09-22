@@ -252,7 +252,7 @@ export function BottomSheet({ visible = true, onClose, children, padded = true }
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
       <Pressable style={styles.scrim} onPress={onClose} aria-label="Close" />
-      <View style={[styles.sheet, padded ? styles.sheetPadded : styles.sheetTight]}>
+      <View style={[styles.sheet, padded ? styles.sheetPadded : styles.sheetTight, sheetAboveKeyboard]}>
         <View style={styles.grabber} />
         {children}
       </View>
@@ -274,11 +274,22 @@ export function EmptyCaption({ children, icon }: { children: ReactNode; icon?: I
 
 // Bottom padding that clears the home indicator. env() is CSS, so only the web build gets
 // it (react-native's types want a number; native sheets pad by their own safe-area inset).
+// The web shell's --safe-bottom drops the inset while the keyboard covers the home indicator.
 function safeBottom(px: number): ViewStyle {
   return Platform.OS === "web"
-    ? ({ paddingBottom: `calc(${px}px + env(safe-area-inset-bottom, 0px))` } as unknown as ViewStyle)
+    ? ({ paddingBottom: `calc(${px}px + var(--safe-bottom, env(safe-area-inset-bottom, 0px)))` } as unknown as ViewStyle)
     : { paddingBottom: px };
 }
+
+// A sheet sits at the bottom of its modal, which is pinned to the layout viewport, and iOS
+// slides its keyboard over that without resizing anything. So on the web the sheet stands on
+// the part of the layout viewport the keyboard covers (the shell publishes it, see
+// apps/web/src/viewportFit.ts; zero when there is no keyboard) and scrolls if the space left
+// above the keyboard is shorter than it is. Native modals avoid the keyboard on their own.
+const sheetAboveKeyboard =
+  Platform.OS === "web"
+    ? ({ marginBottom: "var(--vv-bottom, 0px)", maxHeight: "var(--vv-height, 100%)", overflowY: "auto" } as unknown as ViewStyle)
+    : null;
 
 // Separator starts past the leading tile so it reads as an inset-grouped list.
 const SEPARATOR_INSET = space.xl + TILE + ROW_GAP;

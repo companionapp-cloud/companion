@@ -15,6 +15,7 @@ export type {
   EditorInkProps,
 } from "./types";
 export type { FormatName, FormatState } from "./formatCommands";
+export { VIEWPORT_FIT_EVENT } from "./viewport";
 export {
   DEFAULT_INK_TOOL,
   INK_COLORS,

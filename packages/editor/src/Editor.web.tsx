@@ -1,7 +1,8 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, type CSSProperties } from "react";
 import { createEditor, type EditorHandle } from "./createEditor";
 import { ensureEditorStyles } from "./styles";
 import type { EditorController, EditorProps } from "./types";
+import { VIEWPORT_FIT_EVENT } from "./viewport";
 
 // Web/desktop editor: ProseMirror mounted straight into the DOM (react-native-web is
 // real DOM, so no WebView is needed — Vite resolves this via .web.tsx). It grows to
@@ -98,6 +99,14 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The web shell just fitted the app above the on-screen keyboard (a shorter scroller around
+  // this editor): keep the caret in sight.
+  useEffect(() => {
+    const reveal = () => handleRef.current?.revealSelection();
+    window.addEventListener(VIEWPORT_FIT_EVENT, reveal);
+    return () => window.removeEventListener(VIEWPORT_FIT_EVENT, reveal);
+  }, []);
+
   // Re-hydrate task chips when the host signals task data changed (skips the initial mount,
   // where chips already hydrate themselves on creation).
   const firstRevision = useRef(true);
@@ -131,10 +140,17 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
   }, [clearSignal]);
 
   // The simple field hugs its content; cap it at maxHeight (scrolling past it) and reserve
-  // minHeight so an empty composer/note still has a comfortable tap target.
+  // minHeight so an empty composer/note still has a comfortable tap target. The editable
+  // itself fills that height (--pm-min-height, styles.ts): a tap anywhere in the empty field
+  // has to land in the document, or on a phone it focuses nothing and no keyboard comes up.
   const style =
     variant === "simple" || inline
-      ? { minHeight, maxHeight, overflowY: maxHeight ? ("auto" as const) : undefined }
+      ? ({
+          minHeight,
+          maxHeight,
+          overflowY: maxHeight ? "auto" : undefined,
+          "--pm-min-height": minHeight != null ? `${minHeight}px` : undefined,
+        } as CSSProperties)
       : undefined;
   const className = variant === "simple" ? "companion-editor pm-simple" : inline ? "companion-editor pm-inline" : "companion-editor";
   return <div ref={mountRef} className={className} style={style} />;

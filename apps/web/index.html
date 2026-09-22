@@ -5,10 +5,10 @@
     <!-- viewport-fit=cover lets the app paint under the iPhone notch/home bar (the
          safe-area env() padding on #root keeps content clear of them);
          interactive-widget=resizes-content keeps the editor above the software keyboard
-         on Android. maximum-scale=1 + user-scalable=no disable pinch/double-tap zoom on
-         touch devices so the app feels native (and iOS stops auto-zooming focused
-         inputs); desktop browsers ignore the viewport meta, so Cmd/Ctrl zoom still
-         works there. -->
+         on Android (iOS ignores it; src/viewportFit.ts does that job there).
+         maximum-scale=1 + user-scalable=no disable pinch/double-tap zoom on touch
+         devices so the app feels native (and iOS stops auto-zooming focused inputs);
+         desktop browsers ignore the viewport meta, so Cmd/Ctrl zoom still works there. -->
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content"
@@ -33,8 +33,9 @@
     </script>
     <style>
       html, body, #root { height: 100%; margin: 0; }
-      /* dvh tracks the *visible* viewport on mobile (URL bar collapse, keyboard), so the
-         app never sits half under browser chrome. Desktop is unaffected (dvh == vh). */
+      /* dvh tracks the *visible* viewport on mobile as browser toolbars come and go (and,
+         on Android, the keyboard), so the app never sits half under browser chrome.
+         Desktop is unaffected (dvh == vh). */
       @supports (height: 100dvh) {
         html, body { height: 100dvh; }
       }
@@ -42,10 +43,17 @@
              font-family: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
              /* Stop pull-to-refresh / rubber-banding from fighting in-app scrollers. */
              overscroll-behavior-y: none; }
+      /* The home-indicator inset, less whatever the on-screen keyboard already covers. */
+      :root { --safe-bottom: env(safe-area-inset-bottom, 0px); }
+      html.vv-fit { --safe-bottom: max(0px, calc(env(safe-area-inset-bottom, 0px) - var(--vv-covered))); }
       #root { display: flex; box-sizing: border-box;
               /* Keep content clear of the notch / home bar (zero everywhere else). */
               padding: env(safe-area-inset-top) env(safe-area-inset-right)
-                       env(safe-area-inset-bottom) env(safe-area-inset-left); }
+                       var(--safe-bottom) env(safe-area-inset-left); }
+      /* iOS never shrinks the page for its keyboard (dvh included), so while it is up the app
+         is pinned over just the visible part of the screen: the bottom row of each screen
+         (formatting bar, composer) lands on top of the keyboard. See src/viewportFit.ts. */
+      html.vv-fit #root { position: fixed; left: 0; right: 0; top: var(--vv-top); height: var(--vv-height); }
       .boot { margin: auto; color: #7b7b75; font-size: 13px; }
       /* The boot frame follows the saved theme (set below, before first paint) so a dark
          session never flashes light; once the app mounts, the design system's custom

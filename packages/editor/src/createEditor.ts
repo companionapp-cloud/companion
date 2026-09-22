@@ -47,6 +47,9 @@ export interface EditorHandle {
   /** Run a formatting toggle (bold, list, blockquote, …) on the current selection and
    * refocus the editor. No-op in the simple variant (it has no marks/blocks). */
   format(name: FormatName): void;
+  /** Scroll the caret back into view if the editor has focus (after the host resized the
+   *  space around it). */
+  revealSelection(): void;
   /** Open the `[[` reference picker at the cursor (inserts the trigger, which the
    * autocomplete plugin turns into the web popup or the native host modal). */
   insertReference(): void;
@@ -577,6 +580,14 @@ export function createEditor(
       if (!formatCommands) return;
       formatCommands[name](view.state, view.dispatch, view);
       view.focus();
+    },
+    revealSelection() {
+      if (!view.hasFocus()) return;
+      try {
+        view.dispatch(view.state.tr.scrollIntoView());
+      } catch {
+        /* view torn down */
+      }
     },
     insertReference() {
       // Insert the `[[` trigger at the cursor; the autocomplete plugin (web popup or native

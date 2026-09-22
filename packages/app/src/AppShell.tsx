@@ -85,6 +85,8 @@ import { EXPORT_SCHEDULE_EVENT, REQUEST_SECTION, requestScheduledExport, type Ex
 import { SettingsScreen } from "./SettingsScreen";
 import { useSync } from "./SyncProvider";
 import { SyncHealthChip, syncBlocker } from "./SyncHealthBanner";
+import { IOSPWAInstallBanner } from "./push/IOSPWAInstallBanner";
+import { InstallGuideScreen } from "./push/InstallGuide";
 import { CommandPalette, paletteEnter } from "./CommandPalette";
 import { CAPTURE_NEW_EVENT, CAPTURE_NEW_KEYS, PALETTE_OPEN_EVENT } from "./capture";
 import type { PaletteCreateKind } from "./paletteModel";
@@ -153,6 +155,8 @@ function webLinking(): LinkingOptions<ParamListBase> | undefined {
         // uses for its pushed section screen, so a shell swap lands on the same section.
         settings: "settings/:section?",
         notifications: "notifications",
+        // The iPhone/iPad install guide (push/InstallGuide.tsx), same path as the mobile shell's.
+        install: "install",
         // Deep-linkable project drill-down: /project/<id>[/<section>[/<itemId>[/<subItemId>]]].
         // The fourth segment is the task selected inside a list (/lists/<listId>/<taskId>).
         project: "project/:projectId/:section?/:itemId?/:subItemId?",
@@ -593,6 +597,7 @@ function ShellRoutes({ topInset, windowControls }: { topInset: number; windowCon
         <Nav.Screen name="trash" component={RouteAnchor} />
         <Nav.Screen name="settings" component={RouteAnchor} />
         <Nav.Screen name="notifications" component={RouteAnchor} />
+        <Nav.Screen name="install" component={RouteAnchor} />
         <Nav.Screen name="project" component={RouteAnchor} />
         <Nav.Screen name="area" component={RouteAnchor} />
       </Nav.Navigator>
@@ -794,6 +799,8 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
         </View>
 
         <View style={{ flex: 1, minWidth: 0 }}>
+          {/* iPad Safari in landscape lands here: offer installing to the Home Screen. */}
+          <IOSPWAInstallBanner leftInset={chromeInset} />
           <Frame toolbar={<AppToolbar onCapture={() => setCapture("list")} leftInset={chromeInset} verticalInset={toolbarInset} />}>
             {/* Every tab's surface stays mounted and only the active one is shown, so an
                 editor's draft, a chat's scroll or a graph's layout survives a tab switch. */}
@@ -851,6 +858,7 @@ const VIEW_SCREENS: Partial<Record<SurfaceViewId, ComponentType>> = {
   trash: TrashScreen,
   settings: SettingsScreen,
   notifications: NotificationsRouteScreen,
+  install: InstallGuideScreen,
 };
 
 function SurfaceBody({ tabRef }: { tabRef: TabRef | null }) {

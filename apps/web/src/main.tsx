@@ -18,10 +18,16 @@ import { createElement } from "react";
 // (every new core.* method then failed with "unknown method" and the UI silently did nothing).
 import "./wasm/wasm_exec.js";
 import coreWasmUrl from "./wasm/core.wasm?url";
+import { installViewportFit } from "./viewportFit";
+import { installViewportDebug } from "./viewportDebug";
 
 // Web shell (PLAN §3.2): build the SQLite driver (wa-sqlite/IndexedDB), hand it to
 // the core compiled to wasm, then mount the shared React Native UI via RNW.
 async function boot() {
+  // Keep the app above the iOS keyboard (see viewportFit.ts). Installed first so it also covers
+  // the boot screen. `?debug=viewport` shows the numbers it works from, for on-device checks.
+  installViewportFit();
+  installViewportDebug();
   const sqlite = await createWaSqliteDriver({ dbName: "companion" });
   // Document bytes live in OPFS (PLAN §6.9); degrade gracefully if the browser lacks it —
   // metadata still syncs, but bytes can't be stored or rendered locally.
