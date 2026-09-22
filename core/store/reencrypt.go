@@ -28,6 +28,9 @@ var reencryptTables = []string{
 	"canvas_nodes",
 	"canvas_edges",
 	"note_ink",
+	"notebooks",
+	"notebook_pages",
+	"notebook_page_ink",
 	// Git exports; folder rows share the table but are never pushed (ExportsRepo.Git).
 	"export_destinations",
 }

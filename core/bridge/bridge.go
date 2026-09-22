@@ -497,6 +497,36 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.noteInkUpsert(payload)
 	case "noteInk.delete":
 		return c.noteInkDelete(payload)
+	case "notebooks.list":
+		return c.notebooksList()
+	case "notebooks.get":
+		return c.notebooksGet(payload)
+	case "notebooks.create":
+		return c.notebooksCreate(payload)
+	case "notebooks.update":
+		return c.notebooksUpdate(payload)
+	case "notebooks.reorder":
+		return c.notebooksReorder(payload)
+	case "notebooks.delete":
+		return c.notebooksDelete(payload)
+	case "notebooks.pages.add":
+		return c.notebooksPagesAdd(payload)
+	case "notebooks.pages.get":
+		return c.notebooksPagesGet(payload)
+	case "notebooks.pages.update":
+		return c.notebooksPagesUpdate(payload)
+	case "notebooks.pages.reorder":
+		return c.notebooksPagesReorder(payload)
+	case "notebooks.pages.delete":
+		return c.notebooksPagesDelete(payload)
+	case "notebooks.pages.search":
+		return c.notebooksPagesSearch(payload)
+	case "notebooks.ink.list":
+		return c.notebooksInkList(payload)
+	case "notebooks.ink.upsert":
+		return c.notebooksInkUpsert(payload)
+	case "notebooks.ink.delete":
+		return c.notebooksInkDelete(payload)
 	case "imports.files.scan":
 		return c.importFilesScan(payload)
 	case "imports.files.run":

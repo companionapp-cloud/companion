@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 
-export type ViewId = "today" | "chat" | "calendar" | "notes" | "tasks" | "canvases" | "habits" | "graph" | "logbook" | "trash" | "settings" | "notifications";
+export type ViewId = "today" | "chat" | "calendar" | "notes" | "tasks" | "canvases" | "notebooks" | "habits" | "graph" | "logbook" | "trash" | "settings" | "notifications";
 
 /** The content types a project drills into (its sub-nav). No section is the project's
  *  overview page (PLAN-areas.md §3). */
@@ -27,7 +27,9 @@ export type DocRef = { kind: "note" | "task" | "canvas"; id: string };
 export type TabRef =
   | DocRef
   | { kind: "browse"; section: WorkspaceSection }
-  /** A view. `date` (YYYY-MM-DD) asks the Today view to open on that day — how a dated
+  /** A view. `date` (YYYY-MM-DD) asks the Today view to open on that day. For the Notebooks
+   *  view, `section` is the open notebook's id (/notebooks/:id; PLAN-notebooks.md), or absent
+   *  for the shelf. — how a dated
    *  note is followed from the calendar into the daily-notes tool — or the Calendar to show
    *  that day's week (how the command palette opens an event). `section` is the Settings
    *  section on show, carried in the URL (/settings/:section) so it survives a shell swap. */

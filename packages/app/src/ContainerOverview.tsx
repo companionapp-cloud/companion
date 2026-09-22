@@ -291,7 +291,7 @@ function GhostAction({ icon, label, onPress }: { icon: IconName; label: string; 
 
 /** Resolves a cover's document id to a URL the Image can load, downloading its bytes on first
  *  view. Object URLs are revoked when the cover changes or the page unmounts. */
-function useCoverUrl(documentSource: DocumentSource | undefined, documentId: string | null | undefined): string | null {
+export function useCoverUrl(documentSource: DocumentSource | undefined, documentId: string | null | undefined): string | null {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     setUrl(null);
@@ -321,7 +321,7 @@ function revoke(url: string) {
 
 /** Lets the user choose an image and stages it as a document, returning its id (null when
  *  they cancel). Web and desktop ingest a File from a file input; mobile opens the OS picker. */
-async function pickCoverImage(documentSource: DocumentSource): Promise<string | null> {
+export async function pickCoverImage(documentSource: DocumentSource): Promise<string | null> {
   if (documentSource.ingest && Platform.OS === "web" && typeof document !== "undefined") {
     const file = await chooseImageFile();
     if (!file) return null;

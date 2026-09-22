@@ -13,7 +13,7 @@ import (
 
 // trashTables are the server tables carrying a deleting_at Trash marker. Projects and
 // areas are never trashed, so they are absent here.
-var trashTables = []string{"notes", "tasks", "documents", "canvases"}
+var trashTables = []string{"notes", "tasks", "documents", "canvases", "notebooks"}
 
 // trashSweepInterval is how often the collector wakes. Trash retention is measured in
 // days, so hourly is ample precision (PLAN §7.6).
@@ -99,7 +99,8 @@ func (s *Server) PurgeExpired() (int, error) {
 					log.Printf("trash collector: blob gc for document %s: %v", r.id, err)
 				}
 			}
-			// A purged board takes its nodes and edges with it, and a purged note its ink, so
+			// A purged board takes its nodes and edges with it, a purged note its ink, and a purged
+			// notebook its pages and ink, so
 			// they stop syncing (PLAN-canvases.md §1.5, PLAN-drawing.md); the client does the
 			// same on "delete forever".
 			var childSeq int64
@@ -108,6 +109,8 @@ func (s *Server) PurgeExpired() (int, error) {
 				childSeq, err = s.purgeChildren(r.uid, "canvas_id", r.id, "canvas_nodes", "canvas_edges")
 			case "notes":
 				childSeq, err = s.purgeChildren(r.uid, "note_id", r.id, "note_ink")
+			case "notebooks":
+				childSeq, err = s.purgeChildren(r.uid, "notebook_id", r.id, "notebook_pages", "notebook_page_ink")
 			}
 			if err != nil {
 				return purged, err

@@ -11,13 +11,14 @@ import { BottomSheet, Card, CardRow, CountPill, FAB_CLEARANCE, Fab, IconTile, Se
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-type SectionRoute = 'Today' | 'Chat' | 'Notes' | 'Tasks' | 'Canvases' | 'Habits' | 'Calendar' | 'Graph' | 'Logbook' | 'Trash';
+type SectionRoute = 'Today' | 'Chat' | 'Notes' | 'Tasks' | 'Canvases' | 'Notebooks' | 'Habits' | 'Calendar' | 'Graph' | 'Logbook' | 'Trash';
 const SECTIONS: { route: SectionRoute; label: string; subtitle: string; icon: IconName; accent?: boolean }[] = [
   { route: 'Today', label: 'Today', subtitle: "Today's note and your month", icon: 'today' },
   { route: 'Chat', label: 'Chat', subtitle: 'Ask, capture, recall — anything', icon: 'chat', accent: true },
   { route: 'Notes', label: 'Notes', subtitle: 'Your graph of linked ideas', icon: 'notes' },
   { route: 'Tasks', label: 'Tasks', subtitle: 'What needs doing', icon: 'tasks' },
   { route: 'Canvases', label: 'Canvases', subtitle: 'Boards for arranging ideas', icon: 'canvas' },
+  { route: 'Notebooks', label: 'Notebooks', subtitle: 'Paper pages for writing and drawing', icon: 'notebook' },
   { route: 'Habits', label: 'Habits', subtitle: 'Streaks and daily builders', icon: 'habits' },
   { route: 'Calendar', label: 'Calendar', subtitle: 'Events, tasks, and notes', icon: 'calendar' },
   { route: 'Graph', label: 'Graph', subtitle: 'See how everything connects', icon: 'graph' },

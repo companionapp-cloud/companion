@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CalendarItem } from "@companion/core-bridge";
+import type { CalendarItem, PageHit } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
 import { useNotes } from "./NotesProvider";
 import { useTasks } from "./TasksProvider";
 import { useProjects } from "./ProjectsProvider";
 import { useCanvases } from "./canvas/CanvasesProvider";
+import { useNotebooks } from "./notebooks/NotebooksProvider";
 import { useCaptureController, type CaptureController } from "./useCaptureController";
 import type { ContainerRef, DocRef, TabRef } from "./nav-context";
 import {
@@ -15,6 +16,7 @@ import {
   isDateScope,
   localDay,
   rootItems,
+  pageItem,
   type PaletteData,
   type PaletteItem,
   type PaletteMode,
@@ -98,6 +100,8 @@ export function useCommandPalette({ onClose, onOpen, initialMode, container = nu
   const tasks = useTasks();
   const projects = useProjects();
   const canvases = useCanvases();
+  const notebooks = useNotebooks();
+  const { notebooks: notebooksApi } = useCore();
 
   // --- the new task's project ---------------------------------------------------------------
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -269,16 +273,49 @@ export function useCommandPalette({ onClose, onOpen, initialMode, container = nu
 
   // --- rows ---------------------------------------------------------------------------------
   const data = useMemo<PaletteData>(
-    () => ({ notes: notes.notes, tasks: tasks.tasks, canvases: canvases.canvases, projects: [...projects.projects, ...projects.completedProjects], areas: projects.areas }),
-    [notes.notes, tasks.tasks, canvases.canvases, projects.projects, projects.completedProjects, projects.areas],
+    () => ({ notes: notes.notes, tasks: tasks.tasks, canvases: canvases.canvases, notebooks: notebooks.notebooks, projects: [...projects.projects, ...projects.completedProjects], areas: projects.areas }),
+    [notes.notes, tasks.tasks, canvases.canvases, notebooks.notebooks, projects.projects, projects.completedProjects, projects.areas],
   );
+  // Notebook pages are found by their text, which lives in the core, not in memory: ask it as
+  // you type (debounced), and add the hits under the root rows (PLAN-notebooks.md).
+  const [pageHits, setPageHits] = useState<PageHit[]>([]);
+  useEffect(() => {
+    const q = query.trim();
+    if (mode.kind !== "root" || q.length < 2) {
+      setPageHits([]);
+      return;
+    }
+    let stale = false;
+    const t = setTimeout(() => {
+      notebooksApi.pages
+        .search(q, 5)
+        .then((hits) => {
+          if (!stale) setPageHits(hits ?? []);
+        })
+        .catch(() => {
+          if (!stale) setPageHits([]);
+        });
+    }, 120);
+    return () => {
+      stale = true;
+      clearTimeout(t);
+    };
+  }, [mode.kind, query, notebooksApi]);
+
   const items = useMemo<PaletteItem[]>(() => {
-    if (mode.kind === "root") return rootItems(query, data, events);
+    if (mode.kind === "root") {
+      const rows = rootItems(query, data, events);
+      if (!pageHits.length) return rows;
+      // Page hits sit after the title matches and before the create rows.
+      const firstCreate = rows.findIndex((r) => r.key.startsWith("create:"));
+      const pages = pageHits.map(pageItem);
+      return firstCreate === -1 ? [...rows, ...pages] : [...rows.slice(0, firstCreate), ...pages, ...rows.slice(firstCreate)];
+    }
     if (mode.kind === "create") return [];
     if (mode.scope === "eventDate") return eventsOnDay(dayEvents, day);
     if (mode.scope === "taskDate" || mode.scope === "projectDate") return typedDay && !day ? [] : findByDate(mode.scope, day, data);
     return findByTitle(mode.scope, query, data, events);
-  }, [mode, query, data, events, dayEvents, day, typedDay]);
+  }, [mode, query, data, events, dayEvents, day, typedDay, pageHits]);
 
   const emptyText =
     mode.kind === "create" || items.length > 0

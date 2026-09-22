@@ -42,6 +42,17 @@ export interface EditorInkProps {
   onStateChange?(state: InkState): void;
   /** The reader pressed Escape while drawing: the host should leave drawing mode. */
   onExitRequest?(): void;
+  /** Notebook pages (PLAN-notebooks.md): ink is fixed to the sheet instead of the text, and the
+   *  sheet sizes the ink layers. Read once at mount. */
+  page?: boolean;
+  /** False when the host routes undo/redo/Escape itself because several editors are on screen
+   *  (a notebook spread). Read once at mount. Default true. */
+  keyboard?: boolean;
+  /** The tool a stylus draws with while `tool` is null, so the pencil always writes and
+   *  fingers still type and scroll. Web editor only so far. */
+  penTool?: InkTool | null;
+  /** Two fingers pinched while drawing: the host zooms (notebooks). */
+  onPinch?(factor: number, clientX: number, clientY: number): void;
 }
 
 /** Fired when the reader double-clicks an unresolved `[[label]]` link. The host opens its

@@ -1,4 +1,4 @@
-import type { Area, CalendarItem, Canvas, Note, Project, Task } from "@companion/core-bridge";
+import type { Area, CalendarItem, Canvas, Note, Project, Task, NotebookSummary, PageHit } from "@companion/core-bridge";
 import type { IconName } from "@companion/design-system";
 import type { TabRef } from "./nav-context";
 import { isMacPlatform } from "./shortcuts";
@@ -130,6 +130,7 @@ export interface PaletteData {
   notes: Note[];
   tasks: Task[];
   canvases: Canvas[];
+  notebooks: NotebookSummary[];
   projects: Project[];
   areas: Area[];
 }
@@ -165,6 +166,30 @@ function taskItem(t: Task): PaletteItem {
 
 function canvasItem(c: Canvas): PaletteItem {
   return { key: `canvas:${c.id}`, section: "Canvases", icon: "canvas", title: untitled(c.name, "Untitled canvas"), action: { type: "open", ref: { kind: "canvas", id: c.id } } };
+}
+
+function notebookItem(n: NotebookSummary): PaletteItem {
+  return {
+    key: `notebook:${n.id}`,
+    section: "Notebooks",
+    icon: "notebook",
+    title: untitled(n.title, "Untitled notebook"),
+    trailing: `${n.pageCount} ${n.pageCount === 1 ? "page" : "pages"}`,
+    action: { type: "open", ref: { kind: "view", view: "notebooks", section: n.id } },
+  };
+}
+
+/** A notebook page found by its text (PLAN-notebooks.md): "<Notebook> · p. N" and the matching
+ *  line. Opens the notebook on that page. */
+export function pageItem(h: PageHit): PaletteItem {
+  return {
+    key: `page:${h.pageId}`,
+    section: "Pages",
+    icon: "file",
+    title: `${untitled(h.notebookTitle, "Untitled notebook")} · p. ${h.pageNumber}`,
+    subtitle: h.snippet,
+    action: { type: "open", ref: { kind: "view", view: "notebooks", section: `${h.notebookId}@${h.pageNumber}` } },
+  };
 }
 
 function projectItem(p: Project, areas: Area[]): PaletteItem {
@@ -220,6 +245,7 @@ export function findByTitle(scope: PaletteScope, query: string, data: PaletteDat
   // Open tasks before finished ones, whatever was touched last.
   if (wants("task")) for (const t of live(data.tasks)) add(t.title, time(t.updatedAt) - (t.status === "open" ? 0 : FINISHED_PENALTY), () => taskItem(t));
   if (scope === "all") for (const c of live(data.canvases)) add(c.name, time(c.updatedAt), () => canvasItem(c));
+  if (scope === "all") for (const n of live(data.notebooks)) add(n.title, time(n.updatedAt), () => notebookItem(n));
   if (wants("project")) {
     for (const p of data.projects.filter((p) => !p.deletedAt)) {
       add(p.name, time(p.updatedAt) - (p.completedAt ? FINISHED_PENALTY : 0), () => projectItem(p, data.areas));
@@ -242,7 +268,7 @@ export function findByTitle(scope: PaletteScope, query: string, data: PaletteDat
 
 // Searching everything, each kind keeps to its own section (capped, so one kind can't crowd out
 // the rest). Sections are ordered by their best hit; a tie goes to this order.
-const SECTION_ORDER = ["Notes", "Tasks", "Projects", "Areas", "Canvases", "Events"];
+const SECTION_ORDER = ["Notes", "Tasks", "Projects", "Areas", "Canvases", "Notebooks", "Pages", "Events"];
 const PER_SECTION = 5;
 
 function groupBySection(sorted: Ranked[]): Ranked[] {

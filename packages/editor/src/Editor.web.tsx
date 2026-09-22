@@ -82,6 +82,9 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
             onDelete: (ids) => inkRef.current?.onDelete(ids),
             onStateChange: (state) => inkRef.current?.onStateChange?.(state),
             onExitRequest: () => inkRef.current?.onExitRequest?.(),
+            onPinch: (f, x, y) => inkRef.current?.onPinch?.(f, x, y),
+            page: inkRef.current?.page,
+            keyboard: inkRef.current?.keyboard,
           }
         : undefined,
     });
@@ -89,6 +92,7 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
     if (inkRef.current) {
       handle.setInkGroups(inkRef.current.groups);
       handle.setInkTool(inkRef.current.tool);
+      handle.setInkPenTool(inkRef.current.penTool ?? null);
     }
     return () => {
       handleRef.current = null;
@@ -119,6 +123,11 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
   useEffect(() => {
     handleRef.current?.setInkTool(inkTool);
   }, [inkTool]);
+
+  const inkPenTool = ink?.penTool ?? null;
+  useEffect(() => {
+    handleRef.current?.setInkPenTool(inkPenTool);
+  }, [inkPenTool]);
 
   // Empty the editor when the host bumps clearSignal (chat composer, post-send). Compares with
   // the last value rather than skipping the first run: Fast Refresh re-runs every effect, and

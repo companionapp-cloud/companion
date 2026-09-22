@@ -51,6 +51,10 @@ type Store struct {
 	CanvasEdges *CanvasEdgesRepo
 	// NoteInk holds the ink groups drawn over notes (PLAN-drawing.md).
 	NoteInk *NoteInkRepo
+	// Notebooks are paper notebooks (PLAN-notebooks.md): the book, its pages, their ink.
+	Notebooks     *NotebooksRepo
+	NotebookPages *NotebookPagesRepo
+	NotebookInk   *NotebookInkRepo
 	// Exports are this device's scheduled folder and Git exports, and what each holds
 	// (core/export). Local-only.
 	Exports *ExportsRepo
@@ -115,6 +119,9 @@ func New(d Driver, clock domain.Clock) (*Store, error) {
 	s.CanvasNodes = &CanvasNodesRepo{db: d, clock: clock, links: s.Links}
 	s.CanvasEdges = &CanvasEdgesRepo{db: d, clock: clock}
 	s.NoteInk = &NoteInkRepo{db: d, clock: clock}
+	s.Notebooks = &NotebooksRepo{db: d, clock: clock}
+	s.NotebookPages = &NotebookPagesRepo{db: d, clock: clock}
+	s.NotebookInk = &NotebookInkRepo{db: d, clock: clock}
 	s.Exports = &ExportsRepo{db: d, clock: clock}
 	// Content lives in one container (PLAN-areas.md §2.1). Anything still filed in several
 	// projects from before that rule keeps the first and leaves the rest; a no-op afterwards.

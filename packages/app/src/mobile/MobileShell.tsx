@@ -16,8 +16,11 @@ import { setReminderActivationHandler } from "../reminderNav";
 import { NotesProvider } from "../NotesProvider";
 import { TasksProvider } from "../TasksProvider";
 import { ListsProvider } from "../ListsProvider";
+import { useRoute } from "@react-navigation/native";
 import { CanvasesProvider } from "../canvas/CanvasesProvider";
 import { CanvasesListScreen, CanvasScreen } from "./CanvasScreens";
+import { NotebooksProvider } from "../notebooks/NotebooksProvider";
+import { NotebooksListScreen, NotebookScreen } from "./NotebookScreens";
 import { RemindersProvider, type NotificationScheduler } from "../RemindersProvider";
 import { NotificationsProvider } from "../NotificationsProvider";
 import { ToolVisibilityProvider, type ToolsStorage } from "../ToolVisibilityProvider";
@@ -83,6 +86,8 @@ function mobileLinking(): LinkingOptions<ParamListBase> | undefined {
         task: "tasks/:id",
         canvases: "canvases",
         canvas: "canvases/:id",
+        notebooks: "notebooks",
+        notebook: "notebooks/:id",
         habits: "habits",
         graph: "graph",
         logbook: "logbook",
@@ -155,6 +160,7 @@ const BACK_FALLBACK: Record<string, string> = {
   note: "notes",
   task: "tasks",
   canvas: "canvases",
+  notebook: "notebooks",
   chatConversation: "chat",
   settingsSection: "settings",
 };
@@ -169,6 +175,7 @@ const ACTIVE_VIEW: Record<string, ViewId | "project" | "area"> = {
   note: "notes",
   task: "tasks",
   canvas: "canvases",
+  notebook: "notebooks",
   chatConversation: "chat",
   settingsSection: "settings",
   project: "project",
@@ -223,6 +230,9 @@ function MobileNavBridge({
         case "view":
           if (ref.view === "today") navigation.navigate("today", ref.date ? { date: ref.date } : undefined);
           else if (ref.view === "settings" && ref.section) navigation.navigate("settingsSection", { section: ref.section });
+          else if (ref.view === "notebooks" && ref.section) {
+            if (!(routeName === "notebook" && params.id === ref.section)) push("notebook", { id: ref.section });
+          }
           else if (routeName !== ref.view) navigation.navigate(ref.view);
           return;
         case "browse":
@@ -269,7 +279,7 @@ function MobileNavBridge({
                   kind: "view",
                   view: (ACTIVE_VIEW[routeName] ?? routeName) as Exclude<ViewId, "notes" | "tasks" | "canvases">,
                   date: routeName === "today" ? params.date : undefined,
-                  section: routeName === "settingsSection" ? params.section : undefined,
+                  section: routeName === "settingsSection" ? params.section : routeName === "notebook" ? params.id : undefined,
                 };
 
     return {
@@ -382,6 +392,7 @@ export function MobileWebShell({ topInset = 0, notificationScheduler, toolsStora
               <ProjectsProvider>
                 <ListsProvider>
                 <CanvasesProvider>
+                <NotebooksProvider>
                 <ObjectTypesProvider>
                   <CalendarProvider>
                     <NavigationContainer linking={linking} documentTitle={{ enabled: false }}>
@@ -397,6 +408,8 @@ export function MobileWebShell({ topInset = 0, notificationScheduler, toolsStora
                         <Nav.Screen name="task" component={TaskEditorScreen} />
                         <Nav.Screen name="canvases" component={CanvasesListScreen} />
                         <Nav.Screen name="canvas" component={CanvasScreen} />
+                        <Nav.Screen name="notebooks" component={NotebooksListScreen} />
+                        <Nav.Screen name="notebook" component={NotebookRouteScreen} />
                         <Nav.Screen name="habits" component={HabitsScreen} />
                         <Nav.Screen name="graph" component={GraphScreen} />
                         <Nav.Screen name="logbook" component={LogbookRouteScreen} />
@@ -410,6 +423,7 @@ export function MobileWebShell({ topInset = 0, notificationScheduler, toolsStora
                     </NavigationContainer>
                   </CalendarProvider>
                 </ObjectTypesProvider>
+                </NotebooksProvider>
                 </CanvasesProvider>
                 </ListsProvider>
               </ProjectsProvider>
@@ -426,3 +440,9 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.surfaceApp },
   content: { flex: 1, minHeight: 0 },
 });
+
+/** The notebook route: its id comes from the URL (/notebooks/:id). */
+function NotebookRouteScreen() {
+  const params = (useRoute().params ?? {}) as { id?: string };
+  return <NotebookScreen id={params.id ?? ""} />;
+}
