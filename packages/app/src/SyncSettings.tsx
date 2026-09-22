@@ -5,7 +5,8 @@ import { type Device } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
 import { useSync } from "./SyncProvider";
 import { RecoveryResetScreen } from "./RecoveryResetScreen";
-import { CLOUD_BASE_URL, SignInDialog } from "./SignInDialog";
+import { CLOUD_BASE_URL } from "./cloud";
+import { SignInDialog } from "./SignInDialog";
 import { SettingsField, SettingsNote } from "./settingsUi";
 
 // Re-exported for the package index and the sections that predate settingsUi.

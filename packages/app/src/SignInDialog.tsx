@@ -8,11 +8,7 @@ import { openExternalUrl } from "./externalUrl";
 import { parseResetLink } from "./resetLink";
 import { CodeBlock, Segmented, SettingsField, SettingsNote } from "./settingsUi";
 import { useSync, type AuthMode } from "./SyncProvider";
-
-/** The hosted cloud's API, and the portal where its accounts are created. */
-export const CLOUD_BASE_URL = "https://portal.companionapp.cloud/api";
-const CLOUD_PORTAL_URL = "https://portal.companionapp.cloud";
-const CLOUD_PORTAL_LABEL = "portal.companionapp.cloud";
+import { CLOUD_BASE_URL, CLOUD_PORTAL_LABEL, CLOUD_PORTAL_URL } from "./cloud";
 
 const SELF_HOST_SNIPPET =
   "docker run -p 8080:8080 \\\n  -e DATABASE_URL=postgres://user:pass@host:5432/companion \\\n  ghcr.io/companionapp-cloud/companion-server:0.5.0";
