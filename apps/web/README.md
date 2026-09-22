@@ -41,6 +41,16 @@ npm run dev -w @companion/web
 
 `make web-assets` must be re-run whenever Go code under `core/` changes.
 
+### Build-time settings
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `EXPO_PUBLIC_PORTAL_URL` | `https://portal.companionapp.cloud` | Where the "Companion Cloud" sign-in points: the portal, and its sync API under `/api`. |
+
+Set it in the shell or an `apps/web/.env` file for `vite build`/`vite dev`, or pass
+`--build-arg PORTAL_URL=…` to the Docker build. The same name works for the desktop
+frontend and the mobile app (Expo inlines `EXPO_PUBLIC_*` natively).
+
 ## Build / typecheck
 
 ```bash

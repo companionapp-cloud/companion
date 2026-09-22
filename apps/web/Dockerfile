@@ -22,6 +22,10 @@ RUN GOOS=js GOARCH=wasm go build -C core -ldflags="-s -w" -o /out/core.wasm ./cm
 #    staged by `make web-assets`).
 FROM --platform=$BUILDPLATFORM node:20-alpine AS build
 WORKDIR /src
+# Where the app's "Companion Cloud" sign-in points (portal + its /api). Inlined into the
+# bundle at build time (see packages/app/src/cloud.ts); empty keeps the production portal.
+ARG PORTAL_URL=""
+ENV EXPO_PUBLIC_PORTAL_URL=$PORTAL_URL
 COPY . .
 COPY --from=wasm /out/core.wasm apps/web/src/wasm/core.wasm
 COPY --from=wasm /out/wasm_exec.js apps/web/src/wasm/wasm_exec.js
