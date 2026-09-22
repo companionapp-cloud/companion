@@ -308,6 +308,22 @@
       ],
       "port": 5448,
       "autoPort": false
+    },
+    {
+      "name": "web-notebooks",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@companion/web",
+        "--",
+        "--port",
+        "5459",
+        "--strictPort"
+      ],
+      "port": 5459,
+      "autoPort": false
     }
   ]
 }

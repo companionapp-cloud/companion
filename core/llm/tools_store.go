@@ -66,7 +66,7 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 	r.Add(Tool{
 		Spec: ToolSpec{
 			Name:        "search_notes",
-			Description: "Full-text search the user's notes and tasks, across titles, bodies, AND structured object metadata (archetype props, e.g. a Person's email or a Book's author). Call this whenever the user refers to something they have written or asks a question that their own notes/tasks might answer, including searches by an object field value. Returns matching notes and tasks with a snippet; follow up with get_neighborhood for related context.",
+			Description: "Full-text search the user's notes, tasks and notebook pages, across titles, bodies, AND structured object metadata (archetype props, e.g. a Person's email or a Book's author). Call this whenever the user refers to something they have written or asks a question that their own notes/tasks might answer, including searches by an object field value. Returns matching notes and tasks with a snippet (type note/task), and matching notebook pages (type notebook_page, titled \"<Notebook> · p. N\"; read one in full with get_page); follow up with get_neighborhood for related context.",
 			Schema: json.RawMessage(`{
 				"type":"object",
 				"additionalProperties":false,
@@ -89,7 +89,64 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 			if err != nil {
 				return "", err
 			}
+			// Notebook pages (PLAN-notebooks.md) are not notes; they are searched by text alongside.
+			pages, err := s.NotebookPages.SearchPages(a.Query, a.Limit)
+			if err != nil {
+				return "", err
+			}
+			for _, p := range pages {
+				title := p.NotebookTitle
+				if strings.TrimSpace(title) == "" {
+					title = "Untitled notebook"
+				}
+				hits = append(hits, domain.SearchHit{
+					Type: "notebook_page", ID: p.PageID,
+					Title:   fmt.Sprintf("%s · p. %d", title, p.PageNumber),
+					Snippet: p.Snippet,
+				})
+			}
 			return jsonResult(hits)
+		},
+	})
+
+	r.Add(Tool{
+		Spec: ToolSpec{
+			Name:        "get_page",
+			Description: "Read the FULL text of one notebook page by id (a search_notes hit of type notebook_page). Pages have no title; the result carries the notebook's title and the page number.",
+			Schema:      json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"}},"required":["id"]}`),
+		},
+		Handler: func(_ context.Context, args json.RawMessage) (string, error) {
+			var a struct {
+				ID string `json:"id"`
+			}
+			if err := json.Unmarshal(args, &a); err != nil {
+				return "", err
+			}
+			p, err := s.NotebookPages.Get(a.ID)
+			if errors.Is(err, store.ErrNotFound) {
+				return "", fmt.Errorf("no notebook page with id %q — use search_notes to find the right id", a.ID)
+			}
+			if err != nil {
+				return "", err
+			}
+			n, err := s.Notebooks.Get(p.NotebookID)
+			if err != nil {
+				return "", err
+			}
+			pages, err := s.NotebookPages.ListForNotebook(p.NotebookID)
+			if err != nil {
+				return "", err
+			}
+			number := 0
+			for i, q := range pages {
+				if q.ID == p.ID {
+					number = i + 1
+				}
+			}
+			return jsonResult(map[string]any{
+				"id": p.ID, "notebookId": n.ID, "notebookTitle": n.Title, "pageNumber": number,
+				"paperKind": p.PaperKind, "paperSpacing": p.PaperSpacing, "contentMd": p.ContentMD,
+			})
 		},
 	})
 

@@ -56,6 +56,10 @@ export interface InkAnchor {
   after: string;
   offset: number;
   free?: boolean;
+  /** Notebook pages (PLAN-notebooks.md): the group is fixed to the sheet, not the text. Its
+   *  strokes are in page coordinates and nothing typed on the page moves it. `before`, `after`
+   *  and `offset` are empty. */
+  page?: boolean;
 }
 
 /** The stored payload of one ink group. */
@@ -78,6 +82,20 @@ export interface InkState {
   canUndo: boolean;
   canRedo: boolean;
   hasInk: boolean;
+  /** Page mode only: the bottom of the lowest ink, in page px, so the sheet never shrinks
+   *  above it. */
+  inkBottom?: number;
+}
+
+/** How the layer is mounted. A note's ink follows its text; a notebook page's ink is fixed to
+ *  the sheet. */
+export interface InkLayerOptions {
+  /** Page mode: new groups are fixed to the sheet ({@link InkAnchor.page}), the layers take
+   *  their size from CSS (the sheet) instead of growing draw space below the text. */
+  page?: boolean;
+  /** False when the host routes undo/redo/Escape itself, because several layers are on screen
+   *  at once (a notebook spread) and each would otherwise answer the same key. Default true. */
+  keyboard?: boolean;
 }
 
 /** How the ink layer reports changes. Writes are whole groups; the host persists them. */
@@ -87,6 +105,9 @@ export interface InkCallbacks {
   onStateChange?(state: InkState): void;
   /** Escape was pressed while drawing: the host should leave drawing mode. */
   onExitRequest?(): void;
+  /** Two fingers spread or pinched while drawing (notebooks): the host zooms by `factor`
+   *  around the client point. Without it, two fingers only scroll. */
+  onPinch?(factor: number, clientX: number, clientY: number): void;
 }
 
 /** Parse a stored payload, or null when it isn't an ink group this version understands. */
@@ -107,5 +128,6 @@ export function parseInkGroupData(raw: unknown): InkGroupData | null {
   );
   const anchor: InkAnchor = { before: a.before, after: a.after, offset: a.offset };
   if (a.free) anchor.free = true;
+  if (a.page) anchor.page = true;
   return { v: 1, anchor, strokes };
 }

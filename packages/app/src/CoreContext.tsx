@@ -15,6 +15,7 @@ import {
   llmApi,
   notesApi,
   noteInkApi,
+  notebooksApi,
   exportsApi,
   importFilesApi,
   notifyApi,
@@ -40,6 +41,7 @@ import {
   type LlmApi,
   type NotesApi,
   type NoteInkApi,
+  type NotebooksApi,
   type ExportsApi,
   type ImportFilesApi,
   type NotifyApi,
@@ -75,6 +77,7 @@ interface CoreValue {
   canvases: CanvasesApi;
   /** Ink groups drawn over notes (PLAN-drawing.md). */
   noteInk: NoteInkApi;
+  notebooks: NotebooksApi;
   /** This device's scheduled folder and Git exports (core/export). */
   exports: ExportsApi;
   /** One-time import of a folder of markdown and canvas files. */
@@ -113,6 +116,7 @@ export function CoreProvider({ core, children }: { core: CoreBridge; children: R
       oauth: oauthApi(core),
       canvases: canvasesApi(core),
       noteInk: noteInkApi(core),
+      notebooks: notebooksApi(core),
       exports: exportsApi(core),
       importFiles: importFilesApi(core),
       onboarding: onboardingApi(core),

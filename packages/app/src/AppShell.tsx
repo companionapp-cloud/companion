@@ -59,6 +59,8 @@ import { openFocusWindow } from "./focus";
 import { NotesProvider, useNotes } from "./NotesProvider";
 import { TasksProvider, useTasks } from "./TasksProvider";
 import { ListsProvider } from "./ListsProvider";
+import { NotebooksProvider } from "./notebooks/NotebooksProvider";
+import { NotebooksScreen } from "./notebooks/NotebooksScreen";
 import { CanvasesProvider } from "./canvas/CanvasesProvider";
 import { RemindersProvider, type NotificationScheduler } from "./RemindersProvider";
 import { NotificationsProvider } from "./NotificationsProvider";
@@ -153,6 +155,8 @@ function webLinking(): LinkingOptions<ParamListBase> | undefined {
         notes: "notes/:id?",
         tasks: "tasks/:id?",
         canvases: "canvases/:id?",
+        // The open notebook rides in the URL like a Settings section (PLAN-notebooks.md).
+        notebooks: "notebooks/:section?",
         habits: "habits",
         graph: "graph",
         logbook: "logbook",
@@ -223,7 +227,7 @@ function refOfRoute(route: RouteLike): TabRef {
     kind: "view",
     view: route.name as SurfaceViewId,
     date: route.name === "today" || route.name === "calendar" ? p.date : undefined,
-    section: route.name === "settings" ? p.section : undefined,
+    section: route.name === "settings" || route.name === "notebooks" ? p.section : undefined,
   };
 }
 
@@ -630,11 +634,13 @@ export function AppShell({ topInset = 0, windowControls, notificationScheduler, 
         <ProjectsProvider>
          <ListsProvider>
          <CanvasesProvider>
+         <NotebooksProvider>
          <ObjectTypesProvider>
           <CalendarProvider>
           <ShellRoutes topInset={topInset} windowControls={windowControls} />
           </CalendarProvider>
          </ObjectTypesProvider>
+         </NotebooksProvider>
          </CanvasesProvider>
          </ListsProvider>
         </ProjectsProvider>
@@ -662,6 +668,7 @@ function ShellRoutes({ topInset, windowControls }: { topInset: number; windowCon
         <Nav.Screen name="notes" component={RouteAnchor} />
         <Nav.Screen name="tasks" component={RouteAnchor} />
         <Nav.Screen name="canvases" component={RouteAnchor} />
+        <Nav.Screen name="notebooks" component={RouteAnchor} />
         <Nav.Screen name="habits" component={RouteAnchor} />
         <Nav.Screen name="graph" component={RouteAnchor} />
         <Nav.Screen name="logbook" component={RouteAnchor} />
@@ -958,6 +965,7 @@ const VIEW_SCREENS: Partial<Record<SurfaceViewId, ComponentType>> = {
   chat: ChatsScreen,
   calendar: CalendarScreen,
   graph: GraphScreen,
+  notebooks: NotebooksScreen,
   logbook: LogbookScreen,
   trash: TrashScreen,
   settings: SettingsScreen,

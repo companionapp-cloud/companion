@@ -4,7 +4,7 @@ import { useURL } from 'expo-linking';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import EventSource from 'react-native-sse';
-import { CoreProvider, NotesProvider, TasksProvider, RemindersProvider, NotificationsProvider, ProjectsProvider, ObjectTypesProvider, CalendarProvider, CanvasesProvider, SyncProvider, ToolVisibilityProvider, RecoveryResetScreen, OnboardingStateProvider, WelcomeSheet, type NotificationScheduler } from '@companion/app';
+import { CoreProvider, NotesProvider, TasksProvider, RemindersProvider, NotificationsProvider, ProjectsProvider, ObjectTypesProvider, CalendarProvider, CanvasesProvider, NotebooksProvider, SyncProvider, ToolVisibilityProvider, RecoveryResetScreen, OnboardingStateProvider, WelcomeSheet, type NotificationScheduler } from '@companion/app';
 import { createNativeSyncNotifier, type CoreBridge, type SyncNotifier } from '@companion/core-bridge';
 import { DensityProvider, Spinner, Text, colors, space } from '@companion/design-system';
 import { MobileShell } from './src/MobileShell';
@@ -104,6 +104,7 @@ function Root() {
                   <ObjectTypesProvider>
                     <CalendarProvider>
                     <CanvasesProvider>
+                    <NotebooksProvider>
                       {/* Syncs tasks/projects/events to the watch + handles watch quick-adds (iOS-only;
                           no-op elsewhere). Sits inside Tasks/Projects/Calendar since it reads all three. */}
                       <WatchTasksBridge />
@@ -115,6 +116,7 @@ function Root() {
                           <WelcomeSheet />
                         </OnboardingStateProvider>
                       </ToolVisibilityProvider>
+                    </NotebooksProvider>
                     </CanvasesProvider>
                     </CalendarProvider>
                   </ObjectTypesProvider>
