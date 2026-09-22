@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { Platform, TextInput, View } from "react-native";
 import { Center, Icon, IconButton, Text, colors, font, icon, layout, row, space, useDensity } from "@companion/design-system";
 import { ConfirmDialog } from "../ConfirmDialog";
@@ -8,6 +8,8 @@ import { useCanvases } from "./CanvasesProvider";
 import { CanvasEditor } from "./CanvasEditor";
 import type { CanvasRefKind } from "./host";
 import { TourAnchor } from "../onboarding/anchors";
+import { NavContext } from "../nav-context";
+import { titleFieldValue, titleToSave } from "../untitled";
 
 /** A board's detail pane: an editable name, the project-membership picker, delete, and the
  *  editor beneath. Shared by the root Canvases view and a project's Canvases section. The
@@ -23,14 +25,15 @@ export function CanvasPane({ canvasId, onDeleted, onOpenRef }: { canvasId: strin
   // keystroke re-rendered the controlled field with a stale name mid-flight, which snapped
   // the caret around (it read like the field losing focus). A change that arrives from
   // elsewhere (another device) replaces the draft only when it differs from what we saved.
-  const [draft, setDraft] = useState(canvas?.name ?? "");
+  // An unnamed board shows an empty name (see untitled.ts).
+  const [draft, setDraft] = useState(() => titleFieldValue(canvas?.name ?? ""));
   const lastSaved = useRef(canvas?.name ?? "");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const name = canvas?.name ?? "";
     if (name !== lastSaved.current) {
       lastSaved.current = name;
-      setDraft(name);
+      setDraft(titleFieldValue(name));
     }
   }, [canvas?.name]);
   useEffect(() => () => {
@@ -38,10 +41,16 @@ export function CanvasPane({ canvasId, onDeleted, onOpenRef }: { canvasId: strin
   }, []);
   const onChangeName = (t: string) => {
     setDraft(t);
-    lastSaved.current = t;
+    const name = titleToSave(t, lastSaved.current, "canvas");
+    lastSaved.current = name;
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => void store.rename(canvasId, t), 400);
+    timer.current = setTimeout(() => void store.rename(canvasId, name), 400);
   };
+  // A board nobody has named yet opens on its name field — decided once, when it first shows
+  // (it can load after the pane mounts). Not on touch, and not from a background tab.
+  const visible = useContext(NavContext)?.visible ?? true;
+  const focusName = useRef<boolean | null>(null);
+  if (focusName.current === null && canvas) focusName.current = Platform.OS === "web" && !touch && visible && titleFieldValue(canvas.name) === "";
 
   if (!canvas) {
     return (
@@ -61,6 +70,7 @@ export function CanvasPane({ canvasId, onDeleted, onOpenRef }: { canvasId: strin
           value={draft}
           placeholder="Untitled canvas"
           placeholderTextColor={colors.textQuaternary}
+          autoFocus={focusName.current ?? false}
           onChangeText={onChangeName}
           style={[styles.name, touch ? styles.nameTouch : null]}
         />

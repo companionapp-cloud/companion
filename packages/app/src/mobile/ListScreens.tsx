@@ -12,6 +12,7 @@ import { useProjects } from "../ProjectsProvider";
 import { ListFilterTabs } from "../ListFilterMenu";
 import { CHECKBOX_INSET, CardRow, Checkbox, EmptyCaption, FAB_CLEARANCE, Fab, GroupedItem, NavAction, NavBar, ROW_ICON_INSET, RowIcon } from "./ui";
 import { TourAnchor } from "../onboarding/anchors";
+import { UNTITLED } from "../untitled";
 
 // Full-screen browse lists for the mobile web shell — ports of the native app's
 // NotesListScreen/TasksListScreen. Used globally (all items) and inside the project
@@ -185,7 +186,7 @@ export function TasksListScreen({ projectId, areaId }: { projectId?: string; are
 
   const createTask = async () => {
     // A task added from a schedule view lands in it: Someday, tomorrow (Upcoming), today (Overdue).
-    const task = await store.create({ title: "Untitled task", ...newTaskDefaults(mode) });
+    const task = await store.create({ title: UNTITLED.task, ...newTaskDefaults(mode) });
     if (projectId) await addMember(projectId, "task", task.id);
     else if (areaId) await addAreaMember(areaId, "task", task.id);
     nav.openTask(task.id);

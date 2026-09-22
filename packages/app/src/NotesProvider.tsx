@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { Note, UpdateNoteInput } from "@companion/core-bridge";
 import { useCore } from "./CoreContext";
 import { useSync } from "./SyncProvider";
+import { UNTITLED } from "./untitled";
 
 /** Browse-list membership filter (PLAN §6.6): "unsorted" = notes in no project (default),
  *  "all" = every note regardless of project. */
@@ -89,7 +90,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const create = useCallback(
     async (input?: { title?: string; contentMd?: string; date?: string | null }) => {
-      const note = await api.create({ title: input?.title ?? "Untitled", contentMd: input?.contentMd ?? "", date: input?.date ?? null });
+      const note = await api.create({ title: input?.title ?? UNTITLED.note, contentMd: input?.contentMd ?? "", date: input?.date ?? null });
       setNotes((prev) => [note, ...prev]);
       syncTrigger();
       return note;

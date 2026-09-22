@@ -125,6 +125,7 @@ export { CaptureView } from "./CaptureView";
 export { CaptureForm } from "./CaptureForm";
 export { captureRequested, closeCaptureWindow, setCaptureWindowCloser, setCaptureResultOpener } from "./capture";
 export { CommandPalette } from "./CommandPalette";
+export { setMainWindowCloser } from "./tabClose";
 export { setTableMenuPresenter, tableMenuPresenter } from "./tableMenu";
 export { setExportSinkOpener } from "./export/fileSink";
 export type { ExportSink, ExportSinkOpener, ExportPlan } from "./export/fileSink";

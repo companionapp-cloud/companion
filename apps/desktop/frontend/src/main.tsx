@@ -10,6 +10,7 @@ import {
   setExternalUrlOpener,
   setFocusWindowOpener,
   setCaptureWindowCloser,
+  setMainWindowCloser,
   setCaptureResultOpener,
   setTableMenuPresenter,
   setShortcutStore,
@@ -68,6 +69,12 @@ setFocusWindowOpener(({ kind, id }) => {
 // browser `window.close()` doesn't close a native Wails window, so CaptureView routes its
 // Cancel / Esc / post-save dismiss through here.
 setCaptureWindowCloser(() => {
+  void Window.Close();
+});
+
+// ⌘W: File › Close Tab closes the main window's tabs first; once only an empty tab is left the
+// app asks to close the window itself, which the Go side turns into a hide to the menu bar.
+setMainWindowCloser(() => {
   void Window.Close();
 });
 

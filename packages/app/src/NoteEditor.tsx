@@ -23,6 +23,7 @@ import { NavContext } from "./nav-context";
 import { timeAgo } from "./NotificationRow";
 import { ExportMenu } from "./export/ExportMenu";
 import { DocTitleField } from "./TaskEditor";
+import { isUntitled, titleFieldValue, titleToSave } from "./untitled";
 import { TourAnchor } from "./onboarding/anchors";
 
 export interface NoteEditorProps {
@@ -78,7 +79,8 @@ export function NoteEditor({
   const refDrag = useEditorRefDrag();
   // File embedding (PLAN §6.9): present on web (OPFS blob store), undefined elsewhere.
   const documentSource = useDocumentSource();
-  const [title, setTitle] = useState(note.title);
+  // An unnamed note shows an empty title (see untitled.ts).
+  const [title, setTitle] = useState(() => titleFieldValue(note.title));
   // Seed the editor from `seed.content`; it owns its content thereafter and reports edits
   // back out. `seed.key` remounts it when the sync guard silently adopts a server version
   // (re-injecting via a changing prop is unsafe on the mobile WebView, so we remount).
@@ -139,13 +141,15 @@ export function NoteEditor({
   );
 
   // Selecting a note focuses its body — the title is already written, the cursor belongs
-  // where you keep typing. The editor is keyed by note id upstream, so this is focus-on-mount.
-  // Never on touch (it would pop the keyboard), and never from a background tab. The focus
-  // view has no nav context; it is always the visible surface.
+  // where you keep typing — or, for a note nobody has named yet, its title. The editor is keyed
+  // by note id upstream, so this is focus-on-mount. Never on touch (it would pop the keyboard),
+  // and never from a background tab. The focus view has no nav context; it is always the
+  // visible surface.
   const visible = useContext(NavContext)?.visible ?? true;
+  const focusTitle = useRef(Platform.OS === "web" && !touch && visible && isUntitled(note.title)).current;
   const bodyRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    if (Platform.OS !== "web" || touch || !visible) return;
+    if (Platform.OS !== "web" || touch || !visible || focusTitle) return;
     // The web editor mounts ProseMirror in its own (child) effect, so it exists by now.
     bodyRef.current?.querySelector?.<HTMLElement>(".ProseMirror")?.focus({ preventScroll: true });
     // Mount only: a later tab switch must not yank focus back into the body.
@@ -163,9 +167,9 @@ export function NoteEditor({
   // adoption when clean, a conflict prompt when the editor has unsaved edits.
   const guard = useNoteSyncGuard({
     noteId: note.id,
-    getEditorContent: () => ({ title, contentMd: contentRef.current }),
+    getEditorContent: () => ({ title: titleToSave(title, note.title, "note"), contentMd: contentRef.current }),
     onReseed: (n) => {
-      setTitle(n.title);
+      setTitle(titleFieldValue(n.title));
       contentRef.current = n.contentMd;
       setSeed((s) => ({ key: s.key + 1, content: n.contentMd }));
     },
@@ -251,9 +255,10 @@ export function NoteEditor({
                 <DocTitleField
                   value={title}
                   placeholder="Untitled"
+                  autoFocus={focusTitle}
                   onChangeText={(t) => {
                     setTitle(t);
-                    onChange(note.id, { title: t });
+                    onChange(note.id, { title: titleToSave(t, note.title, "note") });
                   }}
                   // Enter in the title carries on into the body.
                   onSubmit={() => bodyRef.current?.querySelector?.<HTMLElement>(".ProseMirror")?.focus()}

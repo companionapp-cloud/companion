@@ -325,6 +325,8 @@ func main() {
 	}, func() {
 		updates.openApp()
 		handler.OnEvent(importThingsEvent, nil)
+	}, func() {
+		closeTabOrWindow(app.Window.Current(), mainWindow, func() { handler.OnEvent(tabCloseEvent, nil) })
 	}, exports))
 
 	// Register the native table context menu now that the app + window exist. The /table-menu

@@ -90,6 +90,7 @@ import { NotificationsPromptBanner } from "./push/NotificationsPromptBanner";
 import { InstallGuideScreen } from "./push/InstallGuide";
 import { CommandPalette, paletteEnter } from "./CommandPalette";
 import { CAPTURE_NEW_EVENT, CAPTURE_NEW_KEYS, PALETTE_OPEN_EVENT } from "./capture";
+import { TAB_CLOSE_EVENT, closeMainWindow } from "./tabClose";
 import type { PaletteCreateKind } from "./paletteModel";
 import { ThingsImportHost } from "./ThingsImport";
 import { OnboardingProvider, useOnboarding } from "./onboarding/OnboardingProvider";
@@ -463,6 +464,7 @@ function NavBridge({
       <PaletteNavigationBridge />
       <ThingsImportHost />
       <ExportScheduleBridge />
+      <TabCloseBridge />
       {/* The tutorials (onboarding): one per tool, each started the first time the user opens it. */}
       <OnboardingProvider host={tourHost}>
         <MultiSelectProvider>
@@ -555,6 +557,22 @@ function ExportScheduleBridge() {
         if (!kind || !(kind in REQUEST_SECTION)) return;
         requestScheduledExport(kind);
         nav.openRef({ kind: "view", view: "settings", section: REQUEST_SECTION[kind] });
+      }),
+    [nav, core],
+  );
+  return null;
+}
+
+/** The desktop's File › Close Tab (⌘W): close the active tab, and the window once only the one
+ *  empty tab the strip keeps is left. */
+function TabCloseBridge() {
+  const nav = useNav();
+  const { core } = useCore();
+  useEffect(
+    () =>
+      core.on(TAB_CLOSE_EVENT, () => {
+        if (nav.tabs.length <= 1 && !nav.activeTab.ref) closeMainWindow();
+        else nav.closeTab(nav.activeIndex);
       }),
     [nav, core],
   );

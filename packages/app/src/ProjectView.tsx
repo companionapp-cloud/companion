@@ -48,6 +48,7 @@ import { ProjectCalendarsColumn } from "./ProjectCalendars";
 import { ContainerHome, type TaskListFilter } from "./ContainerHome";
 import { useContainerContent } from "./useContainerContent";
 import { TourAnchor } from "./onboarding/anchors";
+import { UNTITLED } from "./untitled";
 
 const SECTIONS: { id: ProjectSection; label: string; tool: ToolId }[] = [
   { id: "notes", label: "Notes", tool: "notes" },
@@ -349,7 +350,7 @@ function ListColumn({
   };
   const createTaskInProject = async (title?: string) => {
     // A task typed into a schedule view lands in it: Someday, tomorrow (Upcoming), today (Overdue).
-    const task = await tasksStore.create({ title: title?.trim() || "Untitled task", ...newTaskDefaults(taskFilter) });
+    const task = await tasksStore.create({ title: title?.trim() || UNTITLED.task, ...newTaskDefaults(taskFilter) });
     await file("task", task.id);
     openItem("tasks", task.id);
   };

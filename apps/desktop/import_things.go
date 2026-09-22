@@ -24,8 +24,9 @@ const thingsGroupContainer = "JLMPQHK86H.com.culturedcode.ThingsMac"
 // applicationMenu is the macOS default menu (app, File, Edit, View, Window, Help) with New
 // Note / Task / Canvas (palette.go) and Import and Export submenus in File. newItem shows the
 // window and opens the palette on that command; openImport shows it and opens the import modal;
-// exports owns the Export submenu (export.go).
-func applicationMenu(newItem func(what string), openImport func(), exports *exportService) *application.Menu {
+// exports owns the Export submenu (export.go); closeTab is File › Close Tab (⌘W, see
+// closeTabOrWindow).
+func applicationMenu(newItem func(what string), openImport func(), closeTab func(), exports *exportService) *application.Menu {
 	menu := application.NewMenu()
 	if runtime.GOOS == "darwin" {
 		menu.AddRole(application.AppMenu)
@@ -42,7 +43,12 @@ func applicationMenu(newItem func(what string), openImport func(), exports *expo
 	exports.addMenu(file)
 	file.AddSeparator()
 	if runtime.GOOS == "darwin" {
-		file.AddRole(application.CloseWindow)
+		file.Add("Close Tab").SetAccelerator("CmdOrCtrl+W").OnClick(func(*application.Context) { closeTab() })
+		file.Add("Close Window").SetAccelerator("CmdOrCtrl+Shift+W").OnClick(func(*application.Context) {
+			if w := application.Get().Window.Current(); w != nil {
+				w.Close()
+			}
+		})
 	} else {
 		file.AddRole(application.Quit)
 	}

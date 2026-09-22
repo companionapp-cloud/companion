@@ -3,6 +3,7 @@ import type { Canvas } from "@companion/core-bridge";
 import { useCore } from "../CoreContext";
 import { useSync } from "../SyncProvider";
 import type { MembershipFilter } from "../NotesProvider";
+import { UNTITLED } from "../untitled";
 
 export interface CanvasesStore {
   canvases: Canvas[];
@@ -62,7 +63,7 @@ export function CanvasesProvider({ children }: { children: ReactNode }) {
 
   const create = useCallback(
     async (name?: string) => {
-      const canvas = await api.create({ name: name ?? "Untitled canvas" });
+      const canvas = await api.create({ name: name ?? UNTITLED.canvas });
       setCanvases((prev) => [canvas, ...prev]);
       syncTrigger();
       return canvas;

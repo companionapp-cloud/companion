@@ -41,6 +41,7 @@ import { NavContext } from "./nav-context";
 import { timeAgo } from "./NotificationRow";
 import { ExportMenu } from "./export/ExportMenu";
 import { isOverdue } from "./taskSchedule";
+import { titleFieldValue, titleToSave } from "./untitled";
 
 export interface TaskEditorProps {
   task: Task;
@@ -74,7 +75,8 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
   const editorRef = useRef<EditorController>(null);
   // Empty `[[label]]` links in the notes double-click to a quick-create dialog.
   const quickCreate = useQuickCreateLink(editorRef);
-  const [title, setTitle] = useState(task.title);
+  // An unnamed task shows an empty title (see untitled.ts).
+  const [title, setTitle] = useState(() => titleFieldValue(task.title));
   const [showProjects, setShowProjects] = useState(false);
   const [showGraph, setShowGraph] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -166,7 +168,7 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
               autoFocus={focusTitle}
               onChangeText={(t) => {
                 setTitle(t);
-                debouncedSave("title", { title: t });
+                debouncedSave("title", { title: titleToSave(t, task.title, "task") });
               }}
             />
           </View>

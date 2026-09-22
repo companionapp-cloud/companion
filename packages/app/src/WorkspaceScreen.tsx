@@ -20,6 +20,7 @@ import { CanvasPane } from "./canvas/CanvasPane";
 import { useCanvases } from "./canvas/CanvasesProvider";
 import { timeAgo } from "./NotificationRow";
 import { TourAnchor } from "./onboarding/anchors";
+import { UNTITLED } from "./untitled";
 
 /** One tab's workspace: a split of a browse list (notes, tasks or canvases — whichever
  * section this tab is in) beside the tab's document, or an empty "Nothing selected" state.
@@ -314,7 +315,7 @@ function TasksList() {
     const title = draft.trim();
     setDraft("");
     // A task typed into a schedule view lands in it: Someday, tomorrow (Upcoming), today (Overdue).
-    const t = await store.create({ title: title || "Untitled task", ...newTaskDefaults(store.filter) });
+    const t = await store.create({ title: title || UNTITLED.task, ...newTaskDefaults(store.filter) });
     nav.openTask(t.id);
   };
 
