@@ -272,5 +272,18 @@ and WebView bundle (unrun); shelf, cover dialog (colour + uploaded image via doc
 editor chrome with touch layout; palette "Pages" section and notebooks by title; AI
 `search_notes` + `get_page`; Trash.
 
+Page turns (2026-09-21, after "I want page turn animations"): in the two-page view the
+leaving spread stays pinned where it was while the outer page flips on the spine (rotateY,
+420 ms, a shadow along the fold) and its partner fades, and the new spread comes in beneath;
+the sheets are moved in the DOM by key, not remade, so editors and ink survive the turn. The
+scrolling list turns by smooth-scrolling to the page (instant in a hidden tab, where smooth
+scrolling never progresses). Turns come from the toolbar, ← / → and PageUp / PageDown when no
+text field has focus, and a single-finger sideways swipe on any touch screen (web and native,
+since native hosts the same view) when no drawing tool is active and the zoom is "fit"; at fit
+the stage gives up horizontal panning (`touch-action: pan-y`) so the swipe is clean, and zoomed
+in a sideways drag pans instead. `prefers-reduced-motion` cuts the flip. Verified with
+synthetic touches in Chromium: swipes turn both ways in both modes, a mouse drag doesn't, a
+swipe while drawing doesn't.
+
 Left: docs (help center); export (v1 exports nothing from notebooks); wheel zoom anchored
 under the pointer; running the native app; the open decisions in §7.
