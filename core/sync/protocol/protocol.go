@@ -57,6 +57,9 @@ const (
 	// the folder is being written, and can pause it or take it over; only the device named in it
 	// ever writes. Stored by the server as an opaque body, like a Git export.
 	EntityFolderExport = "folder_export"
+	// That the user finished or skipped one version of one guided tour, so no other device shows
+	// it again. Stored by the server as an opaque body.
+	EntityOnboarding = "onboarding"
 )
 
 // Push statuses.

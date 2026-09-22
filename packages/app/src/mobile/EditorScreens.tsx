@@ -12,6 +12,7 @@ import { TaskGraph } from "../TaskGraph";
 import { MembershipPicker } from "../MembershipPicker";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { NavAction, NavBar } from "./ui";
+import { TourAnchor } from "../onboarding/anchors";
 
 // Full-screen editor routes for the mobile web shell, wrapping the shared editors the
 // desktop workspace tabs render (WorkspaceScreen's NoteTabBody/TaskTabBody, minus tabs:
@@ -68,16 +69,20 @@ export function NoteEditorScreen() {
           right={
             <>
               <NavAction icon="folder" label="Move to an area or project" onPress={() => setShowProjects(true)} />
-              <NavAction
-                icon="pen"
-                label={drawing ? "Stop drawing" : "Draw on note"}
-                active={drawing && !showGraph}
-                onPress={() => {
-                  setDrawing(!drawing || showGraph);
-                  setShowGraph(false);
-                }}
-              />
-              <NavAction icon="graph" label={showGraph ? "Show note" : "Show note graph"} active={showGraph} onPress={() => setShowGraph((v) => !v)} />
+              <TourAnchor id="note.ink">
+                <NavAction
+                  icon="pen"
+                  label={drawing ? "Stop drawing" : "Draw on note"}
+                  active={drawing && !showGraph}
+                  onPress={() => {
+                    setDrawing(!drawing || showGraph);
+                    setShowGraph(false);
+                  }}
+                />
+              </TourAnchor>
+              <TourAnchor id="note.graph">
+                <NavAction icon="graph" label={showGraph ? "Show note" : "Show note graph"} active={showGraph} onPress={() => setShowGraph((v) => !v)} />
+              </TourAnchor>
               <NavAction icon="trash" label="Delete note" onPress={() => setConfirmDelete(true)} />
             </>
           }

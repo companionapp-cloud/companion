@@ -128,3 +128,9 @@ export { setExportMenuHost } from "./export/menuHost";
 export type { ExportMenuHost } from "./export/menuHost";
 export type { ExportFormat, ExportFile } from "./export/types";
 export { setExportFolderPicker } from "./export/scheduling";
+// Onboarding: the welcome sheet, and the tutorials each shell runs through a TourHost.
+export { OnboardingStateProvider, useOnboardingState } from "./onboarding/OnboardingState";
+export { WelcomeSheet } from "./onboarding/WelcomeSheet";
+export { OnboardingProvider, useOnboarding, useTourView } from "./onboarding/OnboardingProvider";
+export { TourAnchor, useTourAnchor, setTourMeasurer, type TourMeasurer } from "./onboarding/anchors";
+export type { TourHost, Place as TourPlace, ToolPlace } from "./onboarding/host";

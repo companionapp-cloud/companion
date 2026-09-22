@@ -10,6 +10,8 @@ import { ImportSettings } from "./ImportSettings";
 import { ExportSettings } from "./ExportSettings";
 import { GitSyncSettings } from "./GitSyncSettings";
 import { shortcutStore } from "./shortcuts";
+import { TourSettings } from "./onboarding/TourSettings";
+import { toursAvailable } from "./onboarding/OnboardingProvider";
 
 /** Sync has two halves: the Companion server, which keeps devices in step, and — beside it, not
  *  instead of it — a Git repository the workspace is mirrored with, both ways. */
@@ -22,7 +24,7 @@ function SyncSection() {
   );
 }
 
-export type SettingsSectionId = "sync" | "ai" | "objects" | "calendar" | "import" | "export" | "tools" | "shortcuts";
+export type SettingsSectionId = "sync" | "ai" | "objects" | "calendar" | "import" | "export" | "tools" | "shortcuts" | "tutorials";
 
 /** One entry in the settings navigation list (PLAN §3.1 shell). Each section is a
  *  self-contained component that reads its own data through the app providers, so the
@@ -97,6 +99,15 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
     // Desktop only: a browser tab or a phone can't register an OS-wide hotkey, so the
     // section appears exactly where a shell injected a store to bind them through.
     available: () => shortcutStore() !== null,
+  },
+  {
+    id: "tutorials",
+    label: "Tutorials",
+    description: "A short guided tour of each tool",
+    icon: "compass",
+    Component: TourSettings,
+    // Wherever a shell runs the tutorials (all of them do; a focus or capture window doesn't).
+    available: toursAvailable,
   },
 ];
 

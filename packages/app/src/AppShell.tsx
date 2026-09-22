@@ -91,6 +91,9 @@ import { CommandPalette, paletteEnter } from "./CommandPalette";
 import { CAPTURE_NEW_EVENT, CAPTURE_NEW_KEYS, PALETTE_OPEN_EVENT } from "./capture";
 import type { PaletteCreateKind } from "./paletteModel";
 import { ThingsImportHost } from "./ThingsImport";
+import { OnboardingProvider, useOnboarding } from "./onboarding/OnboardingProvider";
+import { TourAnchor } from "./onboarding/anchors";
+import type { Place, TourHost } from "./onboarding/host";
 
 // Monotonic tab uid so React keys are stable across reorders/overwrites even when two
 // tabs hold the same surface.
@@ -451,20 +454,64 @@ function NavBridge({
     };
   }, [tabs, active, activeTab, activeRef, selectRef, replaceRef, stepTab]);
 
+  const tourHost = useDesktopTourHost(nav);
+
   return (
     <NavContext.Provider value={nav}>
       <ReminderNavigationBridge />
       <PaletteNavigationBridge />
       <ThingsImportHost />
       <ExportScheduleBridge />
-      <MultiSelectProvider>
-        <ExportScope />
-        <DndProvider>
-          <Shell topInset={topInset} windowControls={windowControls} />
-        </DndProvider>
-      </MultiSelectProvider>
+      {/* The tutorials (onboarding): one per tool, each started the first time the user opens it. */}
+      <OnboardingProvider host={tourHost}>
+        <MultiSelectProvider>
+          <ExportScope />
+          <DndProvider>
+            <Shell topInset={topInset} windowControls={windowControls} />
+          </DndProvider>
+        </MultiSelectProvider>
+      </OnboardingProvider>
     </NavContext.Provider>
   );
+}
+
+/** Where the active tab is, in the tutorials' terms (see onboarding/host.ts). */
+function desktopPlace(loc: Navigator["current"]): Place {
+  switch (loc.kind) {
+    case "view":
+      return loc.view === "today" || loc.view === "chat" || loc.view === "calendar" || loc.view === "graph" || loc.view === "settings" ? loc.view : "other";
+    case "notes":
+    case "tasks":
+      return loc.kind;
+    case "area":
+      return loc.section ? "area-section" : "area";
+    case "project":
+      return loc.section ? "project-section" : "project";
+    default:
+      return "other";
+  }
+}
+
+/** The tutorials' view of the desktop shell: the active tab's place and document, and the
+ *  navigator's moves. */
+function useDesktopTourHost(nav: Navigator): TourHost {
+  return useMemo<TourHost>(() => {
+    const doc = docOfRef(nav.activeTab.ref);
+    return {
+      layout: "desktop",
+      place: desktopPlace(nav.current),
+      placeKey: keyOfRef(nav.activeTab.ref),
+      doc: doc && doc.kind !== "canvas" ? { kind: doc.kind, id: doc.id } : null,
+      // The desktop has no Home: its sidebar is on every page, so Today stands in.
+      go: (to) => nav.goView(to === "home" ? "today" : to),
+      openNote: nav.openNote,
+      openTask: nav.openTask,
+      openArea: nav.openArea,
+      openProject: nav.openProject,
+      openSettings: (section) => nav.openRef({ kind: "view", view: "settings", section }),
+      back: nav.back,
+    };
+  }, [nav]);
 }
 
 /** Bridges a tapped reminder to navigation (PLAN §6.4). Mounted inside the navigator so it
@@ -661,7 +708,9 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
     const t = setTimeout(() => void dnd.remeasure(), motion.medium + 60);
     return () => clearTimeout(t);
   }, [dragNearRail, dnd.remeasure]);
-  const expanded = open || pinned || dragNearRail;
+  // A tutorial step that points into the sidebar (the areas tree) holds the rail open while it shows.
+  const holdRail = useOnboarding()?.holdRail ?? false;
+  const expanded = open || pinned || dragNearRail || holdRail;
   const railWidth = expanded ? layout.railOpenW : layout.railW;
   // macOS traffic lights sit over the rail's padded top, but they're wider than the
   // collapsed rail — push the toolbar past their right edge. Nothing to do once the
@@ -788,13 +837,15 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
                 onPress={() => nav.goView("trash")}
               />
             ) : null}
-            <RailItem
-              icon={railIcon("settings", "settings")}
-              label="Settings"
-              active={nav.activeView === "settings"}
-              expanded={expanded}
-              onPress={() => nav.goView("settings")}
-            />
+            <TourAnchor id="rail.settings">
+              <RailItem
+                icon={railIcon("settings", "settings")}
+                label="Settings"
+                active={nav.activeView === "settings"}
+                expanded={expanded}
+                onPress={() => nav.goView("settings")}
+              />
+            </TourAnchor>
           </View>
         </View>
 

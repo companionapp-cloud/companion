@@ -1,9 +1,10 @@
 import { useLayoutEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createBottomTabNavigator, type BottomTabBarButtonProps } from '@react-navigation/bottom-tabs';
+import { PlatformPressable } from '@react-navigation/elements';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useProjects } from '@companion/app';
+import { TourAnchor, useProjects } from '@companion/app';
 import { Icon, Text, colors, font, type IconName } from '@companion/design-system';
 import type { ProjectTabParamList, RootStackParamList } from '../MobileShell';
 import { ProjectContext } from '../ProjectContext';
@@ -16,12 +17,13 @@ import { ProjectCalendarScreen } from './ProjectCalendarScreen';
 
 const Tabs = createBottomTabNavigator<ProjectTabParamList>();
 
-const TAB: Record<keyof ProjectTabParamList, { label: string; icon: IconName }> = {
-  ProjectOverview: { label: 'Overview', icon: 'folder' },
-  ProjectNotes: { label: 'Notes', icon: 'notes' },
-  ProjectTasks: { label: 'Tasks', icon: 'tasks' },
-  ProjectCanvases: { label: 'Canvases', icon: 'canvas' },
-  ProjectCalendar: { label: 'Calendar', icon: 'calendar' },
+// `section` names the tab the way the project page does everywhere, so the tutorial finds it.
+const TAB: Record<keyof ProjectTabParamList, { label: string; icon: IconName; section: string }> = {
+  ProjectOverview: { label: 'Overview', icon: 'folder', section: 'overview' },
+  ProjectNotes: { label: 'Notes', icon: 'notes', section: 'notes' },
+  ProjectTasks: { label: 'Tasks', icon: 'tasks', section: 'tasks' },
+  ProjectCanvases: { label: 'Canvases', icon: 'canvas', section: 'canvases' },
+  ProjectCalendar: { label: 'Calendar', icon: 'calendar', section: 'calendars' },
 };
 
 /** A project's scoped view: a bottom tab bar (Overview / Notes / Tasks / Canvases / Calendar) filtered
@@ -69,6 +71,12 @@ export function ProjectScreen({ route }: NativeStackScreenProps<RootStackParamLi
           tabBarIcon: ({ color }) => (
             <Icon name={TAB[tabRoute.name as keyof ProjectTabParamList].icon} size={20} color={color} />
           ),
+          // Each tab is a tutorial anchor (the project tutorial walks the bar).
+          tabBarButton: (props: BottomTabBarButtonProps) => (
+            <TourAnchor id={`page.section.${TAB[tabRoute.name as keyof ProjectTabParamList].section}`} style={styles.tab}>
+              <PlatformPressable {...props} />
+            </TourAnchor>
+          ),
         })}
       >
         <Tabs.Screen name="ProjectOverview" component={ContainerOverviewScreen} />
@@ -91,4 +99,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0,
   },
   tabLabel: { fontFamily: font.mono, fontSize: font.size['2xs'] },
+  // The anchor takes the tab's place in the bar.
+  tab: { flex: 1 },
 });

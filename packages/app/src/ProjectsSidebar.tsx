@@ -6,6 +6,7 @@ import { useProjects } from "./ProjectsProvider";
 import { SortableList } from "./SortableList";
 import { useDropTarget, type DragPayload } from "./DndContext";
 import { SECTION_OF, containerOfLocation, useNav, type ContainerRef } from "./nav-context";
+import { TourAnchor } from "./onboarding/anchors";
 
 /** The areas → projects tree in the expanded rail (PLAN §6.6): area headings that open the
  * area's page, project nav items with a task-completion ring (hidden until member tasks
@@ -92,7 +93,8 @@ export function ProjectsSidebar({
   );
 
   return (
-    <View>
+    // The areas tour points at the whole tree.
+    <TourAnchor id="sidebar.areas">
       <View style={[styles.header, styles.area]}>
         <Text variant="eyebrow" tone="quaternary" numberOfLines={1} style={{ flex: 1 }}>
           Areas
@@ -136,7 +138,7 @@ export function ProjectsSidebar({
           Group your work into areas and projects. Add one with ＋.
         </Text>
       ) : null}
-    </View>
+    </TourAnchor>
   );
 }
 

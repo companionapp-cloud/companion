@@ -3,7 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChatList, useCore } from '@companion/app';
+import { ChatList, TourAnchor, useCore } from '@companion/app';
 import { colors } from '@companion/design-system';
 import type { Chat } from '@companion/core-bridge';
 import type { RootStackParamList } from '../MobileShell';
@@ -41,6 +41,7 @@ export function ChatListScreen() {
 
   return (
     <View style={styles.root}>
+      <TourAnchor id="chat.surface" style={styles.surface}>
       <ChatList
         variant="full"
         chats={list}
@@ -51,6 +52,7 @@ export function ChatListScreen() {
           reload();
         }}
       />
+      </TourAnchor>
       <Fab label="New chat" onPress={() => void newChat()} bottomInset={insets.bottom} />
     </View>
   );
@@ -58,4 +60,6 @@ export function ChatListScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.surfaceApp },
+  // The list: what the chat tutorial points at.
+  surface: { flex: 1 },
 });

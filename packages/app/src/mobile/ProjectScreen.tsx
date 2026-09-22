@@ -62,6 +62,7 @@ export function ProjectScreen() {
         segments={
           <ListFilterTabs
             value={section}
+            anchorPrefix="page.section."
             onChange={(next: Section) => navigation.setParams({ section: next === "overview" ? undefined : next })}
             options={[
               { value: "overview", label: "Overview" },
@@ -113,6 +114,7 @@ export function AreaScreen() {
         segments={
           <ListFilterTabs
             value={section}
+            anchorPrefix="page.section."
             onChange={(next: AreaTab) => navigation.setParams({ section: next === "overview" ? undefined : next })}
             options={tabs.map((t) => ({ value: t.value, label: t.label }))}
           />

@@ -1,4 +1,5 @@
 import type { CoreBridge } from "@companion/core-bridge";
+import { DensityProvider } from "@companion/design-system";
 import type { DocumentSource } from "@companion/editor";
 import { CoreProvider } from "./CoreContext";
 import { DocumentSourceProvider } from "./DocumentSourceContext";
@@ -19,6 +20,8 @@ import { focusTarget } from "./focus";
 import { CaptureView } from "./CaptureView";
 import { captureRequested } from "./capture";
 import { ExportProvider } from "./export/ExportProvider";
+import { OnboardingStateProvider } from "./onboarding/OnboardingState";
+import { WelcomeSheet } from "./onboarding/WelcomeSheet";
 
 /** Mounts the shell matching the viewport: under-desktop widths get the mobile stacked
  * shell, everything else the desktop rail + workspace (see shellMode.ts). A host that is
@@ -35,10 +38,19 @@ function ShellSwitch({
   notificationScheduler?: NotificationScheduler;
 }) {
   const mobile = useMobileWebShell() && shell !== "desktop";
-  return mobile ? (
-    <MobileWebShell topInset={topInset} notificationScheduler={notificationScheduler} />
-  ) : (
-    <AppShell topInset={topInset} windowControls={windowControls} notificationScheduler={notificationScheduler} />
+  return (
+    <>
+      {mobile ? (
+        <MobileWebShell topInset={topInset} notificationScheduler={notificationScheduler} />
+      ) : (
+        <AppShell topInset={topInset} windowControls={windowControls} notificationScheduler={notificationScheduler} />
+      )}
+      {/* Everyone reads the welcome sheet once before the app is theirs; it sits over the
+          shell, which loads underneath, at the shell's density. */}
+      <DensityProvider density={mobile ? "touch" : "pointer"}>
+        <WelcomeSheet />
+      </DensityProvider>
+    </>
   );
 }
 
@@ -115,7 +127,9 @@ export function App({
             </TasksProvider>
           </NotesProvider>
         ) : (
-          <ShellSwitch shell={shell} topInset={topInset} windowControls={windowControls} notificationScheduler={notificationScheduler} />
+          <OnboardingStateProvider>
+            <ShellSwitch shell={shell} topInset={topInset} windowControls={windowControls} notificationScheduler={notificationScheduler} />
+          </OnboardingStateProvider>
         )}
         </ExportProvider>
         </SyncProvider>

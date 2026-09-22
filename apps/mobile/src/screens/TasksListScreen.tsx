@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { Task } from '@companion/core-bridge';
-import { useCore, useTasks, useProjects, ListFilterTabs, DateGroupHeading, filterBySchedule, newTaskDefaults, scheduleGroups, withoutSomeday, type ScheduleFilter } from '@companion/app';
+import { useCore, useTasks, useProjects, ListFilterTabs, DateGroupHeading, filterBySchedule, newTaskDefaults, scheduleGroups, withoutSomeday, type ScheduleFilter, TourAnchor } from '@companion/app';
 import { Spinner, colors, space } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
 import { useAreaScope, useProjectScope } from '../ProjectContext';
@@ -101,6 +101,7 @@ export function TasksListScreen() {
       <NavBarSegments detached={!!scopeId}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.segments}>
           {!scopeId ? (
+            <TourAnchor id="tasks.filters">
             <ListFilterTabs
               value={store.filter}
               onChange={store.setFilter}
@@ -113,6 +114,7 @@ export function TasksListScreen() {
                 { value: 'someday', label: 'Someday' },
               ]}
             />
+            </TourAnchor>
           ) : (
             <ListFilterTabs
               value={dueFilter}
@@ -159,7 +161,7 @@ export function TasksListScreen() {
           );
         }}
       />
-      <Fab label="New task" onPress={() => void createTask()} bottomInset={scopeId ? 0 : insets.bottom} />
+      <Fab label="New task" anchor={scopeId ? undefined : 'tasks.new'} onPress={() => void createTask()} bottomInset={scopeId ? 0 : insets.bottom} />
     </View>
   );
 }

@@ -26,6 +26,7 @@ import { EventEditorDialog, type EventEditorTarget } from "./EventEditorDialog";
 import { useProjectCalendars } from "./ProjectCalendars";
 import { useTasks } from "./TasksProvider";
 import { useNav } from "./nav-context";
+import { TourAnchor } from "./onboarding/anchors";
 
 // The Calendar tool (PLAN §6.7): a week grid of merged events, due tasks, and dated notes,
 // mirroring the prototype's CalendarView. Habit streaks join it when habits (§16) land. The
@@ -357,7 +358,8 @@ export function CalendarScreen({ projectId }: { projectId?: string } = {}) {
   } as any;
 
   return (
-    <View style={styles.root}>
+    // The whole week is what the calendar tour points at.
+    <TourAnchor id="calendar.week" style={styles.root}>
       {/* Toolbar: month, week nav, ISO week, legend, refresh, jump-to-today */}
       <View style={styles.toolbar}>
         <Icon name="calendar" size={14} color={colors.textSecondary} />
@@ -517,7 +519,7 @@ export function CalendarScreen({ projectId }: { projectId?: string } = {}) {
         </View>
       </ScrollView>
       {editor ? <EventEditorDialog target={editor} feeds={creatable} onClose={() => setEditor(null)} /> : null}
-    </View>
+    </TourAnchor>
   );
 }
 

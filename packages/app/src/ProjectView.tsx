@@ -47,6 +47,7 @@ import { CalendarScreen } from "./CalendarScreen";
 import { ProjectCalendarsColumn } from "./ProjectCalendars";
 import { ContainerHome, type TaskListFilter } from "./ContainerHome";
 import { useContainerContent } from "./useContainerContent";
+import { TourAnchor } from "./onboarding/anchors";
 
 const SECTIONS: { id: ProjectSection; label: string; tool: ToolId }[] = [
   { id: "notes", label: "Notes", tool: "notes" },
@@ -140,20 +141,24 @@ export function ProjectView() {
       </View>
 
       <View style={styles.chipRow}>
-        <SectionChip label="Overview" selected={!section} onPress={() => section && nav.openContainer(container)} />
+        {/* Each chip is a tour anchor: the area and project tours walk the row. */}
+        <TourAnchor id="page.section.overview">
+          <SectionChip label="Overview" selected={!section} onPress={() => section && nav.openContainer(container)} />
+        </TourAnchor>
         {sections.map((s) => (
-          <SectionChip
-            key={s.id}
-            label={s.label}
-            count={counts[s.id]}
-            selected={s.id === section}
-            onPress={() => {
-              // Re-picking the open section keeps its selection; a different one clears it.
-              if (s.id === section) return;
-              setTaskFilter("all");
-              nav.openContainer(container, s.id);
-            }}
-          />
+          <TourAnchor key={s.id} id={`page.section.${s.id}`}>
+            <SectionChip
+              label={s.label}
+              count={counts[s.id]}
+              selected={s.id === section}
+              onPress={() => {
+                // Re-picking the open section keeps its selection; a different one clears it.
+                if (s.id === section) return;
+                setTaskFilter("all");
+                nav.openContainer(container, s.id);
+              }}
+            />
+          </TourAnchor>
         ))}
       </View>
 

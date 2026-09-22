@@ -12,6 +12,7 @@ import { useToolVisibility, type ToolId } from "../ToolVisibilityProvider";
 import { CaptureForm } from "../CaptureForm";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { BottomSheet, Card, CardRow, CountPill, FAB_CLEARANCE, Fab, IconTile, NAV_ICON, SectionLabel } from "./ui";
+import { TourAnchor } from "../onboarding/anchors";
 
 // The mobile web root — a port of the native app's HomeScreen (apps/mobile). Home owns its
 // title, so there is no nav bar: a large "What's new today?" across from the notifications
@@ -177,6 +178,8 @@ export function HomeScreen() {
           ))}
         </Card>
 
+        {/* The areas and their projects: what the areas tutorial points at. */}
+        <TourAnchor id="home.areas">
         {areas.map((area) => (
           <View key={area.id}>
             <SectionLabel
@@ -243,6 +246,7 @@ export function HomeScreen() {
             No areas yet. Group your work into areas and projects — add one below.
           </Text>
         ) : null}
+        </TourAnchor>
 
         <SectionLabel>More</SectionLabel>
         <Card>

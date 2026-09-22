@@ -28,6 +28,7 @@ import { useTasks } from "./TasksProvider";
 import { useSync } from "./SyncProvider";
 import { REPEAT_PRESETS, repeatLabel } from "./repeat";
 import { MAX_REMINDERS, REMINDER_LEAD_PRESETS, reminderLabel, remindersSummary, sameReminder } from "./reminders";
+import { TourAnchor } from "./onboarding/anchors";
 import { useLinkSource } from "./useLinkSource";
 import { useQuickCreateLink } from "./useQuickCreateLink";
 import { DateTimeInput } from "./DateTimeInput";
@@ -167,33 +168,39 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
 
         {/* Metadata reads as a row of chips under the title; a chip expands its editor. */}
         <View style={[styles.metaRow, indent]}>
-          <MetaChip
-            icon="calendar"
-            label="Add start"
-            display={task.someday ? "someday" : task.startAt ? `starts ${formatWhen(task.startAt)}` : null}
-            active={expanded === "start"}
-            onPress={() => toggle("start")}
-            onClear={
-              task.someday ? () => save(task.id, { someday: false }) : task.startAt ? () => save(task.id, { clearStartAt: true }) : undefined
-            }
-          />
-          <MetaChip
-            icon="flag"
-            label="Add deadline"
-            display={task.dueAt ? formatWhen(task.dueAt) : null}
-            tone={overdue(task) ? "danger" : dueToday(task) ? "accent" : "default"}
-            active={expanded === "deadline"}
-            onPress={() => toggle("deadline")}
-            onClear={task.dueAt ? () => save(task.id, { clearDueAt: true }) : undefined}
-          />
-          <MetaChip
-            icon="bell"
-            label="Add reminder"
-            display={remindersSummary(task.reminders)}
-            active={expanded === "reminders"}
-            onPress={() => toggle("reminders")}
-            onClear={task.reminders?.length ? () => save(task.id, { reminders: [] }) : undefined}
-          />
+          <TourAnchor id="task.start">
+            <MetaChip
+              icon="calendar"
+              label="Add start"
+              display={task.someday ? "someday" : task.startAt ? `starts ${formatWhen(task.startAt)}` : null}
+              active={expanded === "start"}
+              onPress={() => toggle("start")}
+              onClear={
+                task.someday ? () => save(task.id, { someday: false }) : task.startAt ? () => save(task.id, { clearStartAt: true }) : undefined
+              }
+            />
+          </TourAnchor>
+          <TourAnchor id="task.deadline">
+            <MetaChip
+              icon="flag"
+              label="Add deadline"
+              display={task.dueAt ? formatWhen(task.dueAt) : null}
+              tone={overdue(task) ? "danger" : dueToday(task) ? "accent" : "default"}
+              active={expanded === "deadline"}
+              onPress={() => toggle("deadline")}
+              onClear={task.dueAt ? () => save(task.id, { clearDueAt: true }) : undefined}
+            />
+          </TourAnchor>
+          <TourAnchor id="task.reminders">
+            <MetaChip
+              icon="bell"
+              label="Add reminder"
+              display={remindersSummary(task.reminders)}
+              active={expanded === "reminders"}
+              onPress={() => toggle("reminders")}
+              onClear={task.reminders?.length ? () => save(task.id, { reminders: [] }) : undefined}
+            />
+          </TourAnchor>
           <MetaChip
             icon="repeat"
             label="Repeat"

@@ -125,6 +125,8 @@ export type {
   FileImportReport,
   FileImportOutcome,
 } from "./exports";
+export { onboardingApi, ONBOARDING_CHANGED_EVENT } from "./onboarding";
+export type { OnboardingApi, OnboardingRecord, OnboardingEntry, OnboardingOutcome } from "./onboarding";
 export { syncApi } from "./sync";
 export type { SyncApi } from "./sync";
 export { graphApi } from "./graph";

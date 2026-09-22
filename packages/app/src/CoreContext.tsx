@@ -17,6 +17,7 @@ import {
   importFilesApi,
   notifyApi,
   objectTypesApi,
+  onboardingApi,
   projectsApi,
   tasksApi,
   trashApi,
@@ -38,6 +39,7 @@ import {
   type ImportFilesApi,
   type NotifyApi,
   type ObjectTypesApi,
+  type OnboardingApi,
   type ProjectsApi,
   type TasksApi,
   type TrashApi,
@@ -69,6 +71,8 @@ interface CoreValue {
   exports: ExportsApi;
   /** One-time import of a folder of markdown and canvas files. */
   importFiles: ImportFilesApi;
+  /** Which guided tours the user has finished or skipped (synced). */
+  onboarding: OnboardingApi;
 }
 
 const CoreCtx = createContext<CoreValue | null>(null);
@@ -98,6 +102,7 @@ export function CoreProvider({ core, children }: { core: CoreBridge; children: R
       noteInk: noteInkApi(core),
       exports: exportsApi(core),
       importFiles: importFilesApi(core),
+      onboarding: onboardingApi(core),
     }),
     [core],
   );

@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { Note } from '@companion/core-bridge';
-import { useCore, useNotes, useProjects, ListFilterTabs } from '@companion/app';
+import { useCore, useNotes, useProjects, ListFilterTabs, TourAnchor } from '@companion/app';
 import { Icon, Input, Spinner, Text, colors, space } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
 import { useAreaScope, useProjectScope } from '../ProjectContext';
@@ -98,6 +98,7 @@ export function NotesListScreen() {
           />
         </NavBarSegments>
       ) : null}
+      <TourAnchor id={scopeId ? 'notes.scoped' : 'notes.list'} style={styles.body}>
       <View style={styles.search}>
         <Input
           placeholder="Search notes"
@@ -139,6 +140,7 @@ export function NotesListScreen() {
           </GroupedItem>
         )}
       />
+      </TourAnchor>
       <Fab label="New note" onPress={() => void createNote()} bottomInset={scopeId ? 0 : insets.bottom} />
     </View>
   );
@@ -166,6 +168,8 @@ function relTime(iso: string): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceApp },
+  // Search and rows under the bar: what the notes tutorial points at.
+  body: { flex: 1 },
   search: { paddingHorizontal: space.lg, paddingTop: space.md },
   list: { paddingHorizontal: space.lg, paddingTop: space.md, flexGrow: 1 },
 });

@@ -11,6 +11,7 @@ import { filterBySchedule, newTaskDefaults, scheduleGroups, withoutSomeday, type
 import { useProjects } from "../ProjectsProvider";
 import { ListFilterTabs } from "../ListFilterMenu";
 import { CHECKBOX_INSET, CardRow, Checkbox, EmptyCaption, FAB_CLEARANCE, Fab, GroupedItem, NavAction, NavBar, ROW_ICON_INSET, RowIcon } from "./ui";
+import { TourAnchor } from "../onboarding/anchors";
 
 // Full-screen browse lists for the mobile web shell — ports of the native app's
 // NotesListScreen/TasksListScreen. Used globally (all items) and inside the project
@@ -104,6 +105,7 @@ export function NotesListScreen({ projectId, areaId }: { projectId?: string; are
   return (
     <View style={styles.container}>
       {bar}
+      <TourAnchor id={scoped ? "notes.scoped" : "notes.list"} style={styles.body}>
       <View style={styles.search}>
         <Input
           placeholder="Search notes"
@@ -143,6 +145,7 @@ export function NotesListScreen({ projectId, areaId }: { projectId?: string; are
           </GroupedItem>
         )}
       />
+      </TourAnchor>
       <Fab label="New note" onPress={() => void createNote()} />
     </View>
   );
@@ -210,6 +213,7 @@ export function TasksListScreen({ projectId, areaId }: { projectId?: string; are
       title="Tasks"
       right={<NavAction icon="plus" label="New task" onPress={() => void createTask()} />}
       segments={
+        <TourAnchor id="tasks.filters">
         <ListFilterTabs
           scroll
           value={store.filter}
@@ -223,6 +227,7 @@ export function TasksListScreen({ projectId, areaId }: { projectId?: string; are
             { value: "someday", label: "Someday" },
           ]}
         />
+        </TourAnchor>
       }
     />
   );
@@ -265,7 +270,7 @@ export function TasksListScreen({ projectId, areaId }: { projectId?: string; are
         ListEmptyComponent={<EmptyCaption>{emptyTasksCaption(mode, areaId ? "area" : projectId ? "project" : null)}</EmptyCaption>}
         renderItem={({ item: row }) => (row.kind === "heading" ? <DateGroupHeading label={row.label} count={row.count} /> : taskRow(row))}
       />
-      <Fab label="New task" onPress={() => void createTask()} />
+      <Fab label="New task" anchor={scoped ? undefined : "tasks.new"} onPress={() => void createTask()} />
     </View>
   );
 }
@@ -330,6 +335,8 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.borderSubtle,
     backgroundColor: colors.surfaceApp,
   },
+  // The notes list under the bar (search and rows): what the notes tutorial points at.
+  body: { flex: 1, minHeight: 0 },
   search: { paddingHorizontal: space.ml, paddingTop: space.ml, paddingBottom: space.md },
   list: { paddingHorizontal: space.ml, paddingBottom: FAB_CLEARANCE, flexGrow: 1 },
   listTop: { paddingTop: space.ml },

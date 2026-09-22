@@ -8,6 +8,7 @@ import { useStyledGraph } from "../useStyledGraph";
 import { typeColor } from "../graphModel";
 // Explicit .web specifier — see the note in ../GraphScreen.web.tsx.
 import { GraphEmpty, GraphView, graphCodeStyle, type GraphSelection } from "../GraphView.web";
+import { TourAnchor } from "../onboarding/anchors";
 import { NavBar } from "./ui";
 
 // The whole-knowledgebase graph on mobile web: the same d3-force view the desktop renders,
@@ -57,7 +58,7 @@ export function GraphScreen() {
   return (
     <View style={styles.root}>
       <NavBar title="Graph" />
-      <View style={styles.canvas}>
+      <TourAnchor id="graph.canvas" style={styles.canvas}>
         {empty ? (
           <GraphEmpty>
             Your graph is empty. Create a few notes and link them with{" "}
@@ -66,7 +67,7 @@ export function GraphScreen() {
         ) : (
           <GraphView graph={styledGraph} menu onSelectNode={setSelected} selectedKey={selected?.key ?? null} onCounts={setCounts} />
         )}
-      </View>
+      </TourAnchor>
       {empty ? null : (
         <View style={styles.bar}>
           {selected ? (

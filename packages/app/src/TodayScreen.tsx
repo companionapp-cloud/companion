@@ -30,6 +30,7 @@ import { useTasks } from "./TasksProvider";
 import { useLinkSource } from "./useLinkSource";
 import { useQuickCreateLink } from "./useQuickCreateLink";
 import { useDocumentSource } from "./DocumentSourceContext";
+import { TourAnchor } from "./onboarding/anchors";
 
 // The "Today" tool (PLAN §6.x): a large daily-note editor with a small mini-calendar aside.
 // A daily note is an ordinary note stamped with a `date` (YYYY-MM-DD). The note for the
@@ -142,8 +143,9 @@ export function TodayScreen() {
 export function DailyNote(props: {
   date: string;
   onOpenRef?: (ref: LinkRef) => void;
-  /** Horizontal inset for the date heading, to align it with the editor body. Desktop nests
-   *  this in a padded page already (0); mobile passes the editor's 20px body inset. */
+  /** Native: horizontal inset for the date heading, to line it up with the editor, which brings
+   *  its own body inset there (20px on a phone). The web pads the whole page instead, heading
+   *  and editor alike, so this is ignored there. */
   headingPadding?: number;
   /** Drawing mode (PLAN-drawing.md). The host owns the toggle; the drawing bar shows here. */
   drawing?: boolean;
@@ -276,7 +278,7 @@ function DailyNoteBody({
 
   const body = (
     <>
-      <View style={{ paddingHorizontal: headingPadding }}>
+      <View style={Platform.OS === "web" ? null : { paddingHorizontal: headingPadding }}>
         <Text variant="title" style={touch ? styles.headingTouch : null}>
           {formatFullDate(date)}
         </Text>
@@ -326,8 +328,10 @@ function DailyNoteBody({
 
   return (
     <View style={styles.page}>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.docScroll}>
-        <View style={styles.doc}>{body}</View>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={touch ? styles.docScrollTouch : styles.docScroll}>
+        <TourAnchor id="today.note" style={styles.doc}>
+          {body}
+        </TourAnchor>
       </ScrollView>
       {/* The bar is pinned under the document as the column's last row. A pointer keeps it
           up permanently; touch web only shows it while the editor has focus. */}
@@ -354,8 +358,12 @@ function CalendarPane(props: {
 }) {
   return (
     <View style={styles.aside}>
-      <TodayCalendar selected={props.selected} today={props.today} onSelect={props.onSelect} />
-      <Agenda date={props.selected} onOpenItem={props.onOpenItem} creatable grid visible={props.visible} />
+      <TourAnchor id="today.calendar">
+        <TodayCalendar selected={props.selected} today={props.today} onSelect={props.onSelect} />
+      </TourAnchor>
+      <TourAnchor id="today.agenda" style={styles.agenda}>
+        <Agenda date={props.selected} onOpenItem={props.onOpenItem} creatable grid visible={props.visible} />
+      </TourAnchor>
     </View>
   );
 }
@@ -558,6 +566,8 @@ const styles = {
   // The document column: 20/28 page padding around a 720px measure, centered like the note
   // editor so the two read as the same page.
   docScroll: { paddingHorizontal: 28, paddingTop: space.xl2, paddingBottom: space.huge },
+  // A phone's page, as in the note editor (NoteEditor's pageTouch).
+  docScrollTouch: { paddingHorizontal: space.xl2, paddingTop: space.xl, paddingBottom: space.huge },
   doc: { maxWidth: layout.contentMax, width: "100%" as const, alignSelf: "center" as const },
   page: { flex: 1 },
   // Touch drops the desktop title for the phone's 20px semibold heading.
@@ -565,6 +575,8 @@ const styles = {
   meta: { marginTop: space.xs, marginBottom: space.xl },
 
   aside: { flex: 1, minHeight: 0, padding: space.ml, paddingBottom: 0, backgroundColor: colors.surfaceCard },
+  // The agenda owns the pane's remaining height (its day grid scrolls on its own).
+  agenda: { flex: 1, minHeight: 0 },
 
   calHeader: {
     flexDirection: "row" as const,

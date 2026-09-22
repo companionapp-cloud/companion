@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { TodayCalendar, Agenda, useCalendar, todayISO, formatFullDate } from '@companion/app';
+import { TodayCalendar, Agenda, TourAnchor, useCalendar, todayISO, formatFullDate } from '@companion/app';
 import { Icon, IconButton, Spinner, Text, colors, control, space } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
 import { Card } from '../ui/native';
@@ -54,6 +54,7 @@ export function CalendarScreen() {
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + space.xxl }]}>
+      <TourAnchor id="calendar.day">
       <Card>
         <View style={styles.month}>
           <TodayCalendar selected={selected} today={today} onSelect={setSelected} allowFuture />
@@ -73,6 +74,7 @@ export function CalendarScreen() {
           }}
         />
       </View>
+      </TourAnchor>
     </ScrollView>
   );
 }

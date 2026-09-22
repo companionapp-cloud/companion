@@ -4,7 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { SidebarArea, SidebarProject } from '@companion/core-bridge';
-import { useCore, useNotes, useProjects, useTasks, useNotifications, useToolVisibility, SortableList, CaptureForm, ConfirmDialog, type ToolId } from '@companion/app';
+import { useCore, useNotes, useProjects, useTasks, useNotifications, useToolVisibility, SortableList, CaptureForm, ConfirmDialog, type ToolId, TourAnchor } from '@companion/app';
 import { Badge, Button, Icon, IconButton, Input, ProgressRing, Text, colors, font, radius, space, type IconName } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
 import { BottomSheet, Card, CardRow, CountPill, FAB_CLEARANCE, Fab, IconTile, SectionLabel } from '../ui/native';
@@ -147,6 +147,8 @@ export function HomeScreen() {
           />
         </Card>
 
+        {/* The areas and their projects: what the areas tutorial points at. */}
+        <TourAnchor id="home.areas">
         <SortableList
           items={areas}
           keyExtractor={(a) => a.id}
@@ -237,6 +239,7 @@ export function HomeScreen() {
             Group your work into areas and projects. Start with a new area below.
           </Text>
         ) : null}
+        </TourAnchor>
 
         {/* Settings and other secondary destinations live under the areas as a "More"
             card (moved off the header), along with the new-area affordance. */}

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useTourAnchor } from '@companion/app';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackHeaderProps } from '@react-navigation/native-stack';
@@ -160,10 +161,25 @@ export function Checkbox({ checked, onPress, label }: { checked: boolean; onPres
 }
 
 /** The accent circular create button, floated over a screen's bottom-right corner. Pass
- * `bottomInset` where the screen runs to the bottom edge (no tab bar beneath it). */
-export function Fab({ label, onPress, icon = 'plus', bottomInset = 0 }: { label: string; onPress: () => void; icon?: IconName; bottomInset?: number }) {
+ * `bottomInset` where the screen runs to the bottom edge (no tab bar beneath it). `anchor` makes
+ * it a tutorial anchor (it floats, so it can't be wrapped in one). */
+export function Fab({
+  label,
+  onPress,
+  icon = 'plus',
+  bottomInset = 0,
+  anchor,
+}: {
+  label: string;
+  onPress: () => void;
+  icon?: IconName;
+  bottomInset?: number;
+  anchor?: string;
+}) {
+  const anchorRef = useTourAnchor(anchor ?? '');
   return (
     <Pressable
+      ref={anchor ? (anchorRef as never) : undefined}
       onPress={onPress}
       aria-label={label}
       style={({ pressed }: PressState) => [styles.fab, { bottom: space.xl + bottomInset, backgroundColor: pressed ? colors.accentActive : colors.accent }]}

@@ -433,6 +433,21 @@ CREATE TABLE IF NOT EXISTS folder_exports (
 );
 CREATE INDEX IF NOT EXISTS idx_folder_exports_user_seq ON folder_exports (user_id, server_seq);
 
+-- Onboarding (the guided tours): one row per tour version the user finished or skipped, so a
+-- tour seen on one device is not shown again on another. Kept whole like the export rows; the
+-- server never reads more than the sync metadata.
+CREATE TABLE IF NOT EXISTS onboarding (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  row_json   TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  version    BIGINT NOT NULL DEFAULT 0,
+  server_seq BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_onboarding_user_seq ON onboarding (user_id, server_seq);
+
 CREATE TABLE IF NOT EXISTS calendar_objects (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL,
