@@ -49,6 +49,7 @@ import { ContainerHome, type TaskListFilter } from "./ContainerHome";
 import { useContainerContent } from "./useContainerContent";
 import { TourAnchor } from "./onboarding/anchors";
 import { UNTITLED } from "./untitled";
+import { useDocContextMenus } from "./ItemMenus";
 
 const SECTIONS: { id: ProjectSection; label: string; tool: ToolId }[] = [
   { id: "notes", label: "Notes", tool: "notes" },
@@ -256,6 +257,7 @@ function ListColumn({
   taskFilter: TaskListFilter;
   onTaskFilter: (filter: TaskListFilter) => void;
 }) {
+  const docMenus = useDocContextMenus();
   const nav = useNav();
   const notesStore = useNotes();
   const tasksStore = useTasks();
@@ -439,6 +441,7 @@ function ListColumn({
               return (
                 <ListRow
                   key={n.id}
+                  {...docMenus({ kind: "note", id: n.id })}
                   accessory={<DragHandle payload={{ kind: "note", id: n.id, label: n.title || "Untitled" }} />}
                   icon={<Icon name={n.date ? "today" : "file"} size={icon.sm} color={selected ? colors.textAccent : colors.textQuaternary} />}
                   title={n.title || "Untitled"}
@@ -468,6 +471,7 @@ function ListColumn({
                 renderTask={(t) => (
                   <TaskRow
                     key={t.id}
+                    {...docMenus({ kind: "task", id: t.id })}
                     handle={<DragHandle payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }} />}
                     task={t}
                     selected={ms.active ? ms.isSelected(t.id) : t.id === itemId}
@@ -498,6 +502,7 @@ function ListColumn({
                   {doneTasks.map((t) => (
                     <TaskRow
                       key={t.id}
+                      {...docMenus({ kind: "task", id: t.id })}
                       handle={<DragHandle payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }} />}
                       task={t}
                       selected={ms.active ? ms.isSelected(t.id) : t.id === itemId}

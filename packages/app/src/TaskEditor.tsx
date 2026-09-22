@@ -1,5 +1,5 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Platform, Pressable, ScrollView, TextInput, View, type GestureResponderEvent } from "react-native";
+import { Platform, Pressable, ScrollView, TextInput, View, type GestureResponderEvent, type PressableProps } from "react-native";
 import type { Task, TaskReminder, UpdateTaskInput } from "@companion/core-bridge";
 import {
   Badge,
@@ -493,10 +493,13 @@ export function TaskRow({
   onToggle,
   trailing,
   handle,
+  onContextMenu,
 }: {
   task: Task;
   selected?: boolean;
   onPress: (e: GestureResponderEvent) => void;
+  /** Web: a right-click on the row (its context menu). */
+  onContextMenu?: PressableProps["onContextMenu"];
   onToggle: () => void;
   /** Optional trailing controls after the due label (e.g. a remove-from-list button). Shown
    *  only while the row is hovered, so a list of rows doesn't read as a wall of buttons;
@@ -510,6 +513,7 @@ export function TaskRow({
   return (
     <Pressable
       onPress={onPress}
+      onContextMenu={onContextMenu}
       style={({ hovered, pressed }: PressState) => [
         styles.taskRow,
         noSelect,

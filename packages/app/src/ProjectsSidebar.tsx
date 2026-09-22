@@ -7,6 +7,7 @@ import { SortableList } from "./SortableList";
 import { useDropTarget, type DragPayload } from "./DndContext";
 import { SECTION_OF, containerOfLocation, useNav, type ContainerRef } from "./nav-context";
 import { TourAnchor } from "./onboarding/anchors";
+import { useContainerContextMenu } from "./ItemMenus";
 
 /** The areas → projects tree in the expanded rail (PLAN §6.6): area headings that open the
  * area's page, project nav items with a task-completion ring (hidden until member tasks
@@ -248,6 +249,7 @@ function AreaHeader({
     { accepts: (p) => p.kind !== "project" || (!!projectById(p.id) && projectById(p.id)?.areaId !== area.id) },
   );
   const on = isOver || !!active;
+  const menu = useContainerContextMenu({ kind: "area", id: area.id });
   const deletable = area.projects.length === 0 && !!onDeleteArea;
   let trailing: ReactNode = null;
   if (deletable && hovered) trailing = <MiniButton label={`Delete area ${area.name}`} icon="trash" onPress={() => onDeleteArea?.(area)} />;
@@ -256,6 +258,7 @@ function AreaHeader({
       ref={ref}
       style={[styles.header, styles.areaHeader, { backgroundColor: on ? colors.accentSoft : "transparent", borderColor: isOver ? colors.accent : "transparent" }]}
       {...dragHandlers}
+      {...menu}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
     >
@@ -307,8 +310,9 @@ function ProjectRow({
     { accepts: (p) => p.kind !== "project" },
   );
   const on = isOver || !!active;
+  const menu = useContainerContextMenu({ kind: "project", id: project.id });
   return (
-    <View ref={ref} style={styles.projectSlot}>
+    <View ref={ref} style={styles.projectSlot} {...menu}>
       <Pressable
         onPress={onPress}
         aria-label={project.name}

@@ -91,6 +91,7 @@ import { InstallGuideScreen } from "./push/InstallGuide";
 import { CommandPalette, paletteEnter } from "./CommandPalette";
 import { CAPTURE_NEW_EVENT, CAPTURE_NEW_KEYS, PALETTE_OPEN_EVENT } from "./capture";
 import { TAB_CLOSE_EVENT, closeMainWindow } from "./tabClose";
+import { ItemMenusProvider } from "./ItemMenus";
 import type { PaletteCreateKind } from "./paletteModel";
 import { ThingsImportHost } from "./ThingsImport";
 import { OnboardingProvider, useOnboarding } from "./onboarding/OnboardingProvider";
@@ -467,12 +468,14 @@ function NavBridge({
       <TabCloseBridge />
       {/* The tutorials (onboarding): one per tool, each started the first time the user opens it. */}
       <OnboardingProvider host={tourHost}>
+        <ItemMenusProvider>
         <MultiSelectProvider>
           <ExportScope />
           <DndProvider>
             <Shell topInset={topInset} windowControls={windowControls} />
           </DndProvider>
         </MultiSelectProvider>
+        </ItemMenusProvider>
       </OnboardingProvider>
     </NavContext.Provider>
   );

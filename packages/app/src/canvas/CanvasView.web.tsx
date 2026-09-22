@@ -49,6 +49,8 @@ import type { CanvasDocument, CanvasEdge, CanvasEdgeInput, CanvasEdgeStyle, Canv
 import { Icon, colors, control, font, layout, motion, radius, row, space, swatches, type IconName } from "@companion/design-system";
 import { NODE_DEFAULTS, type CanvasHost, type CanvasRefKind } from "./host";
 import { bounds, containedIds, nearestSides, type Rect } from "./geometry";
+import { FindPalette, type FindItem } from "../FindPalette";
+import { hasContextMenus, openContextMenu, type MenuEntry } from "../contextMenu";
 
 // The canvas renderer (PLAN-canvases.md §3.3): React Flow with one custom node type that
 // switches on the node kind, one custom edge type with per-end arrowheads and an inline
@@ -1691,7 +1693,7 @@ function CanvasSurface({ host, canvasId, touch: touchProp, toolsRef, handleRef }
   const [showHelp, setShowHelp] = useState(false);
   // Touch chrome: the embed sheet behind the bottom bar's More.
   const [showMore, setShowMore] = useState(false);
-  const [search, setSearch] = useState<string | null>(null); // null = closed
+  const [search, setSearch] = useState(false); // the ⌘K find palette
   const [snap, setSnap] = useState(true);
   const [showMinimap, setShowMinimap] = useState(false);
   // Last pointer position over the board (client coords) so keyboard adds land under the
@@ -1885,11 +1887,11 @@ function CanvasSurface({ host, canvasId, touch: touchProp, toolsRef, handleRef }
         stop();
         if (showMore) return setShowMore(false);
         if (showHelp) return setShowHelp(false);
-        if (search !== null) return setSearch(null);
+        if (search) return setSearch(false);
         return selectOnly([]);
       }
       if (!mod && e.key === "?") return void (stop(), setShowHelp((v) => !v));
-      if (mod && key === "k") return void (stop(), setSearch(""));
+      if (mod && key === "k") return void (stop(), setSearch(true));
 
       // Undo / redo, view.
       if (mod && key === "z") return void (stop(), e.shiftKey ? redo() : undo());
@@ -2068,6 +2070,85 @@ function CanvasSurface({ host, canvasId, touch: touchProp, toolsRef, handleRef }
   const canRedo = future.current.length > 0;
   void historyVersion;
 
+  // ---- context menus (right-click) ----
+  // The board: insert something where it was clicked. A card: open it, restack it, recolor it,
+  // delete it — the card and whatever else is selected with it.
+  const insertAt = useCallback(
+    (at: { x: number; y: number }): MenuEntry[] => [
+      { label: "Insert Sticky", run: () => addSticky(at) },
+      { label: "Insert Group", run: () => void addNode({ kind: "group", data: { label: "Group" }, x: at.x, y: at.y }) },
+      "separator",
+      {
+        label: "Insert Note…",
+        run: () =>
+          void host.pickRef("note").then((p) => p && addRefNode({ type: "note", id: p.id, data: p.data }, at)),
+      },
+      {
+        label: "Insert Task…",
+        run: () =>
+          void host.pickRef("task").then((p) => p && addRefNode({ type: "task", id: p.id, data: p.data }, at)),
+      },
+      {
+        label: "Insert Event…",
+        run: () =>
+          void host.pickRef("event").then((p) => p && addRefNode({ type: "event", id: p.id, data: p.data }, at)),
+      },
+      "separator",
+      { label: "Insert Image…", run: () => void host.pickImage().then((p) => p && addImage(p.documentId, at)) },
+      { label: "Insert Link…", run: () => void host.pickLink().then((url) => (url ? addLink(url, at) : undefined)) },
+    ],
+    [addSticky, addNode, host, addRefNode, addImage, addLink],
+  );
+  const onPaneContextMenu = useCallback(
+    (e: MouseEvent | ReactMouseEvent) => {
+      const at = flowPoint(e.clientX, e.clientY);
+      if (openContextMenu({ x: e.clientX, y: e.clientY }, insertAt(at))) e.preventDefault();
+    },
+    [flowPoint, insertAt],
+  );
+  const colorIds = useCallback(
+    (ids: string[], color: string | null) => {
+      const set = new Set(ids);
+      pushHistory();
+      setNodes((prev) => prev.map((n) => (set.has(n.id) ? { ...n, data: { node: { ...n.data.node, color }, refs: refsRef.current } } : n)));
+      void upsertNodes(nodesRef.current.filter((n) => set.has(n.id)).map((n) => ({ ...nodeInput(n), color })));
+    },
+    [pushHistory, setNodes, upsertNodes],
+  );
+  const onNodeContextMenu = useCallback(
+    (e: ReactMouseEvent, node: FlowNode) => {
+      if (!hasContextMenus()) return;
+      e.preventDefault();
+      // A card outside the selection becomes the selection; one inside it acts with the rest.
+      const ids = node.selected ? nodesRef.current.filter((n) => n.selected).map((n) => n.id) : [node.id];
+      if (!node.selected) selectOnly([node.id]);
+      const cards = nodesRef.current.filter((n) => ids.includes(n.id));
+      const one = cards.length === 1 ? cards[0].data.node : null;
+      const openable = one && ((one.kind === "note" || one.kind === "task" || one.kind === "event") && one.refId ? true : one.kind === "link" && typeof one.data?.url === "string");
+      const colors0 = new Set(cards.map((n) => n.data.node.color ?? null));
+      const current = colors0.size === 1 ? [...colors0][0] : undefined;
+      const stackable = cards.some((n) => n.data.node.kind !== "group");
+      const entries: MenuEntry[] = [
+        ...(openable ? ([{ label: "Open", run: activateSelection }, "separator"] as MenuEntry[]) : []),
+        { label: "Move Up", disabled: !stackable, run: () => setZ(1) },
+        { label: "Move Down", disabled: !stackable, run: () => setZ(-1) },
+        "separator",
+        {
+          label: "Color",
+          children: [
+            { label: "None", checked: current === null, run: () => colorIds(ids, null) } as MenuEntry,
+            "separator" as const,
+            ...swatches.map((c): MenuEntry => ({ label: SWATCH_NAMES[c] ?? c, checked: current === c, run: () => colorIds(ids, c) })),
+          ],
+        },
+        "separator",
+        { label: ids.length > 1 ? `Delete ${ids.length} Cards` : "Delete", run: () => void rf.deleteElements({ nodes: ids.map((id) => ({ id })) }) },
+      ];
+      openContextMenu({ x: e.clientX, y: e.clientY }, entries);
+    },
+    [selectOnly, activateSelection, setZ, colorIds, rf],
+  );
+
   return (
     <ActionsCtx.Provider value={actions}>
     <EditRequestCtx.Provider value={editRequest}>
@@ -2125,7 +2206,7 @@ function CanvasSurface({ host, canvasId, touch: touchProp, toolsRef, handleRef }
           </button>
           <ToolButton icon="fit" title={`Fit board (${MOD} 0)`} onClick={() => void rf.fitView({ padding: 0.2, maxZoom: 1 })} />
           <span style={toolDivider} />
-          <ToolButton icon="search" title={`Find a card (${MOD} K)`} active={search !== null} onClick={() => setSearch((v) => (v === null ? "" : null))} />
+          <ToolButton icon="search" title={`Find a card (${MOD} K)`} active={search} onClick={() => setSearch((v) => !v)} />
           <button type="button" className={`canvas-btn icon mono${showHelp ? " on" : ""}`} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" onClick={() => setShowHelp((v) => !v)}>
             ?
           </button>
@@ -2153,6 +2234,8 @@ function CanvasSurface({ host, canvasId, touch: touchProp, toolsRef, handleRef }
               onNodeDragStop={onNodeDragStop}
               onMoveEnd={onMoveEnd}
               onSelectionChange={onSelectionChange}
+              onPaneContextMenu={onPaneContextMenu}
+              onNodeContextMenu={onNodeContextMenu}
               connectionMode={ConnectionMode.Loose}
               deleteKeyCode={["Backspace", "Delete"]}
               selectionKeyCode="Shift"
@@ -2172,24 +2255,20 @@ function CanvasSurface({ host, canvasId, touch: touchProp, toolsRef, handleRef }
                   strip, so React Flow's own controls are not mounted. */}
               <Background color={colors.borderDefault} gap={16} size={1} />
               {showMinimap ? <MiniMap pannable zoomable position="bottom-left" nodeColor={(n) => (n as FlowNode).data?.node.color ?? colors.borderStrong} /> : null}
-              {search !== null ? (
-                <Panel position="top-center">
-                  <CardSearch
-                    query={search}
-                    onQuery={setSearch}
-                    nodes={nodes}
-                    onPick={(id) => {
-                      setSearch(null);
-                      selectOnly([id]);
-                      void rf.fitView({ nodes: [{ id }], padding: 0.6, maxZoom: 1.2, duration: 200 });
-                      wrapperRef.current?.focus();
-                    }}
-                    onClose={() => {
-                      setSearch(null);
-                      wrapperRef.current?.focus();
-                    }}
-                  />
-                </Panel>
+              {/* ⌘K: the find palette, portaled over the whole window like the app's own palettes. */}
+              {search ? (
+                <CardSearch
+                  nodes={nodes}
+                  onPick={(id) => {
+                    selectOnly([id]);
+                    void rf.fitView({ nodes: [{ id }], padding: 0.6, maxZoom: 1.2, duration: 200 });
+                    wrapperRef.current?.focus();
+                  }}
+                  onClose={() => {
+                    setSearch(false);
+                    wrapperRef.current?.focus();
+                  }}
+                />
               ) : null}
               {/* Selection tools float at the bottom of the board, clear of the tool strip. */}
               {hasSelection ? (
@@ -2307,6 +2386,20 @@ function CanvasSurface({ host, canvasId, touch: touchProp, toolsRef, handleRef }
     </ActionsCtx.Provider>
   );
 }
+
+/** Menu names for the swatches (design-system `swatches`), in its order. */
+const SWATCH_NAMES: Record<string, string> = {
+  "#8b5cf6": "Violet",
+  "#ec4899": "Pink",
+  "#f59e0b": "Amber",
+  "#14b8a6": "Teal",
+  "#6366f1": "Indigo",
+  "#ef4444": "Red",
+  "#10b981": "Green",
+  "#eab308": "Yellow",
+  "#3b82f6": "Blue",
+  "#64748b": "Slate",
+};
 
 // The five quick swatches in the tool strip (amber, teal, violet, indigo, slate); the
 // selection bar and the 1–9 keys reach the full set.
@@ -2511,50 +2604,65 @@ function ShortcutHelp({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** Where each kind of card is listed in the find palette. */
+const CARD_KINDS: Record<CanvasNode["kind"], { section: string; icon: IconName; fallback: string }> = {
+  text: { section: "Stickies", icon: "sticky", fallback: "Empty sticky" },
+  note: { section: "Notes", icon: "file", fallback: "Note" },
+  task: { section: "Tasks", icon: "tasks", fallback: "Task" },
+  event: { section: "Events", icon: "calendar", fallback: "Event" },
+  link: { section: "Links", icon: "link", fallback: "Link" },
+  image: { section: "Images", icon: "image", fallback: "Image" },
+  group: { section: "Groups", icon: "group", fallback: "Group" },
+};
+const CARD_ORDER = Object.keys(CARD_KINDS) as CanvasNode["kind"][];
+
 /** ⌘K: find a card by its text, title, label, or URL and jump to it. */
-function CardSearch({ query, onQuery, nodes, onPick, onClose }: { query: string; onQuery: (q: string) => void; nodes: FlowNode[]; onPick: (id: string) => void; onClose: () => void }) {
-  const q = query.trim().toLowerCase();
-  const labelOf = (n: FlowNode): string => {
-    const c = n.data.node;
-    const refs = n.data.refs;
-    switch (c.kind) {
-      case "text": return String(c.data?.text ?? "");
-      case "group": return String(c.data?.label ?? "Group");
-      case "note": return refs.notes[c.refId ?? ""]?.title ?? "Note";
-      case "task": return refs.tasks[c.refId ?? ""]?.title ?? "Task";
-      case "event": return refs.events[c.refId ?? ""]?.title ?? String(c.data?.title ?? "Event");
-      case "image": return refs.documents[c.refId ?? ""]?.filename ?? "Image";
-      case "link": return String(c.data?.title || c.data?.url || "Link");
-    }
-  };
-  const matches = nodes.map((n) => ({ id: n.id, kind: n.data.node.kind, label: labelOf(n) })).filter((m) => !q || m.label.toLowerCase().includes(q)).slice(0, 8);
+function CardSearch({ nodes, onPick, onClose }: { nodes: FlowNode[]; onPick: (id: string) => void; onClose: () => void }) {
+  const items = useMemo(() => {
+    const out: FindItem[] = nodes.map((n) => {
+      const c = n.data.node;
+      const refs = n.data.refs;
+      const kind = CARD_KINDS[c.kind];
+      let title = "";
+      let keywords: string | undefined;
+      let trailing: string | undefined;
+      switch (c.kind) {
+        case "text": {
+          const text = String(c.data?.text ?? "").trim();
+          // A sticky is listed by its first line and found by all of it.
+          title = text.split("\n")[0];
+          keywords = text;
+          break;
+        }
+        case "group": title = String(c.data?.label ?? ""); break;
+        case "note": title = refs.notes[c.refId ?? ""]?.title ?? ""; break;
+        case "task": title = refs.tasks[c.refId ?? ""]?.title ?? ""; break;
+        case "event": title = refs.events[c.refId ?? ""]?.title ?? String(c.data?.title ?? ""); break;
+        case "image": title = refs.documents[c.refId ?? ""]?.filename ?? ""; break;
+        case "link": {
+          const url = String(c.data?.url ?? "");
+          title = String(c.data?.title || url);
+          keywords = url;
+          try {
+            trailing = url ? new URL(url).hostname.replace(/^www\./, "") : undefined;
+          } catch {
+            trailing = undefined;
+          }
+          break;
+        }
+      }
+      return { key: n.id, section: kind.section, icon: kind.icon, title: title || kind.fallback, keywords, trailing };
+    });
+    // Grouped by kind, stickies first; within a kind, the board's own order.
+    return out.sort((a, b) => CARD_ORDER.findIndex((k) => CARD_KINDS[k].section === a.section) - CARD_ORDER.findIndex((k) => CARD_KINDS[k].section === b.section));
+  }, [nodes]);
   return (
-    <div style={{ width: 340, padding: space.xs, background: colors.surfaceOverlay, border: `1px solid ${colors.borderSubtle}`, borderRadius: radius.lg, boxShadow: SHADOW_MD, fontFamily: cardFont }}>
-      <input
-        autoFocus
-        className="canvas-input"
-        value={query}
-        placeholder="Find a card"
-        onChange={(e) => onQuery(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") onClose();
-          else if (e.key === "Enter" && matches[0]) onPick(matches[0].id);
-          e.stopPropagation();
-        }}
-        style={{ width: "100%" }}
-      />
-      <div style={{ marginTop: space.xs, display: "flex", flexDirection: "column", gap: 1 }}>
-        {matches.length ? (
-          matches.map((m) => (
-            <button key={m.id} type="button" className="canvas-row" onClick={() => onPick(m.id)}>
-              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.label || "(empty)"}</span>
-              <span style={{ ...monoMeta, flexShrink: 0 }}>{m.kind === "text" ? "sticky" : m.kind}</span>
-            </button>
-          ))
-        ) : (
-          <div style={{ padding: `${space.xs}px ${space.sm}px`, color: colors.textTertiary, fontSize: font.size.sm }}>No cards match.</div>
-        )}
-      </div>
-    </div>
+    <FindPalette
+      items={items}
+      placeholder="Find a card on this canvas…"
+      emptyText={nodes.length ? "No cards match." : "This canvas has no cards yet."}
+      onPick={(item) => onPick(item.key)}
+      onClose={onClose}
+    />
   );
 }

@@ -21,16 +21,20 @@ export interface ListRowProps {
   /** Tree depth; each level indents 12px. */
   indent?: number;
   onPress?: (e: GestureResponderEvent) => void;
+  /** Web: a right-click on the row (its context menu). react-native-web hands it to the DOM. */
+  onContextMenu?: (event: { preventDefault(): void; stopPropagation(): void; clientX?: number; clientY?: number }) => void;
 }
 
 /** Selectable row for browse lists (notes, tasks, boards, projects). 24px single-line,
  * 38px only when a subtitle earns it; touch surfaces never drop below 44px. */
-export function ListRow({ title, subtitle, icon, trailing, accessory, selected, hasChildren, indent = 0, onPress }: ListRowProps) {
+export function ListRow({ title, subtitle, icon, trailing, accessory, selected, hasChildren, indent = 0, onPress, onContextMenu }: ListRowProps) {
   const density = useDensity();
   const minHeight = density === "touch" ? row.touch : subtitle ? row.twoLine : row.h;
   return (
     <Pressable
       onPress={onPress}
+      // Not in every React Native typing (only react-native-web forwards it), so passed untyped.
+      {...(onContextMenu ? ({ onContextMenu } as object) : null)}
       style={({ hovered, pressed }: PressState) => [
         styles.row,
         noSelect,

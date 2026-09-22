@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import type { ProjectMember, Task } from "@companion/core-bridge";
 import { Icon, Kbd, ListRow, Text, colors, font, icon, radius, shadow, space, useDensity, type IconName } from "@companion/design-system";
-import { paletteEnter } from "./CommandPalette";
+import { paletteEnter } from "./paletteEnter";
 import { Overlay } from "./Overlay";
 import { useProjects } from "./ProjectsProvider";
 

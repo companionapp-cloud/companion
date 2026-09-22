@@ -4,6 +4,7 @@ import { colors, font } from "@companion/design-system";
 import { useCore } from "../CoreContext";
 import { useRefDrag } from "../DndContext";
 import { OpenEntityContext, ThreadLayoutContext } from "./context";
+import { useRefContextMenu } from "../ItemMenus";
 
 // --- wikilink rendering ----------------------------------------------------
 
@@ -44,8 +45,10 @@ export function LinkChip({ type, id }: { type: string; id: string }) {
     };
   }, [graph, id]);
   const drag = useRefDrag(type, id, title ?? "");
+  // Right-click: open, add to a canvas, add to Today's agenda (see ItemMenus).
+  const menu = useRefContextMenu(type, id);
   return (
-    <RNText {...drag} style={[styles.chip, drag ? styles.chipDraggable : null]} onPress={() => openEntity?.(type, id)}>
+    <RNText {...drag} {...menu} style={[styles.chip, drag ? styles.chipDraggable : null]} onPress={() => openEntity?.(type, id)}>
       {title ?? type}
     </RNText>
   );

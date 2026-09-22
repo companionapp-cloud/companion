@@ -25,7 +25,8 @@ declare module "react-native" {
     onPointerLeave?: () => void;
     onPointerMove?: () => void;
     onPointerDown?: (event: { clientX?: number; nativeEvent?: { clientX?: number } }) => void;
-    "aria-label"?: string;
+    "aria-label"?: string;    /** Web only (react-native-web passes it to the DOM): a right-click / context-menu gesture. */
+    onContextMenu?: (event: { preventDefault(): void; stopPropagation(): void; clientX?: number; clientY?: number; nativeEvent?: { clientX?: number; clientY?: number } }) => void;
   }
   interface ScrollViewProps extends ViewProps {
     contentContainerStyle?: StyleProp<ViewStyle>;
@@ -89,6 +90,8 @@ declare module "react-native" {
     role?: string;
     onFocus?: () => void;
     onBlur?: () => void;
+    /** Web only (react-native-web passes it to the DOM): a right-click / context-menu gesture. */
+    onContextMenu?: (event: { preventDefault(): void; stopPropagation(): void; clientX?: number; clientY?: number; nativeEvent?: { clientX?: number; clientY?: number } }) => void;
   }
   interface ModalProps extends ViewProps {
     visible?: boolean;

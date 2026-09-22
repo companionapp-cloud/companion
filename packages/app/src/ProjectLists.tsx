@@ -200,6 +200,7 @@ function ListRows({ projectId, listId, selectedTaskId, projectTasks }: { project
       <View style={styles.search}>
         {headingDraft !== null ? (
           <Input
+            key="heading"
             size="sm"
             placeholder="Heading, press Enter"
             value={headingDraft}
@@ -211,6 +212,7 @@ function ListRows({ projectId, listId, selectedTaskId, projectTasks }: { project
           />
         ) : (
           <Input
+            key="task"
             size="sm"
             placeholder="Add a task, press Enter"
             value={taskDraft}

@@ -4,6 +4,7 @@ import type { CalendarItemKind } from "@companion/core-bridge";
 import { Text, colors, font, motion, radius, shadow, space, transition, type PressState } from "@companion/design-system";
 import { DAY_MIN, KIND, layoutLanes, type Lane } from "./calendarLayout";
 import { useDropTarget, useOptionalDnd, type DragPayload } from "./DndContext";
+import { contextMenuProps, type MenuEntry } from "./contextMenu";
 
 // The Today agenda's day grid (PLAN-agenda.md): what fits inside the day, in one column, midnight to midnight, ruled every
 // fifteen minutes — the step everything in it moves and stretches by. A sibling of the Calendar
@@ -86,6 +87,7 @@ export function AgendaGrid({
   blocks,
   visible = true,
   onPressBlock,
+  blockMenu,
   onMove,
   onPressSlot,
   drop,
@@ -96,6 +98,8 @@ export function AgendaGrid({
   /** False while the tab sits in the background: pauses the clock and defers the first scroll. */
   visible?: boolean;
   onPressBlock?: (block: GridBlock) => void;
+  /** A block's right-click menu (see contextMenu.ts). */
+  blockMenu?: (block: GridBlock) => MenuEntry[];
   /** A block was dropped at a new time, or its bottom edge released: its new instants. */
   onMove?: (block: GridBlock, startsAt: string, endsAt: string) => void;
   /** An empty quarter hour was clicked: minutes since midnight. */
@@ -179,7 +183,7 @@ export function AgendaGrid({
               QUARTERS.map((q) => <Slot key={h * 4 + q} minutes={h * 60 + q * SLOT_MIN} quarter={q} onPress={onPressSlot} />),
             )}
             {blocks.map((b) => (
-              <Block key={b.id} block={b} lane={lanes.get(b.id)} onPress={onPressBlock} onMove={onMove} />
+              <Block key={b.id} block={b} lane={lanes.get(b.id)} onPress={onPressBlock} menu={blockMenu} onMove={onMove} />
             ))}
             {isToday ? (
               <View style={[styles.nowLine, { top: (nowMin / 60) * HOUR_H }]} pointerEvents="none">
@@ -315,11 +319,13 @@ function Block({
   block,
   lane,
   onPress,
+  menu,
   onMove,
 }: {
   block: GridBlock;
   lane?: Lane;
   onPress?: (block: GridBlock) => void;
+  menu?: (block: GridBlock) => MenuEntry[];
   onMove?: (block: GridBlock, startsAt: string, endsAt: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -425,6 +431,7 @@ function Block({
       ]}
     >
       <Pressable
+        {...contextMenuProps(menu ? () => menu(block) : null)}
         onHoverIn={() => setHovered(true)}
         onHoverOut={() => setHovered(false)}
         onPress={() => {

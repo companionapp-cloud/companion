@@ -21,6 +21,7 @@ import { useCanvases } from "./canvas/CanvasesProvider";
 import { timeAgo } from "./NotificationRow";
 import { TourAnchor } from "./onboarding/anchors";
 import { UNTITLED } from "./untitled";
+import { useDocContextMenus } from "./ItemMenus";
 
 /** One tab's workspace: a split of a browse list (notes, tasks or canvases — whichever
  * section this tab is in) beside the tab's document, or an empty "Nothing selected" state.
@@ -187,6 +188,7 @@ function TaskTabBody({ id, onDelete }: { id: string; onDelete: () => void }) {
 
 /** The notes browse list (left column). Selecting a note fills the active tab. */
 function NotesList() {
+  const docMenus = useDocContextMenus();
   const store = useNotes();
   const nav = useNav();
   const ms = useMultiSelect();
@@ -252,6 +254,7 @@ function NotesList() {
             return (
               <ListRow
                 key={n.id}
+                {...docMenus({ kind: "note", id: n.id })}
                 accessory={<DragHandle payload={{ kind: "note", id: n.id, label: n.title || "Untitled" }} />}
                 icon={<Icon name={n.date ? "today" : "file"} size={icon.sm} color={selected ? colors.textAccent : colors.textQuaternary} />}
                 title={n.title || "Untitled"}
@@ -284,6 +287,7 @@ const EMPTY_TASKS: Record<TaskFilter, string> = {
 
 /** The tasks browse list (left column). Selecting a task fills the active tab. */
 function TasksList() {
+  const docMenus = useDocContextMenus();
   const store = useTasks();
   const nav = useNav();
   const ms = useMultiSelect();
@@ -360,6 +364,7 @@ function TasksList() {
             renderTask={(t) => (
               <TaskRow
                 key={t.id}
+                {...docMenus({ kind: "task", id: t.id })}
                 task={t}
                 selected={selectFor(t.id)}
                 onPress={(e) => pressTask(t.id, e)}
@@ -393,6 +398,7 @@ function TasksList() {
             {done.map((t) => (
               <TaskRow
                 key={t.id}
+                {...docMenus({ kind: "task", id: t.id })}
                 task={t}
                 selected={selectFor(t.id)}
                 onPress={(e) => pressTask(t.id, e)}

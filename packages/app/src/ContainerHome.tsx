@@ -14,6 +14,7 @@ import { timeAgo } from "./NotificationRow";
 import { ContainerOverview, OverviewCard, OVERVIEW_LIMIT } from "./ContainerOverview";
 import { DragHandle } from "./DndContext";
 import { ProjectSchedule } from "./ProjectSchedule";
+import { useContainerContextMenus, useDocContextMenus } from "./ItemMenus";
 
 /** A container's tasks-list filter. "unsorted" exists only in an area: the tasks filed directly
  *  in it, in none of its projects. */
@@ -58,6 +59,8 @@ export function ContainerHome({
   /** The mobile shell's document source, where the context has none. */
   documentSource?: DocumentSource;
 }) {
+  const containerMenus = useContainerContextMenus();
+  const docMenus = useDocContextMenus();
   const nav = useNav();
   const tasksStore = useTasks();
   const { sidebar, areas, projectById, updateProject, updateArea, deleteProject, deleteArea } = useProjects();
@@ -95,6 +98,7 @@ export function ContainerHome({
       // The grip drags the task onto another project/area in the sidebar (absent on mobile).
       <TaskRow
         key={t.id}
+        {...docMenus({ kind: "task", id: t.id })}
         handle={<DragHandle payload={{ kind: "task", id: t.id, label: t.title || "Untitled task" }} />}
         task={t}
         onPress={() => (onOpenTask ? onOpenTask(t.id) : nav.openContainer(container, "tasks", t.id))}
@@ -170,6 +174,7 @@ export function ContainerHome({
             {areaProjects.map((p) => (
               <ListRow
                 key={p.id}
+                {...containerMenus({ kind: "project", id: p.id })}
                 icon={p.icon ? <Text style={styles.rowEmoji}>{p.icon}</Text> : <Icon name="folder" size={icon.sm} color={p.color ?? colors.textQuaternary} />}
                 title={p.name}
                 // A Someday project is off the sidebar; this card is where it lives (PLAN-scheduling.md §1).
@@ -221,6 +226,7 @@ export function ContainerHome({
             {recentNotes.slice(0, OVERVIEW_LIMIT).map((n) => (
               <ListRow
                 key={n.id}
+                {...docMenus({ kind: "note", id: n.id })}
                 accessory={<DragHandle payload={{ kind: "note", id: n.id, label: n.title || "Untitled" }} />}
                 icon={<Icon name={n.date ? "today" : "file"} size={icon.sm} color={colors.textQuaternary} />}
                 title={n.title || "Untitled"}
@@ -241,6 +247,7 @@ export function ContainerHome({
             {recentCanvases.slice(0, OVERVIEW_LIMIT).map((c) => (
               <ListRow
                 key={c.id}
+                {...docMenus({ kind: "canvas", id: c.id })}
                 accessory={<DragHandle payload={{ kind: "canvas", id: c.id, label: c.name || "Untitled canvas" }} />}
                 icon={<Icon name="canvas" size={icon.sm} color={colors.textQuaternary} />}
                 title={c.name || "Untitled canvas"}

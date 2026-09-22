@@ -11,6 +11,8 @@ export interface DeleteProjectDialogProps {
    *  vs. move them to Unsorted). The host unmounts this on success. */
   onConfirm: (deleteContent: boolean) => void | Promise<void>;
   onClose: () => void;
+  /** Cover the whole window (see ConfirmDialog's `portal`). */
+  portal?: boolean;
 }
 
 /** The project-delete prompt (PLAN §6.6): removing a project always keeps or removes its
@@ -18,7 +20,7 @@ export interface DeleteProjectDialogProps {
  *  fall back to Unsorted; "Delete content" trashes them too and requires typing the project
  *  name (matching the extra-friction guard used elsewhere for irreversible destroys).
  *  Cross-platform — wraps {@link ConfirmDialog}, so it works on web and native. */
-export function DeleteProjectDialog({ projectName, onConfirm, onClose }: DeleteProjectDialogProps) {
+export function DeleteProjectDialog({ projectName, onConfirm, onClose, portal }: DeleteProjectDialogProps) {
   const [mode, setMode] = useState<"keep" | "content">("keep");
   const deleteContent = mode === "content";
   return (
@@ -48,6 +50,7 @@ export function DeleteProjectDialog({ projectName, onConfirm, onClose }: DeleteP
       confirmTextPrompt={deleteContent ? "Type the project name to confirm:" : undefined}
       onConfirm={() => onConfirm(deleteContent)}
       onClose={onClose}
+      portal={portal}
     />
   );
 }

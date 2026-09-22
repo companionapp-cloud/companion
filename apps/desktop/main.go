@@ -249,7 +249,8 @@ func main() {
 				tableCtxMenu.handleOpen(w, r)
 			}, shortcuts.handleShortcuts, windowChromeHandler(func() *application.WebviewWindow { return mainWindow }), updates.handleState,
 				pickThingsHandler(func() *application.App { return app }),
-				paletteOpenHandler(updates.openApp, handler.OnEvent), exports),
+				paletteOpenHandler(updates.openApp, handler.OnEvent), exports,
+				contextMenuHandler(func() *application.WebviewWindow { return mainWindow })),
 		},
 	})
 
@@ -349,7 +350,7 @@ func main() {
 // (/invoke, /events) to the bridge handler. /window spawns a focus-mode window for a
 // document (the workspace's expand/pop-out action) — browser window.open can't create a
 // real app window in the Wails webview, so the frontend asks the Go side here.
-func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusWindow func(url string), openTableMenu http.HandlerFunc, shortcuts http.HandlerFunc, chrome http.HandlerFunc, updates http.HandlerFunc, pickThings http.HandlerFunc, paletteOpen http.HandlerFunc, exports *exportService) http.Handler {
+func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusWindow func(url string), openTableMenu http.HandlerFunc, shortcuts http.HandlerFunc, chrome http.HandlerFunc, updates http.HandlerFunc, pickThings http.HandlerFunc, paletteOpen http.HandlerFunc, exports *exportService, contextMenu http.HandlerFunc) http.Handler {
 	frontend, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {
 		log.Fatalf("mount frontend assets: %v", err)
@@ -373,6 +374,8 @@ func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusW
 	})
 	// Present the native table context menu at a point (the editor posts the menu state here).
 	mux.HandleFunc("/table-menu", openTableMenu)
+	// Present the app's right-click menus natively (context_menu.go).
+	mux.HandleFunc("/context-menu", contextMenu)
 	// Read/rebind the OS-wide shortcuts (Settings › Shortcuts).
 	mux.HandleFunc("/shortcuts", shortcuts)
 	// Where the native window buttons sit over the page (macOS), so the UI can clear them.

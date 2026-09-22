@@ -8,6 +8,7 @@ import { DragHandle } from "../DndContext";
 import { useCanvases } from "./CanvasesProvider";
 import { pressMods, useOptionalMultiSelect } from "../MultiSelectProvider";
 import { NavContext } from "../nav-context";
+import { useDocContextMenus } from "../ItemMenus";
 
 /** The canvases browse column, shared by the root Canvases view and a project's Canvases
  *  section. Root mode filters Unsorted/All like the notes list; project mode takes the
@@ -34,6 +35,7 @@ export function CanvasesList({
    *  project's list passes its own, so switching lists drops the selection. */
   scope?: string;
 }) {
+  const docMenus = useDocContextMenus();
   const store = useCanvases();
   const ms = useOptionalMultiSelect();
   const navVisible = useContext(NavContext)?.visible ?? true;
@@ -97,6 +99,7 @@ export function CanvasesList({
             return (
               <ListRow
                 key={c.id}
+                {...docMenus({ kind: "canvas", id: c.id })}
                 accessory={<DragHandle payload={{ kind: "canvas", id: c.id, label: c.name || "Untitled canvas" }} />}
                 icon={<Icon name="canvas" size={icon.sm} color={selected ? colors.textAccent : colors.textQuaternary} />}
                 title={c.name || "Untitled canvas"}

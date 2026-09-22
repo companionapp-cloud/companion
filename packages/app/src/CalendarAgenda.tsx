@@ -26,6 +26,9 @@ import { DAY_MIN, POINT_MIN, fitsInDay, taskBlockPatch } from "./calendarLayout"
 import type { DragPayload } from "./DndContext";
 import { EventEditorDialog, type EventEditorTarget } from "./EventEditorDialog";
 import { useTasks } from "./TasksProvider";
+import { contextMenuProps, type MenuEntry } from "./contextMenu";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { useItemMenus } from "./ItemMenus";
 
 /** The local calendar day ('YYYY-MM-DD') an item falls on. All-day items (dated notes,
  *  all-day events) carry a date-only marker stored as midnight UTC; converting that instant
@@ -127,6 +130,17 @@ const minutesOf = (iso: string) => {
 const lengthOf = (it: CalendarItem) =>
   it.endsAt ? (new Date(it.endsAt).getTime() - new Date(it.startsAt).getTime()) / 60_000 : it.kind === "event" ? 60 : POINT_MIN;
 
+/** The lengths an agenda item's Length menu offers, in minutes. */
+const LENGTHS: [number, string][] = [
+  [15, "15 minutes"],
+  [30, "30 minutes"],
+  [45, "45 minutes"],
+  [60, "1 hour"],
+  [90, "1½ hours"],
+  [120, "2 hours"],
+  [180, "3 hours"],
+];
+
 /** The time something new takes on `date`. Clicked into the grid at `from` minutes, it starts
  *  exactly there and runs half an hour, or up to whatever comes next (never under a quarter).
  *  Otherwise it is the next free half hour: from the coming quarter today, from nine any other day. */
@@ -151,6 +165,24 @@ function freeBlock(date: string, busy: { start: number; end: number }[], from?: 
   const [y, mo, d] = date.split("-").map(Number);
   const startsAt = new Date(y, mo - 1, d, Math.floor(start / 60), start % 60);
   return { startsAt: startsAt.toISOString(), endsAt: new Date(startsAt.getTime() + len * 60_000).toISOString() };
+}
+
+/** Where "Add to agenda" puts a task on `date`: the next free half hour (as freeBlock hands out
+ *  with no click), by the drop's rules — its start and deadline become the block, unless it's
+ *  due after the day, when only its start moves there. The day's items come from `range`. */
+export async function agendaPatch(
+  task: Task,
+  date: string,
+  range: (from: string, to: string) => Promise<CalendarItem[]>,
+): Promise<{ startAt: string; dueAt?: string }> {
+  const { from, to } = dayBounds(date);
+  const items = await range(from, to);
+  const busy = items
+    .filter((it) => !isAllDay(it) && !(it.kind === "task" && it.sourceId === task.id))
+    .map((it) => ({ start: minutesOf(it.startsAt), end: minutesOf(it.startsAt) + lengthOf(it) }));
+  const at = freeBlock(date, busy);
+  const dueLater = !!task.dueAt && new Date(task.dueAt).getTime() >= new Date(to).getTime();
+  return dueLater ? { startAt: at.startsAt } : { startAt: at.startsAt, dueAt: at.endsAt };
 }
 
 /** A single day's agenda: the merged items for `date` — events, tasks, dated notes. Used on the
@@ -297,6 +329,74 @@ export function Agenda({
     },
   };
 
+  // Right-click on an agenda item (a row, or a block in the grid). What's on the day can be
+  // resized, pushed to tomorrow or taken off; a task can also be done or reopened, and it and a
+  // dated note carry the item actions every list has (ItemMenus). An event only has actions when
+  // its calendar is writable.
+  const itemMenus = useItemMenus();
+  const { removeEvent } = useCalendar();
+  const [deleting, setDeleting] = useState<{ item: CalendarItem; scope?: "occurrence" | "series" } | null>(null);
+  const DAY_MS = 24 * 60 * 60_000;
+  const shift = (iso: string) => new Date(new Date(iso).getTime() + DAY_MS).toISOString();
+  const menuFor = (it: CalendarItem): MenuEntry[] => {
+    const timedItem = !isAllDay(it);
+    const endOf = (from: string) => it.endsAt ?? new Date(new Date(from).getTime() + lengthOf(it) * 60_000).toISOString();
+    const lengthMenu = (): MenuEntry => ({
+      label: "Length",
+      children: LENGTHS.map(([min, label]) => ({
+        label,
+        checked: Math.round(lengthOf(it)) === min,
+        run: () => moveItem(it, it.startsAt, new Date(new Date(it.startsAt).getTime() + min * 60_000).toISOString()),
+      })),
+    });
+    if (it.kind === "event") {
+      if (!it.editable) return [];
+      return [
+        { label: "Edit Event…", run: () => setEditor({ mode: "edit", item: it }) },
+        "separator",
+        ...(timedItem && !it.recurring ? [lengthMenu()] : []),
+        ...(!it.recurring
+          ? [{ label: "Move to Tomorrow", run: () => void updateEvent(it.sourceId, { startsAt: shift(it.startsAt), endsAt: shift(endOf(it.startsAt)), allDay: it.allDay }) } as MenuEntry]
+          : []),
+        "separator",
+        ...(it.recurring
+          ? ([
+              { label: "Delete This Occurrence…", run: () => setDeleting({ item: it, scope: "occurrence" }) },
+              { label: "Delete All Occurrences…", run: () => setDeleting({ item: it, scope: "series" }) },
+            ] as MenuEntry[])
+          : [{ label: "Delete Event…", run: () => setDeleting({ item: it }) } as MenuEntry]),
+      ];
+    }
+    const docEntries = itemMenus && (it.kind === "task" || it.kind === "note") ? itemMenus.docMenu({ kind: it.kind, id: it.sourceId }, { onAgenda: true }) : [];
+    const opener: MenuEntry = { label: "Open", run: () => open(it) };
+    if (it.kind !== "task") return [opener, "separator", ...docEntries];
+    const task = taskOf(it);
+    if (!task) return [opener];
+    const isOpen = task.status === "open";
+    return [
+      opener,
+      { label: isOpen ? "Mark as Done" : "Mark as Open", run: () => void tasks.setStatus(task.id, isOpen ? "done" : "open") },
+      "separator",
+      ...(timedItem && isOpen ? [lengthMenu()] : []),
+      {
+        label: "Move to Tomorrow",
+        disabled: !isOpen,
+        run: () =>
+          timedItem
+            ? moveItem(it, shift(it.startsAt), shift(endOf(it.startsAt)))
+            : void tasks.update(task.id, { ...(task.startAt ? { startAt: shift(task.startAt) } : {}), ...(task.dueAt ? { dueAt: shift(task.dueAt) } : {}) }),
+      },
+      {
+        // Its start (and a deadline on this day) are what put it here.
+        label: "Remove from Agenda",
+        disabled: !isOpen,
+        run: () => void tasks.update(task.id, { clearStartAt: true, ...(dueAfterDay(task) ? {} : { clearDueAt: true }) }),
+      },
+      "separator",
+      ...docEntries,
+    ];
+  };
+
   const blocks: GridBlock[] = grid
     ? timed.map((it) => {
         const task = taskOf(it);
@@ -332,6 +432,7 @@ export function Agenda({
             color={it.color}
             done={!!task && task.status !== "open"}
             onPress={openable ? () => open(it) : undefined}
+            menu={() => menuFor(it)}
             timeWidth={timeWidth}
             touch={touch}
           />
@@ -368,6 +469,10 @@ export function Agenda({
                 const item = timed.find((it) => it.id === block.id);
                 if (item) open(item);
               }}
+              blockMenu={(block) => {
+                const item = timed.find((it) => it.id === block.id);
+                return item ? menuFor(item) : [];
+              }}
               onMove={moveBlock}
               onPressSlot={creatable ? (from) => setPicking({ from }) : undefined}
               drop={creatable ? drop : undefined}
@@ -382,6 +487,22 @@ export function Agenda({
         rows
       )}
       {editor ? <EventEditorDialog target={editor} onClose={() => setEditor(null)} /> : null}
+      {deleting ? (
+        <ConfirmDialog
+          portal
+          title={deleting.scope === "series" ? "Delete every occurrence?" : "Delete event?"}
+          message={
+            deleting.scope === "series"
+              ? `Every occurrence of “${deleting.item.title}” is removed from its calendar.`
+              : `“${deleting.item.title}” is removed from its calendar.`
+          }
+          onConfirm={async () => {
+            await removeEvent(deleting.item.sourceId, deleting.scope);
+            setDeleting(null);
+          }}
+          onClose={() => setDeleting(null)}
+        />
+      ) : null}
       {picking && block ? (
         <AgendaPalette
           block={block}
@@ -578,6 +699,7 @@ function AgendaRow({
   color,
   done = false,
   onPress,
+  menu,
   timeWidth,
   touch,
 }: {
@@ -590,12 +712,15 @@ function AgendaRow({
   /** A finished task: struck through. */
   done?: boolean;
   onPress?: () => void;
+  /** The row's right-click menu (see contextMenu.ts). */
+  menu?: () => MenuEntry[];
   timeWidth: number;
   touch: boolean;
 }) {
   const gap = touch ? space.ml : space.md;
   return (
     <Pressable
+      {...contextMenuProps(menu ?? null)}
       disabled={!onPress}
       onPress={onPress}
       style={({ hovered, pressed }: PressState) => [

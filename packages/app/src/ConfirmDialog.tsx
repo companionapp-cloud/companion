@@ -166,6 +166,55 @@ export function ConfirmDialog({
   );
 }
 
+/** A one-field dialog (Rename…): the title, a prefilled input, Cancel / confirm. ⏎ saves when
+ *  the field isn't empty; esc cancels. The same card as ConfirmDialog; always portaled, since it
+ *  opens from a context menu anywhere in the window. */
+export function PromptDialog({
+  title,
+  initialValue,
+  placeholder,
+  confirmLabel = "Save",
+  onConfirm,
+  onClose,
+}: {
+  title: string;
+  initialValue: string;
+  placeholder?: string;
+  confirmLabel?: string;
+  onConfirm: (value: string) => void | Promise<void>;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState(initialValue);
+  const [busy, setBusy] = useState(false);
+  const canConfirm = !busy && value.trim().length > 0;
+  const confirm = async () => {
+    if (!canConfirm) return;
+    setBusy(true);
+    try {
+      await onConfirm(value.trim());
+    } catch {
+      setBusy(false);
+    }
+  };
+  const hints = useDialogKeys({ onEnter: () => void confirm(), onEscape: busy ? undefined : onClose });
+  const Host = Platform.OS === "web" ? Overlay : NativeModalHost;
+  return (
+    <Host>
+      <View style={[styles.scrim, styles.scrimPortal]}>
+        <Pressable style={styles.scrimFill} onPress={onClose} aria-label="Cancel" />
+        <View style={styles.card}>
+          <Text variant="title">{title}</Text>
+          <Input autoFocus value={value} onChangeText={setValue} placeholder={placeholder} />
+          <View style={styles.actions}>
+            <Button label="Cancel" variant="ghost" kbd={hints ? "esc" : undefined} onPress={onClose} />
+            <Button label={confirmLabel} variant="primary" kbd={hints ? "⏎" : undefined} disabled={!canConfirm} onPress={() => void confirm()} />
+          </View>
+        </View>
+      </View>
+    </Host>
+  );
+}
+
 const styles = {
   scrim: {
     position: "absolute" as const,

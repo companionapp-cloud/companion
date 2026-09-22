@@ -151,6 +151,7 @@ export function ListRowsScreen({ projectId, listId }: { projectId: string; listI
       <View style={styles.entry}>
         {headingDraft !== null ? (
           <Input
+            key="heading"
             placeholder="Heading, press Enter"
             value={headingDraft}
             onChangeText={setHeadingDraft}
@@ -161,6 +162,7 @@ export function ListRowsScreen({ projectId, listId }: { projectId: string; listI
           />
         ) : (
           <Input
+            key="task"
             placeholder="Add a task, press Enter"
             value={taskDraft}
             onChangeText={setTaskDraft}

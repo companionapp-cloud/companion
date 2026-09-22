@@ -37,6 +37,8 @@ import { Icon, colors, control, font, layout, motion, radius, space, useTheme, t
 import type { Graph, GraphNode } from "@companion/core-bridge";
 import { DEFAULT_PHYSICS, applyGraphFilters, nodeKey, typeColor, type GraphPhysics } from "./graphModel";
 import { GRAPH_CHROME_CSS, GraphMenu, useGraphSettings } from "./GraphMenu.web";
+import { FindPalette, type FindItem } from "./FindPalette";
+import { NavContext } from "./nav-context";
 
 export { nodeKey };
 
@@ -1015,8 +1017,8 @@ function GraphCanvas({
   embedded: boolean;
 }) {
   const { setViewport } = useReactFlow();
-  const { onSelect, selectedKey } = useContext(GraphSelectContext);
-  const onPaneClick = useCallback(() => onSelect?.(null), [onSelect]);
+  const selectValue = useContext(GraphSelectContext);
+  const { onSelect, selectedKey } = selectValue;
   const { frame, simRef } = useForceLayout(simNodes, simLinks, large, physics);
 
   // React Flow is controlled here, so it needs the change handlers from these hooks to
@@ -1034,6 +1036,8 @@ function GraphCanvas({
   // layers (React Flow edges here, the canvas base layer for large graphs) can light up the
   // hovered node's connections.
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  // The node the find palette last flew to (see search below): ringed, its links lit.
+  const [foundKey, setFoundKey] = useState<string | null>(null);
   const byId = useMemo(() => new Map(simNodes.map((n) => [n.id, n])), [simNodes]);
 
   // Sync React Flow's node set from the live sim positions. Runs every frame while the sim
@@ -1050,8 +1054,8 @@ function GraphCanvas({
   // Edges: large graphs paint them on the canvas base layer, so React Flow only carries
   // edges for small graphs. Re-styled when the hovered node changes so its links light up.
   useEffect(() => {
-    setEdges(large ? [] : highlightEdges(flowEdges, hoveredId));
-  }, [flowEdges, hoveredId, large, setEdges]);
+    setEdges(large ? [] : highlightEdges(flowEdges, hoveredId ?? foundKey));
+  }, [flowEdges, hoveredId, foundKey, large, setEdges]);
 
   // Keep the whole graph framed while it loads: re-fit every frame as the layout relaxes so
   // the expanding graph stays fully visible, and stop the moment the user pans, zooms, or
@@ -1077,6 +1081,64 @@ function GraphCanvas({
     userMovedRef.current = false;
     setFitVersion((v) => v + 1);
   }, []);
+
+  // Search (the toolbar's magnifier, or ⌘K while the graph is on screen): a find palette over
+  // the nodes; picking one flies to it and rings it, its links lit, until the next click.
+  const [searching, setSearching] = useState(false);
+  const visible = useContext(NavContext)?.visible ?? true;
+  const searchable = !!overlay;
+  useEffect(() => {
+    if (!searchable || !visible || typeof window === "undefined") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "k") return;
+      e.preventDefault();
+      setSearching(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [searchable, visible]);
+  const searchItems = useMemo(() => {
+    const sections = new Map(LEGEND.map(([type, label], i) => [type, { label, i }]));
+    return simNodes
+      .filter((n) => !n.data.ghost)
+      .map((n): FindItem & { order: number } => {
+        const d = n.data;
+        const section = sections.get(d.entityType);
+        return {
+          key: n.id,
+          section: section?.label ?? d.entityType,
+          order: section?.i ?? LEGEND.length,
+          icon: ((d.objectIcon as IconName | null) ?? TYPE_ICON[d.entityType] ?? "dot") as IconName,
+          iconColor: nodeColor(d.entityType, d.objectTypeId, d.objectColor),
+          title: d.label || "Untitled",
+          trailing: d.degree ? `${d.degree} link${d.degree === 1 ? "" : "s"}` : undefined,
+        };
+      })
+      .sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));
+  }, [simNodes]);
+  const goTo = useCallback(
+    (key: string) => {
+      const s = byId.get(key);
+      if (!s || s.x == null || s.y == null || !width || !height) return;
+      // Taking the camera: the load-time auto-fit must not pull it back.
+      userMovedRef.current = true;
+      const zoom = 1.2;
+      const vp = { x: width / 2 - s.x * zoom, y: height / 2 - s.y * zoom, zoom };
+      setFoundKey(key);
+      void setViewport(vp, { duration: 300 }).then(() => {
+        // A large graph only mounts the nodes in view: reselect for where we landed.
+        viewportRef.current = vp;
+        setSelectionVersion((v) => v + 1);
+      });
+    },
+    [byId, width, height, setViewport],
+  );
+  const onPaneClickClear = useCallback(() => {
+    setFoundKey(null);
+    onSelect?.(null);
+  }, [onSelect]);
+  const ringed = useMemo(() => ({ ...selectValue, selectedKey: selectValue.selectedKey ?? foundKey }), [selectValue, foundKey]);
+  const litId = hoveredId ?? foundKey;
 
   const onMoveEnd = useCallback((_: unknown, vp: Viewport) => {
     viewportRef.current = vp;
@@ -1129,6 +1191,7 @@ function GraphCanvas({
   );
 
   return (
+    <GraphSelectContext.Provider value={ringed}>
     <GraphHoverContext.Provider value={setHoveredId}>
       {/* Fill the RNW parent View (which is position:relative) with an absolutely-sized
           box so React Flow measures a real height — a plain height:100% collapses to 0 in
@@ -1144,6 +1207,9 @@ function GraphCanvas({
             <span style={{ ...monoStyle, minWidth: 0, flexShrink: 1, overflow: "hidden", textOverflow: "ellipsis", marginRight: space.xs }}>
               repel {Math.round(physics.repelForce)} · link {Math.round(physics.linkDistance)}
             </span>
+            <button type="button" className="graph-iconbtn" onClick={() => setSearching(true)} aria-label="Find a node" title="Find a node (⌘K)">
+              <Icon name="search" size={13} color="currentColor" />
+            </button>
             <button type="button" className="graph-iconbtn" onClick={fit} aria-label="Fit" title="Fit">
               <Icon name="fit" size={13} color="currentColor" />
             </button>
@@ -1159,7 +1225,7 @@ function GraphCanvas({
                 everywhere except under the interactive DOM nodes. On a large graph those DOM
                 nodes only exist once zoomed in (selectRender), so the canvas is the sole layer
                 in the zoomed-out overview. */}
-            {large ? <GraphBaseLayer nodes={simNodes} links={simLinks} frame={frame} hoveredId={hoveredId} selectedId={selectedKey} /> : null}
+            {large ? <GraphBaseLayer nodes={simNodes} links={simLinks} frame={frame} hoveredId={litId} selectedId={selectedKey ?? foundKey} /> : null}
             <ReactFlow
               className="graph-flow"
               nodes={nodes}
@@ -1172,7 +1238,7 @@ function GraphCanvas({
               onNodeDragStart={onNodeDragStart}
               onNodeDrag={onNodeDrag}
               onNodeDragStop={onNodeDragStop}
-              onPaneClick={onSelect ? onPaneClick : undefined}
+              onPaneClick={onSelect || foundKey ? onPaneClickClear : undefined}
               // The whole-graph framing is done manually on settle (see the fit effect), since
               // React Flow's fitView can't see the sim nodes that aren't mounted on a large graph.
               proOptions={{ hideAttribution: true }}
@@ -1204,7 +1270,17 @@ function GraphCanvas({
           </div>
         ) : null}
       </div>
+      {searching ? (
+        <FindPalette
+          items={searchItems}
+          placeholder="Find a note, task, canvas or project…"
+          emptyText={searchItems.length ? "Nothing in the graph matches." : "The graph is empty."}
+          onPick={(item) => goTo(item.key)}
+          onClose={() => setSearching(false)}
+        />
+      ) : null}
     </GraphHoverContext.Provider>
+    </GraphSelectContext.Provider>
   );
 }
 

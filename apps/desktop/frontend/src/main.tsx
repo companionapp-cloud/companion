@@ -11,6 +11,7 @@ import {
   setFocusWindowOpener,
   setCaptureWindowCloser,
   setMainWindowCloser,
+  setContextMenuPresenter,
   setCaptureResultOpener,
   setTableMenuPresenter,
   setShortcutStore,
@@ -25,6 +26,7 @@ import type { CoreBridge } from "@companion/core-bridge";
 import type { DocumentSource } from "@companion/editor";
 import { desktopNotificationScheduler } from "./notifications";
 import { desktopTableMenuPresenter } from "./tableMenu";
+import { desktopContextMenuPresenter } from "./contextMenu";
 import { desktopExportMenu, desktopExportSink, pickExportFolder } from "./exports";
 
 // Double-clicking the window chrome (any `--wails-draggable: drag` region, e.g. the
@@ -123,6 +125,8 @@ setThingsSourcePicker(async () => {
 // presenter posts the menu state to /table-menu and runs the chosen action on the "table:action"
 // event (see ./tableMenu.ts + apps/desktop/table_menu.go).
 setTableMenuPresenter(desktopTableMenuPresenter());
+// Right-click menus (rows, sidebar, reference chips, canvas): native menus via the Go side.
+setContextMenuPresenter(desktopContextMenuPresenter());
 
 // Export (./exports.ts + apps/desktop/export.go): files are written through the native save
 // panel instead of downloaded, and File › Export drives the same exporter as the in-page buttons.
