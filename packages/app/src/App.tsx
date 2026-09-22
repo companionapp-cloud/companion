@@ -11,6 +11,7 @@ import { TasksProvider } from "./TasksProvider";
 import { ProjectsProvider } from "./ProjectsProvider";
 import { ObjectTypesProvider } from "./ObjectTypesProvider";
 import { CanvasesProvider } from "./canvas/CanvasesProvider";
+import { CalendarProvider } from "./CalendarProvider";
 import { AppShell, type WindowControls } from "./AppShell";
 import { MobileWebShell } from "./mobile/MobileShell";
 import { useMobileWebShell } from "./mobile/shellMode";
@@ -111,7 +112,10 @@ export function App({
               <ProjectsProvider>
                 <CanvasesProvider>
                   <ObjectTypesProvider>
-                    <CaptureView />
+                    {/* The calendars, for New event. */}
+                    <CalendarProvider>
+                      <CaptureView />
+                    </CalendarProvider>
                   </ObjectTypesProvider>
                 </CanvasesProvider>
               </ProjectsProvider>

@@ -74,7 +74,7 @@ import { WorkspaceScreen } from "./WorkspaceScreen";
 import { TodayScreen } from "./TodayScreen";
 import { GraphScreen } from "./GraphScreen";
 import { CalendarScreen } from "./CalendarScreen";
-import { CalendarProvider } from "./CalendarProvider";
+import { CalendarProvider, useCalendar } from "./CalendarProvider";
 import { TrashScreen } from "./TrashScreen";
 import { LogbookScreen } from "./LogbookScreen";
 import { ChatsScreen } from "./ChatScreen";
@@ -668,8 +668,10 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
   // the clipped (overflow:hidden) rail so the scrim can cover the whole window.
   const [deletingArea, setDeletingArea] = useState<SidebarArea | null>(null);
   // Quick capture: closed, open on its command list ("list"), or open straight on New note /
-  // task / canvas (⌥⇧N / T / C, or the desktop File menu).
+  // task / canvas / event (⌥⇧N / T / C / E, or the desktop File menu).
   const [capture, setCapture] = useState<PaletteCreateKind | "list" | null>(null);
+  // New event is only offered once some calendar takes new events.
+  const canCaptureEvents = useCalendar().writableFeeds.length > 0;
   const { core } = useCore();
   useEffect(
     () =>
@@ -737,19 +739,20 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
     syncTrigger();
   }, [locKey, syncTrigger]);
 
-  // Window-level shortcuts: ⌘T new tab, ⌥⇧Space quick capture, ⌥⇧N / T / C a new note / task /
-  // canvas. (A browser keeps ⌘T for itself; the desktop shell delivers it — and its File menu
-  // owns the ⌥⇧ letters there, arriving as CAPTURE_NEW_EVENT instead.)
+  // Window-level shortcuts: ⌘T new tab, ⌥⇧Space quick capture, ⌥⇧N / T / C / E a new note /
+  // task / canvas / event. (A browser keeps ⌘T for itself; the desktop shell delivers it — and
+  // its File menu owns ⌥⇧N / T / C there, arriving as CAPTURE_NEW_EVENT instead.)
   const addTab = nav.addTab;
   useEffect(() => {
     if (typeof window === "undefined" || !window.addEventListener) return;
     const onKey = (e: KeyboardEvent) => {
+      const create = e.altKey && e.shiftKey && !e.metaKey && !e.ctrlKey ? CAPTURE_NEW_KEYS[e.code] : undefined;
       if (e.code === "Space" && e.altKey && e.shiftKey) {
         e.preventDefault();
         setCapture((c) => (c ? null : "list"));
-      } else if (e.altKey && e.shiftKey && !e.metaKey && !e.ctrlKey && CAPTURE_NEW_KEYS[e.code]) {
+      } else if (create && (create !== "event" || canCaptureEvents)) {
         e.preventDefault();
-        setCapture(CAPTURE_NEW_KEYS[e.code]);
+        setCapture(create);
       } else if ((e.key === "t" || e.key === "T") && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         addTab();
@@ -757,7 +760,7 @@ function Shell({ topInset, windowControls }: { topInset: number; windowControls?
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [addTab]);
+  }, [addTab, canCaptureEvents]);
 
   // Sidebar badges count what needs sorting: notes in no project, and open tasks in no project.
   const badgeFor = (id: string) =>
@@ -1028,8 +1031,9 @@ function ShellStatusBar({ tabCount }: { tabCount: number }) {
 /** Quick capture (⌥⇧Space, or the toolbar's Capture): the command palette on the scrim, 14vh
  *  from the top. The palette owns its keys (Esc steps back, then closes); results open in the
  *  tab already holding them, else the active one — or, on ⇧⏎, a new one. `what` opens it
- *  straight on New note / task / canvas. Whatever is created is filed in the project or area
- *  the active tab is showing, if it is showing one. */
+ *  straight on New note / task / canvas / event. Whatever is created is filed in the project or
+ *  area the active tab is showing, if it is showing one (a new event starts out in a calendar
+ *  that project holds). */
 function QuickCapture({ what, onClose }: { what: PaletteCreateKind | null; onClose: () => void }) {
   const nav = useNav();
   const initialMode = useMemo(() => (what ? ({ kind: "create", what } as const) : undefined), [what]);

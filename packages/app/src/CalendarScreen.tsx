@@ -23,7 +23,7 @@ import { isAllDay, itemDay, itemDays } from "./CalendarAgenda";
 import { CalendarItemInfo } from "./CalendarItemInfo";
 import { DAY_MIN, KIND, layoutLanes, spanOf, taskBlockPatch, type Lane } from "./calendarLayout";
 import { EventEditorDialog, type EventEditorTarget } from "./EventEditorDialog";
-import { useProjectCalendars } from "./ProjectCalendars";
+import { useProjectCalendars } from "./useProjectCalendars";
 import { useTasks } from "./TasksProvider";
 import { useNav } from "./nav-context";
 import { TourAnchor } from "./onboarding/anchors";

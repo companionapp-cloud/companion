@@ -400,7 +400,8 @@ async function capture(page, seeded) {
   await page.keyboard.press("Enter"); // New task is the first command
   await page.waitForTimeout(400);
   await page.keyboard.type("Book the launch venue", { delay: 20 });
-  await page.keyboard.press("Tab"); // onto the first project chip
+  // Past the deadline and reminder questions, onto the first project chip at the bottom.
+  for (let i = 0; i < 3; i++) await page.keyboard.press("Tab");
   await paletteShot(page, "palette-new-task");
 
   await page.keyboard.press("Escape"); // back to the commands

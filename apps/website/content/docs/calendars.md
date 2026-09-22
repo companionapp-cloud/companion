@@ -36,7 +36,7 @@ Your calendar password (or Google sign-in) and your events sync between your dev
 
 The week view merges three streams, each with its own colour in the legend: **events**, **tasks** on their due date, and **notes** dated to the day (your daily notes). Hover over anything for a detail card; the same card appears on agenda rows on [Today](/docs/today-home-base). Click a task or a note to open it.
 
-The toolbar has previous and next week, **Today**, and a refresh button. Refresh is how changes made elsewhere arrive: Companion fetches your calendars when you press it, not on a timer. Your own edits don't wait for it — they're sent as soon as you make them. Once you have at least one calendar you can write to, a **+** button (**New event**) joins them.
+The toolbar has previous and next week, **Today**, and a refresh button. Refresh is how changes made elsewhere arrive: Companion fetches your calendars when you press it, not on a timer. Your own edits don't wait for it — they're sent as soon as you make them. Once you have at least one calendar you can write to, a **+** button (**New event**) joins them. You can also add an event from anywhere with the [command palette](/docs/capture-and-focus)'s **New event** (**⌥⇧E**).
 
 ## Editing events
 

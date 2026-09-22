@@ -11,7 +11,7 @@ import { isMacPlatform } from "./shortcuts";
  *  "sep 30") rather than as title text. */
 export type PaletteScope = "all" | "note" | "task" | "taskDate" | "event" | "eventDate" | "project" | "projectDate" | "area";
 
-export type PaletteCreateKind = "task" | "note" | "canvas";
+export type PaletteCreateKind = "task" | "note" | "canvas" | "event";
 
 /** Where the palette is: its command list, inside a find command, or filling in a new item. */
 export type PaletteMode = { kind: "root" } | { kind: "find"; scope: PaletteScope } | { kind: "create"; what: PaletteCreateKind };
@@ -46,11 +46,13 @@ export interface PaletteCommand {
 }
 
 /** Every command, in the order the empty palette lists them: capture first — the palette is
- *  still quick capture, so ⏎ on open starts a task. */
+ *  still quick capture, so ⏎ on open starts a task. New event is only listed once some calendar
+ *  takes new events (see `rootItems`). */
 export const PALETTE_COMMANDS: PaletteCommand[] = [
   { id: "new-task", label: "New task", keywords: "create add todo capture", icon: "tasks", mode: { kind: "create", what: "task" }, shortcutKey: "T" },
   { id: "new-note", label: "New note", keywords: "create add write capture", icon: "file", mode: { kind: "create", what: "note" }, shortcutKey: "N" },
   { id: "new-canvas", label: "New canvas", keywords: "create add board", icon: "canvas", mode: { kind: "create", what: "canvas" }, shortcutKey: "C" },
+  { id: "new-event", label: "New event", keywords: "create add calendar meeting appointment schedule capture", icon: "calendar", mode: { kind: "create", what: "event" }, shortcutKey: "E" },
   { id: "find-all", label: "Find anything", keywords: "search open go to title", icon: "search", mode: { kind: "find", scope: "all" } },
   { id: "find-note", label: "Find a note", keywords: "search open notes title", icon: "file", mode: { kind: "find", scope: "note" } },
   { id: "find-task", label: "Find a task", keywords: "search open tasks todo title", icon: "tasks", mode: { kind: "find", scope: "task" } },
@@ -68,9 +70,11 @@ const SECTION_COMMANDS = "Commands";
 /** The chip shown in the input while inside a command. */
 export function modeLabel(mode: PaletteMode): string | null {
   if (mode.kind === "root") return null;
-  if (mode.kind === "create") return mode.what === "task" ? "New task" : mode.what === "note" ? "New note" : "New canvas";
+  if (mode.kind === "create") return CREATE_LABEL[mode.what];
   return SCOPE_LABEL[mode.scope];
 }
+
+const CREATE_LABEL: Record<PaletteCreateKind, string> = { task: "New task", note: "New note", canvas: "New canvas", event: "New event" };
 
 const SCOPE_LABEL: Record<PaletteScope, string> = {
   all: "Anything",
@@ -86,10 +90,17 @@ const SCOPE_LABEL: Record<PaletteScope, string> = {
 
 export function modePlaceholder(mode: PaletteMode): string {
   if (mode.kind === "root") return "Capture or find anything…";
-  if (mode.kind === "create") return mode.what === "task" ? "What do you need to do?" : mode.what === "note" ? "Title" : "Name the canvas";
+  if (mode.kind === "create") return CREATE_PLACEHOLDER[mode.what];
   if (isDateScope(mode.scope)) return "A day — today, friday, sep 30…";
   return "Search by title…";
 }
+
+const CREATE_PLACEHOLDER: Record<PaletteCreateKind, string> = {
+  task: "What do you need to do?",
+  note: "Title",
+  canvas: "Name the canvas",
+  event: "What’s the event?",
+};
 
 export const isDateScope = (scope: PaletteScope) => scope === "taskDate" || scope === "eventDate" || scope === "projectDate";
 
@@ -330,15 +341,18 @@ export function eventsOnDay(items: CalendarItem[], day: string | null): PaletteI
 const sectionForDay = (asked: string | null, at: string) => (asked ? dayLabel(asked, true) : dayLabel(at, true));
 
 /** The root list: commands answering the query, then title hits across everything, then the
- *  create rows carrying the typed text. Empty, it is just the command list. */
-export function rootItems(query: string, data: PaletteData, events: CalendarItem[]): PaletteItem[] {
+ *  create rows carrying the typed text. Empty, it is just the command list. Events are only
+ *  offered with `canCreateEvent`: some calendar takes new ones. */
+export function rootItems(query: string, data: PaletteData, events: CalendarItem[], { canCreateEvent = false } = {}): PaletteItem[] {
   const q = query.trim();
-  const commands = PALETTE_COMMANDS.map((c) => ({ c, rank: q ? matchRank(`${c.label} ${c.keywords}`, q) : 2 }))
+  const offered = (what: PaletteCreateKind) => what !== "event" || canCreateEvent;
+  const commands = PALETTE_COMMANDS.filter((c) => c.mode.kind !== "create" || offered(c.mode.what))
+    .map((c) => ({ c, rank: q ? matchRank(`${c.label} ${c.keywords}`, q) : 2 }))
     .filter((x): x is { c: PaletteCommand; rank: number } => x.rank != null)
     .sort((a, b) => a.rank - b.rank)
     .map(({ c }) => commandItem(c));
   if (!q) return commands;
-  const create: PaletteItem[] = (["task", "note", "canvas"] as const).map((what) => ({
+  const create: PaletteItem[] = (["task", "note", "canvas", "event"] as const).filter(offered).map((what) => ({
     key: `create:${what}`,
     section: SECTION_CREATE,
     icon: "plus" as IconName,

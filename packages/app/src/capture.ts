@@ -1,5 +1,5 @@
 // Quick capture: a frameless, Spotlight-style window (desktop) holding the command palette —
-// capture a task, note or canvas, or find something and open it in the main window. Reached
+// capture a task, note, canvas or event, or find something and open it in the main window. Reached
 // via the `?capture=1` URL the desktop shell's global Option/Alt+Space shortcut opens
 // (apps/desktop/main.go). Web/native ignore it.
 
@@ -42,10 +42,11 @@ export function closeCaptureWindow(): void {
  *  payload is `{ what }`. AppShell opens the palette on that command. */
 export const CAPTURE_NEW_EVENT = "capture.new";
 
-/** The in-app shortcuts for the same three: ⌥⇧ and a letter (the palette lists them, see
- *  PALETTE_COMMANDS' `shortcutKey`), beside ⌥⇧Space for the palette itself. Matched on `code`,
- *  since ⌥ changes the character a key types. */
-export const CAPTURE_NEW_KEYS: Record<string, PaletteCreateKind> = { KeyN: "note", KeyT: "task", KeyC: "canvas" };
+/** The in-app shortcuts for the same three, and ⌥⇧E for a new event: ⌥⇧ and a letter (the
+ *  palette lists them, see PALETTE_COMMANDS' `shortcutKey`), beside ⌥⇧Space for the palette
+ *  itself. Matched on `code`, since ⌥ changes the character a key types. The event one only
+ *  answers while some calendar takes new events, so it has no File-menu twin on the desktop. */
+export const CAPTURE_NEW_KEYS: Record<string, PaletteCreateKind> = { KeyN: "note", KeyT: "task", KeyC: "canvas", KeyE: "event" };
 
 /** The event the desktop shell relays to the main window when the capture window asks for
  *  something to be opened; its payload is the TabRef, plus `newTab: true` when it should get a

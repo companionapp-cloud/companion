@@ -3,28 +3,36 @@ import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "re
 import { Icon, Kbd, ListRow, Spinner, Text, colors, control, font, icon, radius, space, type PressState } from "@companion/design-system";
 import { CaptureFields, SAVE_HINT } from "./CaptureForm";
 import { modeLabel, modePlaceholder, type PaletteItem } from "./paletteModel";
-import { useCommandPalette, type CommandPaletteController, type CommandPaletteHost } from "./useCommandPalette";
+import { useCommandPalette, type CommandPaletteController, type CommandPaletteHost, type PaletteChips } from "./useCommandPalette";
 
 /**
  * The command palette (PLAN §6.4): one input over a list. Empty, the list is the commands —
- * new task / note / canvas, then the find commands; typing narrows them and searches every
- * title at once. A find command scopes the search (the chip in the input) to one kind of thing,
- * by title or by day; a create command turns the input into the new item's title, with the
- * task's project chips and due / reminder questions, or the note's body — the full note editor,
- * with its formatting bar — beneath it.
+ * new task / note / canvas / event, then the find commands; typing narrows them and searches
+ * every title at once. A find command scopes the search (the chip in the input) to one kind of
+ * thing, by title or by day; a create command turns the input into the new item's title, with
+ * its questions beneath it — the task's due / reminder, the note's body (the full note editor,
+ * with its formatting bar), the event's when / how long — and, at the foot, the chips saying
+ * where it goes: a project for a task, note or canvas, a calendar for an event. New event is
+ * only there once some calendar takes new events.
  *
  * Keyboard-first: ↑↓ move, ⏎ runs, ⌫ on an empty input or Esc steps back out, Esc at the root
- * closes. ⇧⏎ is ⏎ into a new tab: a result opens in a tab of its own, and a new task, note or
- * canvas is saved and then opened in one (a shift-click on a result does the same). A new task's projects are a Tab away: each chip is a stop (←→ also walk them), and ⏎
- * on one saves the task into it; Space picks one to keep while you Tab on to the dates. The host draws the surface around it — the quick-capture window's floating card, or
- * the in-app overlay — and says what opening a result means (see CommandPaletteHost).
+ * closes. ⇧⏎ is ⏎ into a new tab: a result opens in a tab of its own, and a new item is saved
+ * and then opened in one — an event, the calendar on its week (a shift-click on a result does
+ * the same). The chips come last in the Tab order, after the fields (Tab out of a note's body
+ * skips its formatting bar for them): each chip is a stop (←→ also walk them), and ⏎ on one
+ * saves the item into it; Space picks one to keep. The host draws the surface around it — the
+ * quick-capture window's floating card, or the in-app overlay — and says what opening a result
+ * means (see CommandPaletteHost).
  */
 export function CommandPalette(host: CommandPaletteHost) {
   const p = useCommandPalette(host);
   const { onClose, attachments = true } = host;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const inputRef = useRef<any>(null);
+  // On the web a View's ref is its DOM node.
+  const rootRef = useRef<unknown>(null);
   const creating = p.mode.kind === "create";
+  const what = p.mode.kind === "create" ? p.mode.what : null;
 
   // Stepping in or out of a command hands focus back to the input.
   useEffect(() => {
@@ -36,7 +44,7 @@ export function CommandPalette(host: CommandPaletteHost) {
 
   // Capture phase, so the palette's keys win over the focused field or ProseMirror editor —
   // except a bare Enter inside the note body, which is a new line there.
-  const { move, submit, back, query, projectChoices, toggleProject } = p;
+  const { move, submit, back, query, chips } = p;
   useEffect(() => {
     if (Platform.OS !== "web" || typeof window === "undefined") return;
     const onKey = (e: KeyboardEvent) => {
@@ -48,15 +56,15 @@ export function CommandPalette(host: CommandPaletteHost) {
       };
       const chip = target?.closest(CHIP_SELECTOR);
       if (chip && (e.key === "ArrowRight" || e.key === "ArrowLeft" || e.key === " ")) {
-        // The chips render in `projectChoices` order, so a chip's place is its project.
-        const chips = Array.from(document.querySelectorAll<HTMLElement>(CHIP_SELECTOR));
-        const at = chips.indexOf(chip as HTMLElement);
+        // The chips render in `chips.choices` order, so a chip's place is its choice.
+        const row = Array.from(chip.closest(CHIP_GROUP_SELECTOR)?.querySelectorAll<HTMLElement>(CHIP_SELECTOR) ?? []);
+        const at = row.indexOf(chip as HTMLElement);
         take();
         if (e.key === " ") {
           // Handled here rather than left to Pressable, which only takes Space on buttons.
-          const choice = projectChoices[at];
-          if (choice) toggleProject(choice.id);
-        } else chips[at + (e.key === "ArrowRight" ? 1 : -1)]?.focus();
+          const choice = chips?.choices[at];
+          if (choice) chips.toggle(choice.id);
+        } else row[at + (e.key === "ArrowRight" ? 1 : -1)]?.focus();
       } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         if (creating) return;
         take();
@@ -77,7 +85,28 @@ export function CommandPalette(host: CommandPaletteHost) {
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [creating, move, submit, back, query, onClose, projectChoices, toggleProject]);
+  }, [creating, move, submit, back, query, onClose, chips]);
+
+  // Tab out of the note body lands on the chips below it — as Tab walks a task's fields down to
+  // its chips — rather than on each button of the formatting bar between them. Bubble phase, so
+  // the body keeps a Tab it has a use for (nesting a list item, the next table cell): it says so
+  // by preventing the default.
+  const hasChips = !!chips;
+  useEffect(() => {
+    if (Platform.OS !== "web" || typeof window === "undefined" || !hasChips) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Tab" || e.shiftKey || e.altKey || e.metaKey || e.ctrlKey || e.defaultPrevented) return;
+      const root = rootRef.current as HTMLElement | null;
+      const target = e.target instanceof Element ? e.target : null;
+      if (!root || !target?.closest(".ProseMirror") || !root.contains(target)) return;
+      const first = root.querySelector<HTMLElement>(CHIP_SELECTOR);
+      if (!first) return;
+      e.preventDefault();
+      first.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [hasChips]);
 
   // Keep the selected row in view as the arrows walk past the fold.
   const rowNodes = useRef(new Map<number, unknown>());
@@ -88,7 +117,7 @@ export function CommandPalette(host: CommandPaletteHost) {
 
   const chip = modeLabel(p.mode);
   return (
-    <View style={styles.palette}>
+    <View ref={rootRef as never} style={styles.palette}>
       <View style={styles.inputRow}>
         {p.busy ? <Spinner size={icon.lg} inline /> : <Icon name={creating ? "plus" : "search"} size={icon.lg} color={colors.textTertiary} />}
         {chip ? (
@@ -111,12 +140,14 @@ export function CommandPalette(host: CommandPaletteHost) {
       </View>
 
       {creating ? (
-        p.mode.kind === "create" && p.mode.what !== "canvas" ? (
-          <View style={styles.fields}>
-            {p.mode.what === "task" ? <ProjectChips p={p} /> : null}
-            <CaptureFields c={p.capture} hideTitle attachments={attachments} />
-          </View>
-        ) : null
+        <>
+          {what !== "canvas" ? (
+            <View style={styles.fields}>
+              <CaptureFields c={p.capture} hideTitle attachments={attachments} />
+            </View>
+          ) : null}
+          {p.chips ? <ChipBand p={p} chips={p.chips} /> : null}
+        </>
       ) : (
         <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
           {p.items.map((item, i) => (
@@ -150,15 +181,16 @@ export function CommandPalette(host: CommandPaletteHost) {
       <View style={styles.footer}>
         {creating ? (
           <>
-            <Hint
-              keys="⏎"
-              label={p.mode.kind === "create" && p.mode.what === "canvas" ? (p.target ? `create in ${p.target.name}` : "create and open") : p.target ? `save to ${p.target.name}` : "save"}
-            />
-            <Hint keys="⇧⏎" label={p.mode.kind === "create" && p.mode.what === "canvas" ? "open in new tab" : "save and open"} />
-            {p.mode.kind === "create" && p.mode.what === "task" && p.projectChoices.length > 0 ? (
-              p.focusedProjectId ? <Hint keys="space" label={p.focusedProjectId === p.projectId ? "unpick" : "pick"} /> : <Hint keys="tab" label="project" />
+            <Hint keys="⏎" label={saveHint(p)} />
+            <Hint keys="⇧⏎" label={what === "canvas" ? "open in new tab" : what === "event" ? "add and open" : "save and open"} />
+            {p.chips && p.focusedChip ? (
+              // A calendar can't be unpicked: Space only does something on the others.
+              p.focusedChip !== p.chips.picked || !p.chips.required ? <Hint keys="space" label={p.focusedChip === p.chips.picked ? "unpick" : "pick"} /> : null
+            ) : p.chips && what === "canvas" ? (
+              // The canvas's name is its only field, so its chips are the next stop.
+              <Hint keys="tab" label={p.chips.noun} />
             ) : null}
-            {p.mode.kind === "create" && p.mode.what === "note" ? <Hint keys={SAVE_HINT} label="save from the body" /> : null}
+            {what === "note" ? <Hint keys={SAVE_HINT} label="save from the body" /> : null}
           </>
         ) : (
           <>
@@ -174,33 +206,42 @@ export function CommandPalette(host: CommandPaletteHost) {
   );
 }
 
-/** The new task's project, as a pick-one row of chips in the Tab order between the title and
- *  the dates. The focused chip is where ⏎ saves to; Space (or a click) picks one that sticks
- *  once focus moves on. */
-function ProjectChips({ p }: { p: CommandPaletteController }) {
-  if (p.projectChoices.length === 0) return null;
+/** What ⏎ does to the new item, for its key hint: where it will be saved, filed or added. */
+function saveHint(p: CommandPaletteController): string {
+  const what = p.mode.kind === "create" ? p.mode.what : null;
+  if (what === "canvas") return p.target ? `create in ${p.target.name}` : "create and open";
+  if (what === "event") return p.calendarTarget ? `add to ${p.calendarTarget.name}` : "add";
+  return p.target ? `save to ${p.target.name}` : "save";
+}
+
+/** Where the new item goes, as a pick-one row of chips at the foot of the palette, last in the
+ *  Tab order: the project a task, note or canvas is filed in, or the calendar an event is added
+ *  to. The focused chip is where ⏎ saves to; Space (or a click) picks one that sticks once focus
+ *  moves on. */
+function ChipBand({ p, chips }: { p: CommandPaletteController; chips: PaletteChips }) {
   return (
-    <View style={styles.chipField}>
-      <Text variant="label">Which project?</Text>
+    <View {...RADIO_GROUP} aria-label={chips.label} style={styles.chipBand}>
+      <Text variant="label">{chips.label}</Text>
       <ScrollView style={styles.chipScroll} contentContainerStyle={styles.chips}>
-        {p.projectChoices.map((c) => {
-          const on = c.id === p.projectId;
-          const focused = c.id === p.focusedProjectId;
+        {chips.choices.map((c) => {
+          const on = c.id === chips.picked;
+          const focused = c.id === p.focusedChip;
           return (
             <Pressable
               key={c.id}
               role="radio"
               aria-checked={on}
               aria-label={c.name}
-              onPress={() => p.toggleProject(c.id)}
-              onFocus={() => p.setFocusedProject(c.id)}
-              onBlur={() => p.setFocusedProject(null)}
+              onPress={() => chips.toggle(c.id)}
+              onFocus={() => p.setFocusedChip(c.id)}
+              onBlur={() => p.setFocusedChip(null)}
               style={({ hovered, pressed }: PressState) => [
-                styles.projectChip,
-                on ? styles.projectChipOn : { backgroundColor: pressed ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent" },
-                focused ? styles.projectChipFocused : null,
+                styles.chipItem,
+                on ? styles.chipItemOn : { backgroundColor: pressed ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent" },
+                focused ? styles.chipItemFocused : null,
               ]}
             >
+              {chips.noun === "calendar" ? <View style={[styles.swatch, { backgroundColor: c.color ?? colors.borderStrong }]} /> : null}
               <Text variant="caption" tone={on || focused ? "accent" : "secondary"} numberOfLines={1}>
                 {c.icon ? `${c.icon} ${c.name}` : c.name}
               </Text>
@@ -212,8 +253,11 @@ function ProjectChips({ p }: { p: CommandPaletteController }) {
   );
 }
 
-// The chips are the palette's only radios.
+// The chips are the palette's only radios, in its only radio group.
 const CHIP_SELECTOR = '[role="radio"]';
+const CHIP_GROUP_SELECTOR = '[role="radiogroup"]';
+// A View's role is not in this RN typing, hence the cast.
+const RADIO_GROUP = { role: "radiogroup" } as Record<string, unknown>;
 
 function PaletteRow({ item, selected, onPress }: { item: PaletteItem; selected: boolean; onPress: (newTab: boolean) => void }) {
   return (
@@ -311,14 +355,26 @@ const styles = StyleSheet.create({
   listContent: { padding: space.sm, gap: 1 },
   section: { paddingHorizontal: space.sm, paddingTop: space.md, paddingBottom: space.xs },
   empty: { paddingHorizontal: space.sm, paddingVertical: space.lg },
-  fields: { padding: space.xl, gap: space.ml, borderTopWidth: 1, borderTopColor: colors.borderSubtle },
-  chipField: { gap: space.xs },
+  // Gives way when the card runs out of height (the quick-capture window is 520 tall): a note's
+  // body shrinks toward its minimum and scrolls, so the chips and key hints below stay in view.
+  fields: { padding: space.xl, gap: space.ml, borderTopWidth: 1, borderTopColor: colors.borderSubtle, flexShrink: 1 },
+  // The foot of a new item, over the key hints: where it goes.
+  chipBand: {
+    gap: space.xs,
+    paddingHorizontal: space.xl,
+    paddingTop: space.ml,
+    paddingBottom: space.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
+    flexShrink: 0,
+  },
   // Three rows of chips, then it scrolls; a focused chip scrolls itself into view.
   chipScroll: { maxHeight: 3 * control.sm + 2 * space.xs + 4, flexGrow: 0 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: space.xs, padding: 2 },
-  projectChip: {
+  chipItem: {
     flexDirection: "row",
     alignItems: "center",
+    gap: space.sm,
     height: control.sm,
     maxWidth: 220,
     paddingHorizontal: space.sm,
@@ -327,8 +383,9 @@ const styles = StyleSheet.create({
     borderColor: colors.borderSubtle,
     ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as Record<string, unknown>) : null),
   },
-  projectChipOn: { borderColor: colors.accentSoftBorder, backgroundColor: colors.accentSoft },
-  projectChipFocused: {
+  chipItemOn: { borderColor: colors.accentSoftBorder, backgroundColor: colors.accentSoft },
+  swatch: { width: 8, height: 8, borderRadius: radius.xs, flexShrink: 0 },
+  chipItemFocused: {
     borderColor: colors.borderFocus,
     ...(Platform.OS === "web" ? ({ boxShadow: `0 0 0 2px ${colors.focusRing}` } as Record<string, unknown>) : null),
   },

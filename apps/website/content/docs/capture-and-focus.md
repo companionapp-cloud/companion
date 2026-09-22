@@ -34,17 +34,25 @@ Pressing the shortcut again puts the palette away too, as does clicking outside 
 
 **New task** is first in the list, so **⌥Space ⏎** is all it takes to start one. Type the title and press **⏎** to save. The palette closes and you're back in whatever you were doing.
 
-![A new task in the palette, with a project chip focused and the deadline and reminder questions below](/docs/palette-new-task.png)
+![A new task in the palette, with the deadline and reminder questions under the title and a project chip focused at the bottom](/docs/palette-new-task.png)
 
 Want more than a title? Keep going with **Tab**:
 
-- **File it.** **Tab** walks your projects, one chip at a time, and **⏎** on a chip saves the task straight into that project.
-- **Date it.** Tab past the chips for a deadline and a reminder. Both take plain language — "friday", "tomorrow 9am", "a day before".
-- **Both.** To file a task *and* date it, press **Space** on the project's chip to pick it, then Tab on to the dates.
+- **Date it.** **Tab** takes you to a deadline and a reminder. Both take plain language — "friday", "tomorrow 9am", "a day before".
+- **File it.** Your projects are the row of chips at the bottom, the last stop for **Tab** (**← →** walk along them). **⏎** on a chip saves the task straight into that project. **Space** picks one to keep, if you'd rather go back and change something first.
 
-**New note** takes a title and, a **Tab** away, a body; **⌘⏎** saves from there. **New canvas** names a [board](/docs/your-first-canvas) and opens it, ready to draw on.
+**New note** takes a title and, a **Tab** away, a body; **⌘⏎** saves from there, and **Tab** out of the body lands on the same project chips. **New canvas** names a [board](/docs/your-first-canvas) — its project chips are a **Tab** away — and opens it, ready to draw on.
 
 A saved task or note stays out of your way. If you'd rather carry on working in it, save with **⇧⏎** instead and it opens in a tab of its own.
+
+### Events
+
+Once you have a [calendar you can write to](/docs/calendars) — one from an account, not a subscription — the list gains **New event**. Type the title, then answer two questions:
+
+- **When is it?** Plain language again. Say a time — "friday 3pm", "tomorrow at noon" — and it's a timed event. Say just a day — "friday", "sep 30" — and it's all day.
+- **For how long?** Leave it blank for an hour (or the one day, for an all-day event). Otherwise give a length — "30 min", "2 hours", "3 days" — or an end — "until 5pm".
+
+Each answer is echoed back underneath once you move on, so you can see what Companion understood before you save. If you have more than one calendar, the chips at the bottom say which one it goes in; they work like the project chips. **⇧⏎** saves the event and opens the calendar on its week.
 
 ## Find
 
@@ -60,9 +68,9 @@ Typing something that doesn't exist yet? The bottom of the list offers to make i
 
 Don't like that chord? **Settings › Shortcuts** rebinds it: click the shortcut, press the keys you want. The binding is per-device and takes effect immediately; if the system won't give up the combination you picked, Companion says so and keeps the old one.
 
-The global shortcut is a desktop feature — a browser tab can't register one. Inside the app, on desktop and web alike, the toolbar's **Capture** button (or **⌥⇧Space**) opens the same palette. To skip its list, **⌥⇧N**, **⌥⇧T** and **⌥⇧C** (Alt+Shift on Windows and Linux) open it straight on a new note, task or canvas — on desktop they're also in the **File** menu.
+The global shortcut is a desktop feature — a browser tab can't register one. Inside the app, on desktop and web alike, the toolbar's **Capture** button (or **⌥⇧Space**) opens the same palette. To skip its list, **⌥⇧N**, **⌥⇧T** and **⌥⇧C** (Alt+Shift on Windows and Linux) open it straight on a new note, task or canvas — on desktop they're also in the **File** menu — and **⌥⇧E** on a new event, once you have a calendar to add it to.
 
-Captured from inside the app, a new note, task or canvas lands where you're looking: open on a project or an area, it's filed there (a new task starts with that project's chip picked — **Space** unpicks it); anywhere else, it goes to Unsorted. The global shortcut, with no screen behind it, always captures to Unsorted unless you pick a project.
+Captured from inside the app, a new note, task or canvas lands where you're looking: open on a project or an area, it's filed there (on a project, its chip starts out picked — **Space** unpicks it); anywhere else, it goes to Unsorted. A new event on a project's page starts out in a calendar that project holds, so it shows up on the project's calendar. The global shortcut, with no screen behind it, always captures to Unsorted unless you pick a project.
 
 ## Focus
 
