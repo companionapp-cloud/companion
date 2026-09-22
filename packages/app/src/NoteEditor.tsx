@@ -182,9 +182,11 @@ export function NoteEditor({
           edited {timeAgo(note.updatedAt)}
         </Text>
         <View style={{ flex: 1 }} />
-        <IconButton label="Move to an area or project" size={btn} onPress={() => setShowProjects(true)}>
-          <Icon name="folder" size={glyph} color={colors.textSecondary} />
-        </IconButton>
+        <TourAnchor id="note.file">
+          <IconButton label="Move to an area or project" size={btn} onPress={() => setShowProjects(true)}>
+            <Icon name="folder" size={glyph} color={colors.textSecondary} />
+          </IconButton>
+        </TourAnchor>
         <TourAnchor id="note.ink">
           <IconButton
             label={drawing ? "Stop drawing" : "Draw on note"}

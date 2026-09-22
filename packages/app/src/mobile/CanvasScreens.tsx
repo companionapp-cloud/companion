@@ -12,6 +12,7 @@ import { ConfirmDialog } from "../ConfirmDialog";
 import { MembershipPicker } from "../MembershipPicker";
 import { useMemberIds } from "./ListScreens";
 import { Card, CardRow, EmptyCaption, FAB_CLEARANCE, Fab, NavAction, NavBar, ROW_ICON_INSET, RowIcon } from "./ui";
+import { TourAnchor } from "../onboarding/anchors";
 
 // Canvases for the mobile web shell (PLAN-canvases.md): a full-screen list (globally, or
 // scoped to a project's member boards) and the board itself as a pushed route. Inside a
@@ -52,17 +53,19 @@ export function CanvasesListScreen({ projectId, areaId }: { projectId?: string; 
   return (
     <View style={styles.container}>
       {bar}
-      <ScrollView contentContainerStyle={styles.list}>
-        {canvases.length ? (
-          <Card>
-            {canvases.map((c, i) => (
-              <CanvasCard key={c.id} canvas={c} isLast={i === canvases.length - 1} onPress={() => nav.openCanvas(c.id)} />
-            ))}
-          </Card>
-        ) : (
-          <EmptyCaption>No canvases yet. Tap + to start a board.</EmptyCaption>
-        )}
-      </ScrollView>
+      <TourAnchor id={scoped ? "canvases.scoped" : "canvases.list"} style={styles.body}>
+        <ScrollView contentContainerStyle={styles.list}>
+          {canvases.length ? (
+            <Card>
+              {canvases.map((c, i) => (
+                <CanvasCard key={c.id} canvas={c} isLast={i === canvases.length - 1} onPress={() => nav.openCanvas(c.id)} />
+              ))}
+            </Card>
+          ) : (
+            <EmptyCaption>No canvases yet. Tap + to start a board.</EmptyCaption>
+          )}
+        </ScrollView>
+      </TourAnchor>
       <Fab label="New canvas" onPress={() => void create()} />
     </View>
   );
@@ -133,14 +136,16 @@ export function CanvasScreen() {
         }
         right={
           <>
-            <NavAction icon="folder" label="Projects" active={showProjects} onPress={() => setShowProjects((v) => !v)} />
+            <TourAnchor id="canvas.file">
+              <NavAction icon="folder" label="Move to an area or project" active={showProjects} onPress={() => setShowProjects((v) => !v)} />
+            </TourAnchor>
             <NavAction icon="trash" label="Delete canvas" onPress={() => setConfirmDelete(true)} />
           </>
         }
       />
-      <View style={styles.board}>
+      <TourAnchor id="canvas.board" style={styles.board}>
         <CanvasEditor key={canvas.id} canvasId={canvas.id} />
-      </View>
+      </TourAnchor>
       {showProjects ? <MembershipPicker entityType="canvas" entityId={canvas.id} onClose={() => setShowProjects(false)} /> : null}
       {confirmDelete ? (
         <ConfirmDialog
@@ -163,5 +168,6 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceApp },
   list: { paddingHorizontal: space.ml, paddingTop: space.ml, paddingBottom: FAB_CLEARANCE, flexGrow: 1 },
   titleSlot: { flex: 1, minWidth: 0 },
+  body: { flex: 1, minHeight: 0 },
   board: { flex: 1, minHeight: 0 },
 });

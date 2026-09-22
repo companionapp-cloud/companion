@@ -436,12 +436,14 @@ function CanvasesBrowseList() {
   const activeDoc = docOfRef(nav.activeTab.ref);
   const activeId = activeDoc?.kind === "canvas" ? activeDoc.id : null;
   return (
-    <CanvasesList
-      selectedId={activeId}
-      onSelect={nav.openCanvas}
-      onCreate={() => {
-        void store.create().then((c) => nav.openCanvas(c.id));
-      }}
-    />
+    <TourAnchor id="canvases.list" style={styles.list}>
+      <CanvasesList
+        selectedId={activeId}
+        onSelect={nav.openCanvas}
+        onCreate={() => {
+          void store.create().then((c) => nav.openCanvas(c.id));
+        }}
+      />
+    </TourAnchor>
   );
 }

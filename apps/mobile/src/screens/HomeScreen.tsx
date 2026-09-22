@@ -274,7 +274,7 @@ export function HomeScreen() {
         </Card>
       </ScrollView>
 
-      <Fab label="Quick capture" onPress={() => setCapture(true)} bottomInset={insets.bottom} />
+      <Fab label="Quick capture" anchor="home.capture" onPress={() => setCapture(true)} bottomInset={insets.bottom} />
 
       <CaptureSheet visible={capture} onClose={() => setCapture(false)} />
 

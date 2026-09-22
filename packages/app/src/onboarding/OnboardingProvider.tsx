@@ -5,6 +5,8 @@ import { useSync } from "../SyncProvider";
 import { useNotes } from "../NotesProvider";
 import { useTasks } from "../TasksProvider";
 import { useProjects } from "../ProjectsProvider";
+import { useCanvases } from "../canvas/CanvasesProvider";
+import { useCore } from "../CoreContext";
 import { AnchorRegistryContext, anchorRect, createAnchorRegistry, type AnchorRegistry } from "./anchors";
 import { useOnboardingState } from "./OnboardingState";
 import { TOURS, TOUR_BY_ID, stepAnchors, type TourChoice, type TourContext, type TourDef, type TourId, type TourPlan, type TourStep } from "./tours";
@@ -20,9 +22,9 @@ import type { Layout, Place, TourHost } from "./host";
 // tutorials, and only when the user opens a page themselves:
 // - a page with a tutorial of its own (Today, Notes, an area's overview, …) starts it shortly
 //   after it shows, unless that tutorial's current version is settled;
-// - the desktop's areas tutorial has no page, so it starts on the first page the user opens that
-//   has no tutorial of its own left to show (never the page the app opened on, and never
-//   Settings); on a phone it belongs to Home, once the user comes back to it;
+// - the desktop's quick capture and areas tutorials have no page, so each starts on the first page
+//   the user opens that has no tutorial of its own left to show (never the page the app opened
+//   on, and never Settings); on a phone they belong to Home, once the user comes back to it;
 // - on a device that syncs, not before the first sync has had its chance to bring in what
 //   another device already settled.
 // A tutorial ends on its own page; the next one waits for the user to open another tool.
@@ -106,6 +108,8 @@ export function OnboardingProvider({ host, children }: { host: TourHost; childre
   const notes = useNotes();
   const tasks = useTasks();
   const projects = useProjects();
+  const canvases = useCanvases();
+  const canvasApi = useCore().canvases;
   const registry = useMemo(createAnchorRegistry, []);
   const layout: Layout = host.layout;
   const plan = useCallback((t: TourDef) => t[layout], [layout]);
@@ -119,8 +123,8 @@ export function OnboardingProvider({ host, children }: { host: TourHost; childre
   }, []);
 
   // What tutorials read while they run: always the latest stores and host (see TourContext).
-  const live = useRef({ host, notes, tasks, projects });
-  live.current = { host, notes, tasks, projects };
+  const live = useRef({ host, notes, tasks, projects, canvases, canvasApi });
+  live.current = { host, notes, tasks, projects, canvases, canvasApi };
   const ctx = useMemo<TourContext>(
     () => ({
       get notes() {
@@ -132,10 +136,17 @@ export function OnboardingProvider({ host, children }: { host: TourHost; childre
       get projects() {
         return live.current.projects;
       },
+      get canvases() {
+        return live.current.canvases;
+      },
+      get canvasApi() {
+        return live.current.canvasApi;
+      },
       doc: () => live.current.host.doc,
       go: (to) => live.current.host.go(to),
       openNote: (id) => live.current.host.openNote(id),
       openTask: (id) => live.current.host.openTask(id),
+      openCanvas: (id) => live.current.host.openCanvas(id),
       openArea: (id) => live.current.host.openArea(id),
       openProject: (id) => live.current.host.openProject(id),
       openSettings: (section) => live.current.host.openSettings(section),
@@ -331,7 +342,8 @@ export function OnboardingProvider({ host, children }: { host: TourHost; childre
   const resetAll = useCallback(() => reset(TOURS.map((t) => t.id)), [reset]);
 
   const step = active ? active.steps[active.index] : null;
-  const holdRail = !!step?.rail || !!(starting && plan(starting).steps.some((s) => s.rail));
+  // A tutorial that opens on the sidebar holds it open as it starts, so its first step finds it.
+  const holdRail = !!step?.rail || !!(starting && plan(starting).steps[0]?.rail);
   // A starting tutorial already needs its first step's state: that is where it looks for anchors.
   const view = (step ? step.view : starting ? plan(starting).steps[0]?.view : undefined) ?? null;
 

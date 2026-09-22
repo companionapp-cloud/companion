@@ -280,7 +280,7 @@ export function HomeScreen() {
         <View style={{ height: FAB_CLEARANCE }} />
       </ScrollView>
 
-      <Fab label="Quick capture" onPress={() => setCapture(true)} />
+      <Fab label="Quick capture" anchor="home.capture" onPress={() => setCapture(true)} />
 
       {/* Quick capture is a bottom sheet here: the shared CaptureForm (note or task),
           mounted fresh each time it opens. Create-and-close. */}

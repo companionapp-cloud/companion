@@ -7,6 +7,7 @@ import { ExportMenu } from "../export/ExportMenu";
 import { useCanvases } from "./CanvasesProvider";
 import { CanvasEditor } from "./CanvasEditor";
 import type { CanvasRefKind } from "./host";
+import { TourAnchor } from "../onboarding/anchors";
 
 /** A board's detail pane: an editable name, the project-membership picker, delete, and the
  *  editor beneath. Shared by the root Canvases view and a project's Canvases section. The
@@ -63,17 +64,19 @@ export function CanvasPane({ canvasId, onDeleted, onOpenRef }: { canvasId: strin
           onChangeText={onChangeName}
           style={[styles.name, touch ? styles.nameTouch : null]}
         />
-        <IconButton label="Projects" size={touch ? undefined : "sm"} active={showProjects} onPress={() => setShowProjects((v) => !v)}>
-          <Icon name="folder" size={touch ? icon.lg : 13} color={showProjects ? colors.textAccent : colors.textSecondary} />
-        </IconButton>
+        <TourAnchor id="canvas.file">
+          <IconButton label="Move to an area or project" size={touch ? undefined : "sm"} active={showProjects} onPress={() => setShowProjects((v) => !v)}>
+            <Icon name="folder" size={touch ? icon.lg : 13} color={showProjects ? colors.textAccent : colors.textSecondary} />
+          </IconButton>
+        </TourAnchor>
         <ExportMenu targets={[{ kind: "canvas", id: canvas.id }]} glyph={touch ? icon.lg : 13} />
         <IconButton label="Delete canvas" size={touch ? undefined : "sm"} onPress={() => setConfirmDelete(true)}>
           <Icon name="trash" size={touch ? icon.lg : 13} color={colors.textSecondary} />
         </IconButton>
       </View>
-      <View style={{ flex: 1, minHeight: 0 }}>
+      <TourAnchor id="canvas.board" style={{ flex: 1, minHeight: 0 }}>
         <CanvasEditor key={canvas.id} canvasId={canvas.id} onOpenRef={onOpenRef} />
-      </View>
+      </TourAnchor>
       {showProjects ? <MembershipPicker entityType="canvas" entityId={canvas.id} onClose={() => setShowProjects(false)} /> : null}
       {confirmDelete ? (
         <ConfirmDialog

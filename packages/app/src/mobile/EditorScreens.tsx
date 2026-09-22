@@ -68,7 +68,9 @@ export function NoteEditorScreen() {
           title={note.title || "Untitled"}
           right={
             <>
-              <NavAction icon="folder" label="Move to an area or project" onPress={() => setShowProjects(true)} />
+              <TourAnchor id="note.file">
+                <NavAction icon="folder" label="Move to an area or project" onPress={() => setShowProjects(true)} />
+              </TourAnchor>
               <TourAnchor id="note.ink">
                 <NavAction
                   icon="pen"
@@ -166,7 +168,9 @@ export function TaskEditorScreen() {
           title="Task"
           right={
             <>
-              <NavAction icon="folder" label="Move to an area or project" onPress={() => setShowProjects(true)} />
+              <TourAnchor id="task.file">
+                <NavAction icon="folder" label="Move to an area or project" onPress={() => setShowProjects(true)} />
+              </TourAnchor>
               <NavAction icon="graph" label={showGraph ? "Show task" : "Show task graph"} active={showGraph} onPress={() => setShowGraph((v) => !v)} />
               <NavAction icon="trash" label="Delete task" onPress={() => setConfirmDelete(true)} />
             </>

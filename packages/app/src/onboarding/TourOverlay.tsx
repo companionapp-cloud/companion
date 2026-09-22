@@ -52,7 +52,7 @@ export function TourOverlay(props: TourOverlayProps) {
   // shows in the middle instead. One partly out is lit where it shows.
   const hole = rect && rect.y < vh && rect.y + rect.h > 0 && rect.x < vw && rect.x + rect.w > 0 ? clip(rect, vw, vh) : null;
   const width = cardWidth(vw);
-  const at = placeCard(hole, { w: card?.w ?? width, h: card?.h ?? 180 }, vw, vh, insets);
+  const at = placeCard(hole, { w: card?.w ?? width, h: card?.h ?? 180 }, vw, vh, insets, step.cardAt);
   const onLayout = (e: LayoutChangeEvent) => {
     const { width: w, height: h } = e.nativeEvent.layout;
     setCard((prev) => (prev && prev.w === w && prev.h === h ? prev : { w, h }));

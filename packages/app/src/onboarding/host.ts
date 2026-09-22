@@ -14,6 +14,8 @@ export type Place =
   | "note"
   | "tasks"
   | "task"
+  | "canvases"
+  | "canvas"
   | "graph"
   | "area"
   | "area-section"
@@ -26,13 +28,14 @@ export type Place =
 export type Layout = "desktop" | "mobile";
 
 /** The tools a tutorial can open from Settings. */
-export type ToolPlace = "home" | "today" | "chat" | "calendar" | "notes" | "tasks" | "graph";
+export type ToolPlace = "home" | "today" | "chat" | "calendar" | "notes" | "tasks" | "canvases" | "graph";
 
 /** Moving around, as tutorials need to. */
 export interface TourNav {
   go: (to: ToolPlace) => void;
   openNote: (id: string) => void;
   openTask: (id: string) => void;
+  openCanvas: (id: string) => void;
   openArea: (id: string) => void;
   openProject: (id: string) => void;
   openSettings: (section?: SettingsSectionId) => void;
@@ -44,8 +47,8 @@ export interface TourHost extends TourNav {
   place: Place;
   /** Changes whenever the user moves: to another page, or another document on it. */
   placeKey: string;
-  /** The note or task on screen, if any. */
-  doc: { kind: "note" | "task"; id: string } | null;
+  /** The note, task or canvas on screen, if any. */
+  doc: { kind: "note" | "task" | "canvas"; id: string } | null;
   /** Space system chrome takes at the window's edges (a phone's status bar and home bar). */
   insets?: { top: number; bottom: number };
 }

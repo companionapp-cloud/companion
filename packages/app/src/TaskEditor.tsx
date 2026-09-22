@@ -115,9 +115,11 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
             edited {timeAgo(task.updatedAt)}
           </Text>
           <View style={{ flex: 1 }} />
-          <IconButton label="Move to an area or project" size={btn} onPress={() => setShowProjects(true)}>
-            <Icon name="folder" size={glyph} color={colors.textSecondary} />
-          </IconButton>
+          <TourAnchor id="task.file">
+            <IconButton label="Move to an area or project" size={btn} onPress={() => setShowProjects(true)}>
+              <Icon name="folder" size={glyph} color={colors.textSecondary} />
+            </IconButton>
+          </TourAnchor>
           <IconButton label={showGraph ? "Show task" : "Show task graph"} size={btn} active={showGraph} onPress={() => setShowGraph((v) => !v)}>
             <Icon name="graph" size={glyph} color={showGraph ? colors.textAccent : colors.textSecondary} />
           </IconButton>

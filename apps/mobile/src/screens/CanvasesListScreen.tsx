@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { Canvas } from '@companion/core-bridge';
-import { useCore, useCanvases, useProjects, timeAgo } from '@companion/app';
+import { useCore, useCanvases, useProjects, timeAgo, TourAnchor } from '@companion/app';
 import { Spinner, colors, space } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
 import { useAreaScope, useProjectScope } from '../ProjectContext';
@@ -64,6 +64,7 @@ export function CanvasesListScreen() {
 
   return (
     <View style={styles.container}>
+      <TourAnchor id={scopeId ? 'canvases.scoped' : 'canvases.list'} style={styles.body}>
       <FlatList
         data={canvases}
         keyExtractor={(c) => c.id}
@@ -80,6 +81,7 @@ export function CanvasesListScreen() {
           </GroupedItem>
         )}
       />
+      </TourAnchor>
       <Fab label="New canvas" onPress={() => void createCanvas()} bottomInset={scopeId ? 0 : insets.bottom} />
     </View>
   );
@@ -100,5 +102,6 @@ function CanvasRow({ canvas, isLast, onPress }: { canvas: Canvas; isLast: boolea
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceApp },
+  body: { flex: 1 },
   list: { paddingHorizontal: space.lg, paddingTop: space.lg, flexGrow: 1 },
 });

@@ -101,7 +101,7 @@ export function TourOverlay(props: TourOverlayProps) {
 
   const hole = rect ? { x: rect.x - HOLE_PAD, y: rect.y - HOLE_PAD, w: rect.w + HOLE_PAD * 2, h: rect.h + HOLE_PAD * 2 } : null;
   const width = cardWidth(vw);
-  const at = placeCard(hole, { w: card?.w ?? width, h: card?.h ?? 160 }, vw, vh, insets);
+  const at = placeCard(hole, { w: card?.w ?? width, h: card?.h ?? 160 }, vw, vh, insets, step.cardAt);
 
   return (
     <Overlay>

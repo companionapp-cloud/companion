@@ -2,7 +2,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useTasks, TaskEditor, MembershipPicker, ConfirmDialog } from '@companion/app';
+import { useTasks, TaskEditor, MembershipPicker, ConfirmDialog, TourAnchor } from '@companion/app';
 import type { LinkRef } from '@companion/editor';
 import { Center, Text, colors } from '@companion/design-system';
 import type { RootStackParamList } from '../MobileShell';
@@ -39,7 +39,9 @@ export function TaskEditorScreen() {
       title: 'Task',
       headerRight: () => (
         <NavActions>
-          <NavAction icon="folder" label="Move to an area or project" onPress={() => setShowProjects(true)} />
+          <TourAnchor id="task.file">
+            <NavAction icon="folder" label="Move to an area or project" onPress={() => setShowProjects(true)} />
+          </TourAnchor>
           <NavAction icon="graph" label="Show task graph" onPress={() => nav.navigate('TaskGraph', { id: taskId })} />
           <NavAction icon="trash" label="Delete task" onPress={() => setConfirmDelete(true)} />
         </NavActions>

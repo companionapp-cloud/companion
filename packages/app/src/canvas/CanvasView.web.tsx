@@ -1028,6 +1028,9 @@ export interface CanvasViewProps {
   /** Force the touch chrome (bottom tool bar + embed sheet) on or off. Defaults to the
    *  pointer: coarse → touch, which is what the native WebView and phone browsers report. */
   touch?: boolean;
+  /** Receives the element holding the add tools (the top strip, or the touch bottom bar), so
+   *  the app's tutorial can point at it. */
+  toolsRef?: (el: HTMLElement | null) => void;
 }
 
 /** Imperative entry points for the surrounding editor (drops from the app's drag layer). */
@@ -1069,7 +1072,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(function
   );
 });
 
-function CanvasSurface({ host, canvasId, touch: touchProp, handleRef }: CanvasViewProps & { handleRef: Ref<CanvasViewHandle> }) {
+function CanvasSurface({ host, canvasId, touch: touchProp, toolsRef, handleRef }: CanvasViewProps & { handleRef: Ref<CanvasViewHandle> }) {
   const rf = useReactFlow<FlowNode, FlowEdge>();
   const coarse = useCoarsePointer();
   const touch = touchProp ?? coarse;
@@ -2040,7 +2043,7 @@ function CanvasSurface({ host, canvasId, touch: touchProp, handleRef }: CanvasVi
         {/* The board's tool strip: a 28px sub-toolbar with a bottom hairline. */}
         {/* Under touch the add tools move to the bottom bar (sticky / group / connect / undo)
             and its More sheet; this strip keeps history, colour and the view controls. */}
-        <div style={toolbarStyle}>
+        <div style={toolbarStyle} ref={touch ? undefined : toolsRef}>
           {touch ? null : (
             <>
           <ToolButton icon="sticky" title="Sticky note (T)" onClick={() => addSticky()} />
@@ -2218,7 +2221,7 @@ function CanvasSurface({ host, canvasId, touch: touchProp, handleRef }: CanvasVi
         {touch ? (
           // Native chrome: a 48px bottom tool bar instead of the status strip. The frequent
           // tools sit here; everything you can embed lives behind More.
-          <div style={bottomBarStyle}>
+          <div style={bottomBarStyle} ref={toolsRef}>
             <BarButton icon="sticky" label="Sticky" onClick={() => addSticky()} />
             <BarButton icon="group" label="Group" onClick={() => void groupSelection()} />
             <BarButton icon="arrow" label="Connect" disabled={selectedNodes.length !== 2} onClick={connectSelected} />

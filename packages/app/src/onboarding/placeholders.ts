@@ -1,15 +1,19 @@
+import type { CanvasesApi } from "@companion/core-bridge";
 import type { NotesStore } from "../NotesProvider";
 import type { TasksStore } from "../TasksProvider";
 import type { ProjectsStore } from "../ProjectsProvider";
+import type { CanvasesStore } from "../canvas/CanvasesProvider";
+import { NODE_DEFAULTS } from "../canvas/host";
 
 // Placeholder content for the tours: a tool with nothing in it has nothing to point at, so the
-// tour for an empty tool fills it with a few samples first. They are ordinary notes, tasks, an
-// area and a project, written as a checklist of things to try, so they are worth keeping and
-// easy to delete. They are only ever made when the tool is empty (or, for the area, when the
+// tour for an empty tool fills it with a few samples first. They are ordinary notes, tasks, a
+// canvas, an area and a project, written as a checklist of things to try, so they are worth
+// keeping and easy to delete. They are only ever made when the tool is empty (or, for the area, when the
 // user says yes), and at most once per session even if two tours ask.
 
 let sampleTasks: Promise<string[]> | null = null;
 let sampleNotes: Promise<string[]> | null = null;
+let sampleCanvas: Promise<string[]> | null = null;
 
 const MINUTE = 60_000;
 
@@ -86,6 +90,41 @@ async function createSampleNotes(notes: NotesStore): Promise<string[]> {
     ].join("\n"),
   });
   return [welcome.id, linked.id];
+}
+
+/** The sample board, unless the user already has canvases: returns its id. */
+export function ensureSampleCanvas(canvases: CanvasesStore, api: CanvasesApi): Promise<string[]> {
+  if (canvases.canvases.length > 0) return Promise.resolve([]);
+  if (!sampleCanvas) {
+    sampleCanvas = createSampleCanvas(canvases, api).catch((err) => {
+      sampleCanvas = null;
+      throw err;
+    });
+  }
+  return sampleCanvas;
+}
+
+async function createSampleCanvas(canvases: CanvasesStore, api: CanvasesApi): Promise<string[]> {
+  const board = await canvases.create("Welcome board");
+  // Three stickies in a row, each connected to the next: a board with a shape to it.
+  const { width, height } = NODE_DEFAULTS.text;
+  const texts = [
+    "A sticky holds a quick thought.",
+    "Connect cards to show how ideas relate.",
+    "Notes, tasks and events can sit on a board too, as live cards.",
+  ];
+  const ids: string[] = [];
+  for (const [i, text] of texts.entries()) {
+    const [node] = await api.nodes.upsert(board.id, [{ kind: "text", x: i * (width + 80), y: 0, width, height, data: { text } }]);
+    if (node) ids.push(node.id);
+  }
+  if (ids.length > 1) {
+    await api.edges.upsert(
+      board.id,
+      ids.slice(1).map((to, i) => ({ fromNodeId: ids[i], toNodeId: to, toEnd: "arrow" as const })),
+    );
+  }
+  return [board.id];
 }
 
 /** The sample area and a project inside it, with two starter tasks filed in the project. */

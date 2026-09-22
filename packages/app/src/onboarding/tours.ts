@@ -1,9 +1,12 @@
+import type { CanvasesApi } from "@companion/core-bridge";
 import type { NotesStore } from "../NotesProvider";
 import type { TasksStore } from "../TasksProvider";
 import type { ProjectsStore } from "../ProjectsProvider";
-import { createSampleArea, ensureSampleNotes, ensureSampleTasks } from "./placeholders";
+import type { CanvasesStore } from "../canvas/CanvasesProvider";
+import { isMacPlatform, shortcutStore } from "../shortcuts";
+import { createSampleArea, ensureSampleCanvas, ensureSampleNotes, ensureSampleTasks } from "./placeholders";
 import { docsUrl } from "./links";
-import type { Place, TourNav } from "./host";
+import type { Place, TourHost, TourNav } from "./host";
 
 // The tutorials (tours in code): one per tool, each shown the first time the user opens that
 // tool, ending on its own page. A tutorial has one id and version on every device, so seeing it
@@ -13,7 +16,7 @@ import type { Place, TourNav } from "./host";
 //
 // Copy rules: short sentences, no em dashes.
 
-export type TourId = "today" | "chat" | "calendar" | "notes" | "tasks" | "graph" | "areas" | "area" | "project";
+export type TourId = "today" | "capture" | "chat" | "calendar" | "notes" | "tasks" | "canvases" | "graph" | "areas" | "area" | "project";
 
 const docs = (slug: string) => ({ label: "Read the docs", url: docsUrl(slug) });
 
@@ -23,12 +26,15 @@ export interface TourContext extends TourNav {
   readonly notes: NotesStore;
   readonly tasks: TasksStore;
   readonly projects: ProjectsStore;
-  /** The note or task on screen, if any. */
-  doc: () => { kind: "note" | "task"; id: string } | null;
+  readonly canvases: CanvasesStore;
+  /** Board contents (cards and connections), for the sample canvas. */
+  readonly canvasApi: CanvasesApi;
+  /** The note, task or canvas on screen, if any. */
+  doc: () => TourHost["doc"];
   /** Resolves once `test` holds, or after `timeoutMs` regardless. */
   waitFor: (test: () => boolean, timeoutMs?: number) => Promise<boolean>;
   /** Scratch space for one run: what `prepare` picked, for a later step to open. */
-  picked: { note?: string; task?: string };
+  picked: { note?: string; task?: string; canvas?: string };
 }
 
 export interface TourChoice {
@@ -56,6 +62,9 @@ export interface TourStep {
   /** Leave the step out when its anchor isn't on the page (a tool hidden in Settings, a page
    *  with no cover). Otherwise a missing anchor shows the card in the middle of the window. */
   optional?: boolean;
+  /** Where the card goes when the element fills the screen: its bottom by default, or its top
+   *  when the step talks about something at the bottom. */
+  cardAt?: "top" | "bottom";
   /** Include the step only when this holds as the tutorial starts. */
   when?: (ctx: TourContext) => boolean;
   /** Buttons in place of Next. */
@@ -120,6 +129,13 @@ async function pickTask(ctx: TourContext): Promise<string | undefined> {
   return sample ?? ctx.tasks.visible.find(open)?.id ?? ctx.tasks.tasks.find(open)?.id ?? ctx.tasks.tasks[0]?.id;
 }
 
+/** The canvas a canvases tutorial shows: a sample board it just made, else the newest. */
+async function pickCanvas(ctx: TourContext): Promise<string | undefined> {
+  await ctx.waitFor(() => !ctx.canvases.loading);
+  const [sample] = await ensureSampleCanvas(ctx.canvases, ctx.canvasApi);
+  return sample ?? ctx.canvases.visible[0]?.id ?? ctx.canvases.canvases[0]?.id;
+}
+
 /** The agenda and calendar have something to show once there is a scheduled task. */
 const withSampleTasks = async (ctx: TourContext) => {
   await ctx.waitFor(() => !ctx.tasks.loading);
@@ -171,6 +187,52 @@ const REMINDERS = {
   body: "Get a notification at a set time, or a while before the deadline.",
   link: docs("creating-and-linking-tasks"),
 };
+// Quick capture's shortcuts, written the way the palette writes them on this platform.
+const captureKey = (key: string) => (isMacPlatform() ? `⌥⇧${key}` : `Alt+Shift+${key}`);
+const CAPTURE = {
+  title: "Quick capture",
+  body: `Press ${captureKey("Space")} anywhere in Companion, or click here, and type. ${captureKey("N")}, ${captureKey("T")} and ${captureKey("C")} start a note, a task or a canvas right away.`,
+};
+const CAPTURE_ANYWHERE = {
+  title: "From any app",
+  body: "The desktop app can open capture over whatever you are doing, without switching to Companion. Pick its shortcut in Settings.",
+  // Only the desktop app can claim a system-wide shortcut.
+  when: () => shortcutStore() !== null,
+  action: { label: "Open settings", run: (ctx: TourContext) => ctx.openSettings("shortcuts") },
+};
+const CAPTURE_TOUCH = {
+  title: "Quick capture",
+  body: "Tap + to jot down a note or a task the moment it comes to you. Sort it into an area or a project later.",
+};
+const CANVASES = { title: "Canvases", body: "Boards for laying ideas out side by side. Arrange cards, group them, and connect them." };
+const CANVAS_TOOLS = {
+  title: "Add to the board",
+  body: "Stickies, groups, notes, tasks, events, images and links. Each tool has a letter key, and a double-click on the board makes a sticky.",
+};
+const CANVAS_CONNECT = {
+  title: "Connect ideas",
+  body: "Drag from a card’s edge onto another card to connect them. Drag a note or a task in from its list, or by its tab, to make it a card.",
+};
+const CANVAS_TOUCH = {
+  title: "Add to the board",
+  body: "Tap Sticky in the bar at the bottom for a quick thought, or More to add a note, task, event, image or link. Select two cards and tap Connect to join them.",
+};
+
+/** Filing a note, task or canvas in an area or a project: the folder button in every layout,
+ *  and on the desktop, dragging it onto the sidebar too. */
+const fileIt = (noun: string) => ({
+  title: "File it",
+  body: `Put the ${noun} in an area or a project with this button. It shows up on that page.`,
+});
+const fileItTouch = (noun: string) => ({
+  title: "File it",
+  body: `Tap the folder to put the ${noun} in an area or a project. It shows up on that page.`,
+});
+const dragIt = (noun: string) => ({
+  title: "Or drag it there",
+  body: `Point at a ${noun} in the list and drag its grip, or drag its tab, onto an area or a project here.`,
+});
+
 const GRAPH = {
   title: "How it all connects",
   body: "Every note, task and canvas, joined by the wikilinks between them and by the area or project each is filed in.",
@@ -315,6 +377,27 @@ export const TOURS: readonly TourDef[] = [
     },
   },
   {
+    // Quick capture has no page: its button is in the desktop toolbar on every page, and on Home
+    // on a phone.
+    id: "capture",
+    version: 1,
+    label: "Quick capture",
+    desktop: {
+      startsOn: "idle",
+      open: () => undefined,
+      steps: [
+        { anchor: "toolbar.capture", ...CAPTURE },
+        { anchor: "rail.settings", ...CAPTURE_ANYWHERE },
+      ],
+    },
+    mobile: {
+      startsOn: ["home"],
+      afterMoving: true,
+      open: (ctx) => ctx.go("home"),
+      steps: [{ anchor: "home.capture", ...CAPTURE_TOUCH }],
+    },
+  },
+  {
     id: "chat",
     version: 1,
     label: "Chat",
@@ -360,7 +443,7 @@ export const TOURS: readonly TourDef[] = [
   },
   {
     id: "notes",
-    version: 1,
+    version: 2,
     label: "Notes",
     desktop: {
       startsOn: ["notes"],
@@ -376,6 +459,8 @@ export const TOURS: readonly TourDef[] = [
         { anchor: "note.body", ...MARKDOWN },
         { anchor: "note.ink", ...INK },
         { anchor: "note.graph", ...NOTE_GRAPH },
+        { anchor: "note.file", ...fileIt("note") },
+        { anchor: "sidebar.areas", rail: true, ...dragIt("note") },
       ],
     },
     mobile: {
@@ -397,12 +482,13 @@ export const TOURS: readonly TourDef[] = [
         },
         { anchor: "note.ink", ...INK_TOUCH },
         { anchor: "note.graph", ...NOTE_GRAPH },
+        { anchor: "note.file", ...fileItTouch("note") },
       ],
     },
   },
   {
     id: "tasks",
-    version: 1,
+    version: 2,
     label: "Tasks",
     desktop: {
       startsOn: ["tasks"],
@@ -418,6 +504,8 @@ export const TOURS: readonly TourDef[] = [
         { anchor: "tasks.filters", ...FILTERS },
         { anchor: ["task.start", "task.deadline"], ...DATES },
         { anchor: "task.reminders", ...REMINDERS },
+        { anchor: "task.file", ...fileIt("task") },
+        { anchor: "sidebar.areas", rail: true, ...dragIt("task") },
       ],
     },
     mobile: {
@@ -438,6 +526,52 @@ export const TOURS: readonly TourDef[] = [
           },
         },
         { anchor: "task.reminders", ...REMINDERS },
+        { anchor: "task.file", ...fileItTouch("task") },
+      ],
+    },
+  },
+  {
+    id: "canvases",
+    version: 1,
+    label: "Canvases",
+    desktop: {
+      startsOn: ["canvases"],
+      open: (ctx) => ctx.go("canvases"),
+      // The board steps need a canvas open: the one on screen, else a sample or the newest.
+      prepare: async (ctx) => {
+        if (ctx.doc()?.kind === "canvas") return;
+        const id = await pickCanvas(ctx);
+        if (id) ctx.openCanvas(id);
+      },
+      steps: [
+        { anchor: "canvases.list", ...CANVASES },
+        { anchor: "canvas.tools", ...CANVAS_TOOLS },
+        { anchor: "canvas.board", ...CANVAS_CONNECT },
+        { anchor: "canvas.file", ...fileIt("canvas") },
+        { anchor: "sidebar.areas", rail: true, ...dragIt("canvas") },
+      ],
+    },
+    mobile: {
+      // The list and the board are separate screens: it starts on the list, then opens a board.
+      // The board is a web page inside the native app, so the step lights all of it.
+      startsOn: ["canvases"],
+      runsOn: ["canvases", "canvas"],
+      open: (ctx) => ctx.go("canvases"),
+      prepare: async (ctx) => {
+        ctx.picked.canvas = await pickCanvas(ctx);
+      },
+      steps: [
+        { anchor: "canvases.list", ...CANVASES },
+        {
+          anchor: "canvas.board",
+          ...CANVAS_TOUCH,
+          // The card talks about the bar at the board's bottom, so it keeps clear of it.
+          cardAt: "top",
+          go: (ctx) => {
+            if (ctx.picked.canvas) ctx.openCanvas(ctx.picked.canvas);
+          },
+        },
+        { anchor: "canvas.file", ...fileItTouch("canvas") },
       ],
     },
   },

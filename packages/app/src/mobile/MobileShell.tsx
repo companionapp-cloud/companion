@@ -342,10 +342,11 @@ function MobileNavBridge({
       layout: "mobile",
       place: mobilePlace(routeName, params.section),
       placeKey: locKey,
-      doc: (routeName === "note" || routeName === "task") && params.id ? { kind: routeName, id: params.id } : null,
+      doc: (routeName === "note" || routeName === "task" || routeName === "canvas") && params.id ? { kind: routeName, id: params.id } : null,
       go: (to) => (to === "home" ? navigation.navigate("home") : nav.goView(to)),
       openNote: nav.openNote,
       openTask: nav.openTask,
+      openCanvas: nav.openCanvas,
       openArea: nav.openArea,
       openProject: nav.openProject,
       openSettings: (section) => (section ? navigation.navigate("settingsSection", { section }) : navigation.navigate("settings")),
@@ -384,6 +385,8 @@ function mobilePlace(routeName: string, section: string | undefined): Place {
     case "note":
     case "tasks":
     case "task":
+    case "canvases":
+    case "canvas":
     case "graph":
       return routeName;
     case "area":

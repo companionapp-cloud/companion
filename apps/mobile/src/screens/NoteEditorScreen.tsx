@@ -144,7 +144,9 @@ export function NoteEditorScreen() {
       title: title || 'Untitled',
       headerRight: () => (
         <NavActions>
-          <NavAction icon="folder" label="Add to projects" onPress={() => setShowProjects(true)} />
+          <TourAnchor id="note.file">
+            <NavAction icon="folder" label="Move to an area or project" onPress={() => setShowProjects(true)} />
+          </TourAnchor>
           <TourAnchor id="note.ink">
             <NavAction icon="pen" label={drawing ? 'Stop drawing' : 'Draw on note'} active={drawing} onPress={() => setDrawing((v) => !v)} />
           </TourAnchor>

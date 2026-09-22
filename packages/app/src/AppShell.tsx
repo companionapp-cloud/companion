@@ -482,6 +482,7 @@ function desktopPlace(loc: Navigator["current"]): Place {
       return loc.view === "today" || loc.view === "chat" || loc.view === "calendar" || loc.view === "graph" || loc.view === "settings" ? loc.view : "other";
     case "notes":
     case "tasks":
+    case "canvases":
       return loc.kind;
     case "area":
       return loc.section ? "area-section" : "area";
@@ -501,11 +502,12 @@ function useDesktopTourHost(nav: Navigator): TourHost {
       layout: "desktop",
       place: desktopPlace(nav.current),
       placeKey: keyOfRef(nav.activeTab.ref),
-      doc: doc && doc.kind !== "canvas" ? { kind: doc.kind, id: doc.id } : null,
+      doc: doc ? { kind: doc.kind, id: doc.id } : null,
       // The desktop has no Home: its sidebar is on every page, so Today stands in.
       go: (to) => nav.goView(to === "home" ? "today" : to),
       openNote: nav.openNote,
       openTask: nav.openTask,
+      openCanvas: nav.openCanvas,
       openArea: nav.openArea,
       openProject: nav.openProject,
       openSettings: (section) => nav.openRef({ kind: "view", view: "settings", section }),

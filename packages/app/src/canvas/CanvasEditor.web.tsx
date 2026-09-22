@@ -6,6 +6,7 @@ import { useCanvasHost } from "./useCanvasHost";
 import { useCanvases } from "./CanvasesProvider";
 import type { CanvasRefKind } from "./host";
 import { CanvasView, type CanvasViewHandle } from "./CanvasView.web";
+import { useTourAnchor } from "../onboarding/anchors";
 
 /** Web/desktop canvas editor: the React Flow view straight in the DOM over the shared
  *  host (PLAN-canvases.md §3.2). Also a drop target for the app's drag layer, so a note or
@@ -24,13 +25,15 @@ export function CanvasEditor({ canvasId, onOpenRef }: { canvasId: string; onOpen
       void store.create().then((c) => nav.openCanvas(c.id));
     },
   });
+  // The board's add tools, for the canvases tutorial to point at.
+  const toolsRef = useTourAnchor("canvas.tools");
   const drop = useDropTarget(`canvas:${canvasId}`, (payload, x, y) => {
     if (payload.kind === "note" || payload.kind === "task") view.current?.addRefAt({ type: payload.kind, id: payload.id }, x, y);
   });
 
   return (
     <View ref={drop.ref} style={{ flex: 1, minHeight: 0 }}>
-      <CanvasView ref={view} host={host} canvasId={canvasId} />
+      <CanvasView ref={view} host={host} canvasId={canvasId} toolsRef={toolsRef} />
       {dialogs}
     </View>
   );

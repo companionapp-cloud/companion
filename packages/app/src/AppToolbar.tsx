@@ -26,6 +26,7 @@ import { useSync } from "./SyncProvider";
 import { useCanvases } from "./canvas/CanvasesProvider";
 import { NotificationsBell } from "./NotificationsBell";
 import { Draggable } from "./DndContext";
+import { TourAnchor } from "./onboarding/anchors";
 
 const VIEW_META: Record<SurfaceViewId, { label: string; icon: IconName }> = {
   today: { label: "Today", icon: "today" },
@@ -139,14 +140,16 @@ export function AppToolbar({
         <View style={{ flex: 1, alignSelf: "stretch" }} />
       </ScrollView>
 
-      <Button
-        label="Capture"
-        size="sm"
-        variant="ghost"
-        kbd="⌥⇧␣"
-        icon={<Icon name="capture" size={13} color={colors.textSecondary} />}
-        onPress={onCapture}
-      />
+      <TourAnchor id="toolbar.capture">
+        <Button
+          label="Capture"
+          size="sm"
+          variant="ghost"
+          kbd="⌥⇧␣"
+          icon={<Icon name="capture" size={13} color={colors.textSecondary} />}
+          onPress={onCapture}
+        />
+      </TourAnchor>
       {themeSwitchable ? (
         <IconButton label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} size="sm" onPress={toggleTheme}>
           <Icon name={theme === "dark" ? "sun" : "moon"} size={icon.md} color={colors.textSecondary} />

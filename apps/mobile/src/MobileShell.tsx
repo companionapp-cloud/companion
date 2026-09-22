@@ -104,6 +104,7 @@ const TOOL_ROUTE: Record<ToolPlace, keyof RootStackParamList> = {
   calendar: 'Calendar',
   notes: 'Notes',
   tasks: 'Tasks',
+  canvases: 'Canvases',
   graph: 'Graph',
 };
 
@@ -127,6 +128,10 @@ function tourPlace(root: string, leaf: string): TourPlace {
       return 'tasks';
     case 'TaskEditor':
       return 'task';
+    case 'Canvases':
+      return 'canvases';
+    case 'Canvas':
+      return 'canvas';
     case 'Graph':
       return 'graph';
     case 'Area':
@@ -142,6 +147,14 @@ function tourPlace(root: string, leaf: string): TourPlace {
 }
 
 type RouteParams = { id?: string; areaId?: string; projectId?: string } | undefined;
+
+/** The document a screen shows, for the tutorials. */
+function docOfRoute(root: string, id: string): TourHost['doc'] {
+  if (root === 'NoteEditor') return { kind: 'note', id };
+  if (root === 'TaskEditor') return { kind: 'task', id };
+  if (root === 'Canvas') return { kind: 'canvas', id };
+  return null;
+}
 
 export function MobileShell() {
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
@@ -172,13 +185,14 @@ export function MobileShell() {
       layout: 'mobile',
       place: tourPlace(root, leaf),
       placeKey: `${root}:${leaf}:${params?.id ?? params?.areaId ?? params?.projectId ?? ''}`,
-      doc: (root === 'NoteEditor' || root === 'TaskEditor') && params?.id ? { kind: root === 'NoteEditor' ? 'note' : 'task', id: params.id } : null,
+      doc: params?.id ? docOfRoute(root, params.id) : null,
       insets: { top: insets.top, bottom: insets.bottom },
       go: (to) => {
         if (navigationRef.isReady()) navigationRef.navigate(TOOL_ROUTE[to] as never);
       },
       openNote: (id) => push('NoteEditor', { id }),
       openTask: (id) => push('TaskEditor', { id }),
+      openCanvas: (id) => push('Canvas', { id }),
       openArea: (areaId) => push('Area', { areaId }),
       openProject: (projectId) => push('Project', { projectId }),
       openSettings: (section) => {

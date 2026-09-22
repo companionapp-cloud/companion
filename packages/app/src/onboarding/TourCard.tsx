@@ -38,13 +38,15 @@ export function cardWidth(vw: number): number {
 
 /** Where the card goes: beside the hole (below it by preference, or to the side of a tall one),
  *  kept inside the window and clear of its insets. With no room anywhere it sits inside the
- *  hole's lower edge. */
+ *  hole, by its lower edge unless the step asks for the top. */
 export function placeCard(
   hole: Rect | null,
   card: { w: number; h: number },
   vw: number,
   vh: number,
   insets: { top: number; bottom: number } = { top: 0, bottom: 0 },
+  /** Where the card sits when there is no room beside the element (it fills the screen). */
+  inside: "top" | "bottom" = "bottom",
 ): { x: number; y: number } {
   const top = MARGIN + insets.top;
   const bottom = vh - MARGIN - insets.bottom;
@@ -61,7 +63,7 @@ export function placeCard(
   for (const side of tall ? [right, left, below, above] : [below, above, right, left]) {
     if (side.fits) return side.at;
   }
-  return { x: clampX(midX), y: clampY(hole.y + hole.h - card.h - space.xxl) };
+  return { x: clampX(midX), y: clampY(inside === "top" ? hole.y + space.xxl : hole.y + hole.h - card.h - space.xxl) };
 }
 
 export function TourCard({
