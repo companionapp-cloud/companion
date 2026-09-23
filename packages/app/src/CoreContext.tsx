@@ -1,5 +1,6 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import {
+  aiApi,
   agentsApi,
   devicesApi,
   calendarApi,
@@ -22,6 +23,7 @@ import {
   projectsApi,
   tasksApi,
   trashApi,
+  type AiApi,
   type AgentsApi,
   type DevicesApi,
   type CalendarApi,
@@ -61,6 +63,8 @@ interface CoreValue {
   dates: DatesApi;
   llm: LlmApi;
   agents: AgentsApi;
+  /** The note editor's one-shot writing assists (core/bridge/ai.go). */
+  ai: AiApi;
   devices: DevicesApi;
   chats: ChatsApi;
   calendar: CalendarApi;
@@ -98,6 +102,7 @@ export function CoreProvider({ core, children }: { core: CoreBridge; children: R
       dates: datesApi(core),
       llm: llmApi(core),
       agents: agentsApi(core),
+      ai: aiApi(core),
       devices: devicesApi(core),
       chats: chatsApi(core),
       calendar: calendarApi(core),

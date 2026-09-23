@@ -25,6 +25,9 @@ import { ExportMenu } from "./export/ExportMenu";
 import { DocTitleField } from "./TaskEditor";
 import { isUntitled, titleFieldValue, titleToSave } from "./untitled";
 import { TourAnchor } from "./onboarding/anchors";
+import { useAiStatus } from "./ai/useAiStatus";
+import { useNoteAssist } from "./ai/useNoteAssist";
+import { NoteAiDock } from "./ai/NoteAiPanel";
 
 export interface NoteEditorProps {
   note: Note;
@@ -176,6 +179,23 @@ export function NoteEditor({
     onCreatedNote,
   });
 
+  // Writing assists (PLAN: editor AI): only while an agent this device can run is set up.
+  const aiStatus = useAiStatus();
+  const aiOn = !!aiStatus?.enabled;
+  const assist = useNoteAssist({
+    editorRef,
+    note,
+    title,
+    // Show what was filled in: the metadata panel (hosts without the sub-toolbar show the
+    // fields inline already).
+    onMetadataApplied: () => showToolbar && setShowMeta(true),
+  });
+  const closeAssist = assist.close;
+  // Close the assist when AI goes away, or the document gives way to the graph or drawing.
+  useEffect(() => {
+    if (!aiOn || showGraph || drawing) closeAssist();
+  }, [aiOn, showGraph, drawing, closeAssist]);
+
   const btn = touch ? undefined : ("sm" as const);
   const glyph = touch ? 17 : 13;
   const showBar = Platform.OS === "web" && !showGraph && (touch ? editorFocused : true);
@@ -313,6 +333,8 @@ export function NoteEditor({
                     // `tasks.tasks` gets a fresh identity whenever any task changes (local edit or a
                     // synced pull), signalling the editor to re-hydrate its `[[task:…]]` chips.
                     linkRevision={tasks.tasks}
+                    onAiShortcut={aiOn ? () => assist.start("generate") : undefined}
+                    onAiToolbarPress={aiOn ? assist.openMenu : undefined}
                     ink={{
                       groups: ink.groups,
                       tool: drawing ? tool : null,
@@ -330,6 +352,8 @@ export function NoteEditor({
           {/* Web/desktop formatting bar (native uses its own keyboard toolbar). Includes the
               file-embed action when a documentSource is wired. While drawing, the drawing bar
               takes its place. */}
+          {!showGraph && !drawing ? <NoteAiDock assist={assist} note={note} /> : null}
+
           {drawing && !showGraph ? (
             <DrawingBar
               tool={tool}
@@ -340,7 +364,13 @@ export function NoteEditor({
               onDone={() => setDrawing(false)}
             />
           ) : showBar ? (
-            <FormattingBar state={formatState} editorRef={editorRef} canAttach={!!documentSource} />
+            <FormattingBar
+              state={formatState}
+              editorRef={editorRef}
+              canAttach={!!documentSource}
+              onAi={aiOn ? () => (assist.phase?.kind === "menu" ? assist.close() : assist.openMenu()) : undefined}
+              aiActive={!!assist.phase}
+            />
           ) : null}
         </View>
 

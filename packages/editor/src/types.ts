@@ -1,6 +1,7 @@
 import type { FormatName, FormatState } from "./formatCommands";
 import type { TableMenuPresenter } from "./tableMenu";
 import type { InkGroupRecord, InkState, InkTool } from "./ink/types";
+import type { AiApplyMode, AiTarget } from "./ai";
 
 export type { TableMenuPresenter, TableMenuRequest } from "./tableMenu";
 export type { TableMenuItem } from "./tableCommands";
@@ -23,6 +24,15 @@ export interface EditorController {
   /** Undo / redo the last drawing change (PLAN-drawing.md). No-op without {@link EditorProps.ink}. */
   inkUndo(): void;
   inkRedo(): void;
+  /** Writing assists: capture what an assist acts on — the selection, or the whole note when
+   *  nothing is selected. The target follows later edits and stays highlighted until released.
+   *  Async because on native the answer comes back over the WebView bridge. Null in the simple
+   *  variant (or if the editor is gone). */
+  aiCapture(): Promise<AiTarget | null>;
+  /** Put an assist's markdown result into the note for a captured target (undoable). */
+  aiApply(id: number, mode: AiApplyMode, markdown: string): void;
+  /** Forget a captured target and drop its highlight. */
+  aiRelease(id: number): void;
 }
 
 /** Drawing over the note (PLAN-drawing.md). The host owns persistence: it loads the note's ink
@@ -128,6 +138,12 @@ export interface EditorProps {
   /** Enables drawing over the note (full variant only). Read once at mount for whether ink is
    *  on at all; `groups` and `tool` are then followed as they change. */
   ink?: EditorInkProps;
+  /** Mod-j in the document: the reader asked to write with AI. Full variant only. Omit and the
+   *  key does nothing (AI off). */
+  onAiShortcut?: () => void;
+  /** Native only: show an AI button on the keyboard toolbar that calls this (the host opens its
+   *  assist menu). Web hosts put the button in their own formatting bar. */
+  onAiToolbarPress?: () => void;
 }
 
 /** A reference to open — the payload of {@link EditorProps.onOpenRef}. */

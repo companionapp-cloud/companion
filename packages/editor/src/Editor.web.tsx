@@ -8,7 +8,7 @@ import { VIEWPORT_FIT_EVENT } from "./viewport";
 // real DOM, so no WebView is needed — Vite resolves this via .web.tsx). It grows to
 // its content; the note view's ScrollView provides the scroll and document column.
 export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
-  { markdown, onChangeMarkdown, linkSource, documentSource, onOpenRef, onRefDragStart, onQuickCreate, linkRevision, variant, inline, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange, onFocusChange, tableMenuPresenter, ink },
+  { markdown, onChangeMarkdown, linkSource, documentSource, onOpenRef, onRefDragStart, onQuickCreate, linkRevision, variant, inline, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange, onFocusChange, tableMenuPresenter, ink, onAiShortcut },
   ref,
 ) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -40,6 +40,9 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
   const inkRef = useRef(ink);
   inkRef.current = ink;
   const hasInk = useRef(!!ink).current;
+  // Mod-j follows the host's handler; with none (AI off) the key falls through untouched.
+  const onAiShortcutRef = useRef(onAiShortcut);
+  onAiShortcutRef.current = onAiShortcut;
 
   // The host's selection bar drives the editor through this ref.
   useImperativeHandle(
@@ -52,6 +55,9 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
       resolveQuickCreate: (target) => handleRef.current?.resolveQuickCreate(target),
       inkUndo: () => handleRef.current?.inkUndo(),
       inkRedo: () => handleRef.current?.inkRedo(),
+      aiCapture: async () => handleRef.current?.aiCapture() ?? null,
+      aiApply: (id, mode, markdown) => void handleRef.current?.aiApply(id, mode, markdown),
+      aiRelease: (id) => handleRef.current?.aiRelease(id),
     }),
     [],
   );
@@ -83,6 +89,10 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
       // Desktop injects a Wails-backed native menu presenter; web leaves it undefined (the
       // editor falls back to its built-in HTML popup). Captured once at mount, like documentSource.
       tableMenuPresenter,
+      onAiShortcut: () => {
+        if (!onAiShortcutRef.current) return false;
+        onAiShortcutRef.current();
+      },
       ink: hasInk
         ? {
             onSave: (groups) => inkRef.current?.onSave(groups),

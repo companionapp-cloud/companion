@@ -223,6 +223,25 @@ export const EDITOR_CSS = `
   background: ${c("accentSoft")};
 }
 
+/* Writing assists (ai.ts): the text an assist is working on stays tinted while its panel is
+   open, and a blinking accent bar marks where generated text will land. */
+.ProseMirror .pm-ai-target {
+  background: ${c("accentSoft")};
+  box-shadow: 0 1px 0 ${c("accent")};
+}
+.ProseMirror .pm-ai-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.1em;
+  margin: 0 1px;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  background: ${c("accent")};
+  animation: pm-ai-caret 1.1s ease-in-out infinite;
+}
+@keyframes pm-ai-caret { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .ProseMirror .pm-ai-caret { animation: none; } }
+
 /* Task chip: a referenced task rendered like a todo — a square status box, the title, and
    its due / reminder dates. The status box leads, so the link glyph is dropped. */
 .pm-wikilink-task { gap: 5px; cursor: pointer; }

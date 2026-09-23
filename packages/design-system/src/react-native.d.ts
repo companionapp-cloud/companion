@@ -66,6 +66,7 @@ declare module "react-native" {
     scrollEnabled?: boolean;
     blurOnSubmit?: boolean;
     submitBehavior?: "submit" | "blurAndSubmit" | "newline";
+    onContentSizeChange?: (event: { nativeEvent: { contentSize: { width: number; height: number } } }) => void;
   }
   interface PressableState {
     pressed: boolean;

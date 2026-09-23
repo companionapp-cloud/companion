@@ -32,6 +32,9 @@ import { useEditorRefDrag } from "./DndContext";
 import { useQuickCreateLink } from "./useQuickCreateLink";
 import { useDocumentSource } from "./DocumentSourceContext";
 import { TourAnchor } from "./onboarding/anchors";
+import { useAiStatus } from "./ai/useAiStatus";
+import { useNoteAssist } from "./ai/useNoteAssist";
+import { NoteAiDock } from "./ai/NoteAiPanel";
 
 // The "Today" tool (PLAN §6.x): a large daily-note editor with a small mini-calendar aside.
 // A daily note is an ordinary note stamped with a `date` (YYYY-MM-DD). The note for the
@@ -269,6 +272,16 @@ function DailyNoteBody({
   const [tool, setTool] = useDrawingTool();
   const [inkState, setInkState] = useState<InkState | null>(null);
   const exitDrawing = () => onDrawingChange?.(false);
+
+  // Writing assists, as in the note editor. The day's note may not exist yet: applying a
+  // result is a first write like any keystroke, so it creates the note.
+  const aiOn = !!useAiStatus()?.enabled;
+  const note = hasNote ? notes.notes.find((n) => n.id === noteIdRef.current) ?? null : null;
+  const assist = useNoteAssist({ editorRef, note, title: formatFullDate(date) });
+  const closeAssist = assist.close;
+  useEffect(() => {
+    if (!aiOn || drawing) closeAssist();
+  }, [aiOn, drawing, closeAssist]);
   const drawingBar = drawing ? (
     <DrawingBar
       tool={tool}
@@ -304,6 +317,8 @@ function DailyNoteBody({
         onQuickCreate={quickCreate.onQuickCreate}
         onFormatStateChange={setFormatState}
         onFocusChange={handleFocusChange}
+        onAiShortcut={aiOn ? () => assist.start("generate") : undefined}
+        onAiToolbarPress={aiOn ? assist.openMenu : undefined}
         // Desktop injects a Wails-backed native table menu; web uses the built-in HTML popup.
         tableMenuPresenter={tableMenuPresenter()}
         ink={{
@@ -326,6 +341,7 @@ function DailyNoteBody({
       <View style={styles.page}>
         {body}
         {drawingBar}
+        {!drawing ? <NoteAiDock assist={assist} note={note} /> : null}
         {quickCreate.dialog}
       </View>
     );
@@ -340,9 +356,16 @@ function DailyNoteBody({
       </ScrollView>
       {/* The bar is pinned under the document as the column's last row. A pointer keeps it
           up permanently; touch web only shows it while the editor has focus. */}
+      {!drawing ? <NoteAiDock assist={assist} note={note} /> : null}
       {drawingBar ??
         (!touch || editorFocused ? (
-          <FormattingBar state={formatState} editorRef={editorRef} canAttach={!!documentSource} />
+          <FormattingBar
+            state={formatState}
+            editorRef={editorRef}
+            canAttach={!!documentSource}
+            onAi={aiOn ? () => (assist.phase?.kind === "menu" ? assist.close() : assist.openMenu()) : undefined}
+            aiActive={!!assist.phase}
+          />
         ) : null)}
       {quickCreate.dialog}
     </View>

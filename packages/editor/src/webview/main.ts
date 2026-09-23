@@ -7,6 +7,7 @@ import type { FormatName } from "./../formatCommands";
 import type { DocumentSource, LinkSource, LinkSuggestion, QuickCreateTarget, ResolvedDocument } from "../types";
 import type { TableMenuRequest } from "../tableMenu";
 import type { InkGroupRecord, InkTool } from "../ink/types";
+import type { AiApplyMode } from "../ai";
 
 declare global {
   interface Window {
@@ -39,6 +40,12 @@ declare global {
     __inkSetTool?: (tool: InkTool | null) => void;
     __inkUndo?: () => void;
     __inkRedo?: () => void;
+    // Writing assists: the host captures a target (answered as an aiTarget message), applies a
+    // result to it, releases it, and says whether Mod-j is its to take.
+    __aiCapture?: (requestId: number) => void;
+    __aiApply?: (id: number, mode: AiApplyMode, markdown: string) => void;
+    __aiRelease?: (id: number) => void;
+    __setAiEnabled?: (on: boolean) => void;
   }
 }
 
@@ -107,6 +114,8 @@ let pendingTableMenu: TableMenuRequest | null = null;
 function init(): void {
   const mount = document.getElementById("editor");
   if (!mount) return;
+  // Whether the host has AI on (it injects __setAiEnabled once ready and on every change).
+  let aiEnabled = false;
   const hasLinks = !!window.__HAS_LINK_SOURCE__;
   const simple = window.__EDITOR_VARIANT__ === "simple";
   const handle = createEditor(mount, window.__INITIAL_MARKDOWN__ ?? "", (markdown) => post("change", markdown), {
@@ -143,6 +152,11 @@ function init(): void {
     },
     // Copy actions can't use navigator.clipboard reliably in the WebView; route to the host.
     clipboard: (text) => post("copy", text),
+    // Mod-j asks the host to write with AI, when it has AI on.
+    onAiShortcut: () => {
+      if (!aiEnabled) return false;
+      post("aiShortcut", null);
+    },
     // Ink writes go straight to the host (no batching delay): a WebView can be torn down
     // right after a stroke, and teardown never calls the bridge.
     ink: window.__HAS_INK__
@@ -183,6 +197,12 @@ function init(): void {
   window.__inkSetTool = (tool) => handle.setInkTool(tool);
   window.__inkUndo = () => handle.inkUndo();
   window.__inkRedo = () => handle.inkRedo();
+  window.__aiCapture = (requestId) => post("aiTarget", { requestId, target: handle.aiCapture() });
+  window.__aiApply = (id, mode, markdown) => void handle.aiApply(id, mode, markdown);
+  window.__aiRelease = (id) => handle.aiRelease(id);
+  window.__setAiEnabled = (on) => {
+    aiEnabled = on;
+  };
 
   // The simple editor is an inline field (task note / composer), not a full-screen page, so
   // report its content height and let the host size the WebView to it (bounded by the host's

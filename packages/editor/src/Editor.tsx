@@ -20,6 +20,7 @@ import { EDITOR_CSS } from "./styles";
 import type { FormatName, FormatState } from "./formatCommands";
 import type { TableMenuItem } from "./tableCommands";
 import type { DocumentSource, EditorController, EditorProps, LinkSource, LinkSuggestion, LinkType } from "./types";
+import type { AiTarget } from "./ai";
 
 // The formatting toolbar's buttons, in order. Each format button injects window.__format;
 // the reference button opens the native `[[` picker (it needs a linkSource).
@@ -93,7 +94,7 @@ interface PickerState {
 }
 
 export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
-  { markdown, onChangeMarkdown, linkSource, documentSource, onOpenRef, onQuickCreate, linkRevision, variant, inline, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange, ink },
+  { markdown, onChangeMarkdown, linkSource, documentSource, onOpenRef, onQuickCreate, linkRevision, variant, inline, placeholder, onSubmit, clearSignal, minHeight, maxHeight, debounceMs, onFormatStateChange, ink, onAiShortcut, onAiToolbarPress },
   ref,
 ) {
   const simple = variant === "simple";
@@ -120,6 +121,13 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
   inkRef.current = ink;
   const hasInk = useRef(!!ink && !simple).current;
   const readyRef = useRef(false);
+  // Writing assists: Mod-j (a hardware keyboard) and the toolbar's AI button reach the host
+  // through these; aiCapture answers arrive as aiTarget messages, matched by request id.
+  const onAiShortcutRef = useRef(onAiShortcut);
+  onAiShortcutRef.current = onAiShortcut;
+  const aiEnabled = !!onAiShortcut;
+  const aiPending = useRef(new Map<number, (target: AiTarget | null) => void>());
+  const aiRequestSeq = useRef(0);
 
   const [editorFocused, setEditorFocused] = useState(false);
   const [kbHeight, setKbHeight] = useState(0);
@@ -207,6 +215,15 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inkTool]);
 
+  // Tell the page whether Mod-j is ours to take (AI on) or should fall through.
+  const pushAiEnabled = () => {
+    if (readyRef.current) inject(`window.__setAiEnabled && window.__setAiEnabled(${aiEnabled ? "true" : "false"});`);
+  };
+  useEffect(() => {
+    pushAiEnabled();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiEnabled]);
+
   // Host-driven controls (used by the shared shell; the on-screen toolbar below calls the
   // same injected globals directly).
   useImperativeHandle(
@@ -221,6 +238,19 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
         inject(`window.__resolveQuickCreate && window.__resolveQuickCreate(${jsonArg(target)});`),
       inkUndo: () => inject(`window.__inkUndo && window.__inkUndo();`),
       inkRedo: () => inject(`window.__inkRedo && window.__inkRedo();`),
+      aiCapture: () =>
+        new Promise<AiTarget | null>((resolve) => {
+          const requestId = ++aiRequestSeq.current;
+          aiPending.current.set(requestId, resolve);
+          inject(`window.__aiCapture && window.__aiCapture(${requestId});`);
+          // Don't strand the host if the page never answers (torn down, not ready).
+          setTimeout(() => {
+            if (aiPending.current.delete(requestId)) resolve(null);
+          }, 4000);
+        }),
+      aiApply: (id, mode, markdown) =>
+        inject(`window.__aiApply && window.__aiApply(${Number(id)}, ${jsonArg(mode)}, ${jsonArg(markdown)});`),
+      aiRelease: (id) => inject(`window.__aiRelease && window.__aiRelease(${Number(id)});`),
     }),
     // `inject`/`jsonArg`/`pickDocument` read refs and are stable enough; rebuild is harmless.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -240,6 +270,18 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
           readyRef.current = true;
           pushInkGroups();
           pushInkTool();
+          pushAiEnabled();
+          break;
+        case "aiTarget": {
+          const done = aiPending.current.get(Number(msg.payload?.requestId));
+          if (done) {
+            aiPending.current.delete(Number(msg.payload.requestId));
+            done((msg.payload.target as AiTarget | null) ?? null);
+          }
+          break;
+        }
+        case "aiShortcut":
+          onAiShortcutRef.current?.();
           break;
         case "inkSave":
           if (Array.isArray(msg.payload)) inkRef.current?.onSave(msg.payload);
@@ -408,7 +450,16 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
                 <Icon name="image" size={18} color={colors.textSecondary} />
               </Pressable>
             ) : null}
-            {linkSource || documentSource ? <View style={styles.toolbarDivider} /> : null}
+            {onAiToolbarPress ? (
+              <Pressable
+                accessibilityLabel="Write with AI"
+                style={({ pressed }) => [styles.fmtBtn, pressed && styles.fmtBtnPressed]}
+                onPress={onAiToolbarPress}
+              >
+                <Icon name="sparkle" size={18} color={colors.textAccent} />
+              </Pressable>
+            ) : null}
+            {linkSource || documentSource || onAiToolbarPress ? <View style={styles.toolbarDivider} /> : null}
             {FORMAT_BUTTONS.map((b) => {
               const active = !!formatState?.active[b.name];
               const disabled = !!formatState && !formatState.enabled[b.name];

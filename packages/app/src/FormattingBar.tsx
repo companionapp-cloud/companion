@@ -28,11 +28,17 @@ export function FormattingBar({
   state,
   editorRef,
   canAttach,
+  onAi,
+  aiActive = false,
 }: {
   state: FormatState | null;
   editorRef: RefObject<EditorController | null>;
   /** Show the file-embed action (PLAN §6.9) — only when a documentSource is wired. */
   canAttach: boolean;
+  /** Show the AI button (writing assists), which calls this; omitted while AI is off. */
+  onAi?: () => void;
+  /** The assist panel is open. */
+  aiActive?: boolean;
 }) {
   const touch = useDensity() === "touch";
   const size = touch ? "lg" : "sm";
@@ -53,6 +59,19 @@ export function FormattingBar({
 
   const buttons = (
     <>
+      {/* The AI button leads, so it stays in reach when a narrow column (the metadata panel
+          open beside it) clips the end of the bar. */}
+      {onAi ? (
+        <>
+          {cell(
+            "ai",
+            <IconButton label="AI assist" size={size} active={aiActive} onPress={onAi}>
+              <Icon name="sparkle" size={glyph} color={colors.textAccent} />
+            </IconButton>,
+          )}
+          <Divider vertical style={styles.divider} />
+        </>
+      ) : null}
       {FORMAT_BUTTONS.map((b) => {
         const active = !!state?.active[b.name];
         const disabled = state ? !state.enabled[b.name] : false;
@@ -109,7 +128,7 @@ export function FormattingBar({
       {buttons}
       <View style={{ flex: 1 }} />
       <Text variant="mono" tone="quaternary" numberOfLines={1}>
-        markdown · ⌘B ⌘I ⌘K
+        {onAi ? "markdown · ⌘B ⌘I ⌘K · ⌘J AI" : "markdown · ⌘B ⌘I ⌘K"}
       </Text>
     </View>
   );

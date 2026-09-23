@@ -23,6 +23,7 @@ import { documentNodeView, isDocumentEmbed } from "./documentView";
 import { buildFormatCommands, computeFormatState, type FormatName, type FormatState } from "./formatCommands";
 import type { DocumentSource, LinkRef, LinkSource, QuickCreateRequest, QuickCreateTarget, RefDragStart } from "./types";
 import { InkLayer } from "./ink/layer";
+import { aiTargetsPlugin, applyAiResult, captureAiTarget, releaseAiTarget, type AiApplyMode, type AiTarget } from "./ai";
 import type { InkCallbacks, InkGroupRecord, InkTool } from "./ink/types";
 
 // The shared ProseMirror setup — pure DOM, no framework. Used directly on web/desktop
@@ -66,6 +67,15 @@ export interface EditorHandle {
   setInkTool(tool: InkTool | null): void;
   inkUndo(): void;
   inkRedo(): void;
+  /** Capture what a writing assist acts on — the selection, or the whole note — as a target
+   *  that follows later edits and stays highlighted until released (ai.ts). Full variant only;
+   *  null in the simple editor. */
+  aiCapture(): AiTarget | null;
+  /** Put an assist's markdown result into the note for a target (an undoable edit) and focus
+   *  the editor. Returns false when the target is gone or the result is empty. */
+  aiApply(id: number, mode: AiApplyMode, markdown: string): boolean;
+  /** Forget a target and drop its highlight. */
+  aiRelease(id: number): void;
 }
 
 export interface CreateEditorOptions {
@@ -119,6 +129,9 @@ export interface CreateEditorOptions {
    *  these callbacks and feeds them back with {@link EditorHandle.setInkGroups}. Full variant
    *  only. `saveDelayMs` batches a burst of strokes into one write (0 writes each stroke). */
   ink?: InkCallbacks & { saveDelayMs?: number };
+  /** Mod-j: the reader asked to write with AI. Return false to decline (AI off), letting the
+   *  key through. Full variant only. */
+  onAiShortcut?: () => boolean | void;
 }
 
 // Show placeholder text over an empty document. Decorates the single empty paragraph with a
@@ -273,6 +286,7 @@ export function createEditor(
         // is injected, else the built-in HTML popup.
         tableEditing(),
         trailingParagraphPlugin(),
+        aiTargetsPlugin(),
         tableMenuPlugin({ presenter: options.tableMenuPresenter, clipboard: options.clipboard }),
         // An inline full editor (an overview's description) prompts while it is empty.
         ...(options.placeholder ? [placeholderPlugin(options.placeholder)] : []),
@@ -291,6 +305,7 @@ export function createEditor(
             if (dispatch) dispatch(state.tr.insertText("[["));
             return true;
           },
+          "Mod-j": () => (options.onAiShortcut ? options.onAiShortcut() !== false : false),
         }),
         // List + table editing (before baseKeymap so Enter/Tab are intercepted first): Enter
         // splits a list item or leaves the list, but is swallowed inside a table cell (GFM cells
@@ -560,6 +575,8 @@ export function createEditor(
     }
   };
 
+  const aiCodec = { parse, serialize };
+
   return {
     destroy() {
       if (options.flushOnDestroy) flush();
@@ -625,6 +642,35 @@ export function createEditor(
     },
     inkRedo() {
       ink?.redo();
+    },
+    aiCapture() {
+      if (simple) return null;
+      try {
+        const { tr, target } = captureAiTarget(view.state, aiCodec);
+        view.dispatch(tr);
+        return target;
+      } catch {
+        return null;
+      }
+    },
+    aiApply(id: number, mode: AiApplyMode, markdown: string) {
+      try {
+        const tr = applyAiResult(view.state, id, mode, markdown, aiCodec);
+        if (!tr) return false;
+        view.dispatch(tr);
+        view.focus();
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    aiRelease(id: number) {
+      try {
+        const tr = releaseAiTarget(view.state, id);
+        if (tr) view.dispatch(tr);
+      } catch {
+        /* view torn down */
+      }
     },
     resolveQuickCreate(target: QuickCreateTarget | null) {
       const pending = pendingQuickCreate;

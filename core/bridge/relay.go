@@ -34,7 +34,7 @@ const (
 )
 
 // Methods a host will run for a remote caller. Everything else is refused before Invoke.
-var relayAllowedMethods = map[string]bool{"chats.send": true, "chats.cancel": true, "agents.models": true}
+var relayAllowedMethods = map[string]bool{"chats.send": true, "chats.cancel": true, "agents.models": true, "ai.run": true}
 
 // relayClient is the per-process relay state for the configured sync account.
 type relayClient struct {
@@ -646,6 +646,8 @@ func (c *Core) serveRelayRequest(parent context.Context, f wireFrame) {
 		c.postFrames(f.RequestID, []map[string]any{{"type": relayDone}})
 	case "chats.send":
 		c.serveRemoteChat(parent, f.RequestID, args)
+	case "ai.run":
+		c.serveRemoteAI(parent, f.RequestID, args)
 	}
 }
 

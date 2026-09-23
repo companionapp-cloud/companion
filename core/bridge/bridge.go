@@ -73,6 +73,8 @@ type Core struct {
 	// stop a runaway CLI; guarded by chatMu.
 	chatMu  sync.Mutex
 	working map[string]context.CancelFunc
+	// aiRuns maps each live editor-assist run (ai.go) to its cancel func; guarded by chatMu.
+	aiRuns map[string]context.CancelFunc
 
 	// calPushTimer debounces the provider push after the assistant edits calendar events
 	// (aitools.go); guarded by calPushMu.
@@ -103,7 +105,7 @@ type Core struct {
 
 // New builds a Core over an already-open store.
 func New(st *store.Store) *Core {
-	c := &Core{store: st, working: map[string]context.CancelFunc{}, oauth: newOAuthState()}
+	c := &Core{store: st, working: map[string]context.CancelFunc{}, aiRuns: map[string]context.CancelFunc{}, oauth: newOAuthState()}
 	c.registerPlatformOAuthPurposes()
 	return c
 }
@@ -425,6 +427,12 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.chatsWorking()
 	case "chats.cancel":
 		return c.chatsCancel(payload)
+	case "ai.status":
+		return c.aiStatus()
+	case "ai.run":
+		return c.aiRun(payload)
+	case "ai.cancel":
+		return c.aiCancel(payload)
 	case "calendar.feeds.list":
 		return c.calendarFeedsList()
 	case "calendar.feeds.create":

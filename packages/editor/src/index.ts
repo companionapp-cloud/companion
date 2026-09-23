@@ -16,6 +16,8 @@ export type {
   EditorInkProps,
 } from "./types";
 export type { FormatName, FormatState } from "./formatCommands";
+export { AI_CURSOR_MARKER } from "./ai";
+export type { AiTarget, AiApplyMode } from "./ai";
 export { VIEWPORT_FIT_EVENT } from "./viewport";
 export {
   DEFAULT_INK_TOOL,

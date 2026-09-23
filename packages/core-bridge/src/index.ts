@@ -135,6 +135,19 @@ export { graphApi } from "./graph";
 export type { GraphApi, Graph, GraphNode, GraphEdge } from "./graph";
 export { chatsApi } from "./chats";
 export type { ChatsApi, Chat, ChatDetail, StoredChatMessage, ChatChangedEvent, ChatWorkingEvent } from "./chats";
+export { aiApi } from "./ai";
+export type {
+  AiApi,
+  AiTask,
+  AiStatus,
+  AiRunInput,
+  AiGrammarIssue,
+  AiGrammarResult,
+  AiMetadataResult,
+  AiDeltaEvent,
+  AiDoneEvent,
+  AiErrorEvent,
+} from "./ai";
 export { llmApi } from "./llm";
 export type { LlmApi, ChatMessage, ToolCall, ToolResult, LLMTokenEvent, LLMToolEvent, LLMErrorEvent } from "./llm";
 export { agentsApi, runtimeLabel, isCliRuntime, isCloudRuntime, CLI_RUNTIMES, CLOUD_RUNTIMES } from "./agents";
