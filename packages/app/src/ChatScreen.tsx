@@ -783,6 +783,8 @@ function humanizeTool(name: string): string {
     get_event: "read an event",
     list_canvases: "checked your canvases",
     get_canvas: "read a canvas",
+    list_areas: "checked your areas",
+    list_lists: "checked a project's lists",
     read_from_internet: "read a web page",
     read_from_google: "searched the web",
     render_note: "showed a note",
@@ -794,6 +796,8 @@ function humanizeTool(name: string): string {
     update_note: "updated a note",
     create_task: "created a task",
     update_task: "updated a task",
+    create_canvas: "created a canvas",
+    update_canvas: "updated a canvas",
     create_event: "added an event",
     update_event: "updated an event",
     // CLI agents (Claude Code / Codex) report their own tools.

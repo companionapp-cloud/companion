@@ -500,7 +500,7 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 	r.Add(Tool{
 		Spec: ToolSpec{
 			Name:        "create_note",
-			Description: "Create a new note. Call this when the user asks you to write down, capture, or draft a note. Use Markdown for the body; link to other entities with [[type:id]] wikilinks. To make it a structured object (e.g. a Book or Person), set objectTypeId + props — call list_object_types first to see the archetypes and their fields.",
+			Description: "Create a new note. Call this when the user asks you to write down, capture, or draft a note. Use Markdown for the body; link to other entities with [[type:id]] wikilinks. To make it a structured object (e.g. a Book or Person), set objectTypeId + props — call list_object_types first to see the archetypes and their fields. To file it, set projectId (from list_projects) or areaId (from list_areas).",
 			Schema: json.RawMessage(`{
 				"type":"object",
 				"additionalProperties":false,
@@ -508,7 +508,9 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 					"title":{"type":"string"},
 					"contentMd":{"type":"string","description":"Markdown body."},
 					"objectTypeId":{"type":"string","description":"Optional archetype id (from list_object_types) to make this a structured object."},
-					"props":{"type":"object","description":"Optional structured metadata for the objectTypeId, keyed by the type's field keys. Validated against the type's schema."}
+					"props":{"type":"object","description":"Optional structured metadata for the objectTypeId, keyed by the type's field keys. Validated against the type's schema."},
+					` + projectIDProp + `,
+					` + areaIDProp + `
 				},
 				"required":["title"]
 			}`),
@@ -524,11 +526,18 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 			if err := json.Unmarshal(args, &a); err != nil {
 				return "", err
 			}
+			f, err := parseFiling(s, args)
+			if err != nil {
+				return "", err
+			}
 			n, err := s.Notes.Create(store.CreateNoteInput{
 				Title: a.Title, ContentMD: a.ContentMD,
 				ObjectTypeID: optStr(a.ObjectTypeID), Props: optProps(a.Props),
 			})
 			if err != nil {
+				return "", err
+			}
+			if err := f.apply(s, domain.NodeNote, n.ID); err != nil {
 				return "", err
 			}
 			return writeResult(domain.NodeNote, n.ID, n.Title)
@@ -538,7 +547,7 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 	r.Add(Tool{
 		Spec: ToolSpec{
 			Name:        "update_note",
-			Description: "Update an existing note's title and/or body, or archetype it (objectTypeId + props; clearObjectType to remove). Call this only with an id you already know (from search_notes). Omit a field to leave it unchanged.",
+			Description: "Update an existing note's title and/or body, archetype it (objectTypeId + props; clearObjectType to remove), or move it into a project (projectId) or area (areaId). Call this only with an id you already know (from search_notes). Omit a field to leave it unchanged.",
 			Schema: json.RawMessage(`{
 				"type":"object",
 				"additionalProperties":false,
@@ -548,7 +557,9 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 					"contentMd":{"type":"string"},
 					"objectTypeId":{"type":"string","description":"Archetype id (from list_object_types) to set."},
 					"clearObjectType":{"type":"boolean","description":"Remove the archetype."},
-					"props":{"type":"object","description":"Structured metadata for the objectTypeId, validated against its schema."}
+					"props":{"type":"object","description":"Structured metadata for the objectTypeId, validated against its schema."},
+					` + projectIDNullableProp + `,
+					` + areaIDNullableProp + `
 				},
 				"required":["id"]
 			}`),
@@ -573,8 +584,15 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 			if p := optProps(a.Props); p != nil {
 				in.Props = &p
 			}
+			f, err := parseFiling(s, args)
+			if err != nil {
+				return "", err
+			}
 			n, err := s.Notes.Update(a.ID, in)
 			if err != nil {
+				return "", err
+			}
+			if err := f.apply(s, domain.NodeNote, n.ID); err != nil {
 				return "", err
 			}
 			return writeResult(domain.NodeNote, n.ID, n.Title)
@@ -584,7 +602,7 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 	r.Add(Tool{
 		Spec: ToolSpec{
 			Name:        "create_task",
-			Description: "Create a single task. A task has an optional start (startAt: when to begin working on it), an optional deadline (dueAt: when it must be done), and any number of reminders. Reminders are NOT extra tasks: \"remind me to file taxes by April 30, a week before and the day before\" is ONE task with dueAt = April 30 and reminders [\"1 week before\", \"1 day before\"]. Each reminder is either a lead counted back from the deadline (\"at the deadline\", \"1 hour before\", \"1 day before\", \"3 days before\", \"1 week before\", \"2 weeks before\", \"1 month before\"), which needs a dueAt and follows it if it moves, or an RFC3339 timestamp for an exact moment. Dates are RFC3339 — call get_date first to compute them in the user's timezone. For a REPEATING task (\"every monday\", \"the first of each month\"), set `repeat` and dueAt (or startAt, if it has no deadline) to the FIRST occurrence — the server generates the rest, and lead reminders follow each occurrence. To make it a structured object, set objectTypeId + props (call list_object_types first to see the archetypes and their fields).",
+			Description: "Create a single task. A task has an optional start (startAt: when to begin working on it), an optional deadline (dueAt: when it must be done), and any number of reminders. Reminders are NOT extra tasks: \"remind me to file taxes by April 30, a week before and the day before\" is ONE task with dueAt = April 30 and reminders [\"1 week before\", \"1 day before\"]. Each reminder is either a lead counted back from the deadline (\"at the deadline\", \"1 hour before\", \"1 day before\", \"3 days before\", \"1 week before\", \"2 weeks before\", \"1 month before\"), which needs a dueAt and follows it if it moves, or an RFC3339 timestamp for an exact moment. Dates are RFC3339 — call get_date first to compute them in the user's timezone. For a REPEATING task (\"every monday\", \"the first of each month\"), set `repeat` and dueAt (or startAt, if it has no deadline) to the FIRST occurrence — the server generates the rest, and lead reminders follow each occurrence. To make it a structured object, set objectTypeId + props (call list_object_types first to see the archetypes and their fields). To file it, set projectId (from list_projects), listId (from list_lists — also files it in that list's project) or areaId (from list_areas).",
 			Schema: json.RawMessage(`{
 				"type":"object",
 				"additionalProperties":false,
@@ -597,7 +615,10 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 					"reminders":{"type":"array","items":{"type":"string"},"description":"Optional reminders, each a lead before the deadline (\"1 day before\", \"a week before\", \"at the deadline\") or an RFC3339 timestamp."},
 					"repeat":{"type":"string","description":"Optional recurrence: a phrase like \"every monday\", \"every 2 weeks\", \"the third wednesday of the month\", or an RFC5545 RRULE. Makes this a repeating task."},
 					"objectTypeId":{"type":"string","description":"Optional archetype id (from list_object_types) to make this a structured object."},
-					"props":{"type":"object","description":"Optional structured metadata for the objectTypeId, keyed by the type's field keys. Validated against the type's schema."}
+					"props":{"type":"object","description":"Optional structured metadata for the objectTypeId, keyed by the type's field keys. Validated against the type's schema."},
+					` + projectIDProp + `,
+					` + listIDProp + `,
+					` + areaIDProp + `
 				},
 				"required":["title"]
 			}`),
@@ -634,11 +655,18 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 			if err != nil {
 				return "", err
 			}
+			f, err := parseFiling(s, args)
+			if err != nil {
+				return "", err
+			}
 			t, err := s.Tasks.Create(store.CreateTaskInput{
 				Title: a.Title, NotesMD: a.NotesMD, StartAt: start, Someday: a.Someday, DueAt: due, Reminders: reminders, RepeatRule: repeat,
 				ObjectTypeID: optStr(a.ObjectTypeID), Props: optProps(a.Props),
 			})
 			if err != nil {
+				return "", err
+			}
+			if err := f.apply(s, domain.NodeTask, t.ID); err != nil {
 				return "", err
 			}
 			return writeResult(domain.NodeTask, t.ID, t.Title)
@@ -648,7 +676,7 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 	r.Add(Tool{
 		Spec: ToolSpec{
 			Name:        "update_task",
-			Description: "Update an existing task — retitle it, change its notes, mark it done/cancelled, set/change its start (startAt) or deadline (dueAt), change its reminders, make it repeat (repeat), or archetype it (objectTypeId + props). `reminders` replaces the whole list ([] removes them all); `addReminders` adds to the existing ones. Use clearStartAt / clearDueAt / clearRepeat to remove those. Call this only with an id you already know (from list_tasks or search_notes). Omit a field to leave it unchanged; compute any dates with get_date.",
+			Description: "Update an existing task — retitle it, change its notes, mark it done/cancelled, set/change its start (startAt) or deadline (dueAt), change its reminders, make it repeat (repeat), archetype it (objectTypeId + props), or move it into a project (projectId), onto a list (listId) or into an area (areaId). `reminders` replaces the whole list ([] removes them all); `addReminders` adds to the existing ones. Use clearStartAt / clearDueAt / clearRepeat to remove those. Call this only with an id you already know (from list_tasks or search_notes). Omit a field to leave it unchanged; compute any dates with get_date.",
 			Schema: json.RawMessage(`{
 				"type":"object",
 				"additionalProperties":false,
@@ -668,7 +696,10 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 					"clearRepeat":{"type":"boolean","description":"Stop the task repeating."},
 					"objectTypeId":{"type":"string","description":"Archetype id (from list_object_types) to set."},
 					"clearObjectType":{"type":"boolean","description":"Remove the archetype."},
-					"props":{"type":"object","description":"Structured metadata for the objectTypeId, validated against its schema."}
+					"props":{"type":"object","description":"Structured metadata for the objectTypeId, validated against its schema."},
+					` + projectIDNullableProp + `,
+					` + listIDNullableProp + `,
+					` + areaIDNullableProp + `
 				},
 				"required":["id"]
 			}`),
@@ -740,8 +771,15 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 			if p := optProps(a.Props); p != nil {
 				in.Props = &p
 			}
+			f, err := parseFiling(s, args)
+			if err != nil {
+				return "", err
+			}
 			t, err := s.Tasks.Update(a.ID, in)
 			if err != nil {
+				return "", err
+			}
+			if err := f.apply(s, domain.NodeTask, t.ID); err != nil {
 				return "", err
 			}
 			return writeResult(domain.NodeTask, t.ID, t.Title)
@@ -750,6 +788,7 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 
 	addCalendarTools(r, s, o.events)
 	addCanvasTools(r, s)
+	addFilingTools(r, s)
 	addWebTools(r)
 
 	return r

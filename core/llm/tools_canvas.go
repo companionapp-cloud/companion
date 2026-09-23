@@ -184,6 +184,89 @@ func addCanvasTools(r *Registry, s *store.Store) {
 			return fmt.Sprintf("An inline preview of [[%s:%s]] (%q) is now shown to the user in the chat. Do not describe its layout again — just add any commentary.", domain.NodeCanvas, c.ID, canvasName(c)), nil
 		},
 	})
+
+	r.Add(Tool{
+		Spec: ToolSpec{
+			Name:        "create_canvas",
+			Description: "Create a new, empty canvas (whiteboard). Call this when the user asks for a new canvas, board or whiteboard. To file it, set projectId (from list_projects) or areaId (from list_areas).",
+			Schema: json.RawMessage(`{
+				"type":"object",
+				"additionalProperties":false,
+				"properties":{
+					"name":{"type":"string"},
+					` + projectIDProp + `,
+					` + areaIDProp + `
+				},
+				"required":["name"]
+			}`),
+		},
+		Write: true,
+		Handler: func(_ context.Context, args json.RawMessage) (string, error) {
+			var a struct {
+				Name string `json:"name"`
+			}
+			if err := json.Unmarshal(args, &a); err != nil {
+				return "", err
+			}
+			f, err := parseFiling(s, args)
+			if err != nil {
+				return "", err
+			}
+			c, err := s.Canvases.Create(store.CreateCanvasInput{Name: a.Name})
+			if err != nil {
+				return "", err
+			}
+			if err := f.apply(s, domain.NodeCanvas, c.ID); err != nil {
+				return "", err
+			}
+			return writeResult(domain.NodeCanvas, c.ID, canvasName(c))
+		},
+	})
+
+	r.Add(Tool{
+		Spec: ToolSpec{
+			Name:        "update_canvas",
+			Description: "Rename a canvas, or move it into a project (projectId) or area (areaId). Call this only with an id you already know (from list_canvases). Omit a field to leave it unchanged.",
+			Schema: json.RawMessage(`{
+				"type":"object",
+				"additionalProperties":false,
+				"properties":{
+					"id":{"type":"string"},
+					"name":{"type":"string"},
+					` + projectIDNullableProp + `,
+					` + areaIDNullableProp + `
+				},
+				"required":["id"]
+			}`),
+		},
+		Write: true,
+		Handler: func(_ context.Context, args json.RawMessage) (string, error) {
+			var a struct {
+				ID   string  `json:"id"`
+				Name *string `json:"name"`
+			}
+			if err := json.Unmarshal(args, &a); err != nil {
+				return "", err
+			}
+			f, err := parseFiling(s, args)
+			if err != nil {
+				return "", err
+			}
+			c, err := canvasByID(s, a.ID)
+			if err != nil {
+				return "", err
+			}
+			if a.Name != nil {
+				if c, err = s.Canvases.Update(c.ID, store.UpdateCanvasInput{Name: a.Name}); err != nil {
+					return "", err
+				}
+			}
+			if err := f.apply(s, domain.NodeCanvas, c.ID); err != nil {
+				return "", err
+			}
+			return writeResult(domain.NodeCanvas, c.ID, canvasName(c))
+		},
+	})
 }
 
 func canvasByID(s *store.Store, id string) (*domain.Canvas, error) {
