@@ -1,7 +1,7 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Animated, PanResponder, Platform, View, type GestureResponderHandlers, type PanResponderGestureState } from "react-native";
 import { Icon, Text, colors, noSelect, radius, shadow, space, type IconName } from "@companion/design-system";
-import type { RefDragStart } from "@companion/editor";
+import type { EditorController, RefDragStart } from "@companion/editor";
 import { DragGrip } from "./DragGrip";
 
 /** What is being dragged, plus a label for the drag ghost: a note, task or canvas (a list row,
@@ -415,8 +415,9 @@ export function useRefDrag(type: string, id: string, label: string): RefDragProp
 }
 
 /** An editor's `onRefDragStart`: a link chip dragged out of a note, a task's notes, the daily
- *  note or the chat composer is handed to the drag layer. Undefined without one. */
-export function useEditorRefDrag(): ((drag: RefDragStart) => boolean) | undefined {
+ *  note or the chat composer is handed to the drag layer. Undefined without one. `source` names
+ *  the editor, when it also takes drops (useEditorDrop), so a chip isn't dropped back into it. */
+export function useEditorRefDrag(source?: string): ((drag: RefDragStart) => boolean) | undefined {
   const begin = useContext(DndCtx)?.beginPointerDrag;
   return useMemo(
     () =>
@@ -424,12 +425,40 @@ export function useEditorRefDrag(): ((drag: RefDragStart) => boolean) | undefine
         ? (drag: RefDragStart) => {
             const payload = refPayload(drag.ref.type, drag.ref.id, drag.label);
             if (!payload) return false;
-            begin(payload, drag.x, drag.y);
+            begin(source ? { ...payload, source } : payload, drag.x, drag.y);
             return true;
           }
         : undefined,
-    [begin],
+    [begin, source],
   );
+}
+
+/** Makes a note's editor a drop target (web/desktop): a note, task, canvas or project dragged
+ *  onto it (an agenda item, a list row, a chip from another note) lands as a link chip where
+ *  it's released, and a caret marks the spot while the drag hovers. `id` names the target; a
+ *  chip dragged out of the same editor (`useEditorRefDrag(id)`) passes over it. `accepts`
+ *  narrows it further. Returns the ref to attach to the view around the editor. */
+export function useEditorDrop(id: string, editorRef: RefObject<EditorController | null>, accepts?: (payload: DragPayload) => boolean) {
+  const acceptsRef = useRef(accepts);
+  acceptsRef.current = accepts;
+  const { ref, isOver } = useDropTarget(
+    id,
+    (p, x, y) => {
+      editorRef.current?.showDropCaret(null);
+      editorRef.current?.insertRefAt({ type: p.kind, id: p.id, title: p.label }, x, y);
+    },
+    { accepts: (p) => p.source !== id && (acceptsRef.current?.(p) ?? true) },
+  );
+  const subscribe = useContext(DndCtx)?.subscribeMove;
+  useEffect(() => {
+    if (!isOver || !subscribe) return;
+    const unsubscribe = subscribe((x, y) => editorRef.current?.showDropCaret({ x, y }));
+    return () => {
+      unsubscribe();
+      editorRef.current?.showDropCaret(null);
+    };
+  }, [isOver, subscribe, editorRef]);
+  return ref;
 }
 
 /** The drag layer's `beginPointerDrag`, for a drag the DOM began outside React Native (the

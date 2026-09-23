@@ -11,6 +11,7 @@ import {
   control,
   icon,
   motion,
+  noSelect,
   radius,
   row,
   space,
@@ -23,7 +24,7 @@ import { AgendaGrid, clockLabel, type GridBlock, type GridDrop } from "./AgendaG
 import { AgendaPalette } from "./AgendaPalette";
 import { useCalendar } from "./CalendarProvider";
 import { DAY_MIN, POINT_MIN, fitsInDay, taskBlockPatch } from "./calendarLayout";
-import type { DragPayload } from "./DndContext";
+import { refPayload, useRefDrag, type DragPayload } from "./DndContext";
 import { EventEditorDialog, type EventEditorTarget } from "./EventEditorDialog";
 import { useTasks } from "./TasksProvider";
 import { contextMenuProps, type MenuEntry } from "./contextMenu";
@@ -427,6 +428,7 @@ export function Agenda({
           <AgendaRow
             key={it.id}
             kind={it.kind}
+            sourceId={it.sourceId}
             title={it.title}
             time={timeLabel(it)}
             color={it.color}
@@ -474,6 +476,10 @@ export function Agenda({
                 return item ? menuFor(item) : [];
               }}
               onMove={moveBlock}
+              dragPayload={(block) => {
+                const item = timed.find((it) => it.id === block.id);
+                return item ? refPayload(item.kind, item.sourceId, item.title) : null;
+              }}
               onPressSlot={creatable ? (from) => setPicking({ from }) : undefined}
               drop={creatable ? drop : undefined}
             />
@@ -662,6 +668,7 @@ export function UpcomingAgenda({
                 <AgendaRow
                   key={it.id}
                   kind={it.kind}
+                  sourceId={it.sourceId}
                   title={it.title}
                   time={timeLabel(it)}
                   color={it.color}
@@ -691,9 +698,11 @@ export function UpcomingAgenda({
 }
 
 /** One agenda line: time · kind · title. With a pointer, hovering highlights the row. Pressing opens the item when the host gave it somewhere to go. Pointer rows are
- *  24px; touch rows 44px. */
+ *  24px; touch rows 44px. A task, note or project drags (web/desktop) onto the daily note as
+ *  a chip, onto a project or an area to file it. */
 function AgendaRow({
   kind,
+  sourceId,
   title,
   time,
   color,
@@ -704,6 +713,8 @@ function AgendaRow({
   touch,
 }: {
   kind: CalendarItemKind;
+  /** The backing row's id, which a drag carries. */
+  sourceId: string;
   title: string;
   /** The mono time column: 'HH:mm' or 'all day'. */
   time: string;
@@ -718,34 +729,37 @@ function AgendaRow({
   touch: boolean;
 }) {
   const gap = touch ? space.ml : space.md;
+  const drag = useRefDrag(kind, sourceId, title);
   return (
-    <Pressable
-      {...contextMenuProps(menu ?? null)}
-      disabled={!onPress}
-      onPress={onPress}
-      style={({ hovered, pressed }: PressState) => [
-        styles.row,
-        transition("background-color", motion.instant),
-        {
-          minHeight: touch ? row.touch : row.h,
-          backgroundColor: pressed && onPress ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent",
-        },
-      ]}
-    >
-      <View style={[styles.rowMain, { gap }]}>
-        <Text variant="mono" tone="quaternary" style={{ width: timeWidth, flexShrink: 0 }} numberOfLines={1}>
-          {time}
-        </Text>
-        {touch ? (
-          <View style={[styles.dot, { backgroundColor: color ?? KIND_COLOR[kind] }]} />
-        ) : (
-          <Icon name={KIND_ICON[kind]} size={icon.sm} color={color ?? colors.textQuaternary} />
-        )}
-        <Text variant="label" tone={done ? "tertiary" : undefined} style={[styles.title, done ? styles.struck : null]} numberOfLines={1}>
-          {title || "Untitled"}
-        </Text>
-      </View>
-    </Pressable>
+    <View {...drag} style={drag ? noSelect : null}>
+      <Pressable
+        {...contextMenuProps(menu ?? null)}
+        disabled={!onPress}
+        onPress={onPress}
+        style={({ hovered, pressed }: PressState) => [
+          styles.row,
+          transition("background-color", motion.instant),
+          {
+            minHeight: touch ? row.touch : row.h,
+            backgroundColor: pressed && onPress ? colors.surfaceActive : hovered ? colors.surfaceHover : "transparent",
+          },
+        ]}
+      >
+        <View style={[styles.rowMain, { gap }]}>
+          <Text variant="mono" tone="quaternary" style={{ width: timeWidth, flexShrink: 0 }} numberOfLines={1}>
+            {time}
+          </Text>
+          {touch ? (
+            <View style={[styles.dot, { backgroundColor: color ?? KIND_COLOR[kind] }]} />
+          ) : (
+            <Icon name={KIND_ICON[kind]} size={icon.sm} color={color ?? colors.textQuaternary} />
+          )}
+          <Text variant="label" tone={done ? "tertiary" : undefined} style={[styles.title, done ? styles.struck : null]} numberOfLines={1}>
+            {title || "Untitled"}
+          </Text>
+        </View>
+      </Pressable>
+    </View>
   );
 }
 

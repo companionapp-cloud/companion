@@ -1,4 +1,4 @@
-import { EditorState, Plugin, TextSelection } from "prosemirror-state";
+import { EditorState, Plugin, Selection, TextSelection } from "prosemirror-state";
 import type { Command } from "prosemirror-state";
 import { EditorView, Decoration, DecorationSet } from "prosemirror-view";
 import type { Node } from "prosemirror-model";
@@ -60,6 +60,13 @@ export interface EditorHandle {
   /** Complete (or cancel) a quick-create started from an empty `[[label]]` link: replace the
    * raw text with a resolved chip for `target`, or leave it untouched when `target` is null. */
   resolveQuickCreate(target: QuickCreateTarget | null): void;
+  /** Place a chip for `target` where a drag from the host was released: at the text under
+   *  (x, y), in window coordinates, else at the end of the document. Spaced off the words
+   *  around it. False if it couldn't be placed. */
+  insertRefAt(target: QuickCreateTarget, x: number, y: number): boolean;
+  /** While a drag from the host hovers the editor, mark where `insertRefAt` would put its chip;
+   *  null takes the mark away. */
+  showDropCaret(point: { x: number; y: number } | null): void;
   /** Replace the note's ink groups with the host's current set (PLAN-drawing.md). No-op
    *  unless the editor was created with `ink`. */
   setInkGroups(groups: InkGroupRecord[]): void;
@@ -577,11 +584,26 @@ export function createEditor(
 
   const aiCodec = { parse, serialize };
 
+  // Where a drop at (x, y) lands: the nearest text position under the pointer, else (off the
+  // text, or on something that can't hold a chip) the end of the document, which the trailing
+  // paragraph keeps a text position.
+  const dropSelection = (x: number, y: number): TextSelection => {
+    const { doc } = view.state;
+    const hit = view.posAtCoords({ left: x, top: y });
+    const near = hit ? Selection.near(doc.resolve(hit.pos)) : null;
+    if (near instanceof TextSelection) return near;
+    const end = Selection.atEnd(doc);
+    return end instanceof TextSelection ? end : TextSelection.create(doc, doc.content.size);
+  };
+  // The drop caret: a fixed-position accent bar laid over the text, made on first use.
+  let dropCaret: HTMLDivElement | null = null;
+
   return {
     destroy() {
       if (options.flushOnDestroy) flush();
       else if (timer) clearTimeout(timer);
       ink?.destroy(!!options.flushOnDestroy);
+      dropCaret?.remove();
       view.destroy();
     },
     refreshLinks() {
@@ -668,6 +690,52 @@ export function createEditor(
       try {
         const tr = releaseAiTarget(view.state, id);
         if (tr) view.dispatch(tr);
+      } catch {
+        /* view torn down */
+      }
+    },
+    insertRefAt(target: QuickCreateTarget, x: number, y: number) {
+      try {
+        const at = dropSelection(x, y).head;
+        const $at = view.state.doc.resolve(at);
+        const before = $at.nodeBefore;
+        const after = $at.nodeAfter;
+        // Space the chip off a word it would otherwise touch (another chip counts as a word).
+        const gapBefore = !!before && !(before.isText && /\s$/.test(before.text ?? ""));
+        const gapAfter = !after || !(after.isText && /^\s/.test(after.text ?? ""));
+        const node = wikilinkNode(activeSchema, { type: target.type, id: target.id, alias: target.title });
+        const tr = view.state.tr.setSelection(TextSelection.create(view.state.doc, at));
+        if (gapBefore) tr.insertText(" ");
+        tr.replaceSelectionWith(node, false);
+        if (gapAfter) tr.insertText(" ");
+        view.dispatch(tr.scrollIntoView());
+        view.focus();
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    showDropCaret(point: { x: number; y: number } | null) {
+      if (!point) {
+        dropCaret?.remove();
+        dropCaret = null;
+        return;
+      }
+      try {
+        const coords = view.coordsAtPos(dropSelection(point.x, point.y).head);
+        if (!dropCaret) {
+          dropCaret = document.createElement("div");
+          dropCaret.className = "pm-drop-caret";
+          mount.appendChild(dropCaret);
+        }
+        // Fixed resolves against the window only without a transformed ancestor (a sliding
+        // pane is one): measure where its origin actually sits and place it from there.
+        dropCaret.style.left = "0px";
+        dropCaret.style.top = "0px";
+        const origin = dropCaret.getBoundingClientRect();
+        dropCaret.style.left = `${coords.left - origin.left - 1}px`;
+        dropCaret.style.top = `${coords.top - origin.top}px`;
+        dropCaret.style.height = `${Math.max(12, coords.bottom - coords.top)}px`;
       } catch {
         /* view torn down */
       }

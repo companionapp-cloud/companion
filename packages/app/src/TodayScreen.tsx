@@ -28,7 +28,7 @@ import { useNav } from "./nav-context";
 import { useNotes } from "./NotesProvider";
 import { useTasks } from "./TasksProvider";
 import { useLinkSource } from "./useLinkSource";
-import { useEditorRefDrag } from "./DndContext";
+import { useEditorDrop, useEditorRefDrag } from "./DndContext";
 import { useQuickCreateLink } from "./useQuickCreateLink";
 import { useDocumentSource } from "./DocumentSourceContext";
 import { TourAnchor } from "./onboarding/anchors";
@@ -183,8 +183,9 @@ function DailyNoteBody({
   const touch = useDensity() === "touch";
   const linkSource = useLinkSource();
   // A link chip dragged out of the document (web/desktop): onto a project or area, a task onto
-  // the Today agenda.
-  const refDrag = useEditorRefDrag();
+  // the Today agenda. Named, so the note doesn't take its own chip back as a drop.
+  const dropId = `daily-note:${date}`;
+  const refDrag = useEditorRefDrag(dropId);
   // File embedding (PLAN §6.9): present on web (OPFS blob store), undefined elsewhere.
   const documentSource = useDocumentSource();
 
@@ -200,6 +201,10 @@ function DailyNoteBody({
   // keyboard-anchored toolbar inside the editor, so this stays dormant there.) Mirrors the
   // note editor's formatting-bar plumbing.
   const editorRef = useRef<EditorController>(null);
+  // What's dragged onto the page (an agenda item, a list row, a chip from elsewhere) lands as a
+  // chip where it's released: a first write like any keystroke, so it creates the day's note.
+  // The note itself doesn't go in the note.
+  const dropRef = useEditorDrop(dropId, editorRef, (p) => !(p.kind === "note" && p.id === noteIdRef.current));
   // Empty `[[label]]` links double-click to a quick-create dialog (make a note/task chip).
   const quickCreate = useQuickCreateLink(editorRef);
   const [formatState, setFormatState] = useState<FormatState | null>(null);
@@ -348,7 +353,7 @@ function DailyNoteBody({
   }
 
   return (
-    <View style={styles.page}>
+    <View ref={dropRef} style={styles.page}>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={touch ? styles.docScrollTouch : styles.docScroll}>
         <TourAnchor id="today.note" style={styles.doc}>
           {body}

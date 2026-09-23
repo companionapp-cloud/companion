@@ -236,6 +236,9 @@ export const Editor = forwardRef<EditorController, EditorProps>(function Editor(
       insertDocument: () => void pickDocument(),
       resolveQuickCreate: (target) =>
         inject(`window.__resolveQuickCreate && window.__resolveQuickCreate(${jsonArg(target)});`),
+      // Nothing drags onto a note on native (no drag layer).
+      insertRefAt: () => {},
+      showDropCaret: () => {},
       inkUndo: () => inject(`window.__inkUndo && window.__inkUndo();`),
       inkRedo: () => inject(`window.__inkRedo && window.__inkRedo();`),
       aiCapture: () =>

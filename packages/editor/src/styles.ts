@@ -242,6 +242,17 @@ export const EDITOR_CSS = `
 @keyframes pm-ai-caret { 50% { opacity: 0.25; } }
 @media (prefers-reduced-motion: reduce) { .ProseMirror .pm-ai-caret { animation: none; } }
 
+/* Where a chip dragged in from the host would land (createEditor's showDropCaret). Fixed, so
+   it follows the pointer's window coordinates, not the document's scroll. */
+.pm-drop-caret {
+  position: fixed;
+  z-index: 20;
+  width: 2px;
+  border-radius: 1px;
+  background: ${c("accent")};
+  pointer-events: none;
+}
+
 /* Task chip: a referenced task rendered like a todo — a square status box, the title, and
    its due / reminder dates. The status box leads, so the link glyph is dropped. */
 .pm-wikilink-task { gap: 5px; cursor: pointer; }

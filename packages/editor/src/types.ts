@@ -21,6 +21,13 @@ export interface EditorController {
    * {@link EditorProps.onQuickCreate}): pass the newly created target to swap the raw text
    * for a resolved chip, or null to cancel and leave the text as-is. */
   resolveQuickCreate(target: QuickCreateTarget | null): void;
+  /** Web/desktop: place a chip for `target` where a drag from the host's drag layer was
+   * released (window coordinates), e.g. an agenda item dropped on the daily note. No-op on
+   * native, which has no drag layer. */
+  insertRefAt(target: QuickCreateTarget, x: number, y: number): void;
+  /** Web/desktop: mark where {@link insertRefAt} would place a chip while a drag hovers the
+   * editor; null clears the mark. No-op on native. */
+  showDropCaret(point: { x: number; y: number } | null): void;
   /** Undo / redo the last drawing change (PLAN-drawing.md). No-op without {@link EditorProps.ink}. */
   inkUndo(): void;
   inkRedo(): void;

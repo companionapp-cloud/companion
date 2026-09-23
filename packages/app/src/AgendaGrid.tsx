@@ -3,7 +3,7 @@ import { PanResponder, Pressable, ScrollView, View, type PanResponderGestureStat
 import type { CalendarItemKind } from "@companion/core-bridge";
 import { Text, colors, font, motion, radius, shadow, space, transition, type PressState } from "@companion/design-system";
 import { DAY_MIN, KIND, layoutLanes, type Lane } from "./calendarLayout";
-import { useDropTarget, useOptionalDnd, type DragPayload } from "./DndContext";
+import { useDropTarget, useOptionalDnd, useRefDrag, type DragPayload } from "./DndContext";
 import { contextMenuProps, type MenuEntry } from "./contextMenu";
 
 // The Today agenda's day grid (PLAN-agenda.md): what fits inside the day, in one column, midnight to midnight, ruled every
@@ -91,6 +91,7 @@ export function AgendaGrid({
   onMove,
   onPressSlot,
   drop,
+  dragPayload,
 }: {
   /** The day shown, 'YYYY-MM-DD'. */
   date: string;
@@ -106,6 +107,10 @@ export function AgendaGrid({
   onPressSlot?: (minutes: number) => void;
   /** Take drops from the app's drag layer; see GridDrop. */
   drop?: GridDrop;
+  /** What a block carries out of the grid into the app's drag layer (onto the daily note, a
+   *  project, an area), or null for one that doesn't leave it (an event). A block that moves
+   *  goes once the pointer leaves the grid sideways; one that doesn't, from the start. */
+  dragPayload?: (block: GridBlock) => DragPayload | null;
 }) {
   // A ticking clock so the "now" line tracks real time; only a visible tab keeps it.
   const [now, setNow] = useState(() => new Date());
@@ -161,6 +166,11 @@ export function AgendaGrid({
     const offset = y - rect.top + scroller.scrollTop - CONTENT_TOP;
     return Math.min(DAY_MIN - SLOT_MIN, Math.max(0, Math.floor(((offset / HOUR_H) * 60) / SLOT_MIN) * SLOT_MIN));
   };
+  /** Whether a window x is off the grid to either side: a block moved there leaves the grid. */
+  const offSide = (x: number): boolean => {
+    const rect = (target.ref.current as DomNode | null)?.getBoundingClientRect?.();
+    return !!rect && (x < rect.left || x > rect.right);
+  };
   const hovering = useDropHover(target.isOver, target.ref, scrollRef, minutesAt);
   const dnd = useOptionalDnd();
   const plan = hovering != null && dnd?.dragging && drop ? drop.plan(dnd.dragging, hovering) : null;
@@ -183,7 +193,16 @@ export function AgendaGrid({
               QUARTERS.map((q) => <Slot key={h * 4 + q} minutes={h * 60 + q * SLOT_MIN} quarter={q} onPress={onPressSlot} />),
             )}
             {blocks.map((b) => (
-              <Block key={b.id} block={b} lane={lanes.get(b.id)} onPress={onPressBlock} menu={blockMenu} onMove={onMove} />
+              <Block
+                key={b.id}
+                block={b}
+                lane={lanes.get(b.id)}
+                onPress={onPressBlock}
+                menu={blockMenu}
+                onMove={onMove}
+                drag={dragPayload?.(b) ?? null}
+                offSide={offSide}
+              />
             ))}
             {isToday ? (
               <View style={[styles.nowLine, { top: (nowMin / 60) * HOUR_H }]} pointerEvents="none">
@@ -200,7 +219,7 @@ export function AgendaGrid({
 
 /** The DOM behind a react-native-web view, as far as a drop needs it. */
 type DomNode = {
-  getBoundingClientRect?: () => { top: number; bottom: number };
+  getBoundingClientRect?: () => { top: number; bottom: number; left: number; right: number };
   scrollTop: number;
   scrollBy?: (x: number, y: number) => void;
   addEventListener?: (type: "scroll", cb: () => void) => void;
@@ -313,20 +332,25 @@ function Slot({ minutes, quarter, onPress }: { minutes: number; quarter: number;
 
 /** One positioned block. A drag past a small threshold moves it, the bottom edge stretches it —
  *  both in quarter-hour steps, previewed live with the times they will land on — and a plain
- *  press opens it. Concurrent blocks split the column into lanes; one being handled takes the
- *  full width back. */
+ *  press opens it. Pulled off the grid sideways, a move becomes a drag of what the block is
+ *  (`drag`) through the app's drag layer; a block that doesn't move drags that way outright.
+ *  Concurrent blocks split the column into lanes; one being handled takes the full width back. */
 function Block({
   block,
   lane,
   onPress,
   menu,
   onMove,
+  drag,
+  offSide,
 }: {
   block: GridBlock;
   lane?: Lane;
   onPress?: (block: GridBlock) => void;
   menu?: (block: GridBlock) => MenuEntry[];
   onMove?: (block: GridBlock, startsAt: string, endsAt: string) => void;
+  drag: DragPayload | null;
+  offSide: (x: number) => boolean;
 }) {
   const [hovered, setHovered] = useState(false);
   const [dragDy, setDragDy] = useState<number | null>(null);
@@ -343,9 +367,15 @@ function Block({
   const shownStart = dragDy !== null ? movedStart(dragDy) : startMin;
   const shownLen = resizeDy !== null ? resizedLen(resizeDy) : lenMin;
 
+  // A block that stays put drags as a reference from the press; one that moves hands its drag
+  // to the drag layer once it leaves the grid (below).
+  const refDrag = useRefDrag(drag?.kind ?? "", drag?.id ?? "", drag?.label ?? "");
+  const beginPointerDrag = useOptionalDnd()?.beginPointerDrag;
   // Stable responders that read fresh values through a ref (mirrors the week grid's blocks).
-  const latest = useRef({ block, onMove, movedStart, resizedLen, startMin, durationMs });
-  latest.current = { block, onMove, movedStart, resizedLen, startMin, durationMs };
+  const latest = useRef({ block, onMove, movedStart, resizedLen, startMin, durationMs, drag, offSide, beginPointerDrag });
+  latest.current = { block, onMove, movedStart, resizedLen, startMin, durationMs, drag, offSide, beginPointerDrag };
+  // Set once a move has left the grid and the drag layer carries it: the move is off.
+  const handedOff = useRef(false);
   // A drag ends with a synthetic click on web; remember when, so that press is ignored.
   const lastGestureEnd = useRef(0);
 
@@ -363,12 +393,27 @@ function Block({
       PanResponder.create({
         onStartShouldSetPanResponder: () => false,
         onMoveShouldSetPanResponder: (_e, g: PanResponderGestureState) => Math.abs(g.dy) > 4,
-        onPanResponderGrant: () => setDragDy(0),
-        onPanResponderMove: (_e, g: PanResponderGestureState) => setDragDy(g.dy),
+        onPanResponderGrant: () => {
+          handedOff.current = false;
+          setDragDy(0);
+        },
+        onPanResponderMove: (_e, g: PanResponderGestureState) => {
+          if (handedOff.current) return;
+          const { drag: payload, offSide: off, beginPointerDrag: begin } = latest.current;
+          if (payload && begin && off(g.moveX)) {
+            // The drag layer follows the pointer from here to its release.
+            handedOff.current = true;
+            setDragDy(null);
+            begin(payload, g.moveX, g.moveY);
+            return;
+          }
+          setDragDy(g.dy);
+        },
         onPanResponderTerminationRequest: () => false,
         onPanResponderRelease: (_e, g: PanResponderGestureState) => {
           setDragDy(null);
           lastGestureEnd.current = Date.now();
+          if (handedOff.current) return;
           commit(latest.current.movedStart(g.dy), latest.current.durationMs);
         },
         onPanResponderTerminate: () => {
@@ -415,7 +460,7 @@ function Block({
 
   return (
     <View
-      {...(movable ? pan.panHandlers : {})}
+      {...(movable ? pan.panHandlers : refDrag ?? {})}
       style={[
         styles.block,
         transition("left, width", motion.fast),
