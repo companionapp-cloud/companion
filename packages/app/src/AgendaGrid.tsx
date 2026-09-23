@@ -3,7 +3,7 @@ import { PanResponder, Pressable, ScrollView, View, type PanResponderGestureStat
 import type { CalendarItemKind } from "@companion/core-bridge";
 import { Text, colors, font, motion, radius, shadow, space, transition, type PressState } from "@companion/design-system";
 import { DAY_MIN, KIND, layoutLanes, type Lane } from "./calendarLayout";
-import { useDropTarget, useOptionalDnd, useRefDrag, type DragPayload } from "./DndContext";
+import { noSelectPress, useDropTarget, useOptionalDnd, useRefDrag, type DragPayload } from "./DndContext";
 import { contextMenuProps, type MenuEntry } from "./contextMenu";
 
 // The Today agenda's day grid (PLAN-agenda.md): what fits inside the day, in one column, midnight to midnight, ruled every
@@ -460,6 +460,7 @@ function Block({
 
   return (
     <View
+      {...noSelectPress}
       {...(movable ? pan.panHandlers : refDrag ?? {})}
       style={[
         styles.block,

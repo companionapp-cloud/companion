@@ -378,6 +378,13 @@ function followPress(x0: number, y0: number, onDrag: (x: number, y: number) => v
   window.addEventListener("pointercancel", stop, true);
 }
 
+/** Spread on a draggable item (web): its press never starts a text selection. `userSelect:
+ *  none` alone isn't enough, since a press that begins on unselectable text still selects the
+ *  selectable text it's dragged across (a note beside the agenda). Cancelling the mousedown stops
+ *  that; the click, the context menu and the drag itself still come. */
+export const noSelectPress =
+  Platform.OS === "web" ? { onMouseDown: (e: { preventDefault: () => void }) => e.preventDefault() } : {};
+
 /** The press handler `useRefDrag` returns, to spread on a chip or a card. */
 export type RefDragProps = { onPointerDown: (event: unknown) => void };
 

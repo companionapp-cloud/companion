@@ -24,7 +24,7 @@ import { AgendaGrid, clockLabel, type GridBlock, type GridDrop } from "./AgendaG
 import { AgendaPalette } from "./AgendaPalette";
 import { useCalendar } from "./CalendarProvider";
 import { DAY_MIN, POINT_MIN, fitsInDay, taskBlockPatch } from "./calendarLayout";
-import { refPayload, useRefDrag, type DragPayload } from "./DndContext";
+import { noSelectPress, refPayload, useRefDrag, type DragPayload } from "./DndContext";
 import { EventEditorDialog, type EventEditorTarget } from "./EventEditorDialog";
 import { useTasks } from "./TasksProvider";
 import { contextMenuProps, type MenuEntry } from "./contextMenu";
@@ -49,10 +49,24 @@ export function isAllDay(item: CalendarItem): boolean {
 }
 
 /** Every local day ('YYYY-MM-DD') an item that doesn't fit in one covers, first to last: from
- *  the day it starts to the day it ends, in the viewer's timezone. Any other item covers just
- *  its `itemDay`. */
+ *  the day it starts to the day it ends, in the viewer's timezone. A multi-day all-day event
+ *  covers its date markers' days, the end being exclusive (iCal DTEND). Any other item covers
+ *  just its `itemDay`. */
 export function itemDays(item: CalendarItem): string[] {
-  if (item.allDay || !item.endsAt || fitsInDay(item)) return [itemDay(item)];
+  if (item.allDay) {
+    const first = item.startsAt.slice(0, 10);
+    const end = item.endsAt?.slice(0, 10);
+    if (!end || end <= first) return [first];
+    const days: string[] = [];
+    const d = new Date(`${first}T00:00:00Z`);
+    for (let i = 0; i < 3660; i++) {
+      days.push(d.toISOString().slice(0, 10));
+      d.setUTCDate(d.getUTCDate() + 1);
+      if (d.toISOString().slice(0, 10) >= end) break;
+    }
+    return days;
+  }
+  if (!item.endsAt || fitsInDay(item)) return [itemDay(item)];
   const start = new Date(item.startsAt);
   const last = localDay(new Date(item.endsAt));
   const days: string[] = [];
@@ -731,7 +745,7 @@ function AgendaRow({
   const gap = touch ? space.ml : space.md;
   const drag = useRefDrag(kind, sourceId, title);
   return (
-    <View {...drag} style={drag ? noSelect : null}>
+    <View {...noSelectPress} {...drag} style={noSelect}>
       <Pressable
         {...contextMenuProps(menu ?? null)}
         disabled={!onPress}
