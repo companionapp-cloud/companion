@@ -129,6 +129,8 @@ export type {
 } from "./exports";
 export { onboardingApi, ONBOARDING_CHANGED_EVENT } from "./onboarding";
 export type { OnboardingApi, OnboardingRecord, OnboardingEntry, OnboardingOutcome } from "./onboarding";
+export { pomodoroApi, pomodoroRemainingMs, POMODORO_CHANGED_EVENT } from "./pomodoro";
+export type { PomodoroApi, Pomodoro, PomodoroState, PomodoroOutcome } from "./pomodoro";
 export { syncApi } from "./sync";
 export type { SyncApi } from "./sync";
 export { graphApi } from "./graph";

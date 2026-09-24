@@ -284,6 +284,9 @@ func (s *Store) clearTasks(now string) (int64, error) {
 	if err := s.tombstone("notification_reads", ``, ``, now); err != nil {
 		return 0, err
 	}
+	if err := s.tombstone("pomodoros", ``, ``, now); err != nil {
+		return 0, err
+	}
 	// Reminders and repeat rules stay: the server validates them on push and times a
 	// repeating task's next copy from them, which a tombstoned seed no longer gets.
 	err = s.tombstone("tasks",

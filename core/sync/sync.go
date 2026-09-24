@@ -276,6 +276,8 @@ func New(st *store.Store, t Transport, clock domain.Clock) *Engine {
 	e.register(newRepoSyncer[*domain.FolderExport](st.Exports.Folder(), clock))
 	// Onboarding: which guided tours are settled, so a tour seen on one device stays seen.
 	e.register(newRepoSyncer[*domain.Onboarding](st.Onboarding, clock))
+	// Pomodoros: the tally of focus sessions follows the user between devices.
+	e.register(newRepoSyncer[*domain.Pomodoro](st.Pomodoros, clock))
 	return e
 }
 

@@ -539,6 +539,22 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.onboardingRecord(payload)
 	case "onboarding.reset":
 		return c.onboardingReset(payload)
+	case "pomodoro.state":
+		return c.pomodoroState(payload)
+	case "pomodoro.start":
+		return c.pomodoroStart(payload)
+	case "pomodoro.complete":
+		return c.pomodoroComplete(payload)
+	case "pomodoro.cancel":
+		return c.pomodoroCancel(payload)
+	case "pomodoro.pause":
+		return c.pomodoroPause(payload)
+	case "pomodoro.resume":
+		return c.pomodoroResume(payload)
+	case "pomodoro.finish":
+		return c.pomodoroFinish(payload)
+	case "pomodoro.skipBreak":
+		return c.pomodoroSkipBreak(payload)
 	default:
 		return nil, fmt.Errorf("unknown method %q", method)
 	}

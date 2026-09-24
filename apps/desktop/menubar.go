@@ -25,17 +25,25 @@ var trayIconTemplate []byte
 // openWindow brings Companion up: the main window, or the updater window while an update has
 // the app (update_window.go). checkForUpdates, when non-nil (release builds, see updates.go),
 // adds "Check for Updates…".
-func installMenuBar(app *application.App, openWindow func(), checkForUpdates func()) {
+//
+// A click brings up the menu bar panel (pomodoro.go); with the pomodoro tool on, the item also
+// shows the countdown while a pomodoro or its break runs. The menu is a right-click away.
+func installMenuBar(app *application.App, openWindow func(), checkForUpdates func(), pomodoro *pomodoroTimer) *application.SystemTray {
 	tray := app.SystemTray.New()
 	// Just the icon in the menu bar — a template image, no text label. macOS auto-sizes
 	// it to the menu-bar thickness and recolours it for light/dark appearance.
 	tray.SetTemplateIcon(trayIconTemplate)
 	tray.SetTooltip("Companion")
 
-	tray.OnClick(openWindow)
+	// A click drops the Control Center–style panel down (or puts it away): the pomodoro timer
+	// when that tool is on, a compact layout when it's off, quick capture in both. A right-click
+	// opens this menu.
+	tray.OnClick(pomodoro.toggleWindow)
 
 	menu := app.NewMenu()
 	menu.Add("Open Companion").OnClick(func(*application.Context) { openWindow() })
+	// Only while the pomodoro tool is switched on (pomodoro.go keeps it in step).
+	pomodoro.attachMenu(menu, menu.Add("Pomodoro Timer").OnClick(func(*application.Context) { pomodoro.showWindow() }))
 	if checkForUpdates != nil {
 		menu.Add("Check for Updates…").OnClick(func(*application.Context) { checkForUpdates() })
 	}
@@ -67,4 +75,5 @@ func installMenuBar(app *application.App, openWindow func(), checkForUpdates fun
 	menu.Add("Quit Companion").OnClick(func(*application.Context) { app.Quit() })
 
 	tray.SetMenu(menu)
+	return tray
 }

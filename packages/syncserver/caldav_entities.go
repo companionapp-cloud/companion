@@ -25,6 +25,8 @@ var (
 	folderExportHandler = opaqueRowHandler(protocol.EntityFolderExport, "folder_exports")
 	// Which guided tours the user has settled: nothing the server acts on.
 	onboardingHandler = opaqueRowHandler(protocol.EntityOnboarding, "onboarding")
+	// Pomodoros (focus sessions on tasks): nothing the server acts on.
+	pomodoroHandler = opaqueRowHandler(protocol.EntityPomodoro, "pomodoros")
 )
 
 // opaqueRowMeta is the only part of an opaque body the server reads.

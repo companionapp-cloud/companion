@@ -83,7 +83,10 @@ func main() {
 
 	core := bridge.New(st)
 	handler := newBridgeHandler(core)
-	core.SetEventHandler(handler)
+	// The menu-bar pomodoro timer (pomodoro.go) watches the same events the webview does.
+	pomodoro := newPomodoroTimer(core.Invoke, pomodoroPrefsPath(dbPath))
+	pomodoro.emit = handler.OnEvent
+	core.SetEventHandler(eventFanout{handler, pomodoro})
 	// Document bytes (PLAN §6.9): a filesystem blob store beside the database. The core owns
 	// blob sync; the webview embeds/renders through the invoke bridge (documents.ingestBytes /
 	// documents.dataUrl), so no extra HTTP routes are needed.
@@ -120,6 +123,7 @@ func main() {
 	notifSvc := notifications.New()
 	bundled := runningFromBundle()
 	notifHandler := newNotificationsHandler(notifSvc, bundled)
+	pomodoro.notify = notifHandler.sendNow
 
 	// Assigned right after the app is built; the /window handler (below) captures it by
 	// reference and only runs once requests arrive, so the app is set by then. mainWindow
@@ -205,6 +209,7 @@ func main() {
 	// app so the asset handler can close over it; the actual OS registration waits for
 	// start(app) below, once the app exists.
 	shortcuts := newShortcutManager(shortcutPrefsPath(dbPath), openCaptureWindow)
+	pomodoro.openCapture = openCaptureWindow
 
 	// File › Export and the save panel its files go through (export.go). Built before the app,
 	// like the shortcut manager, so the asset handler can route to it.
@@ -226,6 +231,7 @@ func main() {
 	// Built before the app so the asset handler can serve its state; attached once the main
 	// window exists.
 	updates := newUpdateService(version, runningBundle())
+	pomodoro.openApp = updates.openApp
 	updates.markerPath = relaunchMarkerPath(dbPath)
 	// An update restart while the main window was closed to the menu bar comes back hidden.
 	startHidden := consumeRelaunchMarker(updates.markerPath)
@@ -250,7 +256,7 @@ func main() {
 			}, shortcuts.handleShortcuts, windowChromeHandler(func() *application.WebviewWindow { return mainWindow }), updates.handleState,
 				pickThingsHandler(func() *application.App { return app }),
 				paletteOpenHandler(updates.openApp, handler.OnEvent), exports,
-				contextMenuHandler(func() *application.WebviewWindow { return mainWindow })),
+				contextMenuHandler(func() *application.WebviewWindow { return mainWindow }), pomodoro.handleShow, pomodoro.handleEnabled, pomodoro.handleGlass, pomodoro.handleCapture, pomodoro.handleOpenApp),
 		},
 	})
 
@@ -293,6 +299,11 @@ func main() {
 			return
 		}
 		log.Printf("notify: response received id=%q action=%q userInfo=%v", result.Response.ID, result.Response.ActionIdentifier, result.Response.UserInfo)
+		// A pomodoro running out or its break ending: tapping it brings up the timer.
+		if isPomodoroResponse(result.Response) {
+			pomodoro.showWindow()
+			return
+		}
 		taskID := taskIDFromResponse(result.Response)
 		if taskID == "" {
 			log.Printf("notify: response has no resolvable taskId — not deep-linking")
@@ -308,7 +319,8 @@ func main() {
 	// manual check.
 	checkForUpdates := updates.attach(app, mainWindow, !startHidden)
 
-	installMenuBar(app, updates.openApp, checkForUpdates)
+	tray := installMenuBar(app, updates.openApp, checkForUpdates, pomodoro)
+	pomodoro.start(app, tray)
 
 	// File › New Note / Task / Canvas: bring the window forward and have the app open the
 	// palette on that command (palette.go). File › Import › Things 3… (PLAN §6.12): likewise,
@@ -350,7 +362,7 @@ func main() {
 // (/invoke, /events) to the bridge handler. /window spawns a focus-mode window for a
 // document (the workspace's expand/pop-out action) — browser window.open can't create a
 // real app window in the Wails webview, so the frontend asks the Go side here.
-func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusWindow func(url string), openTableMenu http.HandlerFunc, shortcuts http.HandlerFunc, chrome http.HandlerFunc, updates http.HandlerFunc, pickThings http.HandlerFunc, paletteOpen http.HandlerFunc, exports *exportService, contextMenu http.HandlerFunc) http.Handler {
+func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusWindow func(url string), openTableMenu http.HandlerFunc, shortcuts http.HandlerFunc, chrome http.HandlerFunc, updates http.HandlerFunc, pickThings http.HandlerFunc, paletteOpen http.HandlerFunc, exports *exportService, contextMenu http.HandlerFunc, pomodoroShow, pomodoroEnabled, pomodoroGlass, pomodoroCapture, pomodoroOpenApp http.HandlerFunc) http.Handler {
 	frontend, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {
 		log.Fatalf("mount frontend assets: %v", err)
@@ -386,6 +398,16 @@ func rootHandler(bridge *bridgeHandler, notify *notificationsHandler, openFocusW
 	mux.HandleFunc("/import/things/pick", pickThings)
 	// The quick-capture palette opening a result in the main window (palette.go).
 	mux.HandleFunc("/palette/open", paletteOpen)
+	// A task's stopwatch bringing up the pomodoro timer window (pomodoro.go).
+	mux.HandleFunc("/pomodoro/show", pomodoroShow)
+	// Whether the pomodoro tool is switched on for this device (Settings › Tools).
+	mux.HandleFunc("/pomodoro/enabled", pomodoroEnabled)
+	// Where the timer's modules sit, for the native glass under each (pomodoro_darwin.go).
+	mux.HandleFunc("/pomodoro/glass", pomodoroGlass)
+	// The menu bar panel's Quick Capture tile.
+	mux.HandleFunc("/pomodoro/capture", pomodoroCapture)
+	// The menu bar panel's Open Companion button.
+	mux.HandleFunc("/pomodoro/open", pomodoroOpenApp)
 	// File › Export (export.go): which formats the menu offers, and the save-panel session the
 	// exported files are written through.
 	mux.HandleFunc("/export/menu", exports.handleMenu)

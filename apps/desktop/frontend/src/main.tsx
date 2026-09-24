@@ -19,6 +19,7 @@ import {
   setExportSinkOpener,
   setExportMenuHost,
   setExportFolderPicker,
+  setPomodoroHost,
 } from "@companion/app";
 import type { ShortcutBinding, ShortcutId, WindowControls } from "@companion/app";
 import { createHttpBridge, documentsApi } from "@companion/core-bridge";
@@ -51,8 +52,12 @@ if (typeof window !== "undefined" && (window as unknown as { _wails?: unknown })
 // global Option/Alt+Space shortcut). The page's default body/#root background (index.html)
 // is opaque; clear it so the window is see-through and CaptureView's palette card + shadow
 // read against it. Harmless on the main window, which never carries ?capture.
-const isCaptureWindow = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("capture");
-if (isCaptureWindow) {
+// The pomodoro timer (?pomodoro=1, apps/desktop/pomodoro.go) is the same: its modules sit
+// straight on the panel's native glass.
+const isSeeThroughWindow =
+  typeof window !== "undefined" &&
+  (new URLSearchParams(window.location.search).has("capture") || new URLSearchParams(window.location.search).has("pomodoro"));
+if (isSeeThroughWindow) {
   document.documentElement.style.background = "transparent";
   document.body.style.background = "transparent";
 }
@@ -88,6 +93,43 @@ setCaptureResultOpener((ref, opts) => {
   const body = JSON.stringify(opts?.newTab ? { ...ref, newTab: true } : ref);
   void fetch("/palette/open", { method: "POST", headers: { "Content-Type": "application/json" }, body });
 });
+
+// Pomodoros: the timer lives in the menu bar, which only the Go process owns
+// (apps/desktop/pomodoro.go). Injecting the host is what shows a task's stopwatch button; the
+// button starts pomodoros through the core like any other write, and asks here for the timer
+// window. The tool is off until switched on in Settings › Tools; the Go side keeps that setting,
+// since the menu bar needs it too. Only inside Wails — a plain browser has no menu bar.
+if (typeof window !== "undefined" && (window as unknown as { _wails?: unknown })._wails) {
+  const readEnabled = async (res: Response) => {
+    if (!res.ok) throw new Error((await res.text()).trim() || "Couldn’t reach the pomodoro setting.");
+    return ((await res.json()) as { enabled: boolean }).enabled;
+  };
+  setPomodoroHost({
+    showTimer() {
+      void fetch("/pomodoro/show", { method: "POST" });
+    },
+    // The timer's modules sit on native Liquid Glass (apps/desktop/pomodoro_darwin.go); elsewhere
+    // the page draws them.
+    setGlass: /mac/i.test(navigator.platform || navigator.userAgent)
+      ? (layout) => {
+          void fetch("/pomodoro/glass", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(layout) });
+        }
+      : undefined,
+    capture() {
+      void fetch("/pomodoro/capture", { method: "POST" });
+    },
+    openApp() {
+      void fetch("/pomodoro/open", { method: "POST" });
+    },
+    isEnabled: () => fetch("/pomodoro/enabled").then(readEnabled),
+    setEnabled: (enabled) =>
+      fetch("/pomodoro/enabled", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      }).then(readEnabled),
+  });
+}
 
 // Global shortcuts: only the Go process can register an OS-wide hotkey, so Settings ›
 // Shortcuts reads and rebinds through it. Injecting this store is also what makes that

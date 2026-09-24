@@ -20,6 +20,7 @@ import {
   notifyApi,
   objectTypesApi,
   onboardingApi,
+  pomodoroApi,
   projectsApi,
   tasksApi,
   trashApi,
@@ -44,6 +45,7 @@ import {
   type NotifyApi,
   type ObjectTypesApi,
   type OnboardingApi,
+  type PomodoroApi,
   type ProjectsApi,
   type TasksApi,
   type TrashApi,
@@ -79,6 +81,8 @@ interface CoreValue {
   importFiles: ImportFilesApi;
   /** Which guided tours the user has finished or skipped (synced). */
   onboarding: OnboardingApi;
+  /** Timed focus sessions on tasks (synced; the timer itself is a desktop surface). */
+  pomodoro: PomodoroApi;
   /** Counts and permanent clears behind Settings › Danger Zone. */
   data: DataApi;
 }
@@ -112,6 +116,7 @@ export function CoreProvider({ core, children }: { core: CoreBridge; children: R
       exports: exportsApi(core),
       importFiles: importFilesApi(core),
       onboarding: onboardingApi(core),
+      pomodoro: pomodoroApi(core),
       data: dataApi(core),
     }),
     [core],

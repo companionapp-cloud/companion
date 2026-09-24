@@ -20,6 +20,8 @@ import { FocusView } from "./FocusView";
 import { focusTarget } from "./focus";
 import { CaptureView } from "./CaptureView";
 import { captureRequested } from "./capture";
+import { PomodoroView } from "./pomodoro/PomodoroView";
+import { pomodoroRequested } from "./pomodoro/host";
 import { ExportProvider } from "./export/ExportProvider";
 import { OnboardingStateProvider } from "./onboarding/OnboardingState";
 import { WelcomeSheet } from "./onboarding/WelcomeSheet";
@@ -91,6 +93,7 @@ export function App({
 }) {
   const target = focusTarget();
   const capture = captureRequested();
+  const pomodoro = pomodoroRequested();
   // A forgot-password reset deep link takes over the whole app: the recovery flow runs before (and
   // instead of) the normal shell, needing only the core for its crypto — no sync/data providers.
   const reset = resetLinkTarget();
@@ -106,7 +109,11 @@ export function App({
       <DocumentSourceProvider documentSource={documentSource}>
         <SyncProvider>
         <ExportProvider>
-        {capture ? (
+        {pomodoro ? (
+          // The desktop's pomodoro timer window (apps/desktop/pomodoro.go): everything it shows
+          // comes with the pomodoro state, so it needs no data providers.
+          <PomodoroView />
+        ) : capture ? (
           <NotesProvider>
             <TasksProvider>
               <ProjectsProvider>

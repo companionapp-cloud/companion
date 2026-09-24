@@ -1,4 +1,6 @@
 export { App } from "./App";
+export { setPomodoroHost } from "./pomodoro/host";
+export type { PomodoroHost } from "./pomodoro/host";
 export type { WindowControls } from "./AppShell";
 export { AppShell } from "./AppShell";
 export { MobileWebShell } from "./mobile/MobileShell";

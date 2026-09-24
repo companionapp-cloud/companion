@@ -98,6 +98,7 @@ func (s *Server) handlers() map[string]*entityHandler {
 			protocol.EntityGitExport:        gitExportHandler,
 			protocol.EntityFolderExport:     folderExportHandler,
 			protocol.EntityOnboarding:       onboardingHandler,
+			protocol.EntityPomodoro:         pomodoroHandler,
 		}
 	}
 	return s.entities

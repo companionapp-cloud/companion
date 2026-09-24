@@ -60,6 +60,30 @@ func taskIDFromResponse(resp notifications.NotificationResponse) string {
 	return ""
 }
 
+// sendNow posts a notification right away (the pomodoro timer's "time's up" and "break's over").
+// Marked as a pomodoro's, so tapping it brings up the timer rather than deep-linking to a task.
+func (h *notificationsHandler) sendNow(id, title, body string) {
+	if !h.enabled {
+		return
+	}
+	if err := h.svc.SendNotification(notifications.NotificationOptions{
+		ID:    id,
+		Title: title,
+		Body:  body,
+		Data:  map[string]interface{}{"pomodoro": true},
+	}); err != nil {
+		log.Printf("notify: send %s failed: %v", id, err)
+	}
+}
+
+// isPomodoroResponse reports whether a tapped notification was one of the pomodoro timer's.
+func isPomodoroResponse(resp notifications.NotificationResponse) bool {
+	if v, ok := resp.UserInfo["pomodoro"].(bool); ok && v {
+		return true
+	}
+	return strings.HasPrefix(resp.ID, "pomodoro:")
+}
+
 func (h *notificationsHandler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

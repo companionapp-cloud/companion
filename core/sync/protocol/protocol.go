@@ -60,6 +60,9 @@ const (
 	// That the user finished or skipped one version of one guided tour, so no other device shows
 	// it again. Stored by the server as an opaque body.
 	EntityOnboarding = "onboarding"
+	// A timed focus session on a task, and whether it counted. Stored by the server as an
+	// opaque body.
+	EntityPomodoro = "pomodoro"
 )
 
 // Push statuses.

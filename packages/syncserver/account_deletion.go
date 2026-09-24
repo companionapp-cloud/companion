@@ -59,6 +59,7 @@ var userTables = []string{
 	"git_exports",
 	"folder_exports",
 	"onboarding",
+	"pomodoros",
 	// Devices and what is routed through them.
 	"relay_requests",
 	"push_deliveries",

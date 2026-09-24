@@ -110,7 +110,7 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
   {
     id: "tools",
     label: "Tools",
-    description: "Which tools show in the sidebar on this device",
+    description: "Which tools show on this device",
     icon: "panelLeft",
     Component: ToolSettings,
   },

@@ -56,6 +56,8 @@ type Store struct {
 	Exports *ExportsRepo
 	// Onboarding records which guided tours the user has finished or skipped (synced).
 	Onboarding *OnboardingRepo
+	// Pomodoros are timed focus sessions on tasks, and the tally of those that counted (synced).
+	Pomodoros *PomodorosRepo
 }
 
 // New builds a Store over an already-open Driver, applying pending migrations. A nil
@@ -119,6 +121,7 @@ func New(d Driver, clock domain.Clock) (*Store, error) {
 	s.NoteInk = &NoteInkRepo{db: d, clock: clock}
 	s.Exports = &ExportsRepo{db: d, clock: clock}
 	s.Onboarding = &OnboardingRepo{db: d, clock: clock}
+	s.Pomodoros = &PomodorosRepo{db: d, clock: clock}
 	// Content lives in one container (PLAN-areas.md §2.1). Anything still filed in several
 	// projects from before that rule keeps the first and leaves the rest; a no-op afterwards.
 	if _, err := s.ProjectMembers.EnforceSingleContainer(); err != nil {

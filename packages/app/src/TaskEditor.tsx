@@ -40,6 +40,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { NavContext } from "./nav-context";
 import { timeAgo } from "./NotificationRow";
 import { ExportMenu } from "./export/ExportMenu";
+import { PomodoroButton } from "./pomodoro/PomodoroButton";
 import { isOverdue } from "./taskSchedule";
 import { titleFieldValue, titleToSave } from "./untitled";
 
@@ -121,6 +122,7 @@ export function TaskEditor({ task, save, onDelete, onPopOut, showToolbar = true,
             edited {timeAgo(task.updatedAt)}
           </Text>
           <View style={{ flex: 1 }} />
+          <PomodoroButton taskId={task.id} done={done} size={btn} glyph={glyph} />
           <TourAnchor id="task.file">
             <IconButton label="Move to an area or project" size={btn} onPress={() => setShowProjects(true)}>
               <Icon name="folder" size={glyph} color={colors.textSecondary} />

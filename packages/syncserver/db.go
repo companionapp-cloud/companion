@@ -449,6 +449,20 @@ CREATE TABLE IF NOT EXISTS onboarding (
 );
 CREATE INDEX IF NOT EXISTS idx_onboarding_user_seq ON onboarding (user_id, server_seq);
 
+-- Pomodoros (timed focus sessions on tasks), so the tally follows the user between devices.
+-- Kept whole like the onboarding rows; the server never reads more than the sync metadata.
+CREATE TABLE IF NOT EXISTS pomodoros (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  row_json   TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  version    BIGINT NOT NULL DEFAULT 0,
+  server_seq BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pomodoros_user_seq ON pomodoros (user_id, server_seq);
+
 CREATE TABLE IF NOT EXISTS calendar_objects (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL,
