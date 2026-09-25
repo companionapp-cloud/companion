@@ -21,7 +21,7 @@ import (
 // its layout (setPomodoroGlass); this is the width of the grid and the tallest layout.
 const (
 	pomodoroWindowName   = "pomodoro"
-	pomodoroWindowWidth  = 318
+	pomodoroWindowWidth  = 298
 	pomodoroWindowHeight = 432
 	// A click on the menu bar item first takes focus from the panel, which hides it; the click
 	// that follows must not bring it straight back.

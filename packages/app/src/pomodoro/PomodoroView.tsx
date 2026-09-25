@@ -18,7 +18,7 @@ const TALLY_ROW = Math.ceil(DAY_POMODOROS / 2);
 
 /**
  * The desktop menu bar panel (`?pomodoro=1`), built like macOS Control Center: glass modules on
- * Control Center's grid of 62pt cells with 14pt gutters. The same cards always, and with the
+ * Control Center's grid of 62pt cells with 10pt gutters. The same cards always, and with the
  * pomodoro tool on, the timer's beneath them — so nothing moves when the tool is switched:
  *
  *   ┌──────────┬──────────┐
@@ -30,7 +30,7 @@ const TALLY_ROW = Math.ceil(DAY_POMODOROS / 2);
  *   │  (2×2) │ ◉ toggle  │   capsule toggles like Wi-Fi and Bluetooth: what to do right now
  *   ├────────┴───────────┤
  *   │ task ─────●─────── │   a 4×1 slider module like Display: the task, and how far in —
- *   └────────────────────┘   or, once it's finished, a quick pick of the next
+ *   └────────────────────┘   or, with no task picked, a few to pick from
  *        ( Open Companion )     a glass pill like Edit Controls, in both
  *
  * As in Control Center there's no panel behind the modules: the window is transparent and each
@@ -131,9 +131,9 @@ function TimerCards({ state, now, apply }: { state: PomodoroState; now: number; 
   let countdown: string;
   let progress = 0;
   let taskId: string | null = null;
-  let rowTitle: string;
-  // Waiting for the next task: the task row becomes a quick pick.
-  let picking = false;
+  let rowTitle = "";
+  // With no task in front of the clock, the task row suggests some instead; this is its heading.
+  let pickHeading: string;
   let toggles: [ToggleProps, ToggleProps];
   // The tile's pause / play button, while a task is in front of the clock.
   let clock: { icon: IconName; label: string; onPress: () => void } | null = null;
@@ -143,7 +143,8 @@ function TimerCards({ state, now, apply }: { state: PomodoroState; now: number; 
     const paused = !!running.pausedAt;
     const left = pomodoroRemainingMs(running, now);
     mode = paused ? "Paused" : "Focus";
-    caption = running.tasksDone > 0 ? doneLabel(running.tasksDone) : paused ? "paused" : "remaining";
+    caption = running.tasksDone > 0 ? doneLabel(running.tasksDone) : paused ? "paused" : "left";
+    pickHeading = "Next task — the clock waits till you pick";
     countdown = formatCountdown(left);
     progress = 1 - left / (running.durationSec * 1000);
     if (running.taskId) {
@@ -155,8 +156,6 @@ function TimerCards({ state, now, apply }: { state: PomodoroState; now: number; 
         : { icon: "pause", label: "Pause the clock", onPress: () => act(pomodoro.pause) };
     } else {
       // The task is done: the clock waits on the next one — or this pomodoro can end here.
-      picking = true;
-      rowTitle = "Next task";
       toggles = [
         running.tasksDone > 0
           ? { icon: "check", title: "Break now", subtitle: "It counts", on: true, onPress: () => act(pomodoro.finish) }
@@ -166,20 +165,20 @@ function TimerCards({ state, now, apply }: { state: PomodoroState; now: number; 
     }
   } else if (breakEndsAt != null) {
     mode = "Break";
-    caption = "of your break";
+    caption = "break";
+    pickHeading = "Up next — picking one ends the break";
     countdown = formatCountdown(breakEndsAt - now);
     const length = last?.breakEndsAt && last.endedAt ? Date.parse(last.breakEndsAt) - Date.parse(last.endedAt) : 5 * 60 * 1000;
     progress = 1 - (breakEndsAt - now) / Math.max(length, 1);
-    rowTitle = "On a break";
     toggles = [
       { icon: "check", title: "Counted", subtitle: doneLabel(last?.tasksDone ?? 0), on: true },
       { icon: "chevronRight", title: "Skip break", subtitle: "Resume", onPress: () => act(pomodoro.skipBreak) },
     ];
   } else {
     mode = "Ready";
-    caption = "per pomodoro";
+    caption = "25 min";
+    pickHeading = "Start a pomodoro on…";
     countdown = formatCountdown(25 * 60 * 1000);
-    rowTitle = "No task";
     const recent = last?.endedAt && now - Date.parse(last.endedAt) < LAST_OUTCOME_MS ? last : null;
     if (recent?.outcome === "expired") {
       const again = recent.taskId;
@@ -234,8 +233,8 @@ function TimerCards({ state, now, apply }: { state: PomodoroState; now: number; 
         </View>
       </View>
 
-      {picking ? (
-        <NextTaskPicker now={now} error={error} disabled={busy} onPick={(id) => act(() => pomodoro.start(id))} />
+      {!taskId ? (
+        <NextTaskPicker heading={pickHeading} now={now} error={error} disabled={busy} onPick={(id) => act(() => pomodoro.start(id))} />
       ) : (
         // The task, drawn like the Display slider: how far into the pomodoro (or break). A press
         // opens the task in Companion.
@@ -280,10 +279,22 @@ function Tally({ count }: { count: number }) {
 // How many open tasks the quick pick offers.
 const PICK_COUNT = 3;
 
-/** The next task, picked from a few open ones — due or starting by the end of today first, then
- *  the most recently touched. Picking one puts it in front of the running pomodoro and starts its
- *  clock again. */
-function NextTaskPicker({ now, error, disabled, onPick }: { now: number; error: string | null; disabled?: boolean; onPick: (id: string) => void }) {
+/** Tasks to work on, whenever none is in front of the clock: a few open ones — due or starting by
+ *  the end of today first, then the most recently touched. Picking one puts it in front of the
+ *  running pomodoro and starts its clock again, or starts a pomodoro on it (ending a break). */
+function NextTaskPicker({
+  heading,
+  now,
+  error,
+  disabled,
+  onPick,
+}: {
+  heading: string;
+  now: number;
+  error: string | null;
+  disabled?: boolean;
+  onPick: (id: string) => void;
+}) {
   const { core, tasks } = useCore();
   const [open, setOpen] = useState<Task[] | null>(null);
 
@@ -312,7 +323,7 @@ function NextTaskPicker({ now, error, disabled, onPick }: { now: number; error: 
 
   return (
     <Module id="next" radius={RADIUS.slider} style={styles.picker}>
-      <Text style={styles.pickerHead}>{error ?? "Next task — the clock waits till you pick"}</Text>
+      <Text style={styles.pickerHead}>{error ?? heading}</Text>
       {open && picks.length === 0 ? (
         <Pressable onPress={openCapture} style={({ pressed }) => [styles.noFocusRing, styles.pick, pressed ? styles.pickPressed : null]}>
           <Icon name="capture" size={14} strokeWidth={2} color={WHITE} />
@@ -328,10 +339,8 @@ function NextTaskPicker({ now, error, disabled, onPick }: { now: number; error: 
             style={({ pressed }) => [styles.noFocusRing, styles.pick, pressed ? styles.pickPressed : null]}
           >
             <View style={styles.pickRing} />
-            <Text style={styles.pickTitle} numberOfLines={1}>
-              {t.title.trim() || "Untitled task"}
-            </Text>
-            {soon(t) ? <Text style={styles.pickHint}>Today</Text> : null}
+            {/* Wrapped, not cut off: a task is picked by its whole name. */}
+            <Text style={styles.pickTitle}>{t.title.trim() || "Untitled task"}</Text>
           </Pressable>
         ))
       )}
@@ -363,8 +372,10 @@ interface GlassLayer {
 
 const GlassCtx = createContext<GlassLayer>({ ref: () => () => {}, panelRef: () => {}, style: {} });
 
-/** Collects the panel's height and its modules' boxes after every render and hands them to the
- *  shell when they change, so the window and its glass track the layout. */
+/** Collects the panel's height and its modules' boxes and hands them to the shell when they
+ *  change, so the window and its glass track the layout. It measures after every render of the
+ *  panel, and — since a card can change size on its own (the task suggestions arriving, say)
+ *  without the panel re-rendering — whenever the panel or a module resizes. */
 function useGlassLayer(): GlassLayer {
   const setGlass = pomodoroHost()?.setGlass;
   const nodes = useRef(new Map<string, { node: HTMLElement; radius: number }>());
@@ -372,23 +383,7 @@ function useGlassLayer(): GlassLayer {
   const panel = useRef<HTMLElement | null>(null);
   const sent = useRef("");
 
-  const ref = useCallback((key: string, radius: number) => {
-    const id = `${key}:${radius}`;
-    let cb = refs.current.get(id);
-    if (!cb) {
-      cb = (node: unknown) => {
-        if (node) nodes.current.set(key, { node: node as HTMLElement, radius });
-        else nodes.current.delete(key);
-      };
-      refs.current.set(id, cb);
-    }
-    return cb;
-  }, []);
-  const panelRef = useCallback((node: unknown) => {
-    panel.current = node as HTMLElement | null;
-  }, []);
-
-  useLayoutEffect(() => {
+  const measure = useCallback(() => {
     if (!setGlass || typeof panel.current?.getBoundingClientRect !== "function") return;
     const rects: GlassRect[] = [];
     for (const { node, radius } of nodes.current.values()) {
@@ -401,7 +396,53 @@ function useGlassLayer(): GlassLayer {
     if (key === sent.current) return;
     sent.current = key;
     setGlass({ height, rects });
-  });
+  }, [setGlass]);
+
+  // One observer for the panel and every module, alive while the panel is mounted. Nodes that
+  // arrive later (a card appearing) are observed as they register.
+  const observer = useRef<ResizeObserver | null>(null);
+  const observe = (node: HTMLElement | null, on: boolean) => {
+    if (!node || !observer.current || !(node instanceof Element)) return;
+    if (on) observer.current.observe(node);
+    else observer.current.unobserve(node);
+  };
+  useLayoutEffect(() => {
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => measure());
+    observer.current = ro;
+    if (panel.current instanceof Element) ro.observe(panel.current);
+    for (const { node } of nodes.current.values()) if (node instanceof Element) ro.observe(node);
+    return () => {
+      ro.disconnect();
+      observer.current = null;
+    };
+  }, [measure]);
+
+  const ref = useCallback((key: string, radius: number) => {
+    const id = `${key}:${radius}`;
+    let cb = refs.current.get(id);
+    if (!cb) {
+      cb = (node: unknown) => {
+        const prev = nodes.current.get(key)?.node ?? null;
+        if (prev && prev !== node) observe(prev, false);
+        if (node) {
+          nodes.current.set(key, { node: node as HTMLElement, radius });
+          observe(node as HTMLElement, true);
+        } else nodes.current.delete(key);
+      };
+      refs.current.set(id, cb);
+    }
+    return cb;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const panelRef = useCallback((node: unknown) => {
+    observe(panel.current, false);
+    panel.current = node as HTMLElement | null;
+    observe(panel.current, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useLayoutEffect(measure);
 
   return { ref, panelRef, style: setGlass ? styles.glassNative : styles.glass };
 }
@@ -491,7 +532,9 @@ function Label({ title, subtitle }: { title: string; subtitle: string }) {
 const WHITE = "#ffffff";
 // Control Center's grid.
 const CELL = 62;
-const GAP = 14;
+// Gutters between modules (and the margin around them): tighter than Control Center's grid
+// suggests, at 10pt.
+const GAP = 10;
 const CIRCLE = 36;
 // Corner radii, shared with the native glass under each module.
 const RADIUS = { tile: 26, capsule: CELL / 2, slider: 22, shortcut: 22, pill: 12 };
@@ -552,11 +595,11 @@ const styles = StyleSheet.create({
   // 4×1, grown to its rows: the next-task quick pick.
   picker: { paddingHorizontal: 10, paddingTop: 10, paddingBottom: 6, gap: 2 },
   pickerHead: { fontFamily: SYSTEM, fontSize: 12, fontWeight: "600", color: "rgba(255,255,255,0.72)", paddingHorizontal: 6, paddingBottom: 4 },
-  pick: { flexDirection: "row", alignItems: "center", gap: 10, height: 30, paddingHorizontal: 6, borderRadius: 10 },
+  // Rows grow with a wrapped title; the ring sits level with its first line.
+  pick: { flexDirection: "row", alignItems: "flex-start", gap: 10, minHeight: 30, paddingHorizontal: 6, paddingVertical: 6, borderRadius: 10 },
   pickPressed: { backgroundColor: "rgba(255,255,255,0.14)" },
-  pickRing: { width: 14, height: 14, borderRadius: 7, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.72)" },
-  pickTitle: { flex: 1, fontFamily: SYSTEM, fontSize: 13, fontWeight: "500", color: WHITE },
-  pickHint: { fontFamily: SYSTEM, fontSize: 11, fontWeight: "600", color: "rgba(255,255,255,0.6)" },
+  pickRing: { width: 14, height: 14, marginTop: 1, borderRadius: 7, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.72)" },
+  pickTitle: { flex: 1, fontFamily: SYSTEM, fontSize: 13, lineHeight: 16, fontWeight: "500", color: WHITE },
 
   // 4×1, like Display.
   slider: { height: CELL, paddingHorizontal: 16, justifyContent: "center", gap: 8 },
