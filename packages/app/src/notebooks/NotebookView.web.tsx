@@ -512,6 +512,11 @@ function MediumSheet({
       resolveQuickCreate() {},
       inkUndo: () => s.undo(),
       inkRedo: () => s.redo(),
+      insertRefAt() {},
+      showDropCaret() {},
+      aiCapture: async () => null,
+      aiApply() {},
+      aiRelease() {},
     });
     return () => {
       alive = false;

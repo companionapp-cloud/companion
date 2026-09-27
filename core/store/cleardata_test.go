@@ -256,6 +256,44 @@ func TestClearCanvasesTakesBoardsAndTheirImages(t *testing.T) {
 	}
 }
 
+func TestClearNotebooksTakesPagesInkAndCovers(t *testing.T) {
+	clk := &fixedClock{t: time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)}
+	s := newTestStore(t, clk)
+	cover, _ := s.Documents.Create(CreateDocumentInput{Filename: "cover.jpg", SHA256: fakeSHA("e")})
+	nb, err := s.Notebooks.Create(CreateNotebookInput{Title: "Field notes", Binding: domain.BindingRing})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Notebooks.Update(nb.ID, UpdateNotebookInput{CoverDocumentID: &cover.ID}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := s.NotebookPages.Add(AddPageInput{NotebookID: nb.ID, ContentMD: "private"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.NotebookInk.UpsertMany(nb.ID, page.ID, []NoteInkInput{{ID: "0190f5a0-0000-7000-8000-0000000000e1", Data: json.RawMessage(`{"strokes":[]}`)}}); err != nil {
+		t.Fatal(err)
+	}
+
+	rep := mustClear(t, s, DataNotebooks)
+
+	if rep.Cleared[DataNotebooks] != 1 {
+		t.Errorf("cleared notebooks = %d", rep.Cleared[DataNotebooks])
+	}
+	if got := clearRow(t, s, `SELECT title, settings_json, deleted_at IS NOT NULL, dirty FROM notebooks WHERE id = ?;`, nb.ID); got[0] != "" || got[1] != "{}" || got[2] != "1" || got[3] != "1" {
+		t.Errorf("notebook = %v", got)
+	}
+	if n := clearCount(t, s, `SELECT count(*) FROM notebook_pages WHERE deleted_at IS NULL OR content_md <> '';`); n != 0 {
+		t.Errorf("pages left with content = %d", n)
+	}
+	if n := clearCount(t, s, `SELECT count(*) FROM notebook_page_ink WHERE deleted_at IS NULL OR data_json <> '{}';`); n != 0 {
+		t.Errorf("ink left = %d", n)
+	}
+	if got := clearRow(t, s, `SELECT deleted_at IS NOT NULL FROM documents WHERE id = ?;`, cover.ID)[0]; got != "1" {
+		t.Error("the notebook's cover should go with it")
+	}
+}
+
 func TestClearChatsBlanksMessages(t *testing.T) {
 	s := newTestStore(t, &fixedClock{t: time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)})
 	chat, _ := s.Chats.Create("Taxes", nil)
@@ -437,7 +475,7 @@ func TestClearAllEmptiesTheSummary(t *testing.T) {
 		t.Errorf("agent after clear = %v", got)
 	}
 	// Every change rides the next push.
-	for _, table := range []string{"notes", "tasks", "canvases", "chats", "calendar_feeds", "areas", "projects", "documents", "object_types", "llm_configs", "export_destinations"} {
+	for _, table := range []string{"notes", "tasks", "canvases", "notebooks", "notebook_pages", "chats", "calendar_feeds", "areas", "projects", "documents", "object_types", "llm_configs", "export_destinations"} {
 		if n := clearCount(t, s, `SELECT count(*) FROM `+table+` WHERE dirty = 0;`); n != 0 {
 			t.Errorf("%s has %d clean rows after a clear", table, n)
 		}

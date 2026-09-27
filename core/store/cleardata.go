@@ -20,13 +20,14 @@ import (
 type DataKind string
 
 const (
-	DataNotes    DataKind = "notes"    // notes, trashed ones included, and the ink drawn on them
-	DataTasks    DataKind = "tasks"    // tasks, repeating tasks and their occurrences, read receipts
-	DataCanvases DataKind = "canvases" // boards with their cards and connections
-	DataChats    DataKind = "chats"    // conversations with agents (the agents themselves stay)
-	DataCalendar DataKind = "calendar" // calendar accounts, subscriptions and their events
-	DataAreas    DataKind = "areas"    // areas, projects and their lists; filed content stays, unfiled
-	DataFiles    DataKind = "files"    // every attachment
+	DataNotes     DataKind = "notes"     // notes, trashed ones included, and the ink drawn on them
+	DataTasks     DataKind = "tasks"     // tasks, repeating tasks and their occurrences, read receipts
+	DataCanvases  DataKind = "canvases"  // boards with their cards and connections
+	DataNotebooks DataKind = "notebooks" // notebooks with their pages and the ink on them
+	DataChats     DataKind = "chats"     // conversations with agents (the agents themselves stay)
+	DataCalendar  DataKind = "calendar"  // calendar accounts, subscriptions and their events
+	DataAreas     DataKind = "areas"     // areas, projects and their lists; filed content stays, unfiled
+	DataFiles     DataKind = "files"     // every attachment
 	// The rest only go with everything else: they are settings more than content.
 	DataObjectTypes DataKind = "objectTypes"
 	DataAgents      DataKind = "agents"
@@ -36,7 +37,7 @@ const (
 // AllDataKinds is every kind, in the order a clear runs them. Content goes before the
 // containers and files it points at, so the file purge at the end sees who still uses what.
 var AllDataKinds = []DataKind{
-	DataNotes, DataTasks, DataCanvases, DataChats, DataCalendar, DataAreas,
+	DataNotes, DataTasks, DataCanvases, DataNotebooks, DataChats, DataCalendar, DataAreas,
 	DataFiles, DataObjectTypes, DataAgents, DataExports,
 }
 
@@ -60,6 +61,7 @@ type DataSummary struct {
 	Notes            int64 `json:"notes"`
 	Tasks            int64 `json:"tasks"`
 	Canvases         int64 `json:"canvases"`
+	Notebooks        int64 `json:"notebooks"`
 	Chats            int64 `json:"chats"`
 	Calendars        int64 `json:"calendars"`
 	CalendarAccounts int64 `json:"calendarAccounts"`
@@ -81,6 +83,7 @@ func (s *Store) DataSummary() (*DataSummary, error) {
 		{&sum.Notes, "notes"},
 		{&sum.Tasks, "tasks"},
 		{&sum.Canvases, "canvases"},
+		{&sum.Notebooks, "notebooks"},
 		{&sum.Chats, "chats"},
 		{&sum.Calendars, "calendar_feeds"},
 		{&sum.CalendarAccounts, "calendar_accounts"},
@@ -197,6 +200,8 @@ func (s *Store) clearKind(k DataKind, now string, rep *ClearReport) (int64, erro
 		return s.clearTasks(now)
 	case DataCanvases:
 		return s.clearCanvases(now)
+	case DataNotebooks:
+		return s.clearNotebooks(now)
 	case DataChats:
 		return s.clearChats(now)
 	case DataCalendar:
@@ -217,7 +222,7 @@ func (s *Store) clearKind(k DataKind, now string, rep *ClearReport) (int64, erro
 
 // tombstone is the statement shape every kind uses: blank the given columns and tombstone the
 // row, for live rows and for older tombstones that still carry text. set is the column list
-// ("title = '', content_md = ''"; empty for a row with no text), leftover the condition that
+// ("title = ”, content_md = ”"; empty for a row with no text), leftover the condition that
 // finds a tombstone with text. Both are compile-time constants from this file. deleted_at
 // keeps an older tombstone's instant; updated_at and dirty move so the blanked row pushes again.
 func (s *Store) tombstone(table, set, leftover, now string) error {
@@ -314,6 +319,25 @@ func (s *Store) clearCanvases(now string) (int64, error) {
 		return 0, err
 	}
 	err = s.tombstone("canvases", `name = ''`, `name <> ''`, now)
+	return n, err
+}
+
+// clearNotebooks deletes every notebook, its pages and the ink on them. The medium and
+// binding go with the settings: a tombstone keeps nothing of what was written.
+func (s *Store) clearNotebooks(now string) (int64, error) {
+	n, err := s.countLive("notebooks")
+	if err != nil {
+		return 0, err
+	}
+	if err := s.tombstone("notebook_page_ink", `data_json = '{}'`, `data_json <> '{}'`, now); err != nil {
+		return 0, err
+	}
+	if err := s.tombstone("notebook_pages", `content_md = ''`, `content_md <> ''`, now); err != nil {
+		return 0, err
+	}
+	err = s.tombstone("notebooks",
+		`title = '', settings_json = '{}', cover_document_id = NULL`,
+		`title <> '' OR settings_json <> '{}' OR cover_document_id IS NOT NULL`, now)
 	return n, err
 }
 
@@ -521,6 +545,13 @@ func (s *Store) filesUsedBy(want map[DataKind]bool) ([]string, error) {
 		}
 		add(ids...)
 	}
+	if want[DataNotebooks] {
+		ids, err := s.queryIDs(`SELECT cover_document_id FROM notebooks WHERE cover_document_id IS NOT NULL AND deleted_at IS NULL;`)
+		if err != nil {
+			return nil, err
+		}
+		add(ids...)
+	}
 	if want[DataAreas] {
 		ids, err := s.queryIDs(
 			`SELECT cover_document_id FROM areas WHERE cover_document_id IS NOT NULL AND deleted_at IS NULL
@@ -559,7 +590,8 @@ func (s *Store) purgeUnusedFiles(candidates []string, now string) ([]string, err
 }
 
 // fileInUse reports whether anything live still uses a document: the text of a note or task
-// (trashed ones too, so restoring one never finds a hole), a board's image, or a cover.
+// (trashed ones too, so restoring one never finds a hole), a board's image, or a cover (an
+// area's, a project's or a notebook's).
 func (s *Store) fileInUse(id string) (bool, error) {
 	like := "%" + id + "%"
 	rows, err := s.db.Query(
@@ -569,7 +601,8 @@ func (s *Store) fileInUse(id string) (bool, error) {
 		   WHERE n.ref_type = 'document' AND n.ref_id = ? AND n.deleted_at IS NULL AND c.deleted_at IS NULL
 		 UNION ALL SELECT 1 FROM areas WHERE cover_document_id = ? AND deleted_at IS NULL
 		 UNION ALL SELECT 1 FROM projects WHERE cover_document_id = ? AND deleted_at IS NULL
-		 LIMIT 1;`, like, like, like, like, id, id, id)
+		 UNION ALL SELECT 1 FROM notebooks WHERE cover_document_id = ? AND deleted_at IS NULL
+		 LIMIT 1;`, like, like, like, like, id, id, id, id)
 	if err != nil {
 		return false, fmt.Errorf("query document use: %w", err)
 	}

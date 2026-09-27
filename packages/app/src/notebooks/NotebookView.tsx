@@ -77,6 +77,12 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
       resolveQuickCreate: (target) => call("resolveQuickCreate", target),
       inkUndo: () => call("inkUndo"),
       inkRedo: () => call("inkRedo"),
+      // A notebook page takes no dropped reference chips and has no AI assist.
+      insertRefAt: () => {},
+      showDropCaret: () => {},
+      aiCapture: async () => null,
+      aiApply: () => {},
+      aiRelease: () => {},
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],

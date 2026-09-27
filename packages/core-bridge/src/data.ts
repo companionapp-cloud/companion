@@ -6,6 +6,7 @@ export type DataKind =
   | "notes"
   | "tasks"
   | "canvases"
+  | "notebooks"
   | "chats"
   | "calendar"
   | "areas"
@@ -19,6 +20,7 @@ export interface DataSummary {
   notes: number;
   tasks: number;
   canvases: number;
+  notebooks: number;
   chats: number;
   calendars: number;
   calendarAccounts: number;
