@@ -247,12 +247,12 @@ func TestStoreToolsSpecsDeterministic(t *testing.T) {
 	s := newTestStore(t)
 	r := NewStoreRegistry(s)
 	specs := r.Specs()
-	if len(specs) != 31 {
-		t.Fatalf("expected 31 tools, got %d", len(specs))
+	if len(specs) != 32 {
+		t.Fatalf("expected 32 tools, got %d", len(specs))
 	}
 	// The calendar write tools exist only where there is an event writer to carry them out.
-	if n := len(NewStoreRegistry(s, WithEventWriter(&fakeEventWriter{})).Specs()); n != 33 {
-		t.Fatalf("expected 33 tools with an event writer, got %d", n)
+	if n := len(NewStoreRegistry(s, WithEventWriter(&fakeEventWriter{})).Specs()); n != 34 {
+		t.Fatalf("expected 34 tools with an event writer, got %d", n)
 	}
 	for i := 1; i < len(specs); i++ {
 		if specs[i-1].Name > specs[i].Name {

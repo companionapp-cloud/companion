@@ -22,7 +22,7 @@ import {
 import { useCore } from "./CoreContext";
 import { ConfirmDialog } from "./ConfirmDialog";
 
-const ENTITY_ICON: Record<TrashEntityType, IconName> = { note: "file", task: "tasks", document: "file", habit: "habits", canvas: "canvas" };
+const ENTITY_ICON: Record<TrashEntityType, IconName> = { note: "file", task: "tasks", document: "file", habit: "habits", canvas: "canvas", notebook: "notes" };
 
 export interface TrashScreenProps {
   /** Render the in-page “Empty trash” action. Defaults to on with a pointer and off under

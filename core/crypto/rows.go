@@ -47,6 +47,11 @@ var protectedFields = map[string][]string{
 	// Note ink: the whole group payload. The strokes are the user's handwriting and the anchor
 	// quotes the note's text, so none of it can stay plaintext; only the note id does.
 	protocol.EntityNoteInk: {"data"},
+	// Notebooks: the title and settings (guides) of a book, a page's text, and a page's ink. The
+	// cover colour, cover document id, paper and order stay plaintext.
+	protocol.EntityNotebook:        {"title", "settingsJson"},
+	protocol.EntityNotebookPage:    {"contentMd"},
+	protocol.EntityNotebookPageInk: {"data"},
 	// A Git export: where the repository is, who signs in and with what, the name of the device
 	// that exports, and its last error (which can quote the repository's address). The schedule,
 	// the on/off flag, the device id and the run times stay plaintext.

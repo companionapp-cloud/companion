@@ -9,6 +9,7 @@ import { ShortcutSettings } from "./ShortcutSettings";
 import { ImportSettings } from "./ImportSettings";
 import { ExportSettings } from "./ExportSettings";
 import { GitSyncSettings } from "./GitSyncSettings";
+import { LabsSettings } from "./LabsSettings";
 import { shortcutStore } from "./shortcuts";
 import { TourSettings } from "./onboarding/TourSettings";
 import { DangerZoneSettings } from "./DangerZoneSettings";
@@ -38,6 +39,7 @@ export type SettingsSectionId =
   | "tools"
   | "shortcuts"
   | "tutorials"
+  | "labs"
   | "danger";
 
 /** One entry in the settings navigation list (PLAN §3.1 shell). Each section is a
@@ -132,6 +134,13 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
     Component: TourSettings,
     // Wherever a shell runs the tutorials (all of them do; a focus or capture window doesn't).
     available: toursAvailable,
+  },
+  {
+    id: "labs",
+    label: "Labs",
+    description: "Lab features are subject to change. You may lose data, use at your own risk",
+    icon: "flag",
+    Component: LabsSettings,
   },
   {
     // Last, where a destructive page is expected and least likely to be opened by accident.

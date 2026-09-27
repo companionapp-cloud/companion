@@ -1,0 +1,84 @@
+import type { InkGroupRecord } from "@companion/editor";
+import type { PaperStyle } from "./paper";
+import type { NotebookMedium, WaxLeaves } from "./mediums";
+import type { Booklet, NotebookBinding } from "./bindings";
+
+// What the notebook renderer needs from the outside world (PLAN-notebooks.md §5), shaped like
+// CanvasHost: every argument and result is JSON, so the same renderer can run over the core
+// APIs on web and desktop and over postMessage inside the native WebView.
+
+export type NotebookCover = { kind: "color"; color: string } | { kind: "image"; color: string; documentId: string };
+
+/** A guide dragged out of a ruler, in page px. `x` guides are vertical lines. */
+export interface NotebookGuide {
+  id: string;
+  axis: "x" | "y";
+  at: number;
+}
+
+export type NotebookViewMode = "spread" | "scroll";
+
+export interface Notebook {
+  id: string;
+  title: string;
+  cover: NotebookCover;
+  /** What it is made of (mediums.ts). Fixed when the notebook is made. */
+  medium: NotebookMedium;
+  /** A wax codex's leaf count. */
+  leaves?: WaxLeaves;
+  /** How a paper notebook is held together (bindings.ts); null for one made without. */
+  binding?: NotebookBinding | null;
+  /** A traveler's notebook's booklets. */
+  booklets?: Booklet[];
+  /** A sewn journal's ribbon: the page it lies in. */
+  ribbon?: string | null;
+  /** Pages torn out of a pad. */
+  torn?: number;
+  guides: NotebookGuide[];
+  pageCount: number;
+  updatedAt: string;
+}
+
+/** One page. A page owns its text and ink: it is not a note, never appears under Notes, and
+ *  is only ever opened on its sheet. */
+export interface NotebookPage {
+  id: string;
+  position: number;
+  paper: PaperStyle;
+}
+
+export interface NotebookDocument {
+  notebook: Notebook;
+  pages: NotebookPage[];
+}
+
+export interface NotebookHost {
+  load(notebookId: string): Promise<NotebookDocument>;
+  /** A page's text, as markdown. Pages have no title. */
+  loadPage(pageId: string): Promise<{ contentMd: string }>;
+  savePage(pageId: string, contentMd: string): Promise<void>;
+  loadInk(pageId: string): Promise<InkGroupRecord[]>;
+  saveInk(pageId: string, groups: InkGroupRecord[]): Promise<void>;
+  deleteInk(pageId: string, ids: string[]): Promise<void>;
+  /** Insert a blank page after `afterPageId` (or at the end), with the given paper. `id`
+   *  chooses the page's id (a sherd picked from the heap keeps the shape it was shown with). */
+  addPage(notebookId: string, afterPageId: string | null, paper: PaperStyle, id?: string): Promise<NotebookPage>;
+  setPaper(pageId: string, paper: PaperStyle): Promise<void>;
+  deletePage(pageId: string): Promise<void>;
+  setGuides(notebookId: string, guides: NotebookGuide[]): Promise<void>;
+  /** Clear a page's text and ink (wax: smooth the leaf; clay: knead it flat). Held ink for it
+   *  is dropped. */
+  smoothPage(pageId: string): Promise<void>;
+  /** Put a ring binder's or a card box's pages in a new order (every page id, in order). */
+  reorderPages(notebookId: string, pageIds: string[]): Promise<void>;
+  /** Take a page out of one ring binder and clip it into the end of another. */
+  movePage(pageId: string, toNotebookId: string): Promise<void>;
+  /** Slip a new booklet into a traveler's notebook, one fresh page on the paper given. */
+  addBooklet(notebookId: string, title: string, paper: PaperStyle): Promise<Booklet>;
+  /** Rename a booklet, or slip it out of the cover and back. */
+  updateBooklet(notebookId: string, bookletId: string, patch: { title?: string; archived?: boolean }): Promise<void>;
+  /** Lay a sewn journal's ribbon in a page. */
+  setRibbon(notebookId: string, pageId: string | null): Promise<void>;
+  /** Resolve a cover image to something an <img> can show. */
+  resolveDocument(id: string): Promise<{ url: string } | null>;
+}

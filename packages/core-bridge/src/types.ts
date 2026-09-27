@@ -204,7 +204,7 @@ export interface NotificationFeedItem extends TaskNotification {
 }
 
 /** The kinds of entity that can be trashed (mirrors the server's trashable tables). */
-export type TrashEntityType = "note" | "task" | "document" | "habit" | "canvas";
+export type TrashEntityType = "note" | "task" | "document" | "habit" | "canvas" | "notebook";
 
 /** One row in the Trash, across entity types (mirrors bridge trashItem). */
 export interface TrashItem {

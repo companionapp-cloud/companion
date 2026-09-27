@@ -21,6 +21,7 @@ import {
   parseInkGroupData,
   type InkAnchor,
   type InkCallbacks,
+  type InkLayerOptions,
   type InkGroupData,
   type InkGroupRecord,
   type InkState,
@@ -60,6 +61,7 @@ const APPROX_RESNAPSHOT_MS = 3000;
 // Our own write is expected back from the host within this window; until then a different
 // version of that group from the host is a stale read and is ignored.
 const ECHO_WINDOW_MS = 5000;
+const PAGE_ANCHOR: InkAnchor = { before: "", after: "", offset: 0, page: true };
 
 interface Group {
   id: string;
@@ -157,6 +159,9 @@ export class InkLayer {
   private approx = new Set<string>();
   private approxTimer: ReturnType<typeof setTimeout> | null = null;
   private tool: InkTool | null = null;
+  /** Drawn with by a stylus even outside drawing mode (notebooks: the pencil always draws). */
+  private penTool: InkTool | null = null;
+  private inkBottom = 0;
   private index: { doc: unknown; index: TextIndex } | null = null;
   private cancelLayout: (() => void) | null = null;
   private undoStack: InkOp[] = [];
@@ -175,6 +180,7 @@ export class InkLayer {
     private readonly host: HTMLElement,
     private readonly cb: InkCallbacks,
     private readonly saveDelayMs = 300,
+    private readonly opts: InkLayerOptions = {},
   ) {
     host.classList.add("pm-ink-host");
     this.under = this.makeLayer("pm-ink pm-ink-under");
@@ -196,6 +202,10 @@ export class InkLayer {
     // cancelled; cancelling also stops the page from scrolling under a stroke.
     o.addEventListener("touchstart", this.onTouch, { passive: false });
     o.addEventListener("touchmove", this.onTouch, { passive: false });
+    // The pencil draws outside drawing mode too (see setPenTool): the upper layer ignores the
+    // pointer then, so a stylus is caught on the host before the text sees it.
+    host.addEventListener("pointerdown", this.onHostPointerDown, true);
+    host.addEventListener("touchstart", this.onHostTouch, { passive: false, capture: true });
 
     if (typeof ResizeObserver !== "undefined") {
       this.ro = new ResizeObserver(() => this.queueLayout());
@@ -264,7 +274,7 @@ export class InkLayer {
       // Scribble has no text field to turn handwriting into.
       this.view.setProps({ editable: () => false });
       (this.view.dom as HTMLElement).blur();
-      window.addEventListener("keydown", this.onKey);
+      if (this.opts.keyboard !== false) window.addEventListener("keydown", this.onKey);
     } else if (!tool && wasDrawing) {
       this.cancelGesture();
       this.view.setProps({ editable: () => true });
@@ -273,6 +283,12 @@ export class InkLayer {
       this.flush();
     }
     this.queueLayout();
+  }
+
+  /** The tool a stylus draws with while no drawing tool is active, or null for none: the text
+   *  stays editable by finger and keyboard, and the pencil always writes. */
+  setPenTool(tool: InkTool | null): void {
+    this.penTool = tool;
   }
 
   undo(): void {
@@ -324,6 +340,7 @@ export class InkLayer {
   onTransaction(tr: Transaction): void {
     if (!tr.docChanged || this.destroyed) return;
     for (const g of this.groups.values()) {
+      if (g.anchor.page) continue;
       const r = tr.mapping.mapResult(g.pos, g.anchor.free ? -1 : 1);
       g.pos = r.pos;
       // Text deleted all around the point (a selection spanning it): don't re-pin to whatever
@@ -385,6 +402,8 @@ export class InkLayer {
     window.removeEventListener("keydown", this.onKey);
     document.fonts?.removeEventListener?.("loadingdone", this.queueLayout);
     document.removeEventListener("visibilitychange", this.onVisibility);
+    this.host.removeEventListener("pointerdown", this.onHostPointerDown, true);
+    this.host.removeEventListener("touchstart", this.onHostTouch, true);
     this.under.remove();
     this.over.remove();
     this.host.classList.remove("pm-ink-host", "pm-ink-drawing", "pm-ink-erasing");
@@ -435,6 +454,14 @@ export class InkLayer {
 
   /** A group from the host: find its anchor in the current text and draw its strokes. */
   private loadGroup(id: string, data: InkGroupData, serialized: string, rev?: string): void {
+    if (data.anchor.page) {
+      const g = this.makeGroup(id, data.anchor, 0);
+      for (const s of data.strokes) this.renderStroke(g, s);
+      g.strokes = data.strokes.slice();
+      g.serialized = serialized;
+      g.rev = rev;
+      return;
+    }
     const index = this.textIndex();
     const hit = resolveAnchor(index, data.anchor);
     const g = this.makeGroup(id, data.anchor, index.posAt(hit.offset));
@@ -454,9 +481,9 @@ export class InkLayer {
     g.bbox = null;
     g.bytes = 0;
     const index = this.textIndex();
-    const hit = resolveAnchor(index, data.anchor);
+    const hit = data.anchor.page ? { offset: 0, match: "exact" as const } : resolveAnchor(index, data.anchor);
     g.anchor = data.anchor;
-    g.pos = index.posAt(hit.offset);
+    g.pos = data.anchor.page ? 0 : index.posAt(hit.offset);
     for (const s of data.strokes) this.renderStroke(g, s);
     g.strokes = data.strokes.slice();
     g.serialized = serialized;
@@ -469,6 +496,12 @@ export class InkLayer {
   /** A new group pinned to the text nearest (x, y), in layer coordinates: to the words under
    *  it, or (drawn in empty space) freely to the nearest line. */
   private createGroupAt(x: number, y: number): Group {
+    if (this.opts.page) {
+      const g = this.makeGroup(newGroupId(), { ...PAGE_ANCHOR }, 0);
+      const o = this.origin();
+      if (o) this.placeGroup(g, o, this.frame(o));
+      return g;
+    }
     const index = this.textIndex();
     let pos = this.posNear(x, y);
     let free = !this.overText(x, y, pos);
@@ -490,7 +523,7 @@ export class InkLayer {
   /** Bring back a group an undo/redo needs (it was deleted when its last stroke went). */
   private recreateGroup(id: string, anchor: InkAnchor): Group {
     const index = this.textIndex();
-    const hit = resolveAnchor(index, anchor);
+    const hit = anchor.page ? { offset: 0, match: "exact" as const } : resolveAnchor(index, anchor);
     const g = this.makeGroup(id, anchor, index.posAt(hit.offset));
     g.orphan = hit.match === "lost";
     this.pendingDelete.delete(id);
@@ -599,6 +632,7 @@ export class InkLayer {
     const index = this.textIndex();
     let moved = false;
     for (const g of this.groups.values()) {
+      if (g.anchor.page) continue;
       if (g.orphan) {
         const hit = resolveAnchor(index, g.anchor);
         if (hit.match === "lost") continue;
@@ -625,7 +659,7 @@ export class InkLayer {
       const index = this.textIndex();
       for (const id of this.approx) {
         const g = this.groups.get(id);
-        if (!g || g.orphan) continue;
+        if (!g || g.orphan || g.anchor.page) continue;
         g.anchor = snapshotAnchor(index, index.offsetAt(g.pos), g.anchor.free);
         this.markDirty(id);
       }
@@ -639,7 +673,8 @@ export class InkLayer {
       canRedo: this.redoStack.length > 0,
       hasInk: this.groups.size > 0,
     };
-    const key = `${state.canUndo}${state.canRedo}${state.hasInk}`;
+    if (this.opts.page) state.inkBottom = this.inkBottom;
+    const key = `${state.canUndo}${state.canRedo}${state.hasInk}${state.inkBottom ?? ""}`;
     if (key === this.lastState) return;
     this.lastState = key;
     this.cb.onStateChange?.(state);
@@ -700,6 +735,15 @@ export class InkLayer {
       this.placeGroup(g, o, f);
       if (g.bbox) inkBottom = Math.max(inkBottom, g.ty + (g.bbox.y + g.bbox.h) * g.scale);
     }
+    if (this.opts.page) {
+      // The sheet sizes the layers (CSS); report the lowest ink so the sheet can hold it.
+      const bottom = Math.ceil(inkBottom);
+      if (bottom !== this.inkBottom) {
+        this.inkBottom = bottom;
+        this.emitState();
+      }
+      return;
+    }
     // The layers may reach past the text: ink drawn below it, and room to draw while drawing.
     // Absolutely positioned, they extend the scroll area without moving anything.
     const drawSpace = this.tool ? Math.max(DRAW_SPACE_MIN, window.innerHeight * 0.6) : 0;
@@ -710,6 +754,16 @@ export class InkLayer {
   /** Put a group at its anchor. A group that would stick out past the layers (it was drawn
    *  on a wider screen) is nudged back in, and scaled down if it is wider than they are. */
   private placeGroup(g: Group, o: Origin, f: Frame): void {
+    if (g.anchor.page) {
+      // Page coordinates are the layers' own: the sheet's top-left, unscaled.
+      if (!g.over.hasAttribute("transform")) {
+        g.over.setAttribute("transform", "translate(0 0)");
+        g.under.setAttribute("transform", "translate(0 0)");
+      }
+      g.tx = g.ty = 0;
+      g.scale = 1;
+      return;
+    }
     const free = !!g.anchor.free;
     let c: { left: number; top: number };
     try {
@@ -813,8 +867,32 @@ export class InkLayer {
     }
   };
 
+  /** A stylus touching the page outside drawing mode: draw with the pen tool instead of placing
+   *  the caret. Fingers and the mouse fall through to the text. */
+  private onHostPointerDown = (e: PointerEvent): void => {
+    if (this.tool || !this.penTool || e.pointerType !== "pen" || this.destroyed) return;
+    e.stopPropagation();
+    this.onPointerDown(e);
+  };
+
+  /** iPadOS Scribble turns pencil strokes over editable text into typing unless the touch is
+   *  cancelled. Only stylus touches are cancelled, so fingers still scroll and tap. */
+  private onHostTouch = (e: TouchEvent): void => {
+    if (this.tool || !this.penTool) return;
+    for (const t of Array.from(e.changedTouches)) {
+      if ((t as Touch & { touchType?: string }).touchType === "stylus") {
+        e.preventDefault();
+        return;
+      }
+    }
+  };
+
+  private activeTool(e?: PointerEvent): InkTool | null {
+    return this.tool ?? ((!e || e.pointerType === "pen") ? this.penTool : null);
+  }
+
   private onPointerDown = (e: PointerEvent): void => {
-    const tool = this.tool;
+    const tool = this.activeTool(e);
     if (!tool || this.destroyed) return;
     const o = this.origin();
     if (!o) return;
@@ -863,7 +941,7 @@ export class InkLayer {
   };
 
   private onPointerMove = (e: PointerEvent): void => {
-    if (!this.tool) return;
+    if (!this.tool && !this.live && !this.erasing) return;
     const o = this.origin();
     if (!o) return;
     const prev = e.pointerType === "touch" ? this.touches.get(e.pointerId) : undefined;
@@ -871,11 +949,14 @@ export class InkLayer {
       this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this.touches.size > 1 || this.penSeen) {
         // A palm resting on the screen must not scroll the page under a pen stroke.
-        if (!this.live && !this.erasing) this.pan(e.clientX - prev.x, e.clientY - prev.y);
+        if (!this.live && !this.erasing) {
+          this.pan(e.clientX - prev.x, e.clientY - prev.y);
+          this.pinch(e, prev);
+        }
         return;
       }
     }
-    if (this.tool.kind === "eraser" && e.pointerType !== "touch") {
+    if (this.tool?.kind === "eraser" && e.pointerType !== "touch") {
       const [x, y] = this.toLocal(e, o);
       const r = ERASER_RADII[this.tool.size] ?? 12;
       this.cursor.style.display = "";
@@ -934,6 +1015,20 @@ export class InkLayer {
   /** Scroll the note with one or two fingers while drawing (the layer blocks native
    *  scrolling so strokes don't scroll the page). Each finger contributes its share of the
    *  movement, so two fingers moving together scroll by their shared distance. */
+  /** Two fingers changing their distance: report the zoom factor to the host. The pan above
+   *  has already moved each finger's share, so pinching in place doesn't drift. */
+  private pinch(e: PointerEvent, prev: { x: number; y: number }): void {
+    if (!this.cb.onPinch || this.touches.size !== 2) return;
+    const [a, b] = [...this.touches.entries()];
+    const other = a[0] === e.pointerId ? b[1] : a[1];
+    const before = Math.hypot(prev.x - other.x, prev.y - other.y);
+    const after = Math.hypot(e.clientX - other.x, e.clientY - other.y);
+    if (before < 1 || after < 1) return;
+    const factor = after / before;
+    if (Math.abs(factor - 1) < 0.002) return;
+    this.cb.onPinch(factor, (e.clientX + other.x) / 2, (e.clientY + other.y) / 2);
+  }
+
   private pan(moveX: number, moveY: number): void {
     const n = this.touches.size;
     const dx = moveX / n;
@@ -1021,7 +1116,7 @@ export class InkLayer {
   }
 
   private eraseAlong(from: [number, number], to: [number, number]): void {
-    const r = ERASER_RADII[this.tool?.size ?? 1] ?? 12;
+    const r = ERASER_RADII[this.activeTool()?.size ?? 1] ?? 12;
     const dist = Math.hypot(to[0] - from[0], to[1] - from[1]);
     const steps = Math.max(1, Math.ceil(dist / (r / 2)));
     for (let i = 1; i <= steps; i++) {
@@ -1033,7 +1128,7 @@ export class InkLayer {
   private eraseAt(x: number, y: number): void {
     const erasing = this.erasing;
     if (!erasing) return;
-    const radius = ERASER_RADII[this.tool?.size ?? 1] ?? 12;
+    const radius = ERASER_RADII[this.activeTool()?.size ?? 1] ?? 12;
     for (let i = this.order.length - 1; i >= 0; i--) {
       const g = this.groups.get(this.order[i]);
       if (!g?.bbox) continue;

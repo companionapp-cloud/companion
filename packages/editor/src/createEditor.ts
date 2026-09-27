@@ -24,7 +24,7 @@ import { buildFormatCommands, computeFormatState, type FormatName, type FormatSt
 import type { DocumentSource, LinkRef, LinkSource, QuickCreateRequest, QuickCreateTarget, RefDragStart } from "./types";
 import { InkLayer } from "./ink/layer";
 import { aiTargetsPlugin, applyAiResult, captureAiTarget, releaseAiTarget, type AiApplyMode, type AiTarget } from "./ai";
-import type { InkCallbacks, InkGroupRecord, InkTool } from "./ink/types";
+import type { InkCallbacks, InkGroupRecord, InkLayerOptions, InkTool } from "./ink/types";
 
 // The shared ProseMirror setup — pure DOM, no framework. Used directly on web/desktop
 // (Editor.web.tsx) and inside the WebView on native (webview/main.ts). Content is
@@ -72,6 +72,8 @@ export interface EditorHandle {
   setInkGroups(groups: InkGroupRecord[]): void;
   /** Start drawing with a tool, switch tools, or stop drawing (null). */
   setInkTool(tool: InkTool | null): void;
+  /** The tool a stylus draws with outside drawing mode, or null (notebooks). */
+  setInkPenTool(tool: InkTool | null): void;
   inkUndo(): void;
   inkRedo(): void;
   /** Capture what a writing assist acts on — the selection, or the whole note — as a target
@@ -135,7 +137,7 @@ export interface CreateEditorOptions {
   /** Enables drawing over the note (PLAN-drawing.md): the host persists ink groups through
    *  these callbacks and feeds them back with {@link EditorHandle.setInkGroups}. Full variant
    *  only. `saveDelayMs` batches a burst of strokes into one write (0 writes each stroke). */
-  ink?: InkCallbacks & { saveDelayMs?: number };
+  ink?: InkCallbacks & InkLayerOptions & { saveDelayMs?: number };
   /** Mod-j: the reader asked to write with AI. Return false to decline (AI off), letting the
    *  key through. Full variant only. */
   onAiShortcut?: () => boolean | void;
@@ -568,7 +570,7 @@ export function createEditor(
   // Seed the toolbar with the initial selection's state.
   emitFormatState();
 
-  if (options.ink && !simple) ink = new InkLayer(view, mount, options.ink, options.ink.saveDelayMs);
+  if (options.ink && !simple) ink = new InkLayer(view, mount, options.ink, options.ink.saveDelayMs, { page: options.ink.page, keyboard: options.ink.keyboard });
 
   // Swap the whole document for freshly parsed content, off the undo history. Emits a
   // change like any edit (the composer's onChange resets its draft).
@@ -658,6 +660,9 @@ export function createEditor(
     },
     setInkTool(tool: InkTool | null) {
       ink?.setTool(tool);
+    },
+    setInkPenTool(tool: InkTool | null) {
+      ink?.setPenTool(tool);
     },
     inkUndo() {
       ink?.undo();

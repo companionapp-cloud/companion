@@ -38,6 +38,14 @@ const ROWS: ClearRow[] = [
     count: (s) => s.canvases,
     what: (s) => plural(s.canvases, "canvas", "canvases"),
   },
+  {
+    kind: "notebooks",
+    label: "Notebooks",
+    icon: "notebook",
+    count: (s) => s.notebooks,
+    what: (s) => plural(s.notebooks, "notebook"),
+    note: "Their pages and everything drawn on them go too.",
+  },
   { kind: "chats", label: "Chats", icon: "chat", count: (s) => s.chats, what: (s) => plural(s.chats, "chat") },
   {
     kind: "calendar",

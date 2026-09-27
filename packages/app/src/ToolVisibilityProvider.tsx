@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import type { IconName } from "@companion/design-system";
 import type { ViewId } from "./nav-context";
+import { useLabsFlag } from "./labs";
 
 /** The rail tools a user can hide. Settings is deliberately not hideable (it's how you get
  *  back), and notifications has no rail item — its entry point is the toolbar bell. */
@@ -22,11 +23,13 @@ export const TOOLS: ToolDef[] = [
   { id: "notes", label: "Notes", icon: "notes" },
   { id: "tasks", label: "Tasks", icon: "tasks" },
   { id: "canvases", label: "Canvases", icon: "canvas" },
+  { id: "notebooks", label: "Notebooks", icon: "notebook" },
   { id: "habits", label: "Habits", icon: "habits" },
   { id: "graph", label: "Graph", icon: "graph" },
   { id: "logbook", label: "Logbook", icon: "logbook" },
   { id: "trash", label: "Trash", icon: "trash" },
 ];
+
 
 /** Where the hidden set + order persist. Deliberately device-local — hiding or reordering a
  *  tool is an ergonomic choice per machine, not synced data. Same synchronous contract as
@@ -169,14 +172,20 @@ export function ToolVisibilityProvider({ storage, children }: { storage?: ToolsS
   );
 
   const byId = useMemo(() => new Map(TOOLS.map((t) => [t.id, t])), []);
+  // Notebooks is a Labs feature. Switched off, it's left out of `tools` (so Settings › Tools
+  // doesn't list it) and reported as hidden (so every rail and home list drops it), without
+  // touching the user's saved hidden set or order.
+  const notebooksOn = useLabsFlag("notebooks");
+  const labsOff = useMemo(() => new Set<ToolId>(notebooksOn ? [] : ["notebooks"]), [notebooksOn]);
   const tools = useMemo(
-    () => state.order.map((id) => byId.get(id)).filter((t): t is ToolDef => t != null),
-    [state.order, byId],
+    () => state.order.filter((id) => !labsOff.has(id)).map((id) => byId.get(id)).filter((t): t is ToolDef => t != null),
+    [state.order, byId, labsOff],
   );
+  const hidden = useMemo(() => (labsOff.size ? new Set([...state.hidden, ...labsOff]) : state.hidden), [state.hidden, labsOff]);
 
   const value = useMemo<ToolVisibilityStore>(
-    () => ({ tools, hidden: state.hidden, setHidden, reorder }),
-    [tools, state.hidden, setHidden, reorder],
+    () => ({ tools, hidden, setHidden, reorder }),
+    [tools, hidden, setHidden, reorder],
   );
   return <ToolVisibilityCtx.Provider value={value}>{children}</ToolVisibilityCtx.Provider>;
 }

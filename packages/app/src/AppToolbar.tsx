@@ -31,6 +31,7 @@ import { TourAnchor } from "./onboarding/anchors";
 
 const VIEW_META: Record<SurfaceViewId, { label: string; icon: IconName }> = {
   today: { label: "Today", icon: "today" },
+  notebooks: { label: "Notebooks", icon: "notebook" },
   chat: { label: "Chat", icon: "chat" },
   calendar: { label: "Calendar", icon: "calendar" },
   habits: { label: "Habits", icon: "habits" },

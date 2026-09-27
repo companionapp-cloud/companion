@@ -109,6 +109,28 @@ export { canvasesApi } from "./canvases";
 export type { CanvasesApi, CreateCanvasInput, UpdateCanvasInput, CanvasNodeInput, CanvasEdgeInput } from "./canvases";
 export { noteInkApi } from "./noteInk";
 export type { NoteInkApi, NoteInkInput } from "./noteInk";
+export { notebooksApi } from "./notebooks";
+export type {
+  NotebooksApi,
+  Notebook,
+  NotebookSummary,
+  NotebookPage,
+  NotebookDocument,
+  NotebookPageInk,
+  NotebookGuide,
+  PageHit,
+  PaperKind,
+  PaperSpacing,
+  UpdateNotebookInput,
+  AddPageInput,
+  UpdatePageInput,
+  CreateNotebookInput,
+  NotebookMedium,
+  NotebookCoreSettings,
+  WaxLeaves,
+  NotebookBinding,
+  Booklet,
+} from "./notebooks";
 export { exportsApi, importFilesApi, EXPORT_CHANGED_EVENT, SYNC_REQUESTED_EVENT } from "./exports";
 export type {
   ExportsApi,
