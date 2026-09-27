@@ -32,6 +32,13 @@ const notebookColumns = `id, title, cover_color, cover_document_id, settings_jso
 type CreateNotebookInput struct {
 	Title      string `json:"title"`
 	CoverColor string `json:"coverColor"`
+	// Medium is fixed for the notebook's life (domain.NotebookMediums); empty is paper.
+	Medium string `json:"medium,omitempty"`
+	// Leaves binds a wax codex (domain.WaxLeaves); empty takes the default.
+	Leaves int `json:"leaves,omitempty"`
+	// FirstPageID chooses the first page's id (a UUID): the sherd picked from the heap when a
+	// potsherd notebook is made. Empty: generated. The bridge uses it; Create ignores it.
+	FirstPageID string `json:"firstPageId,omitempty"`
 }
 
 // UpdateNotebookInput carries partial updates; nil fields are left unchanged. An empty
@@ -61,8 +68,19 @@ func (r *NotebooksRepo) Create(in CreateNotebookInput) (*domain.Notebook, error)
 	if color == "" {
 		color = "ink"
 	}
+	settings := json.RawMessage("{}")
+	if m := strings.TrimSpace(in.Medium); m != "" && m != domain.MediumPaper {
+		s := domain.NotebookSettings{Medium: m}
+		if m == domain.MediumWax {
+			s.Leaves = in.Leaves
+			if s.Leaves == 0 {
+				s.Leaves = domain.DefaultWaxLeaves
+			}
+		}
+		settings, _ = json.Marshal(s)
+	}
 	n := &domain.Notebook{
-		ID: id.String(), Title: strings.TrimSpace(in.Title), CoverColor: color, Settings: json.RawMessage("{}"),
+		ID: id.String(), Title: strings.TrimSpace(in.Title), CoverColor: color, Settings: settings,
 		SortOrder: next, CreatedAt: now, UpdatedAt: now, Version: 0, Dirty: true,
 	}
 	if err := n.Validate(); err != nil {
@@ -115,7 +133,11 @@ func (r *NotebooksRepo) Update(id string, in UpdateNotebookInput) (*domain.Noteb
 		}
 	}
 	if in.Settings != nil {
-		n.Settings = json.RawMessage(normalizeProps(*in.Settings))
+		merged, err := mergeNotebookSettings(n.Settings, *in.Settings)
+		if err != nil {
+			return nil, errors.Join(domain.ErrInvalidNotebook, err)
+		}
+		n.Settings = merged
 	}
 	n.UpdatedAt = r.clock.Now().UTC()
 	n.Dirty = true
@@ -129,6 +151,33 @@ func (r *NotebooksRepo) Update(id string, in UpdateNotebookInput) (*domain.Noteb
 		return nil, fmt.Errorf("update notebook: %w", err)
 	}
 	return n, nil
+}
+
+// mergeNotebookSettings applies a settings update key by key: a key sent replaces that key, a
+// null removes it, and keys not sent are kept (so saving the guides keeps the medium). The
+// core's own keys (medium, leaves) are never taken from an update.
+func mergeNotebookSettings(current, update json.RawMessage) (json.RawMessage, error) {
+	base := map[string]json.RawMessage{}
+	if len(current) > 0 && string(current) != "null" {
+		if err := json.Unmarshal(current, &base); err != nil {
+			base = map[string]json.RawMessage{}
+		}
+	}
+	var patch map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(normalizeProps(update)), &patch); err != nil {
+		return nil, errors.New("settings must be a JSON object")
+	}
+	for k, v := range patch {
+		if domain.CoreSettingsKeys[k] {
+			continue
+		}
+		if string(v) == "null" {
+			delete(base, k)
+		} else {
+			base[k] = v
+		}
+	}
+	return json.Marshal(base)
 }
 
 // Touch bumps updated_at without marking the row dirty, so the shelf's recency reflects page
@@ -336,6 +385,9 @@ const notebookPageColumns = `id, notebook_id, sort_order, paper_kind, paper_spac
 // AddPageInput describes a new page: where it goes (after AfterID, or at the end when empty)
 // and its paper. The app passes the paper of the page the writer is on.
 type AddPageInput struct {
+	// ID lets the app choose the page's id (a UUID): a potsherd's shape is drawn from its id,
+	// so the sherd picked out of the heap is the one that becomes the page. Empty: generated.
+	ID           string `json:"id,omitempty"`
 	NotebookID   string `json:"notebookId"`
 	AfterID      string `json:"afterId"`
 	PaperKind    string `json:"paperKind"`
@@ -356,6 +408,20 @@ func (r *NotebookPagesRepo) Add(in AddPageInput) (*domain.NotebookPage, error) {
 	id, err := uuid.NewV7()
 	if err != nil {
 		return nil, fmt.Errorf("generate uuid: %w", err)
+	}
+	if in.ID != "" {
+		if id, err = uuid.Parse(in.ID); err != nil {
+			return nil, errors.Join(domain.ErrInvalidNotebookPage, errors.New("id must be a UUID"))
+		}
+		rows, err := r.db.Query(`SELECT 1 FROM notebook_pages WHERE id = ?;`, id.String())
+		if err != nil {
+			return nil, fmt.Errorf("check page id: %w", err)
+		}
+		used := rows.Next()
+		rows.Close()
+		if used {
+			return nil, errors.Join(domain.ErrInvalidNotebookPage, errors.New("page id already used"))
+		}
 	}
 	pages, err := r.ListForNotebook(in.NotebookID)
 	if err != nil {

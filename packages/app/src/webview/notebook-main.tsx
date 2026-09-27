@@ -5,6 +5,7 @@ import type { NotebookHost, NotebookPage, NotebookViewMode } from "../notebooks/
 // Resolves to the DOM view via the .web-first resolution in scripts/build-notebook.mjs.
 import { NotebookView } from "../notebooks/NotebookView.web";
 import type { NotebookViewController, NotebookZoom } from "../notebooks/viewTypes";
+import type { MediumToolId } from "../notebooks/mediums";
 
 // Entry for the native notebook WebView (bundled to a string by scripts/build-notebook.mjs,
 // embedded by notebooks/NotebookView.tsx). Renders the same page view the web app uses. The
@@ -27,6 +28,8 @@ interface ViewProps {
   zoom: NotebookZoom;
   tool: InkTool | null;
   penTool: InkTool | null;
+  mediumTool: MediumToolId | null;
+  mediumSize: number;
   rulers: boolean;
   revision: number;
 }
@@ -63,10 +66,11 @@ const host: NotebookHost = {
   loadInk: (id) => rpc("loadInk", [id]),
   saveInk: (id, groups) => rpc("saveInk", [id, groups]),
   deleteInk: (id, ids) => rpc("deleteInk", [id, ids]),
-  addPage: (nb, after, paper) => rpc("addPage", [nb, after, paper]),
+  addPage: (nb, after, paper, id) => rpc("addPage", [nb, after, paper, id]),
   setPaper: (id, paper) => rpc("setPaper", [id, paper]),
   deletePage: (id) => rpc("deletePage", [id]),
   setGuides: (nb, guides) => rpc("setGuides", [nb, guides]),
+  smoothPage: (id) => rpc("smoothPage", [id]),
   resolveDocument: (id) => rpc("resolveDocument", [id], 60000),
 };
 
@@ -78,6 +82,7 @@ window.__notebookCall = (method, args) => {
   if (!controller) return;
   if (method === "goTo") controller.goTo(Number(args[0]));
   else if (method === "addPage") controller.addPage();
+  else if (method === "smoothPage") controller.smoothPage();
   else {
     // Editor controller calls for the current page: format, insertTable, inkUndo, …
     const ed = controller.editor() as unknown as Record<string, (...a: unknown[]) => void> | null;
@@ -88,7 +93,7 @@ window.__notebookCall = (method, args) => {
 
 function NotebookApp() {
   const notebookId = window.__NOTEBOOK_ID__ ?? "";
-  const [props, setProps] = useState<ViewProps>({ mode: "scroll", zoom: "fit", tool: null, penTool: null, rulers: false, revision: 0 });
+  const [props, setProps] = useState<ViewProps>({ mode: "scroll", zoom: "fit", tool: null, penTool: null, mediumTool: null, mediumSize: 1, rulers: false, revision: 0 });
   const ref = useRef<NotebookViewController>(null);
   useEffect(() => {
     setPropsExternal = setProps;
@@ -109,6 +114,8 @@ function NotebookApp() {
       onZoom={(z) => post("event", { name: "zoom", value: z })}
       tool={props.tool}
       penTool={props.penTool}
+      mediumTool={props.mediumTool}
+      mediumSize={props.mediumSize}
       rulers={props.rulers}
       revision={props.revision}
       onState={(s) => post("event", { name: "state", value: s })}

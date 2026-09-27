@@ -7,6 +7,7 @@ import { useSync } from "../SyncProvider";
 import { useDocumentSource } from "../DocumentSourceContext";
 import type { NotebookDocument, NotebookHost, NotebookPage } from "./host";
 import type { PaperStyle } from "./paper";
+import { mediumOf } from "./mediums";
 
 // The platform-independent NotebookHost (PLAN-notebooks.md §5): wraps the notebooks.* core
 // API, the document source (cover images) and the sync trigger. The web view uses it
@@ -81,6 +82,8 @@ export function useNotebookHost(): NotebookHost {
             cover: doc.notebook.coverDocumentId
               ? { kind: "image", color: doc.notebook.coverColor, documentId: doc.notebook.coverDocumentId }
               : { kind: "color", color: doc.notebook.coverColor },
+            medium: mediumOf(doc.notebook.settingsJson),
+            leaves: doc.notebook.settingsJson?.leaves,
             guides: Array.isArray(settings.guides) ? settings.guides : [],
             pageCount: doc.pages.length,
             updatedAt: doc.notebook.updatedAt,
@@ -127,8 +130,8 @@ export function useNotebookHost(): NotebookHost {
         }
         schedule(pageId);
       },
-      async addPage(notebookId, afterPageId, paper) {
-        const p = await api.pages.add({ notebookId, afterId: afterPageId ?? undefined, paperKind: paper.kind, paperSpacing: paper.spacing });
+      async addPage(notebookId, afterPageId, paper, id) {
+        const p = await api.pages.add({ id, notebookId, afterId: afterPageId ?? undefined, paperKind: paper.kind, paperSpacing: paper.spacing });
         syncTrigger();
         return toPage(p);
       },
@@ -143,6 +146,14 @@ export function useNotebookHost(): NotebookHost {
       },
       async setGuides(notebookId, guides) {
         await api.update(notebookId, { settingsJson: { guides } });
+        syncTrigger();
+      },
+      async smoothPage(pageId) {
+        // Held ink is about to be smoothed away: drop it rather than write it first.
+        const h = held.current.get(pageId);
+        if (h?.timer) clearTimeout(h.timer);
+        held.current.delete(pageId);
+        await api.pages.smooth(pageId);
         syncTrigger();
       },
       async resolveDocument(id) {

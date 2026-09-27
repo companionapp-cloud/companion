@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { Notebook, NotebookSummary, UpdateNotebookInput } from "@companion/core-bridge";
+import type { CreateNotebookInput, Notebook, NotebookSummary, UpdateNotebookInput } from "@companion/core-bridge";
 import { useCore } from "../CoreContext";
 import { useSync } from "../SyncProvider";
 
@@ -7,7 +7,8 @@ export interface NotebooksStore {
   notebooks: NotebookSummary[];
   loading: boolean;
   byId: (id: string) => NotebookSummary | undefined;
-  create: (input?: { title?: string; coverColor?: string }) => Promise<Notebook>;
+  /** The medium (and a wax codex's leaves) are fixed from here on. */
+  create: (input?: CreateNotebookInput) => Promise<Notebook>;
   update: (id: string, input: UpdateNotebookInput) => Promise<void>;
   /** Move a notebook to the Trash; its pages and ink ride along. */
   remove: (id: string) => Promise<void>;
@@ -48,8 +49,8 @@ export function NotebooksProvider({ children }: { children: ReactNode }) {
   }, [core, refresh, scheduleRefresh]);
 
   const create = useCallback(
-    async (input?: { title?: string; coverColor?: string }) => {
-      const nb = await api.create({ title: input?.title ?? "", coverColor: input?.coverColor ?? "ink" });
+    async (input?: CreateNotebookInput) => {
+      const nb = await api.create({ ...input, title: input?.title ?? "", coverColor: input?.coverColor ?? "ink" });
       await refresh();
       syncTrigger();
       return nb;

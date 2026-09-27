@@ -89,8 +89,19 @@ func (c *Core) notebooksCreate(payload []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := c.store.NotebookPages.Add(store.AddPageInput{NotebookID: n.ID}); err != nil {
-		return nil, err
+	// A wax codex is bound with all its leaves; every other medium starts with one page.
+	count := 1
+	if s := n.ParsedSettings(); s.Medium == domain.MediumWax {
+		count = s.Leaves
+	}
+	for i := 0; i < count; i++ {
+		page := store.AddPageInput{NotebookID: n.ID}
+		if i == 0 {
+			page.ID = in.FirstPageID
+		}
+		if _, err := c.store.NotebookPages.Add(page); err != nil {
+			return nil, err
+		}
 	}
 	c.emitNotebookChanged(n.ID)
 	return json.Marshal(n)
@@ -161,8 +172,12 @@ func (c *Core) notebooksPagesAdd(payload []byte) ([]byte, error) {
 	if err := unmarshal(payload, &in); err != nil {
 		return nil, err
 	}
-	if _, err := c.store.Notebooks.Get(in.NotebookID); err != nil {
+	n, err := c.store.Notebooks.Get(in.NotebookID)
+	if err != nil {
 		return nil, mapStoreErr(err)
+	}
+	if n.Medium() == domain.MediumWax {
+		return nil, errWaxLeaves
 	}
 	p, err := c.store.NotebookPages.Add(in)
 	if err != nil {
@@ -195,6 +210,9 @@ func (c *Core) notebooksPagesUpdate(payload []byte) ([]byte, error) {
 		store.UpdatePageInput
 	}
 	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	if _, _, err := c.writablePage(args.ID); err != nil {
 		return nil, err
 	}
 	p, err := c.store.NotebookPages.Update(args.ID, args.UpdatePageInput)
@@ -234,9 +252,12 @@ func (c *Core) notebooksPagesDelete(payload []byte) ([]byte, error) {
 	if err := unmarshal(payload, &args); err != nil {
 		return nil, err
 	}
-	p, err := c.store.NotebookPages.Get(args.ID)
+	p, n, err := c.writablePage(args.ID)
 	if err != nil {
-		return nil, mapStoreErr(err)
+		return nil, err
+	}
+	if n.Medium() == domain.MediumWax {
+		return nil, errWaxLeaves
 	}
 	pages, err := c.store.NotebookPages.ListForNotebook(p.NotebookID)
 	if err != nil {
@@ -252,6 +273,51 @@ func (c *Core) notebooksPagesDelete(payload []byte) ([]byte, error) {
 		return nil, mapStoreErr(err)
 	}
 	_ = c.store.Notebooks.Touch(p.NotebookID)
+	c.emitNotebookChanged(p.NotebookID)
+	return json.Marshal(map[string]bool{"ok": true})
+}
+
+// ---- mediums ---------------------------------------------------------------------------
+// (PLAN-notebooks.md §11) The rules live here so every device keeps them: a wax codex keeps
+// the leaves it was bound with.
+
+var errWaxLeaves = errors.New("a wax codex keeps the leaves it was bound with: smooth a leaf to reuse it")
+
+// writablePage loads a page and its notebook.
+func (c *Core) writablePage(pageID string) (*domain.NotebookPage, *domain.Notebook, error) {
+	p, err := c.store.NotebookPages.Get(pageID)
+	if err != nil {
+		return nil, nil, mapStoreErr(err)
+	}
+	n, err := c.store.Notebooks.Get(p.NotebookID)
+	if err != nil {
+		return nil, nil, mapStoreErr(err)
+	}
+	return p, n, nil
+}
+
+// notebooksPagesSmooth clears a page's text and ink in one step: the flat end of the stylus
+// drawn across a wax leaf, or a clay tablet kneaded flat. Any page may be smoothed.
+func (c *Core) notebooksPagesSmooth(payload []byte) ([]byte, error) {
+	var args struct {
+		ID string `json:"id"`
+	}
+	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	p, _, err := c.writablePage(args.ID)
+	if err != nil {
+		return nil, err
+	}
+	empty := ""
+	if _, err := c.store.NotebookPages.Update(p.ID, store.UpdatePageInput{ContentMD: &empty}); err != nil {
+		return nil, mapStoreErr(err)
+	}
+	if err := c.store.NotebookInk.DeleteForPage(p.ID); err != nil {
+		return nil, err
+	}
+	_ = c.store.Notebooks.Touch(p.NotebookID)
+	c.emitNotebookInkChanged(p.ID)
 	c.emitNotebookChanged(p.NotebookID)
 	return json.Marshal(map[string]bool{"ok": true})
 }
@@ -299,9 +365,9 @@ func (c *Core) notebooksInkUpsert(payload []byte) ([]byte, error) {
 	if err := unmarshal(payload, &args); err != nil {
 		return nil, err
 	}
-	p, err := c.store.NotebookPages.Get(args.PageID)
+	p, _, err := c.writablePage(args.PageID)
 	if err != nil {
-		return nil, mapStoreErr(err)
+		return nil, err
 	}
 	groups, err := c.store.NotebookInk.UpsertMany(p.NotebookID, p.ID, args.Groups)
 	if err != nil {
@@ -318,6 +384,9 @@ func (c *Core) notebooksInkDelete(payload []byte) ([]byte, error) {
 		IDs    []string `json:"ids"`
 	}
 	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	if _, _, err := c.writablePage(args.PageID); err != nil {
 		return nil, err
 	}
 	n, err := c.store.NotebookInk.DeleteMany(args.IDs)

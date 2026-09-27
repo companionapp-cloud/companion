@@ -1,5 +1,6 @@
 import type { InkGroupRecord } from "@companion/editor";
 import type { PaperStyle } from "./paper";
+import type { NotebookMedium, WaxLeaves } from "./mediums";
 
 // What the notebook renderer needs from the outside world (PLAN-notebooks.md §5), shaped like
 // CanvasHost: every argument and result is JSON, so the same renderer can run over the core
@@ -20,6 +21,10 @@ export interface Notebook {
   id: string;
   title: string;
   cover: NotebookCover;
+  /** What it is made of (mediums.ts). Fixed when the notebook is made. */
+  medium: NotebookMedium;
+  /** A wax codex's leaf count. */
+  leaves?: WaxLeaves;
   guides: NotebookGuide[];
   pageCount: number;
   updatedAt: string;
@@ -46,11 +51,15 @@ export interface NotebookHost {
   loadInk(pageId: string): Promise<InkGroupRecord[]>;
   saveInk(pageId: string, groups: InkGroupRecord[]): Promise<void>;
   deleteInk(pageId: string, ids: string[]): Promise<void>;
-  /** Insert a blank page after `afterPageId` (or at the end), with the given paper. */
-  addPage(notebookId: string, afterPageId: string | null, paper: PaperStyle): Promise<NotebookPage>;
+  /** Insert a blank page after `afterPageId` (or at the end), with the given paper. `id`
+   *  chooses the page's id (a sherd picked from the heap keeps the shape it was shown with). */
+  addPage(notebookId: string, afterPageId: string | null, paper: PaperStyle, id?: string): Promise<NotebookPage>;
   setPaper(pageId: string, paper: PaperStyle): Promise<void>;
   deletePage(pageId: string): Promise<void>;
   setGuides(notebookId: string, guides: NotebookGuide[]): Promise<void>;
+  /** Clear a page's text and ink (wax: smooth the leaf; clay: knead it flat). Held ink for it
+   *  is dropped. */
+  smoothPage(pageId: string): Promise<void>;
   /** Resolve a cover image to something an <img> can show. */
   resolveDocument(id: string): Promise<{ url: string } | null>;
 }

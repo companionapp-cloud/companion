@@ -11,14 +11,22 @@ import type { NotebookHost, NotebookPage, NotebookViewMode } from "./host";
 import { NotebookView, type NotebookViewController, type NotebookViewState, type NotebookZoom } from "./NotebookView";
 import { PAPER_KINDS, PAPER_SPACINGS, SPACING_LABEL, type PaperStyle } from "./paper";
 import { CoverDialog } from "./CoverDialog";
+import { MEDIUMS, MEDIUM_SIZES, mediumOf, type MediumSize, type MediumTool, type MediumToolId } from "./mediums";
 import { useNotebooks } from "./NotebooksProvider";
 
 // The notebook editor (PLAN-notebooks.md §1): full width, a back button to the shelf, the
 // pages two-up or in a scrolling list, and a bottom toolbar for typing, inking, pages, zoom
-// and view. Plain React Native around the DOM page view, so the same chrome serves web,
-// desktop and (over the WebView bundle) the native app.
+// and view. The notebook's medium (PLAN §11) decides which page actions exist and what
+// they're called. Clay, wax and sherds are pen-only: they swap the formatting and drawing bars
+// for their own tools (stylus and wedge, point and flat end, brush and scraper), and on a touch
+// screen the mode switch says whether a finger scrolls or draws. Plain React Native around the
+// DOM page view, so the same chrome serves web, desktop and (over the WebView bundle) the
+// native app.
 
 const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
+/** The size each pen tool was last used at, for the session. */
+const toolSizes: Partial<Record<MediumToolId, MediumSize>> = {};
 
 export interface NotebookEditorProps {
   host: NotebookHost;
@@ -35,6 +43,8 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
   const { core } = useCore();
   const notebooks = useNotebooks();
   const notebook = notebooks.byId(notebookId);
+  const medium = mediumOf(notebook?.settingsJson);
+  const spec = MEDIUMS[medium];
   const { width } = useWindowDimensions();
   const touch = useDensity() === "touch";
   const narrow = width < 900;
@@ -52,7 +62,21 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
   const [inkState, setInkState] = useState<InkState | null>(null);
   const [paperOpen, setPaperOpen] = useState(false);
   const [cover, setCover] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirm, setConfirm] = useState<"delete" | "smooth" | null>(null);
+  const [mediumTool, setMediumTool] = useState<MediumToolId | null>(spec.tools[0]?.id ?? null);
+  const [sizes, setSizes] = useState(toolSizes);
+  const mediumSize: MediumSize = (mediumTool && sizes[mediumTool]) ?? 1;
+  const setMediumSize = (size: MediumSize) => {
+    if (!mediumTool) return;
+    toolSizes[mediumTool] = size;
+    setSizes({ ...toolSizes });
+  };
+  const penOnly = medium !== "paper";
+
+  // The notebook (and so its medium) can arrive after the first render.
+  useEffect(() => {
+    if (!spec.tools.some((t) => t.id === mediumTool)) setMediumTool(spec.tools[0]?.id ?? null);
+  }, [spec, mediumTool]);
   const [revision, setRevision] = useState(0);
 
   // A phone has no room for a spread.
@@ -90,7 +114,9 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
     });
   }, []);
 
-  const step = mode === "spread" ? 2 : 1;
+  // Only a book pages two-up (clay scrolls, sherds lie in a grid), so the rest step singly.
+  const paged = spec.flow === "book";
+  const step = mode === "spread" && paged ? 2 : 1;
   const stepZoom = (dir: 1 | -1) => {
     const at = state.scale;
     const next = dir > 0 ? ZOOM_STEPS.find((z) => z > at + 0.01) : [...ZOOM_STEPS].reverse().find((z) => z < at - 0.01);
@@ -104,11 +130,11 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
   const deletePage = async () => {
     if (!page) return;
     await host.deletePage(page.id);
-    setConfirmDelete(false);
+    setConfirm(null);
     setRevision((r) => r + 1);
   };
   const last = Math.max(0, state.pageCount - 1);
-  const folio = mode === "spread" && state.page + 1 <= last ? `${state.page + 1}–${state.page + 2}` : `${state.page + 1}`;
+  const folio = step === 2 && state.page + 1 <= last ? `${state.page + 1}–${state.page + 2}` : `${state.page + 1}`;
   const glyph = touch ? 17 : 13;
   const btn = touch ? ("lg" as const) : ("sm" as const);
 
@@ -123,12 +149,16 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
       <IconButton label="Next page" size={btn} disabled={state.page + step > last} onPress={() => viewRef.current?.goTo(state.page + step)}>
         <Icon name="chevronRight" size={glyph} color={colors.textSecondary} />
       </IconButton>
-      <IconButton label="Add page after this one" size={btn} onPress={() => viewRef.current?.addPage()}>
-        <Icon name="plus" size={glyph} color={colors.textSecondary} />
-      </IconButton>
-      <IconButton label="Delete this page" size={btn} disabled={state.pageCount <= 1} onPress={() => setConfirmDelete(true)}>
-        <Icon name="trash" size={glyph} color={colors.textSecondary} />
-      </IconButton>
+      {spec.addLabel ? (
+        <IconButton label={spec.addLabel} size={btn} onPress={() => viewRef.current?.addPage()}>
+          <Icon name="plus" size={glyph} color={colors.textSecondary} />
+        </IconButton>
+      ) : null}
+      {spec.deleteLabel ? (
+        <IconButton label={spec.deleteLabel} size={btn} disabled={state.pageCount <= 1} onPress={() => setConfirm("delete")}>
+          <Icon name="trash" size={glyph} color={colors.textSecondary} />
+        </IconButton>
+      ) : null}
     </>
   );
   const zoomControls = (
@@ -146,17 +176,25 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
       </IconButton>
     </>
   );
-  const viewControls = (
-    <>
+  const mediumControls =
+    medium === "paper" ? (
       <IconButton label="Paper" size={btn} active={paperOpen} onPress={() => setPaperOpen((v) => !v)}>
         <Icon name="file" size={glyph} color={paperOpen ? colors.textAccent : colors.textSecondary} />
       </IconButton>
+    ) : spec.smooth ? (
+      <IconButton label={spec.smooth.label} size={btn} disabled={!page} onPress={() => setConfirm("smooth")}>
+        <Icon name="waves" size={glyph} color={colors.textSecondary} />
+      </IconButton>
+    ) : null;
+  const viewControls = (
+    <>
+      {mediumControls}
       <IconButton label={rulers ? "Hide rulers and guides" : "Show rulers and guides"} size={btn} active={rulers} onPress={() => setRulers((v) => !v)}>
         <Icon name="grip" size={glyph} color={rulers ? colors.textAccent : colors.textSecondary} />
       </IconButton>
     </>
   );
-  const modeToggle = !narrow ? (
+  const modeToggle = !narrow && paged ? (
     <Segmented
       value={mode}
       onChange={(m) => setMode(m)}
@@ -166,7 +204,8 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
       ]}
     />
   ) : null;
-  const typeDraw = (
+  // Pen-only mediums have nothing to type; on a touch screen the switch says what a finger does.
+  const typeDraw = !penOnly ? (
     <Segmented
       value={drawing ? "draw" : "type"}
       onChange={(v) => setDrawing(v === "draw")}
@@ -175,7 +214,16 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
         { value: "draw", label: "Draw", icon: "pen" },
       ]}
     />
-  );
+  ) : touch ? (
+    <Segmented
+      value={drawing ? "draw" : "scroll"}
+      onChange={(v) => setDrawing(v === "draw")}
+      options={[
+        { value: "scroll", label: "Scroll", icon: "listBullet" },
+        { value: "draw", label: "Finger draws", icon: "pen" },
+      ]}
+    />
+  ) : null;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surfaceApp }}>
@@ -203,6 +251,8 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
           onZoom={setZoom}
           tool={drawing ? tool : null}
           penTool={tool}
+          mediumTool={mediumTool}
+          mediumSize={MEDIUM_SIZES[mediumSize].scale}
           rulers={rulers}
           revision={revision}
           onState={setState}
@@ -236,7 +286,18 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
       </View>
 
       {/* The typing or drawing tools for the current page, then pages, zoom and view. */}
-      {drawing ? (
+      {penOnly ? (
+        <MediumBar
+          tools={spec.tools}
+          value={mediumTool}
+          onChange={setMediumTool}
+          size={mediumSize}
+          onSize={setMediumSize}
+          state={inkState}
+          onUndo={() => viewRef.current?.editor()?.inkUndo()}
+          onRedo={() => viewRef.current?.editor()?.inkRedo()}
+        />
+      ) : drawing ? (
         <DrawingBar tool={tool} onChange={setTool} state={inkState} onUndo={() => viewRef.current?.editor()?.inkUndo()} onRedo={() => viewRef.current?.editor()?.inkRedo()} onDone={() => setDrawing(false)} />
       ) : (
         <FormattingBar state={formatState} editorRef={editorRef} canAttach={false} />
@@ -266,15 +327,102 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
       )}
 
       {cover ? <CoverDialog notebookId={notebookId} onClose={() => setCover(false)} /> : null}
-      {confirmDelete ? (
+      {confirm === "delete" && spec.deleteConfirm ? (
         <ConfirmDialog
-          title="Delete this page?"
-          message="The page and its ink are deleted right away. Pages do not go to the Trash."
-          confirmLabel="Delete page"
+          title={spec.deleteConfirm.title}
+          message={spec.deleteConfirm.message}
+          confirmLabel={spec.deleteLabel?.replace(/ this .*$/, "") ?? "Delete"}
           onConfirm={() => void deletePage()}
-          onClose={() => setConfirmDelete(false)}
+          onClose={() => setConfirm(null)}
         />
       ) : null}
+      {confirm === "smooth" && spec.smooth ? (
+        <ConfirmDialog
+          title={spec.smooth.title}
+          message={spec.smooth.message}
+          confirmLabel={spec.smooth.confirm}
+          onConfirm={() => {
+            setConfirm(null);
+            viewRef.current?.smoothPage();
+          }}
+          onClose={() => setConfirm(null)}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+/** The pen tools of a clay, wax or pottery notebook, with undo and redo. */
+function MediumBar({
+  tools,
+  value,
+  onChange,
+  size,
+  onSize,
+  state,
+  onUndo,
+  onRedo,
+}: {
+  tools: MediumTool[];
+  value: MediumToolId | null;
+  onChange(tool: MediumToolId): void;
+  size: MediumSize;
+  onSize(size: MediumSize): void;
+  state: InkState | null;
+  onUndo(): void;
+  onRedo(): void;
+}) {
+  const touch = useDensity() === "touch";
+  const btn = touch ? ("lg" as const) : ("sm" as const);
+  return (
+    <View style={styles.mediumBar}>
+      {tools.map((t) => {
+        const on = t.id === value;
+        return (
+          <Pressable
+            key={t.id}
+            aria-label={t.label}
+            aria-selected={on}
+            onPress={() => onChange(t.id)}
+            style={({ hovered }: PressState) => [
+              styles.toolChip,
+              touch ? styles.toolChipTouch : null,
+              { backgroundColor: on ? colors.accentSoft : hovered ? colors.surfaceHover : "transparent", borderColor: on ? colors.accentSoftBorder : "transparent" },
+            ]}
+          >
+            {t.swatch ? <View style={[styles.swatchDot, { backgroundColor: t.swatch }]} /> : <Icon name={t.icon} size={12} color={on ? colors.textAccent : colors.textSecondary} />}
+            <Text tone={on ? "accent" : "secondary"}>{t.label}</Text>
+          </Pressable>
+        );
+      })}
+      <Divider vertical style={styles.divider} />
+      {/* Fine, medium, broad: dots that grow, for whichever tool is in hand. */}
+      {MEDIUM_SIZES.map((s) => {
+        const on = s.size === size;
+        const d = 4 + s.size * 3.5;
+        return (
+          <Pressable
+            key={s.size}
+            aria-label={s.label}
+            aria-selected={on}
+            onPress={() => onSize(s.size)}
+            style={({ hovered }: PressState) => [
+              styles.sizeChip,
+              touch ? styles.sizeChipTouch : null,
+              { backgroundColor: on ? colors.accentSoft : hovered ? colors.surfaceHover : "transparent", borderColor: on ? colors.accentSoftBorder : "transparent" },
+            ]}
+          >
+            <View style={{ width: d, height: d, borderRadius: d / 2, backgroundColor: on ? colors.textAccent : colors.textSecondary }} />
+          </Pressable>
+        );
+      })}
+      <View style={{ flex: 1 }} />
+      <IconButton label="Undo" size={btn} disabled={!state?.canUndo} onPress={onUndo}>
+        <Icon name="undo" size={13} color={colors.textSecondary} />
+      </IconButton>
+      <IconButton label="Redo" size={btn} disabled={!state?.canRedo} onPress={onRedo}>
+        <Icon name="redo" size={13} color={colors.textSecondary} />
+      </IconButton>
     </View>
   );
 }
@@ -346,6 +494,29 @@ const styles = {
   segmented: { flexDirection: "row" as const, padding: 2, gap: 2, borderRadius: radius.md, backgroundColor: colors.surfaceSunken },
   segment: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.sm, height: 22, paddingHorizontal: space.md, borderRadius: radius.sm },
   segmentTouch: { height: 32, paddingHorizontal: space.ml },
+  mediumBar: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: space.xs,
+    minHeight: layout.toolbarH,
+    paddingHorizontal: space.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
+    backgroundColor: colors.surfaceApp,
+  },
+  toolChip: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: space.sm,
+    height: 24,
+    paddingHorizontal: space.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+  },
+  toolChipTouch: { height: 34, paddingHorizontal: space.ml },
+  sizeChip: { width: 26, height: 24, alignItems: "center" as const, justifyContent: "center" as const, borderRadius: radius.md, borderWidth: 1 },
+  sizeChipTouch: { width: 36, height: 34 },
+  swatchDot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1, borderColor: "rgba(255,255,255,0.35)" },
   chip: { height: 26, paddingHorizontal: space.ml, justifyContent: "center" as const, borderRadius: radius.md, borderWidth: 1 },
   popover: {
     position: "absolute" as const,

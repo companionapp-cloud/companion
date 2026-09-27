@@ -287,3 +287,86 @@ swipe while drawing doesn't.
 
 Left: docs (help center); export (v1 exports nothing from notebooks); wheel zoom anchored
 under the pointer; running the native app; the open decisions in §7.
+
+## 11. Mediums: clay, wax, sherds (2026-09-26, reworked the same day)
+
+**Behind a Labs flag.** Settings › Labs › "Include less modern mediums" ("Yes, I would like
+to write on dirt"), off by default, device-local (`labs.ts`: localStorage on web, a JSON file
+on native via `setLabsStorage`). Off, New notebook is just a title and makes paper. Notebooks
+already made of clay, wax or sherds stay on the shelf and open normally either way.
+
+A notebook is made of paper, clay tablets, wax tablets or potsherds. The medium (and a wax
+codex's leaf count) is chosen in the New notebook dialog and never changes. **Clay, wax and
+sherds are pen-only:** no text and no keyboard. Each page is a surface the pen works on,
+rendered by a WebGL2 shader (`mediumEngine.ts`).
+
+| Medium | Tools | What the pen does |
+|---|---|---|
+| Clay (red, mottled, gritty, pillow-shaped tablet) | Stylus, Wedge, Thumb | The stylus carves a rounded groove and pushes the moved clay into ridges beside and ahead of it, which then slump. The wedge presses a cuneiform wedge (tap for a default one, drag to aim and stretch it). The thumb smooths, leaving a faint fingerprint. "Knead it flat" clears the tablet |
+| Wax (honey beeswax, glossy, in a wooden frame; leather thongs through the cord holes at the spine, knotted across to the facing leaf in the two-page view) | Point, Flat end | The point drags: the tip trails the hand on a short rope and holds its line until pulled ~20° off, so curves come out as runs of straight scratches. It curls a burr up on one side, chatters, and leaves swarf crumbs. The flat end smooths. "Smooth this leaf" clears the leaf. **Leaves are fixed (core)** |
+| Sherds (every piece a different pot, 24 wares in `SHERD_FABRICS`: red, buff and grey ware, black gloss, green glaze, slip-painted, cooking pot, faience, red- and black-figure, terra sigillata, blue-and-white, celadon, maiolica, lustreware, cardial, cord-marked, salt glaze, tortoiseshell, Egyptian blue-painted, Minoan marine style, bucchero, rouletted, feathered slipware) | Carbon, Ochre, Scrape | A reed brush that thins when flicked and runs dry through separate bristles. Ink soaks unevenly into bare fabric and beads on glaze. Scraping lifts ink and scores the surface |
+
+**Engine.** A page is a heightfield plus, on sherds, two ink channels, uploaded in dirty rects
+as R16F (height only) or RGBA16F. Resolution is per medium: wax 3 cells per page px (its
+scratches are 2 to 3 px wide), clay and sherds 2. The fragment shader adds each object's own shape and
+surface (dome and rim, frame and recessed wax, a sherd's jagged mask with its broken edge
+showing the fabric's core), lights it, and shades it by material (grit and mica, wax
+translucency and sheen, glaze reflection, burial crust). All pages share one WebGL2 context
+(`SharedRenderer`): each page keeps only its textures there and shows a plain 2D canvas the
+renderer paints into, because browsers drop the oldest context past about 16 and a grid of
+sherds went blank. A lost context is restored and pages re-upload. Without WebGL2 there is a
+flat fallback with simple relief lighting. The shadow is a CSS drop-shadow that follows the
+canvas alpha.
+
+**Storage.** Each stroke is one `notebook_page_ink` row in the app's own format
+(`{v: 2, tool, seed, t, p: [x, y, a, b, ...]}`): the dabs it laid down, already processed
+(rope, stick-slip, speed, reservoir), so replay in `t` order rebuilds the same field on
+every device. No migration. `settings_json` carries the core-owned `medium` and `leaves`;
+`notebooks.update` merges settings key by key and never takes those two. The only new bridge
+method is `notebooks.pages.smooth`, which clears a page's text and ink. Firing was removed.
+
+**Shelf and pickers.** Covers for clay, wax and sherds are rendered by the same engine
+(`mediumCovers.ts`, `renderMedium`), composed on a 2D canvas and cached as data URLs:
+- clay: a stack of tablets, the title pressed into the front one over rows of cuneiform;
+- wax: a leaf with the title scratched in and lines of cursive, the codex's other leaves
+  showing beneath, thongs through the cord holes, and a bronze stylus lying across it;
+- sherds: a heap of different pots with the title brushed in ink on the top one.
+
+The shelf falls back to its plain React Native art on native, where there is no DOM. On web,
+finished covers are kept in IndexedDB (`companion-notebook-covers`, newest 150, WebP with a PNG
+fallback; the key carries `COVER_VERSION`, so bump it when the covers or shader change). A
+refresh loads them from there (about 100 ms after the shelf in Chrome, 240 ms in WebKit)
+instead of re-rendering. Meanwhile the shelf holds each cover's space empty and fades the cover
+in; the plain art is never shown on web.
+
+**Wedge preview.** While the reed is down, the wedge is pressed live at the current angle
+and length: the builder restores the clay from a snapshot of the last preview's box, then
+stamps again. On release the final wedge is stamped and stored.
+
+**Sherds on a table.** A sherd notebook always lays out as a wrapping grid (about three
+across, no spread toggle). "Pick up another sherd" opens a heap of nine blank pieces, each
+a fresh UUID rendered as the pot it will be. The one clicked is added with that id:
+`notebooks.pages.add` now accepts an optional client-chosen `id` (a UUID, refused if
+already used), since a sherd's shape comes from its id. The first sherd is picked the same way
+in New notebook (five candidates and a "Rummage" button; web only, since native has no pictures),
+passed as `notebooks.create`'s `firstPageId`.
+
+**Tool sizes.** Every pen tool comes in fine, medium and broad (×0.55, ×1, ×1.7 on its width;
+carving tools also press deeper by the square root). The toolbar remembers a size per tool
+for the session. A stroke stores its dabs already sized, so it replays the same everywhere.
+
+**Layout per medium** (`MediumSpec.flow`): paper and wax are books (two pages or scroll, the
+reader's choice); clay tablets always scroll, one under another; sherds always lie in a grid.
+
+**Input.** A pen and a mouse always draw. On touch devices a "Scroll / Finger draws" switch
+decides what a finger does, and a stylus's touchstart is claimed so the page doesn't scroll.
+Undo and redo go through a stand-in editor controller, so the toolbar and cmd-Z work
+unchanged, including over the native WebView bridge (`mediumTool` is a new view prop).
+
+Verified with Playwright in Chrome and WebKit: every tool on every medium, the stick-slip
+wax lines, sherd fabrics, and strokes plus undo surviving a reload. Not run on a real Apple
+Pencil or in the native app.
+
+Gaps: old clay/wax/sherd pages keep any typed `content_md` from the first version, but it is
+no longer shown. A page-text conflict copy can add a leaf to a wax codex. A page with
+hundreds of strokes replays on open (roughly 50 ms per hundred on a laptop).

@@ -124,6 +124,10 @@ export type {
   UpdateNotebookInput,
   AddPageInput,
   UpdatePageInput,
+  CreateNotebookInput,
+  NotebookMedium,
+  NotebookCoreSettings,
+  WaxLeaves,
 } from "./notebooks";
 export { exportsApi, importFilesApi, EXPORT_CHANGED_EVENT, SYNC_REQUESTED_EVENT } from "./exports";
 export type {

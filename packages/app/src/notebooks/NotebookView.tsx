@@ -39,7 +39,7 @@ type Message =
   | { type: "ready"; payload: null };
 
 export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps>(function NotebookView(
-  { host, notebookId, mode, zoom, onZoom, tool, penTool, rulers, revision, onState, onActivePage, onFormatState, onInkState, onExitDrawing },
+  { host, notebookId, mode, zoom, onZoom, tool, penTool, mediumTool, mediumSize, rulers, revision, onState, onActivePage, onFormatState, onInkState, onExitDrawing },
   ref,
 ) {
   const webRef = useRef<WebView>(null);
@@ -58,7 +58,10 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
   const call = (method: string, ...args: unknown[]) => inject(`window.__notebookCall && window.__notebookCall(${jsonArg(method)}, ${jsonArg(args)});`);
 
   // Push the view's props whenever they change (and once the page reports ready).
-  const props = useMemo(() => ({ mode, zoom, tool, penTool, rulers, revision }), [mode, zoom, tool, penTool, rulers, revision]);
+  const props = useMemo(
+    () => ({ mode, zoom, tool, penTool, mediumTool, mediumSize, rulers, revision }),
+    [mode, zoom, tool, penTool, mediumTool, mediumSize, rulers, revision],
+  );
   useEffect(() => {
     if (ready.current) inject(`window.__notebookProps && window.__notebookProps(${jsonArg(props)});`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -78,7 +81,16 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
-  useImperativeHandle(ref, () => ({ goTo: (page) => call("goTo", page), addPage: () => call("addPage"), editor: () => editor }), [editor]);
+  useImperativeHandle(
+    ref,
+    () => ({
+      goTo: (page) => call("goTo", page),
+      addPage: () => call("addPage"),
+      smoothPage: () => call("smoothPage"),
+      editor: () => editor,
+    }),
+    [editor],
+  );
 
   const onMessage = async (event: WebViewMessageEvent) => {
     let msg: Message;
