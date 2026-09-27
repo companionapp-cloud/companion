@@ -6,6 +6,7 @@ import { NavAction, NavBar } from "./ui";
 import { NotebookShelf } from "../notebooks/NotebookShelf";
 import { NotebookEditor } from "../notebooks/NotebookEditor";
 import { CoverDialog } from "../notebooks/CoverDialog";
+import { NewNotebookDialog } from "../notebooks/NewNotebookDialog";
 import { useNotebooks } from "../notebooks/NotebooksProvider";
 import { useNotebookHost } from "../notebooks/useNotebookHost";
 import { parseNotebookSection, toShelfNotebook, useShelfCoverUrls } from "../notebooks/NotebooksScreen";
@@ -17,18 +18,25 @@ export function NotebooksListScreen() {
   const notebooks = useNotebooks();
   const nav = useNav();
   const [editId, setEditId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const shelf = useMemo(() => notebooks.notebooks.map(toShelfNotebook), [notebooks.notebooks]);
   const coverUrls = useShelfCoverUrls(notebooks.notebooks);
   const open = (id: string) => nav.openRef({ kind: "view", view: "notebooks", section: id });
-  const create = async () => {
-    const nb = await notebooks.create();
-    setEditId(nb.id);
-  };
+  const create = () => setCreating(true);
   return (
     <View style={{ flex: 1, backgroundColor: colors.surfaceApp }}>
-      <NavBar title="Notebooks" right={<NavAction icon="plus" label="New notebook" onPress={() => void create()} />} />
-      {notebooks.loading ? <Spinner label="Loading your notebooks…" /> : <NotebookShelf notebooks={shelf} coverUrls={coverUrls} onOpen={open} onCreate={() => void create()} onEdit={setEditId} />}
+      <NavBar title="Notebooks" right={<NavAction icon="plus" label="New notebook" onPress={create} />} />
+      {notebooks.loading ? <Spinner label="Loading your notebooks…" /> : <NotebookShelf notebooks={shelf} coverUrls={coverUrls} onOpen={open} onCreate={create} onEdit={setEditId} />}
       {editId ? <CoverDialog notebookId={editId} onClose={() => setEditId(null)} /> : null}
+      {creating ? (
+        <NewNotebookDialog
+          onCreated={(nb) => {
+            setCreating(false);
+            open(nb.id);
+          }}
+          onClose={() => setCreating(false)}
+        />
+      ) : null}
     </View>
   );
 }

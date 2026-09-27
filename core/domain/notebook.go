@@ -52,6 +52,59 @@ const (
 	DefaultPaperSpacing = 28
 )
 
+// Mediums (PLAN-notebooks.md §11): what a notebook is made of. Paper is the default and has
+// no rules beyond its ruling. The ancient mediums are design constraints with some history
+// in them. They are written with a pen only (no typed text): the app keeps each page's marks as
+// ink rows in its own stroke format and renders them as impressions, scratches or brushed ink.
+//
+//   - clay: a run of small tablets, written by pressing a stylus in.
+//   - wax: a codex of wooden leaves bound when it is made (a diptych, triptych or polyptych).
+//     Leaves are never added or removed (the core refuses both); a leaf is reused by smoothing.
+//   - sherd: a heap of potsherds (ostraca). Pick up another when one is full.
+//
+// The medium and a wax codex's leaf count are chosen when the notebook is made and never
+// change. They live in the notebook's (encrypted) settings, beside the guides.
+const (
+	MediumPaper = "paper"
+	MediumClay  = "clay"
+	MediumWax   = "wax"
+	MediumSherd = "sherd"
+)
+
+var NotebookMediums = map[string]bool{MediumPaper: true, MediumClay: true, MediumWax: true, MediumSherd: true}
+
+// WaxLeaves are the bindings a wax codex may have: a diptych, a triptych, a polyptych.
+var WaxLeaves = map[int]bool{2: true, 3: true, 8: true}
+
+const DefaultWaxLeaves = 2
+
+// NotebookSettings is the typed view of settings_json that the core reads. Other keys (the
+// app's guides) are carried through untouched. Medium and Leaves are owned by the core: a
+// generic settings update never changes them.
+type NotebookSettings struct {
+	Medium string `json:"medium,omitempty"`
+	Leaves int    `json:"leaves,omitempty"`
+}
+
+// CoreSettingsKeys are the settings keys only the core writes.
+var CoreSettingsKeys = map[string]bool{"medium": true, "leaves": true}
+
+// ParsedSettings reads the core's keys from Settings, leniently: a missing or malformed value
+// reads as paper.
+func (n *Notebook) ParsedSettings() NotebookSettings {
+	var s NotebookSettings
+	if len(n.Settings) > 0 {
+		_ = json.Unmarshal(n.Settings, &s)
+	}
+	if !NotebookMediums[s.Medium] {
+		s.Medium = MediumPaper
+	}
+	return s
+}
+
+// Medium is the notebook's medium; paper when unset.
+func (n *Notebook) Medium() string { return n.ParsedSettings().Medium }
+
 // MaxNotebookPageContent caps a page's markdown. A page is one A5 sheet that grows by whole
 // rules, not a document, so this is generous.
 const MaxNotebookPageContent = 512 * 1024
@@ -104,6 +157,19 @@ func (n *Notebook) Validate() error {
 		var obj map[string]json.RawMessage
 		if err := json.Unmarshal(n.Settings, &obj); err != nil {
 			return errors.Join(ErrInvalidNotebook, errors.New("settings must be a JSON object"))
+		}
+		if raw, ok := obj["medium"]; ok {
+			var m string
+			if err := json.Unmarshal(raw, &m); err != nil || !NotebookMediums[m] {
+				return errors.Join(ErrInvalidNotebook, errors.New("unknown medium"))
+			}
+			if m == MediumWax {
+				var leaves int
+				_ = json.Unmarshal(obj["leaves"], &leaves)
+				if !WaxLeaves[leaves] {
+					return errors.Join(ErrInvalidNotebook, errors.New("a wax codex has 2, 3 or 8 leaves"))
+				}
+			}
 		}
 	}
 	return nil

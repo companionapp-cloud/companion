@@ -7,14 +7,28 @@ import type { NoteInkInput } from "./noteInk";
 export type PaperKind = "blank" | "lined" | "grid" | "dots";
 export type PaperSpacing = 24 | 28 | 32;
 
+/** What a notebook is made of (PLAN-notebooks.md §11). Chosen when it is made, never changed.
+ *  Clay, wax and sherds are written with a pen only; their marks are ink rows in the app's own
+ *  stroke format. The core keeps a wax codex's leaves fixed. */
+export type NotebookMedium = "paper" | "clay" | "wax" | "sherd";
+/** A wax codex's binding: diptych, triptych or polyptych. */
+export type WaxLeaves = 2 | 3 | 8;
+
+/** The keys of `settingsJson` the core owns and never takes from an update. */
+export interface NotebookCoreSettings {
+  medium?: NotebookMedium;
+  leaves?: WaxLeaves;
+}
+
 export interface Notebook {
   id: string;
   title: string;
   /** A named cover colour; the app owns the list. */
   coverColor: string;
   coverDocumentId?: string | null;
-  /** Notebook-wide settings: the guides dragged out of the rulers. */
-  settingsJson: Record<string, unknown>;
+  /** Notebook-wide settings: the guides dragged out of the rulers, and the medium's keys
+   *  (NotebookCoreSettings). An update merges key by key. */
+  settingsJson: NotebookCoreSettings & Record<string, unknown>;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -87,7 +101,19 @@ export interface UpdateNotebookInput {
   settingsJson?: { guides?: NotebookGuide[] } & Record<string, unknown>;
 }
 
+export interface CreateNotebookInput {
+  title?: string;
+  coverColor?: string;
+  medium?: NotebookMedium;
+  /** Wax only. */
+  leaves?: WaxLeaves;
+  /** Choose the first page's id (a UUID): the sherd picked from the heap. Omit to generate. */
+  firstPageId?: string;
+}
+
 export interface AddPageInput {
+  /** Choose the page's id (a UUID): a sherd's shape comes from its id. Omit to generate. */
+  id?: string;
   notebookId: string;
   /** Insert after this page; omit to append. */
   afterId?: string;
@@ -109,8 +135,8 @@ export function notebooksApi(core: CoreBridge) {
   return {
     list: () => core.invoke<NotebookSummary[]>("notebooks.list", {}),
     get: (id: string) => core.invoke<NotebookDocument>("notebooks.get", { id }),
-    /** Creates the notebook with one page on the default paper. */
-    create: (input: { title?: string; coverColor?: string }) => core.invoke<Notebook>("notebooks.create", input),
+    /** Creates the notebook with one page on the default paper (a wax codex: all its leaves). */
+    create: (input: CreateNotebookInput) => core.invoke<Notebook>("notebooks.create", input),
     update: (id: string, input: UpdateNotebookInput) => core.invoke<Notebook>("notebooks.update", { id, ...input }),
     reorder: (ids: string[]) => core.invoke<{ ok: boolean }>("notebooks.reorder", { ids }),
     /** Moves the notebook to the Trash; its pages and ink ride along. */
@@ -124,6 +150,8 @@ export function notebooksApi(core: CoreBridge) {
        *  its last page. */
       remove: (id: string) => core.invoke<{ ok: boolean }>("notebooks.pages.delete", { id }),
       search: (query: string, limit?: number) => core.invoke<PageHit[]>("notebooks.pages.search", { query, limit }),
+      /** Clear a page's text and ink in one step (wax: smooth the leaf; clay: knead it flat). */
+      smooth: (id: string) => core.invoke<{ ok: boolean }>("notebooks.pages.smooth", { id }),
     },
     ink: {
       list: (pageId: string) => core.invoke<NotebookPageInk[]>("notebooks.ink.list", { pageId }),

@@ -7,6 +7,8 @@ import { useCoverUrl } from "../ContainerOverview";
 import { NotebookShelf } from "./NotebookShelf";
 import { NotebookEditor } from "./NotebookEditor";
 import { CoverDialog } from "./CoverDialog";
+import { NewNotebookDialog } from "./NewNotebookDialog";
+import { mediumOf } from "./mediums";
 import { useNotebooks } from "./NotebooksProvider";
 import { useNotebookHost } from "./useNotebookHost";
 import type { Notebook, NotebookSummary } from "@companion/core-bridge";
@@ -29,6 +31,8 @@ export function toShelfNotebook(n: NotebookSummary): ShelfNotebook {
     id: n.id,
     title: n.title,
     cover: n.coverDocumentId ? { kind: "image", color: n.coverColor, documentId: n.coverDocumentId } : { kind: "color", color: n.coverColor },
+    medium: mediumOf(n.settingsJson),
+    leaves: n.settingsJson?.leaves,
     guides: [],
     pageCount: n.pageCount,
     updatedAt: n.updatedAt,
@@ -62,6 +66,7 @@ export function NotebooksScreen() {
   const notebooks = useNotebooks();
   const host = useNotebookHost();
   const [editId, setEditId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   // The section is the notebook id, optionally "@<page>" from a search hit.
   const [openId, initialPage] = parseNotebookSection(nav.current.kind === "view" && nav.current.view === "notebooks" ? nav.current.section : undefined);
   const open = openId ? notebooks.byId(openId) : undefined;
@@ -70,9 +75,10 @@ export function NotebooksScreen() {
 
   const openNotebook = (id: string) => nav.openRef({ kind: "view", view: "notebooks", section: id });
   const backToShelf = () => nav.replaceRef({ kind: "view", view: "notebooks" });
-  const create = async () => {
-    const nb: Notebook = await notebooks.create();
-    setEditId(nb.id);
+  const create = () => setCreating(true);
+  const created = (nb: Notebook) => {
+    setCreating(false);
+    openNotebook(nb.id);
   };
 
   if (openId && notebooks.loading) return <Spinner label="Opening your notebook…" />;
@@ -93,14 +99,15 @@ export function NotebooksScreen() {
           {notebooks.notebooks.length}
         </Text>
         <View style={{ flex: 1 }} />
-        <Button size="sm" label="New notebook" onPress={() => void create()} />
+        <Button size="sm" label="New notebook" onPress={create} />
       </View>
       {notebooks.loading ? (
         <Spinner label="Loading your notebooks…" />
       ) : (
-        <NotebookShelf notebooks={shelf} coverUrls={coverUrls} onOpen={openNotebook} onCreate={() => void create()} onEdit={setEditId} />
+        <NotebookShelf notebooks={shelf} coverUrls={coverUrls} onOpen={openNotebook} onCreate={create} onEdit={setEditId} />
       )}
       {editId ? <CoverDialog notebookId={editId} onClose={() => setEditId(null)} /> : null}
+      {creating ? <NewNotebookDialog onCreated={created} onClose={() => setCreating(false)} /> : null}
     </View>
   );
 }

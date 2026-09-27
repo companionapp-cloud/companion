@@ -521,6 +521,8 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.notebooksPagesDelete(payload)
 	case "notebooks.pages.search":
 		return c.notebooksPagesSearch(payload)
+	case "notebooks.pages.smooth":
+		return c.notebooksPagesSmooth(payload)
 	case "notebooks.ink.list":
 		return c.notebooksInkList(payload)
 	case "notebooks.ink.upsert":

@@ -9,6 +9,7 @@ import { ShortcutSettings } from "./ShortcutSettings";
 import { ImportSettings } from "./ImportSettings";
 import { ExportSettings } from "./ExportSettings";
 import { GitSyncSettings } from "./GitSyncSettings";
+import { LabsSettings } from "./LabsSettings";
 import { shortcutStore } from "./shortcuts";
 
 /** Sync has two halves: the Companion server, which keeps devices in step, and — beside it, not
@@ -22,7 +23,7 @@ function SyncSection() {
   );
 }
 
-export type SettingsSectionId = "sync" | "ai" | "objects" | "calendar" | "import" | "export" | "tools" | "shortcuts";
+export type SettingsSectionId = "sync" | "ai" | "objects" | "calendar" | "import" | "export" | "tools" | "shortcuts" | "labs";
 
 /** One entry in the settings navigation list (PLAN §3.1 shell). Each section is a
  *  self-contained component that reads its own data through the app providers, so the
@@ -97,6 +98,13 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
     // Desktop only: a browser tab or a phone can't register an OS-wide hotkey, so the
     // section appears exactly where a shell injected a store to bind them through.
     available: () => shortcutStore() !== null,
+  },
+  {
+    id: "labs",
+    label: "Labs",
+    description: "Experiments to opt into, like writing on mud",
+    icon: "flag",
+    Component: LabsSettings,
   },
 ];
 

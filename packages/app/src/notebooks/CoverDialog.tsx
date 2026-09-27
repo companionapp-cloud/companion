@@ -7,9 +7,11 @@ import { pickCoverImage, useCoverUrl } from "../ContainerOverview";
 import { useNotebooks } from "./NotebooksProvider";
 import { NotebookCoverArt } from "./NotebookShelf";
 import { COVER_COLORS } from "./paper";
+import { MEDIUMS, mediumOf } from "./mediums";
 
 /** Title, cover colour and cover image for one notebook (PLAN-notebooks.md §2). The image
- *  is ingested as a document, like an area's or a project's cover. */
+ *  is ingested as a document, like an area's or a project's cover. Clay, wax and sherds have
+ *  no cover: the dialog shows the title and what the medium is instead (PLAN §11). */
 export function CoverDialog({ notebookId, onClose }: { notebookId: string; onClose(): void }) {
   const notebooks = useNotebooks();
   const documentSource = useDocumentSource();
@@ -34,7 +36,18 @@ export function CoverDialog({ notebookId, onClose }: { notebookId: string; onClo
     }
   };
 
-  const cover = { id: n.id, title: n.title, cover: { kind: "color" as const, color: n.coverColor }, guides: [], pageCount: n.pageCount, updatedAt: n.updatedAt };
+  const medium = mediumOf(n.settingsJson);
+  const spec = MEDIUMS[medium];
+  const cover = {
+    id: n.id,
+    title: n.title,
+    cover: { kind: "color" as const, color: n.coverColor },
+    medium,
+    leaves: n.settingsJson?.leaves,
+    guides: [],
+    pageCount: n.pageCount,
+    updatedAt: n.updatedAt,
+  };
   return (
     <Dialog title="Notebook" onClose={busy ? undefined : onClose} width={520} footer={<Button size={touch ? "lg" : "sm"} label="Done" onPress={onClose} disabled={busy} />}>
       <View style={styles.body}>
@@ -50,6 +63,18 @@ export function CoverDialog({ notebookId, onClose }: { notebookId: string; onClo
             placeholderTextColor={colors.textQuaternary}
             style={styles.titleInput}
           />
+          {medium !== "paper" ? (
+            <>
+              <Text variant="eyebrow" tone="tertiary">
+                {spec.label}
+              </Text>
+              <Text tone="secondary" variant="caption">
+                {spec.history}
+              </Text>
+            </>
+          ) : null}
+          {medium === "paper" ? (
+          <>
           <Text variant="eyebrow" tone="tertiary">
             Cover colour
           </Text>
@@ -72,6 +97,8 @@ export function CoverDialog({ notebookId, onClose }: { notebookId: string; onClo
                 <Button variant="ghost" size="sm" label="Remove image" onPress={() => void notebooks.update(n.id, { coverDocumentId: "" })} disabled={busy} />
               ) : null}
             </View>
+          ) : null}
+          </>
           ) : null}
           {error ? (
             <Text tone="danger" variant="caption">

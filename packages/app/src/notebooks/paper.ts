@@ -28,13 +28,21 @@ export const PAPER_KINDS: { kind: PaperKind; label: string }[] = [
 /** The page in logical px: A5 (148 x 210 mm) at 96 dpi, so 100% zoom is life size on screen
  *  and a PDF export maps 1:1. Margins are 10.6 mm sides, 12.7 mm head and foot. A page never
  *  shrinks below this; it grows by whole rules when its text runs past the bottom margin. */
-export const PAGE = {
+export interface PageGeometry {
+  width: number;
+  height: number;
+  marginX: number;
+  marginTop: number;
+  marginBottom: number;
+}
+
+export const PAGE: PageGeometry = {
   width: 559,
   height: 794,
   marginX: 40,
   marginTop: 48,
   marginBottom: 48,
-} as const;
+};
 
 export const PAGE_GAP = 24;
 
@@ -50,16 +58,16 @@ const RULE_LIFT: Record<PaperSpacing, number> = { 24: 4, 28: 5, 32: 6 };
  *  pattern is phased to the top margin so the first text line sits on the first rule, and the
  *  head and foot margins are masked with the sheet colour, the way printed paper leaves them
  *  clear. */
-export function paperBackground(paper: PaperStyle, rule: string, dot: string, sheet: string, scale = 1): Record<string, string> {
+export function paperBackground(paper: PaperStyle, rule: string, dot: string, sheet: string, scale = 1, page: PageGeometry = PAGE): Record<string, string> {
   const s = paper.spacing;
   // Rules are a device hairline, not a page measure: zoomed out, a 1px rule would round away.
   const t = Math.min(3, Math.max(1, 1 / scale));
-  const y = PAGE.marginTop - RULE_LIFT[s];
+  const y = page.marginTop - RULE_LIFT[s];
   if (paper.kind === "blank") return {};
   const mask = `linear-gradient(${sheet}, ${sheet})`;
   const masks = {
     image: `${mask}, ${mask}`,
-    size: `100% ${y}px, 100% ${PAGE.marginBottom - s + RULE_LIFT[s] - 1}px`,
+    size: `100% ${y}px, 100% ${page.marginBottom - s + RULE_LIFT[s] - 1}px`,
     position: `0 0, 0 100%`,
     repeat: `no-repeat, no-repeat`,
   };
@@ -77,14 +85,14 @@ export function paperBackground(paper: PaperStyle, rule: string, dot: string, sh
       return {
         backgroundImage: `${masks.image}, linear-gradient(to bottom, transparent ${s - t}px, ${rule} ${s - t}px), linear-gradient(to right, transparent ${s - t}px, ${rule} ${s - t}px)`,
         backgroundSize: `${masks.size}, ${s}px ${s}px, ${s}px ${s}px`,
-        backgroundPosition: `${masks.position}, ${PAGE.marginX % s}px ${y}px, ${PAGE.marginX % s}px ${y}px`,
+        backgroundPosition: `${masks.position}, ${page.marginX % s}px ${y}px, ${page.marginX % s}px ${y}px`,
         backgroundRepeat: `${masks.repeat}, repeat, repeat`,
       };
     case "dots":
       return layer(
         `radial-gradient(circle at ${s - 1}px ${s - 1}px, ${dot} ${1.1 * t}px, transparent ${1.6 * t}px)`,
         `${s}px ${s}px`,
-        `${(PAGE.marginX % s) + 1}px ${y + 1}px`,
+        `${(page.marginX % s) + 1}px ${y + 1}px`,
       );
   }
 }
@@ -117,11 +125,11 @@ ${sel} hr { margin: ${s / 2 - 1}px 0 ${s / 2}px; }
 }
 
 /** Round a content height up to a whole number of rules, never below the base page. */
-export function sheetHeightFor(contentHeight: number, spacing: PaperSpacing): number {
-  const needed = PAGE.marginTop + contentHeight + PAGE.marginBottom;
-  if (needed <= PAGE.height) return PAGE.height;
-  const extra = needed - PAGE.height;
-  return PAGE.height + Math.ceil(extra / spacing) * spacing;
+export function sheetHeightFor(contentHeight: number, spacing: PaperSpacing, page: PageGeometry = PAGE): number {
+  const needed = page.marginTop + contentHeight + page.marginBottom;
+  if (needed <= page.height) return page.height;
+  const extra = needed - page.height;
+  return page.height + Math.ceil(extra / spacing) * spacing;
 }
 
 /** Notebook covers: a solid colour by default, or an uploaded image. The colours are fixed

@@ -93,6 +93,7 @@ export { NotebooksScreen, parseNotebookSection, toShelfNotebook, useShelfCoverUr
 export { NotebookShelf } from "./notebooks/NotebookShelf";
 export { NotebookEditor } from "./notebooks/NotebookEditor";
 export { CoverDialog as NotebookCoverDialog } from "./notebooks/CoverDialog";
+export { NewNotebookDialog } from "./notebooks/NewNotebookDialog";
 export { useNotebookHost } from "./notebooks/useNotebookHost";
 export type { NotebookHost } from "./notebooks/host";
 export { DocumentSourceProvider, useDocumentSource } from "./DocumentSourceContext";
@@ -119,6 +120,8 @@ export { SyncHealthBanner } from "./SyncHealthBanner";
 export { RecoveryResetScreen } from "./RecoveryResetScreen";
 export { SETTINGS_SECTIONS, visibleSettingsSections, settingsSection } from "./settingsSections";
 export type { SettingsSectionId, SettingsSectionDef } from "./settingsSections";
+export { labsFlag, setLabsFlag, setLabsStorage, useLabsFlag } from "./labs";
+export type { LabsFlag, LabsStorage } from "./labs";
 export { SHORTCUTS, setShortcutStore, shortcutStore, acceleratorFromKeyEvent, formatAccelerator } from "./shortcuts";
 export type { ShortcutId, ShortcutBinding, ShortcutStore } from "./shortcuts";
 export { useNav } from "./nav-context";
