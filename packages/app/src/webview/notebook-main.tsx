@@ -31,6 +31,7 @@ interface ViewProps {
   mediumTool: MediumToolId | null;
   mediumSize: number;
   rulers: boolean;
+  booklet: string | null;
   revision: number;
 }
 
@@ -71,6 +72,11 @@ const host: NotebookHost = {
   deletePage: (id) => rpc("deletePage", [id]),
   setGuides: (nb, guides) => rpc("setGuides", [nb, guides]),
   smoothPage: (id) => rpc("smoothPage", [id]),
+  reorderPages: (nb, ids) => rpc("reorderPages", [nb, ids]),
+  movePage: (id, to) => rpc("movePage", [id, to]),
+  addBooklet: (nb, title, paper) => rpc("addBooklet", [nb, title, paper]),
+  updateBooklet: (nb, id, patch) => rpc("updateBooklet", [nb, id, patch]),
+  setRibbon: (nb, id) => rpc("setRibbon", [nb, id]),
   resolveDocument: (id) => rpc("resolveDocument", [id], 60000),
 };
 
@@ -83,6 +89,8 @@ window.__notebookCall = (method, args) => {
   if (method === "goTo") controller.goTo(Number(args[0]));
   else if (method === "addPage") controller.addPage();
   else if (method === "smoothPage") controller.smoothPage();
+  else if (method === "movePageBy") controller.movePageBy(Number(args[0]) as 1 | -1);
+  else if (method === "shuffle") controller.shuffle();
   else {
     // Editor controller calls for the current page: format, insertTable, inkUndo, …
     const ed = controller.editor() as unknown as Record<string, (...a: unknown[]) => void> | null;
@@ -93,7 +101,7 @@ window.__notebookCall = (method, args) => {
 
 function NotebookApp() {
   const notebookId = window.__NOTEBOOK_ID__ ?? "";
-  const [props, setProps] = useState<ViewProps>({ mode: "scroll", zoom: "fit", tool: null, penTool: null, mediumTool: null, mediumSize: 1, rulers: false, revision: 0 });
+  const [props, setProps] = useState<ViewProps>({ mode: "scroll", zoom: "fit", tool: null, penTool: null, mediumTool: null, mediumSize: 1, rulers: false, revision: 0, booklet: null });
   const ref = useRef<NotebookViewController>(null);
   useEffect(() => {
     setPropsExternal = setProps;
@@ -117,6 +125,7 @@ function NotebookApp() {
       mediumTool={props.mediumTool}
       mediumSize={props.mediumSize}
       rulers={props.rulers}
+      booklet={props.booklet ?? null}
       revision={props.revision}
       onState={(s) => post("event", { name: "state", value: s })}
       onActivePage={(p: NotebookPage | null) => post("event", { name: "activePage", value: p })}

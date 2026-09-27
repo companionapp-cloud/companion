@@ -2,9 +2,10 @@ import { useSyncExternalStore } from "react";
 
 // Labs: opt-in experiments, one switch each. Device-local like the rail's tool list (an
 // experiment is a choice per machine, not synced data), behind the same synchronous storage
-// contract so a native shell can inject its file-backed store with setLabsStorage.
+// contract so a native shell can inject its file-backed store with setLabsStorage. Every
+// flag is off until switched on.
 
-export type LabsFlag = "ancientMediums";
+export type LabsFlag = "notebooks" | "ancientMediums" | "notebookBindings";
 
 export interface LabsStorage {
   load(): string | null;

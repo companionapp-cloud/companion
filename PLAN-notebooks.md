@@ -290,8 +290,8 @@ under the pointer; running the native app; the open decisions in §7.
 
 ## 11. Mediums: clay, wax, sherds (2026-09-26, reworked the same day)
 
-**Behind a Labs flag.** Settings › Labs › "Include less modern mediums" ("Yes, I would like
-to write on dirt"), off by default, device-local (`labs.ts`: localStorage on web, a JSON file
+**Behind a Labs flag.** Settings › Labs › Notebooks › "Enable ancient mediums for notebooks",
+off by default (Notebooks itself is behind "Enable Notebooks" in the same card), device-local (`labs.ts`: localStorage on web, a JSON file
 on native via `setLabsStorage`). Off, New notebook is just a title and makes paper. Notebooks
 already made of clay, wax or sherds stay on the shelf and open normally either way.
 
@@ -370,3 +370,27 @@ Pencil or in the native app.
 Gaps: old clay/wax/sherd pages keep any typed `content_md` from the first version, but it is
 no longer shown. A page-text conflict copy can add a leaf to a wax codex. A page with
 hundreds of strokes replays on open (roughly 50 ms per hundred on a laptop).
+
+## 12. Bindings (2026-09-27)
+
+**Behind a Labs flag.** Settings › Labs › Notebooks › "Enable notebook bindings", off by default.
+On, New notebook asks how a paper notebook is held together. Like a medium, a binding is fixed
+when the notebook is made; it lives in the notebook's settings (`binding`, plus `pages`, `torn`
+and `booklets`, all core-owned keys that an app update can't change). A paper notebook made
+without a binding keeps the original rules. The core keeps each binding's rules
+(`core/bridge/notebooks.go`); `bindings.ts` holds its page, flow, words and history, and
+`specFor(medium, binding)` merges it over the paper medium for the editor and page view.
+
+| Binding | Pages | Rules | View |
+|---|---|---|---|
+| Sewn journal | 48 / 96 / 192, all made up front | none added, removed or reordered; a ribbon (`settings.ribbon`, an app key) marks a page and the journal opens there | two-up, gutter and thread |
+| Spiral notebook | 40 / 80 / 120 | torn out (counted in `torn`), never added | one page at a time or scroll; coil, perforation; torn scraps on the shelf cover |
+| Reporter's pad | 40 / 70 / 100, 400 × 720 | as spiral | pages flip up over a top coil |
+| Ring binder | starts with one | added anywhere, reordered, moved to another ring binder with their ink (`notebooks.pages.move`) | holes and rings |
+| Stapled pocket notebook | 16 / 32 / 48, 336 × 528 | a sheet of four pages folds in at the centre; a page comes out with its sheet; 48 at most | staples in the fold |
+| Traveler's notebook | booklets | `booklets` are runs of pages from `firstPageId` to the next booklet; new booklets slip in at the back (`notebooks.booklets.add`); a booklet is renamed or slipped out and back (`notebooks.booklets.update`); a booklet keeps its last page and the cover keeps one booklet | one booklet at a time, tabs above the pages |
+| Index card box | cards, 480 × 288, narrow-lined | added anywhere, reordered, shuffled; a card doesn't grow | a table of cards, red heading rule |
+| Concertina | panels, 384 × 576 | added and cut at the end only | one strip unfolding sideways |
+
+No schema change: bindings, booklets and the torn count ride in `settings_json`, and moving a
+page between binders rewrites `notebook_id` on the page and its ink rows, which already sync.

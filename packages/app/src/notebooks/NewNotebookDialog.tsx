@@ -6,16 +6,28 @@ import type { Notebook as CoreNotebook, NotebookMedium, WaxLeaves } from "@compa
 import { Dialog } from "../Dialog";
 import { useNotebooks } from "./NotebooksProvider";
 import { NotebookCoverArt } from "./NotebookShelf";
-import { MEDIUMS, MEDIUM_ORDER, SHERD_FABRICS, WAX_BINDINGS, sherdShape } from "./mediums";
+import { MEDIUMS, MEDIUM_ORDER, SHERD_FABRICS, WAX_BINDINGS, sherdShape, specFor } from "./mediums";
+import { BINDINGS, BINDING_ORDER, sizeLabel, type NotebookBinding } from "./bindings";
 import { sherdPicture } from "./mediumCovers";
 import { useLabsFlag } from "../labs";
 
 // Making a notebook (PLAN-notebooks.md §11): a title and what to write on. The medium is the
 // one choice that can't be changed later, so it is made here, with its rules and a little of
 // its history in view, rather than in the cover dialog. Clay, wax and sherds are a Labs
-// experiment ("Include less modern mediums"): until it's switched on this is just a title.
+// experiment ("Enable ancient mediums for notebooks"): until it's switched on this is just a title.
+// A paper notebook's binding (PLAN §12) is chosen here too, behind "Enable notebook bindings".
 
 const MAKE_LABEL: Record<NotebookMedium, string> = { paper: "Start notebook", clay: "Shape a tablet", wax: "Bind the codex", sherd: "Pick up a sherd" };
+const BIND_LABEL: Record<NotebookBinding, string> = {
+  sewn: "Sew the journal",
+  spiral: "Wind the coil",
+  topbound: "Start the pad",
+  ring: "Open the binder",
+  saddle: "Staple it",
+  travelers: "Fill the cover",
+  cards: "Open the box",
+  accordion: "Fold the strip",
+};
 
 export function NewNotebookDialog({ onCreated, onClose }: { onCreated(nb: CoreNotebook): void; onClose(): void }) {
   const notebooks = useNotebooks();
@@ -24,13 +36,20 @@ export function NewNotebookDialog({ onCreated, onClose }: { onCreated(nb: CoreNo
   const ancient = useLabsFlag("ancientMediums");
   const [picked, setMedium] = useState<NotebookMedium>("paper");
   const medium: NotebookMedium = ancient ? picked : "paper";
+  const bindingsOn = useLabsFlag("notebookBindings");
+  const [bindingPicked, setBinding] = useState<NotebookBinding>("ring");
+  const binding: NotebookBinding | null = bindingsOn && medium === "paper" ? bindingPicked : null;
+  const [sizes, setSizes] = useState<Partial<Record<NotebookBinding, number>>>({});
+  const bound = binding ? BINDINGS[binding] : null;
+  const size = bound?.sizes ? (sizes[bound.id] ?? bound.sizes[0]) : undefined;
   const [leaves, setLeaves] = useState<WaxLeaves>(2);
   // A potsherd notebook starts with a sherd picked off the heap: its page id (a sherd's shape
   // and fabric come from its id).
   const [firstSherd, setFirstSherd] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const spec = MEDIUMS[medium];
+  const spec = specFor(medium, binding);
+  const choosing = ancient || bindingsOn;
 
   const make = async () => {
     setBusy(true);
@@ -40,6 +59,8 @@ export function NewNotebookDialog({ onCreated, onClose }: { onCreated(nb: CoreNo
         title: title.trim(),
         medium,
         leaves: medium === "wax" ? leaves : undefined,
+        binding: binding ?? undefined,
+        pages: size,
         firstPageId: medium === "sherd" ? (firstSherd ?? undefined) : undefined,
       });
       onCreated(nb);
@@ -53,11 +74,11 @@ export function NewNotebookDialog({ onCreated, onClose }: { onCreated(nb: CoreNo
     <Dialog
       title="New notebook"
       onClose={busy ? undefined : onClose}
-      width={ancient ? 640 : 440}
+      width={choosing ? 640 : 440}
       footer={
         <View style={{ flexDirection: "row", gap: space.md }}>
           <Button variant="ghost" size={touch ? "lg" : "sm"} label="Cancel" onPress={onClose} disabled={busy} />
-          <Button size={touch ? "lg" : "sm"} label={MAKE_LABEL[medium]} onPress={() => void make()} disabled={busy} />
+          <Button size={touch ? "lg" : "sm"} label={binding ? BIND_LABEL[binding] : MAKE_LABEL[medium]} onPress={() => void make()} disabled={busy} />
         </View>
       }
     >
@@ -72,8 +93,10 @@ export function NewNotebookDialog({ onCreated, onClose }: { onCreated(nb: CoreNo
           placeholderTextColor={colors.textQuaternary}
           style={styles.titleInput}
         />
-        {ancient ? (
+        {choosing ? (
           <>
+            {ancient ? (
+              <>
             <Text variant="eyebrow" tone="tertiary">
               Write on
             </Text>
@@ -120,6 +143,85 @@ export function NewNotebookDialog({ onCreated, onClose }: { onCreated(nb: CoreNo
                 );
               })}
             </View>
+              </>
+            ) : null}
+
+            {bindingsOn && medium === "paper" ? (
+              <>
+                <Text variant="eyebrow" tone="tertiary">
+                  Bound as
+                </Text>
+                <View style={styles.grid}>
+                  {BINDING_ORDER.map((b) => {
+                    const s = BINDINGS[b];
+                    const on = b === binding;
+                    return (
+                      <Pressable
+                        key={b}
+                        aria-label={s.label}
+                        aria-selected={on}
+                        onPress={() => setBinding(b)}
+                        style={({ hovered }: PressState) => [
+                          styles.card,
+                          styles.bindCard,
+                          {
+                            borderColor: on ? colors.borderFocus : colors.borderSubtle,
+                            backgroundColor: on ? colors.accentSoft : hovered ? colors.surfaceHover : "transparent",
+                          },
+                        ]}
+                      >
+                        <View style={styles.art} pointerEvents="none">
+                          <NotebookCoverArt
+                            width={46}
+                            notebook={{
+                              id: `preview-${b}`,
+                              title: "",
+                              cover: { kind: "color", color: "navy" },
+                              medium: "paper",
+                              binding: b,
+                              guides: [],
+                              pageCount: 1,
+                              updatedAt: "",
+                            }}
+                          />
+                        </View>
+                        <View style={{ flex: 1, gap: space.xxs }}>
+                          <Text style={{ fontWeight: font.weight.semibold }}>{s.label}</Text>
+                          <Text tone="tertiary" variant="caption" numberOfLines={3}>
+                            {s.tagline}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                {bound?.sizes ? (
+                  <View style={{ gap: space.sm }}>
+                    <Text variant="eyebrow" tone="tertiary">
+                      Size
+                    </Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
+                      {[...bound.sizes].sort((a, b) => a - b).map((n) => (
+                        <Pressable
+                          key={n}
+                          aria-selected={size === n}
+                          onPress={() => setSizes((prev) => ({ ...prev, [bound.id]: n }))}
+                          style={({ hovered }: PressState) => [
+                            styles.chip,
+                            {
+                              backgroundColor: size === n ? colors.accentSoft : hovered ? colors.surfaceHover : "transparent",
+                              borderColor: size === n ? colors.accentSoftBorder : colors.borderDefault,
+                            },
+                          ]}
+                        >
+                          <Text tone={size === n ? "accent" : "secondary"}>{sizeLabel(bound.id, n)}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
+              </>
+            ) : null}
 
             {/* The heap's pictures need a DOM; on native the first sherd is left to chance. */}
             {medium === "sherd" && typeof document !== "undefined" ? <FirstSherd value={firstSherd} onChange={setFirstSherd} /> : null}
@@ -162,9 +264,9 @@ export function NewNotebookDialog({ onCreated, onClose }: { onCreated(nb: CoreNo
               <Text tone="tertiary" variant="caption" style={{ marginTop: space.sm }}>
                 {spec.history}
               </Text>
-              {medium !== "paper" ? (
+              {medium !== "paper" || binding ? (
                 <Text tone="quaternary" variant="caption">
-                  The medium can't be changed once the notebook is made.
+                  {binding ? "The binding can't be changed once the notebook is made." : "The medium can't be changed once the notebook is made."}
                 </Text>
               ) : null}
             </View>
@@ -275,6 +377,7 @@ const styles = {
     borderRadius: radius.lg,
     borderWidth: 1,
   },
+  bindCard: { flexBasis: 280, paddingVertical: space.md },
   art: { width: 58, height: 76, alignItems: "center" as const, justifyContent: "center" as const, overflow: "hidden" as const },
   chip: { height: 28, paddingHorizontal: space.ml, justifyContent: "center" as const, borderRadius: radius.md, borderWidth: 1 },
   about: { gap: space.xs, padding: space.lg, borderRadius: radius.lg, backgroundColor: colors.surfaceSunken },

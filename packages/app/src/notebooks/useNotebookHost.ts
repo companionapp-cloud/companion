@@ -8,6 +8,7 @@ import { useDocumentSource } from "../DocumentSourceContext";
 import type { NotebookDocument, NotebookHost, NotebookPage } from "./host";
 import type { PaperStyle } from "./paper";
 import { mediumOf } from "./mediums";
+import { bindingOf } from "./bindings";
 
 // The platform-independent NotebookHost (PLAN-notebooks.md §5): wraps the notebooks.* core
 // API, the document source (cover images) and the sync trigger. The web view uses it
@@ -74,7 +75,7 @@ export function useNotebookHost(): NotebookHost {
     return {
       async load(notebookId): Promise<NotebookDocument> {
         const doc = await api.get(notebookId);
-        const settings = (doc.notebook.settingsJson ?? {}) as { guides?: CoreGuide[] };
+        const settings = (doc.notebook.settingsJson ?? {}) as { guides?: CoreGuide[]; ribbon?: unknown };
         return {
           notebook: {
             id: doc.notebook.id,
@@ -84,6 +85,10 @@ export function useNotebookHost(): NotebookHost {
               : { kind: "color", color: doc.notebook.coverColor },
             medium: mediumOf(doc.notebook.settingsJson),
             leaves: doc.notebook.settingsJson?.leaves,
+            binding: bindingOf(doc.notebook.settingsJson),
+            booklets: doc.notebook.settingsJson?.booklets,
+            ribbon: typeof settings.ribbon === "string" ? settings.ribbon : null,
+            torn: doc.notebook.settingsJson?.torn,
             guides: Array.isArray(settings.guides) ? settings.guides : [],
             pageCount: doc.pages.length,
             updatedAt: doc.notebook.updatedAt,
@@ -154,6 +159,28 @@ export function useNotebookHost(): NotebookHost {
         if (h?.timer) clearTimeout(h.timer);
         held.current.delete(pageId);
         await api.pages.smooth(pageId);
+        syncTrigger();
+      },
+      async reorderPages(notebookId, pageIds) {
+        await api.pages.reorder(notebookId, pageIds);
+        syncTrigger();
+      },
+      async movePage(pageId, toNotebookId) {
+        await flush(pageId);
+        await api.pages.move(pageId, toNotebookId);
+        syncTrigger();
+      },
+      async addBooklet(notebookId, title, paper) {
+        const b = await api.booklets.add(notebookId, { title, paperKind: paper.kind, paperSpacing: paper.spacing });
+        syncTrigger();
+        return b;
+      },
+      async updateBooklet(notebookId, bookletId, patch) {
+        await api.booklets.update(notebookId, bookletId, patch);
+        syncTrigger();
+      },
+      async setRibbon(notebookId, pageId) {
+        await api.update(notebookId, { settingsJson: { ribbon: pageId } });
         syncTrigger();
       },
       async resolveDocument(id) {

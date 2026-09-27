@@ -20,6 +20,10 @@ export interface NotebookViewController {
   addPage(): void;
   /** Clay, wax: smooth the current page flat, clearing its marks. */
   smoothPage(): void;
+  /** A ring binder or a box of cards: move the current page one place earlier or later. */
+  movePageBy(dir: 1 | -1): void;
+  /** A box of cards: shuffle it. */
+  shuffle(): void;
   /** The page the toolbar acts on: the last one focused or drawn on. */
   editor(): EditorController | null;
 }
@@ -38,6 +42,8 @@ export interface NotebookViewProps {
   /** Its size, as a multiplier on its width (mediums.ts MEDIUM_SIZES). */
   mediumSize: number;
   rulers: boolean;
+  /** A traveler's notebook: the booklet open in the cover (its pages are the ones shown). */
+  booklet: string | null;
   /** Bump to re-read the notebook (a page's paper changed, a page was deleted). */
   revision: number;
   onState(state: NotebookViewState): void;

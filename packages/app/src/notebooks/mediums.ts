@@ -1,6 +1,7 @@
 import type { NotebookMedium, WaxLeaves } from "@companion/core-bridge";
 import type { IconName } from "@companion/design-system";
 import { PAGE, type PageGeometry, type PaperStyle } from "./paper";
+import { BINDINGS, type BindingFlow, type NotebookBinding } from "./bindings";
 
 // Notebook mediums (PLAN-notebooks.md §11): paper, and three older ways of keeping notes,
 // each a set of design constraints with some history in it. Clay, wax and sherds are written
@@ -41,8 +42,9 @@ export interface MediumSpec {
   /** Paper grows by whole rules when its text runs long. Nothing else stretches. */
   grows: boolean;
   /** How pages are laid out: "book" pages two-up or scrolls (the reader chooses), "scroll" is
-   *  always a scrolling list (clay tablets are a pile, not a codex), "grid" wraps (sherds). */
-  flow: "book" | "scroll" | "grid";
+   *  always a scrolling list (clay tablets are a pile, not a codex), "grid" wraps (sherds). A
+   *  paper notebook's binding can lay its pages out other ways (bindings.ts). */
+  flow: "scroll" | BindingFlow;
   /** The paper a new page gets (paper pages choose their own; others don't use it). */
   paper: PaperStyle | null;
   /** The pen tools. Empty for paper, which types and uses the ordinary drawing tools. */
@@ -180,8 +182,32 @@ export function mediumOf(settings: { medium?: unknown } | null | undefined): Not
   return m === "clay" || m === "wax" || m === "sherd" ? m : "paper";
 }
 
-export function countLabel(medium: NotebookMedium, n: number): string {
+/** What a notebook's pages are and how they behave: its medium's, and for paper, its binding's
+ *  page, flow and page actions over the paper notebook's. */
+export function specFor(medium: NotebookMedium, binding?: NotebookBinding | null): MediumSpec {
   const spec = MEDIUMS[medium];
+  if (medium !== "paper" || !binding) return spec;
+  const b = BINDINGS[binding];
+  return {
+    ...spec,
+    label: b.label,
+    noun: b.noun,
+    nouns: b.nouns,
+    page: b.page,
+    grows: b.grows,
+    flow: b.flow,
+    paper: b.paper,
+    addLabel: b.addLabel,
+    deleteLabel: b.deleteLabel,
+    deleteConfirm: b.deleteConfirm,
+    tagline: b.tagline,
+    rules: b.rules,
+    history: b.history,
+  };
+}
+
+export function countLabel(medium: NotebookMedium, n: number, binding?: NotebookBinding | null): string {
+  const spec = specFor(medium, binding);
   return `${n} ${n === 1 ? spec.noun : spec.nouns}`;
 }
 
@@ -268,9 +294,9 @@ export function sherdShape(pageId: string): SherdShape {
   return shape;
 }
 
-/** One page's sheet: the medium's geometry, or this sherd's own. */
-export function pageGeometry(medium: NotebookMedium, pageId: string): PageGeometry {
-  return medium === "sherd" ? sherdShape(pageId).page : MEDIUMS[medium].page;
+/** One page's sheet: the medium's (or binding's) geometry, or this sherd's own. */
+export function pageGeometry(medium: NotebookMedium, pageId: string, binding?: NotebookBinding | null): PageGeometry {
+  return medium === "sherd" ? sherdShape(pageId).page : specFor(medium, binding).page;
 }
 
 /** The page view's styles for the pen-only sheets. The objects draw themselves (a WebGL

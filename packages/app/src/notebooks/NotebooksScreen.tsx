@@ -8,6 +8,7 @@ import { NotebookShelf } from "./NotebookShelf";
 import { NotebookEditor } from "./NotebookEditor";
 import { CoverDialog } from "./CoverDialog";
 import { NewNotebookDialog } from "./NewNotebookDialog";
+import { bindingOf } from "./bindings";
 import { mediumOf } from "./mediums";
 import { useNotebooks } from "./NotebooksProvider";
 import { useNotebookHost } from "./useNotebookHost";
@@ -33,6 +34,9 @@ export function toShelfNotebook(n: NotebookSummary): ShelfNotebook {
     cover: n.coverDocumentId ? { kind: "image", color: n.coverColor, documentId: n.coverDocumentId } : { kind: "color", color: n.coverColor },
     medium: mediumOf(n.settingsJson),
     leaves: n.settingsJson?.leaves,
+    binding: bindingOf(n.settingsJson),
+    booklets: n.settingsJson?.booklets,
+    torn: n.settingsJson?.torn,
     guides: [],
     pageCount: n.pageCount,
     updatedAt: n.updatedAt,

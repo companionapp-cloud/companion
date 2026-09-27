@@ -1,6 +1,7 @@
 import type { InkGroupRecord } from "@companion/editor";
 import type { PaperStyle } from "./paper";
 import type { NotebookMedium, WaxLeaves } from "./mediums";
+import type { Booklet, NotebookBinding } from "./bindings";
 
 // What the notebook renderer needs from the outside world (PLAN-notebooks.md §5), shaped like
 // CanvasHost: every argument and result is JSON, so the same renderer can run over the core
@@ -25,6 +26,14 @@ export interface Notebook {
   medium: NotebookMedium;
   /** A wax codex's leaf count. */
   leaves?: WaxLeaves;
+  /** How a paper notebook is held together (bindings.ts); null for one made without. */
+  binding?: NotebookBinding | null;
+  /** A traveler's notebook's booklets. */
+  booklets?: Booklet[];
+  /** A sewn journal's ribbon: the page it lies in. */
+  ribbon?: string | null;
+  /** Pages torn out of a pad. */
+  torn?: number;
   guides: NotebookGuide[];
   pageCount: number;
   updatedAt: string;
@@ -60,6 +69,16 @@ export interface NotebookHost {
   /** Clear a page's text and ink (wax: smooth the leaf; clay: knead it flat). Held ink for it
    *  is dropped. */
   smoothPage(pageId: string): Promise<void>;
+  /** Put a ring binder's or a card box's pages in a new order (every page id, in order). */
+  reorderPages(notebookId: string, pageIds: string[]): Promise<void>;
+  /** Take a page out of one ring binder and clip it into the end of another. */
+  movePage(pageId: string, toNotebookId: string): Promise<void>;
+  /** Slip a new booklet into a traveler's notebook, one fresh page on the paper given. */
+  addBooklet(notebookId: string, title: string, paper: PaperStyle): Promise<Booklet>;
+  /** Rename a booklet, or slip it out of the cover and back. */
+  updateBooklet(notebookId: string, bookletId: string, patch: { title?: string; archived?: boolean }): Promise<void>;
+  /** Lay a sewn journal's ribbon in a page. */
+  setRibbon(notebookId: string, pageId: string | null): Promise<void>;
   /** Resolve a cover image to something an <img> can show. */
   resolveDocument(id: string): Promise<{ url: string } | null>;
 }

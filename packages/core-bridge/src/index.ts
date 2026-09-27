@@ -128,6 +128,8 @@ export type {
   NotebookMedium,
   NotebookCoreSettings,
   WaxLeaves,
+  NotebookBinding,
+  Booklet,
 } from "./notebooks";
 export { exportsApi, importFilesApi, EXPORT_CHANGED_EVENT, SYNC_REQUESTED_EVENT } from "./exports";
 export type {

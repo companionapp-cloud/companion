@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, View, useWindowDimensions } from "react-native";
-import { Button, Divider, Icon, IconButton, Text, colors, layout, radius, row, shadow, space, useDensity } from "@companion/design-system";
+import { Pressable, ScrollView, TextInput, View, useWindowDimensions } from "react-native";
+import { Button, Divider, Icon, IconButton, Text, colors, font, layout, radius, row, shadow, space, useDensity } from "@companion/design-system";
 import type { IconName, PressState } from "@companion/design-system";
 import type { EditorController, FormatState, InkState } from "@companion/editor";
 import { FormattingBar } from "../FormattingBar";
 import { DrawingBar, useDrawingTool } from "../DrawingBar";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { Dialog } from "../Dialog";
 import { useCore } from "../CoreContext";
 import type { NotebookHost, NotebookPage, NotebookViewMode } from "./host";
 import { NotebookView, type NotebookViewController, type NotebookViewState, type NotebookZoom } from "./NotebookView";
 import { PAPER_KINDS, PAPER_SPACINGS, SPACING_LABEL, type PaperStyle } from "./paper";
 import { CoverDialog } from "./CoverDialog";
-import { MEDIUMS, MEDIUM_SIZES, mediumOf, type MediumSize, type MediumTool, type MediumToolId } from "./mediums";
+import { MEDIUM_SIZES, mediumOf, specFor, type MediumSize, type MediumTool, type MediumToolId } from "./mediums";
+import { BINDINGS, bindingOf, type Booklet } from "./bindings";
 import { useNotebooks } from "./NotebooksProvider";
 
 // The notebook editor (PLAN-notebooks.md §1): full width, a back button to the shelf, the
@@ -44,7 +46,9 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
   const notebooks = useNotebooks();
   const notebook = notebooks.byId(notebookId);
   const medium = mediumOf(notebook?.settingsJson);
-  const spec = MEDIUMS[medium];
+  const binding = bindingOf(notebook?.settingsJson);
+  const spec = specFor(medium, binding);
+  const bound = binding ? BINDINGS[binding] : null;
   const { width } = useWindowDimensions();
   const touch = useDensity() === "touch";
   const narrow = width < 900;
@@ -63,6 +67,30 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
   const [paperOpen, setPaperOpen] = useState(false);
   const [cover, setCover] = useState(false);
   const [confirm, setConfirm] = useState<"delete" | "smooth" | null>(null);
+  // A traveler's notebook: the booklet open in the cover, and one being renamed.
+  const booklets = binding === "travelers" ? (notebook?.settingsJson?.booklets ?? []) : [];
+  const inCover = booklets.filter((b) => !b.archived);
+  const [bookletId, setBookletId] = useState<string | null>(null);
+  const booklet = inCover.find((b) => b.id === bookletId) ?? inCover[0] ?? null;
+  const [renaming, setRenaming] = useState<Booklet | null>(null);
+  const [shelved, setShelved] = useState(false);
+  // A ring binder: the binder a page is being moved to.
+  const [moving, setMoving] = useState(false);
+  // What the core refused (a booklet's last page, a full stapled notebook), for a moment.
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
+  const attempt = async (fn: () => Promise<unknown>) => {
+    try {
+      await fn();
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message.replace(/^[a-z]/, (c) => c.toUpperCase()) : "That didn't work.");
+    }
+    setRevision((r) => r + 1);
+  };
   const [mediumTool, setMediumTool] = useState<MediumToolId | null>(spec.tools[0]?.id ?? null);
   const [sizes, setSizes] = useState(toolSizes);
   const mediumSize: MediumSize = (mediumTool && sizes[mediumTool]) ?? 1;
@@ -98,13 +126,20 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
     };
   }, [core, notebookId]);
 
-  // Jump to the requested page once the pages are known.
+  // Jump to the requested page once the pages are known; a sewn journal opens at its ribbon.
   const jumped = useRef(false);
+  const ribbon = typeof notebook?.settingsJson?.ribbon === "string" ? (notebook.settingsJson.ribbon as string) : null;
   useEffect(() => {
-    if (jumped.current || !initialPage || state.pageCount === 0) return;
+    if (jumped.current || state.pageCount === 0) return;
     jumped.current = true;
-    viewRef.current?.goTo(initialPage - 1);
-  }, [initialPage, state.pageCount]);
+    if (initialPage) viewRef.current?.goTo(initialPage - 1);
+    else if (ribbon && binding === "sewn") {
+      void host.load(notebookId).then((d) => {
+        const i = d.pages.findIndex((p) => p.id === ribbon);
+        if (i > 0) viewRef.current?.goTo(i);
+      });
+    }
+  }, [initialPage, state.pageCount, ribbon, binding, host, notebookId]);
 
   editorRef.current = viewRef.current?.editor() ?? null;
   const syncEditor = useCallback((p: NotebookPage | null) => {
@@ -114,9 +149,10 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
     });
   }, []);
 
-  // Only a book pages two-up (clay scrolls, sherds lie in a grid), so the rest step singly.
-  const paged = spec.flow === "book";
-  const step = mode === "spread" && paged ? 2 : 1;
+  // A book pages two-up and a pad one page at a time (clay scrolls, sherds and cards lie in a
+  // grid, a concertina unfolds), so the rest step singly.
+  const paged = spec.flow === "book" || spec.flow === "pad" || spec.flow === "pad-top";
+  const step = mode === "spread" && spec.flow === "book" ? 2 : 1;
   const stepZoom = (dir: 1 | -1) => {
     const at = state.scale;
     const next = dir > 0 ? ZOOM_STEPS.find((z) => z > at + 0.01) : [...ZOOM_STEPS].reverse().find((z) => z < at - 0.01);
@@ -129,9 +165,12 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
   };
   const deletePage = async () => {
     if (!page) return;
-    await host.deletePage(page.id);
     setConfirm(null);
-    setRevision((r) => r + 1);
+    await attempt(async () => {
+      // A concertina is only ever cut at its end.
+      const target = binding === "accordion" ? (await host.load(notebookId)).pages.at(-1)?.id : page.id;
+      if (target) await host.deletePage(target);
+    });
   };
   const last = Math.max(0, state.pageCount - 1);
   const folio = step === 2 && state.page + 1 <= last ? `${state.page + 1}–${state.page + 2}` : `${state.page + 1}`;
@@ -157,6 +196,31 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
       {spec.deleteLabel ? (
         <IconButton label={spec.deleteLabel} size={btn} disabled={state.pageCount <= 1} onPress={() => setConfirm("delete")}>
           <Icon name="trash" size={glyph} color={colors.textSecondary} />
+        </IconButton>
+      ) : null}
+      {bound?.reorder ? (
+        <>
+          <IconButton label={`Move this ${bound.noun} earlier`} size={btn} disabled={!page} onPress={() => viewRef.current?.movePageBy(-1)}>
+            <Text tone="secondary">←</Text>
+          </IconButton>
+          <IconButton label={`Move this ${bound.noun} later`} size={btn} disabled={!page} onPress={() => viewRef.current?.movePageBy(1)}>
+            <Text tone="secondary">→</Text>
+          </IconButton>
+        </>
+      ) : null}
+      {binding === "cards" ? (
+        <IconButton label="Shuffle the box" size={btn} disabled={state.pageCount < 2} onPress={() => viewRef.current?.shuffle()}>
+          <Icon name="repeat" size={glyph} color={colors.textSecondary} />
+        </IconButton>
+      ) : null}
+      {bound?.move ? (
+        <IconButton label="Move this page to another binder" size={btn} disabled={!page || state.pageCount <= 1} onPress={() => setMoving(true)}>
+          <Icon name="folder" size={glyph} color={colors.textSecondary} />
+        </IconButton>
+      ) : null}
+      {binding === "sewn" ? (
+        <IconButton label={page && page.id === ribbon ? "The ribbon is in this page" : "Lay the ribbon in this page"} size={btn} active={!!page && page.id === ribbon} disabled={!page} onPress={() => page && void attempt(() => host.setRibbon(notebookId, page.id))}>
+          <Icon name="tag" size={glyph} color={page && page.id === ribbon ? colors.textAccent : colors.textSecondary} />
         </IconButton>
       ) : null}
     </>
@@ -199,7 +263,7 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
       value={mode}
       onChange={(m) => setMode(m)}
       options={[
-        { value: "spread", label: "Two pages", icon: "panelLeft" },
+        { value: "spread", label: spec.flow === "book" ? "Two pages" : "One page", icon: "panelLeft" },
         { value: "scroll", label: "Scroll", icon: "listBullet" },
       ]}
     />
@@ -241,6 +305,30 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
         </View>
       ) : null}
 
+      {binding === "travelers" ? (
+        <BookletBar
+          booklets={booklets}
+          current={booklet}
+          onOpen={(b) => setBookletId(b.id)}
+          onAdd={() =>
+            void attempt(async () => {
+              const b = await host.addBooklet(notebookId, "", page?.paper ?? { kind: "lined", spacing: 28 });
+              setBookletId(b.id);
+            })
+          }
+          onRename={setRenaming}
+          onSlipOut={(b) => void attempt(() => host.updateBooklet(notebookId, b.id, { archived: true }))}
+          shelved={shelved}
+          onShelved={setShelved}
+          onPutBack={(b) =>
+            void attempt(async () => {
+              await host.updateBooklet(notebookId, b.id, { archived: false });
+              setBookletId(b.id);
+              setShelved(false);
+            })
+          }
+        />
+      ) : null}
       <View style={{ flex: 1, minHeight: 0 }}>
         <NotebookView
           ref={viewRef}
@@ -254,6 +342,7 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
           mediumTool={mediumTool}
           mediumSize={MEDIUM_SIZES[mediumSize].scale}
           rulers={rulers}
+          booklet={booklet?.id ?? null}
           revision={revision}
           onState={setState}
           onActivePage={syncEditor}
@@ -282,6 +371,11 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
               New pages take the paper of the page you are on.
             </Text>
           </View>
+        ) : null}
+        {notice ? (
+          <Pressable style={styles.notice} onPress={() => setNotice(null)}>
+            <Text tone="secondary">{notice}</Text>
+          </Pressable>
         ) : null}
       </View>
 
@@ -336,6 +430,26 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
           onClose={() => setConfirm(null)}
         />
       ) : null}
+      {moving && page ? (
+        <MoveToBinder
+          notebookId={notebookId}
+          onClose={() => setMoving(false)}
+          onPick={(to) => {
+            setMoving(false);
+            void attempt(() => host.movePage(page.id, to));
+          }}
+        />
+      ) : null}
+      {renaming ? (
+        <RenameBooklet
+          booklet={renaming}
+          onClose={() => setRenaming(null)}
+          onSave={(title) => {
+            setRenaming(null);
+            void attempt(() => host.updateBooklet(notebookId, renaming.id, { title }));
+          }}
+        />
+      ) : null}
       {confirm === "smooth" && spec.smooth ? (
         <ConfirmDialog
           title={spec.smooth.title}
@@ -349,6 +463,122 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
         />
       ) : null}
     </View>
+  );
+}
+
+/** A traveler's notebook's booklets: a tab for each in the cover, a new one slipped in, and the
+ *  ones slipped out kept to hand. */
+function BookletBar({
+  booklets,
+  current,
+  onOpen,
+  onAdd,
+  onRename,
+  onSlipOut,
+  shelved,
+  onShelved,
+  onPutBack,
+}: {
+  booklets: Booklet[];
+  current: Booklet | null;
+  onOpen(b: Booklet): void;
+  onAdd(): void;
+  onRename(b: Booklet): void;
+  onSlipOut(b: Booklet): void;
+  shelved: boolean;
+  onShelved(open: boolean): void;
+  onPutBack(b: Booklet): void;
+}) {
+  const touch = useDensity() === "touch";
+  const btn = touch ? ("lg" as const) : ("sm" as const);
+  const out = booklets.filter((b) => b.archived);
+  const inCover = booklets.filter((b) => !b.archived);
+  return (
+    <View style={styles.bookletBar}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.xs, alignItems: "center" }} style={{ flexShrink: 1 }}>
+        {inCover.map((b) => (
+          <Chip key={b.id} label={b.title} active={b.id === current?.id} onPress={() => onOpen(b)} />
+        ))}
+      </ScrollView>
+      <IconButton label="Slip in a new booklet" size={btn} onPress={onAdd}>
+        <Icon name="plus" size={13} color={colors.textSecondary} />
+      </IconButton>
+      <View style={{ flex: 1 }} />
+      {current ? (
+        <>
+          <Button variant="ghost" size="sm" label="Rename" onPress={() => onRename(current)} />
+          <Button variant="ghost" size="sm" label="Slip out" disabled={inCover.length <= 1} onPress={() => onSlipOut(current)} />
+        </>
+      ) : null}
+      {out.length ? <Button variant="ghost" size="sm" label={`Slipped out · ${out.length}`} onPress={() => onShelved(!shelved)} /> : null}
+      {shelved && out.length ? (
+        <View style={[styles.popover, { top: layout.toolbarH, bottom: undefined }]}>
+          <Text variant="eyebrow" tone="tertiary">
+            Slipped out of the cover
+          </Text>
+          {out.map((b) => (
+            <View key={b.id} style={{ flexDirection: "row", alignItems: "center", gap: space.md }}>
+              <Text style={{ flex: 1 }} numberOfLines={1}>
+                {b.title}
+              </Text>
+              <Button variant="ghost" size="sm" label="Put back" onPress={() => onPutBack(b)} />
+            </View>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function RenameBooklet({ booklet, onClose, onSave }: { booklet: Booklet; onClose(): void; onSave(title: string): void }) {
+  const [title, setTitle] = useState(booklet.title);
+  const save = () => title.trim() && onSave(title.trim());
+  return (
+    <Dialog
+      title="Rename booklet"
+      onClose={onClose}
+      width={380}
+      footer={
+        <View style={{ flexDirection: "row", gap: space.md }}>
+          <Button variant="ghost" size="sm" label="Cancel" onPress={onClose} />
+          <Button size="sm" label="Rename" disabled={!title.trim()} onPress={save} />
+        </View>
+      }
+    >
+      <TextInput aria-label="Booklet title" autoFocus value={title} onChangeText={setTitle} onSubmitEditing={save} style={styles.input} />
+    </Dialog>
+  );
+}
+
+/** Pick the ring binder a page is unclipped into. */
+function MoveToBinder({ notebookId, onClose, onPick }: { notebookId: string; onClose(): void; onPick(id: string): void }) {
+  const notebooks = useNotebooks();
+  const binders = notebooks.notebooks.filter((n) => n.id !== notebookId && bindingOf(n.settingsJson) === "ring");
+  return (
+    <Dialog title="Move page to another binder" onClose={onClose} width={400} footer={<Button variant="ghost" size="sm" label="Cancel" onPress={onClose} />}>
+      <View style={{ gap: space.xs, paddingVertical: space.md }}>
+        {binders.length === 0 ? (
+          <Text tone="tertiary">There's no other ring binder to move it to. Make one from New notebook.</Text>
+        ) : (
+          binders.map((n) => (
+            <Pressable
+              key={n.id}
+              aria-label={`Move to ${n.title || "Untitled"}`}
+              onPress={() => onPick(n.id)}
+              style={({ hovered }: PressState) => [styles.binderRow, { backgroundColor: hovered ? colors.surfaceHover : "transparent" }]}
+            >
+              <Icon name="notebook" size={13} color={colors.textSecondary} />
+              <Text style={{ flex: 1 }} numberOfLines={1}>
+                {n.title || "Untitled"}
+              </Text>
+              <Text variant="mono" tone="quaternary">
+                {n.pageCount} {n.pageCount === 1 ? "page" : "pages"}
+              </Text>
+            </Pressable>
+          ))
+        )}
+      </View>
+    </Dialog>
   );
 }
 
@@ -534,4 +764,39 @@ const styles = {
     ...shadow.md,
   },
   popoverRow: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: space.sm },
+  bookletBar: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: space.xs,
+    height: layout.toolbarH,
+    paddingHorizontal: space.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+    backgroundColor: colors.surfaceApp,
+    zIndex: 11,
+  },
+  notice: {
+    position: "absolute" as const,
+    alignSelf: "center" as const,
+    bottom: space.lg,
+    maxWidth: "90%" as const,
+    paddingVertical: space.md,
+    paddingHorizontal: space.lg,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.surfaceOverlay,
+    zIndex: 12,
+    ...shadow.md,
+  },
+  input: {
+    fontFamily: font.sans,
+    fontSize: font.size.base,
+    color: colors.textPrimary,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderDefault,
+    paddingVertical: space.sm,
+    outlineStyle: "none" as never,
+  },
+  binderRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: space.md, paddingVertical: space.sm, paddingHorizontal: space.md, borderRadius: radius.md },
 };

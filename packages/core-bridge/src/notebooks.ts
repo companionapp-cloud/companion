@@ -14,10 +14,29 @@ export type NotebookMedium = "paper" | "clay" | "wax" | "sherd";
 /** A wax codex's binding: diptych, triptych or polyptych. */
 export type WaxLeaves = 2 | 3 | 8;
 
+/** How a paper notebook is held together (PLAN-notebooks.md §12). Chosen when it is made, never
+ *  changed; the core keeps each binding's rules. A notebook made without one has none. */
+export type NotebookBinding = "sewn" | "spiral" | "topbound" | "ring" | "saddle" | "travelers" | "cards" | "accordion";
+
+/** One insert in a traveler's notebook: its pages run from `firstPageId` to the next booklet's. */
+export interface Booklet {
+  id: string;
+  title: string;
+  firstPageId: string;
+  /** Slipped out of the cover: kept, but not shown. */
+  archived?: boolean;
+}
+
 /** The keys of `settingsJson` the core owns and never takes from an update. */
 export interface NotebookCoreSettings {
   medium?: NotebookMedium;
   leaves?: WaxLeaves;
+  binding?: NotebookBinding;
+  /** The size a fixed binding was made in. */
+  pages?: number;
+  /** Pages torn out of a pad. */
+  torn?: number;
+  booklets?: Booklet[];
 }
 
 export interface Notebook {
@@ -107,6 +126,10 @@ export interface CreateNotebookInput {
   medium?: NotebookMedium;
   /** Wax only. */
   leaves?: WaxLeaves;
+  /** Paper only. */
+  binding?: NotebookBinding;
+  /** The size of a sewn journal, a pad or a stapled notebook; omit for the binding's default. */
+  pages?: number;
   /** Choose the first page's id (a UUID): the sherd picked from the heap. Omit to generate. */
   firstPageId?: string;
 }
@@ -152,6 +175,18 @@ export function notebooksApi(core: CoreBridge) {
       search: (query: string, limit?: number) => core.invoke<PageHit[]>("notebooks.pages.search", { query, limit }),
       /** Clear a page's text and ink in one step (wax: smooth the leaf; clay: knead it flat). */
       smooth: (id: string) => core.invoke<{ ok: boolean }>("notebooks.pages.smooth", { id }),
+      /** Take a page out of one ring binder and clip it into another, after `afterId` (or at the
+       *  end). Its ink goes with it. */
+      move: (id: string, notebookId: string, afterId?: string) => core.invoke<NotebookPage>("notebooks.pages.move", { id, notebookId, afterId }),
+    },
+    /** A traveler's notebook's booklets. */
+    booklets: {
+      /** Slip a new booklet in at the back, one fresh page on the paper given. */
+      add: (notebookId: string, input: { title?: string; paperKind?: PaperKind; paperSpacing?: PaperSpacing }) =>
+        core.invoke<Booklet>("notebooks.booklets.add", { notebookId, ...input }),
+      /** Rename a booklet, or slip it out of the cover and back. */
+      update: (notebookId: string, id: string, input: { title?: string; archived?: boolean }) =>
+        core.invoke<Booklet>("notebooks.booklets.update", { notebookId, id, ...input }),
     },
     ink: {
       list: (pageId: string) => core.invoke<NotebookPageInk[]>("notebooks.ink.list", { pageId }),

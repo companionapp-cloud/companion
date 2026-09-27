@@ -138,7 +138,7 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
   {
     id: "labs",
     label: "Labs",
-    description: "Experiments to opt into, like writing on mud",
+    description: "Lab features are subject to change. You may lose data, use at your own risk",
     icon: "flag",
     Component: LabsSettings,
   },

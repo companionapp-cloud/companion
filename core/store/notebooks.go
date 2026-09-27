@@ -36,6 +36,11 @@ type CreateNotebookInput struct {
 	Medium string `json:"medium,omitempty"`
 	// Leaves binds a wax codex (domain.WaxLeaves); empty takes the default.
 	Leaves int `json:"leaves,omitempty"`
+	// Binding holds a paper notebook together (domain.NotebookBindings); empty is none.
+	Binding string `json:"binding,omitempty"`
+	// Pages is the size a fixed binding is made in (domain.BindingPageCounts); empty takes the
+	// binding's default. The bridge makes the pages.
+	Pages int `json:"pages,omitempty"`
 	// FirstPageID chooses the first page's id (a UUID): the sherd picked from the heap when a
 	// potsherd notebook is made. Empty: generated. The bridge uses it; Create ignores it.
 	FirstPageID string `json:"firstPageId,omitempty"`
@@ -69,12 +74,23 @@ func (r *NotebooksRepo) Create(in CreateNotebookInput) (*domain.Notebook, error)
 		color = "ink"
 	}
 	settings := json.RawMessage("{}")
-	if m := strings.TrimSpace(in.Medium); m != "" && m != domain.MediumPaper {
-		s := domain.NotebookSettings{Medium: m}
+	m := strings.TrimSpace(in.Medium)
+	b := strings.TrimSpace(in.Binding)
+	if (m != "" && m != domain.MediumPaper) || b != "" {
+		s := domain.NotebookSettings{Medium: m, Binding: b}
+		if m == domain.MediumPaper {
+			s.Medium = ""
+		}
 		if m == domain.MediumWax {
 			s.Leaves = in.Leaves
 			if s.Leaves == 0 {
 				s.Leaves = domain.DefaultWaxLeaves
+			}
+		}
+		if sizes := domain.BindingPageCounts[b]; sizes != nil {
+			s.Pages = in.Pages
+			if s.Pages == 0 {
+				s.Pages = sizes[0]
 			}
 		}
 		settings, _ = json.Marshal(s)
@@ -178,6 +194,38 @@ func mergeNotebookSettings(current, update json.RawMessage) (json.RawMessage, er
 		}
 	}
 	return json.Marshal(base)
+}
+
+// SetCoreSettings writes the core's own settings keys (a torn page counted, a booklet added),
+// keeping every other key. Only the bridge calls it: an app update never reaches these keys.
+func (r *NotebooksRepo) SetCoreSettings(id string, core domain.NotebookSettings) (*domain.Notebook, error) {
+	n, err := r.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	base := map[string]json.RawMessage{}
+	if len(n.Settings) > 0 && string(n.Settings) != "null" {
+		_ = json.Unmarshal(n.Settings, &base)
+	}
+	for k := range domain.CoreSettingsKeys {
+		delete(base, k)
+	}
+	raw, _ := json.Marshal(core)
+	var keys map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &keys)
+	for k, v := range keys {
+		base[k] = v
+	}
+	n.Settings, _ = json.Marshal(base)
+	n.UpdatedAt = r.clock.Now().UTC()
+	n.Dirty = true
+	if err := n.Validate(); err != nil {
+		return nil, err
+	}
+	if _, err := r.db.Exec(`UPDATE notebooks SET settings_json = ?, updated_at = ?, dirty = 1 WHERE id = ?;`, string(n.Settings), n.UpdatedAt.Format(timeFormat), n.ID); err != nil {
+		return nil, fmt.Errorf("update notebook settings: %w", err)
+	}
+	return n, nil
 }
 
 // Touch bumps updated_at without marking the row dirty, so the shelf's recency reflects page
@@ -521,6 +569,39 @@ func (r *NotebookPagesRepo) Reorder(notebookID string, ids []string) error {
 	return nil
 }
 
+// Move takes a page out of its notebook and puts it into another, after AfterID (or at the
+// end). Its old notebook keeps its gap (reads sort); the new one makes room, as Add does.
+func (r *NotebookPagesRepo) Move(id, notebookID, afterID string) (*domain.NotebookPage, error) {
+	p, err := r.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	pages, err := r.ListForNotebook(notebookID)
+	if err != nil {
+		return nil, err
+	}
+	at := len(pages)
+	if afterID != "" {
+		for i, q := range pages {
+			if q.ID == afterID {
+				at = i + 1
+				break
+			}
+		}
+	}
+	now := r.clock.Now().UTC()
+	if _, err := r.db.Exec(`UPDATE notebook_pages SET sort_order = sort_order + 1, updated_at = ?, dirty = 1 WHERE notebook_id = ? AND deleted_at IS NULL AND sort_order >= ?;`,
+		now.Format(timeFormat), notebookID, at); err != nil {
+		return nil, fmt.Errorf("shift pages: %w", err)
+	}
+	if _, err := r.db.Exec(`UPDATE notebook_pages SET notebook_id = ?, sort_order = ?, updated_at = ?, dirty = 1 WHERE id = ?;`,
+		notebookID, at, now.Format(timeFormat), id); err != nil {
+		return nil, fmt.Errorf("move page: %w", err)
+	}
+	p.NotebookID, p.SortOrder, p.UpdatedAt, p.Dirty = notebookID, at, now, true
+	return p, nil
+}
+
 // Delete tombstones a page. There is no per-page Trash: the app confirms first. Later pages
 // keep their sort_order (gaps are harmless; reads sort).
 func (r *NotebookPagesRepo) Delete(id string) error {
@@ -743,6 +824,15 @@ func (r *NotebookInkRepo) DeleteForPage(pageID string) error {
 	now := r.clock.Now().UTC().Format(timeFormat)
 	if _, err := r.db.Exec(`UPDATE notebook_page_ink SET deleted_at = ?, updated_at = ?, dirty = 1 WHERE page_id = ? AND deleted_at IS NULL;`, now, now, pageID); err != nil {
 		return fmt.Errorf("delete ink for page: %w", err)
+	}
+	return nil
+}
+
+// MoveForPage follows a page into another notebook: its ink carries the new notebook id.
+func (r *NotebookInkRepo) MoveForPage(pageID, notebookID string) error {
+	now := r.clock.Now().UTC().Format(timeFormat)
+	if _, err := r.db.Exec(`UPDATE notebook_page_ink SET notebook_id = ?, updated_at = ?, dirty = 1 WHERE page_id = ? AND deleted_at IS NULL;`, notebookID, now, pageID); err != nil {
+		return fmt.Errorf("move ink for page: %w", err)
 	}
 	return nil
 }

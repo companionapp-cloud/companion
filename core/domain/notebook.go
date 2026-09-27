@@ -78,16 +78,75 @@ var WaxLeaves = map[int]bool{2: true, 3: true, 8: true}
 
 const DefaultWaxLeaves = 2
 
+// Bindings (PLAN-notebooks.md §12): how a paper notebook is held together. Like a medium, a
+// binding is a set of physical rules chosen when the notebook is made and never changed. A
+// paper notebook made before bindings (or with the Labs flag off) has none, and keeps the
+// original rules: pages added, deleted and re-ruled freely.
+//
+//   - sewn: a Smyth-sewn journal. Its pages are all there from the start; none added or removed.
+//   - spiral: a wire-bound pad. Pages are torn out but never put back in.
+//   - topbound: a reporter's pad, spiral-bound along the top. Torn off, never added.
+//   - ring: a ring binder. Pages go in anywhere, move about, and move to another binder.
+//   - saddle: a stapled pocket notebook. Paper comes in folded sheets of four pages, added at the
+//     centre fold and taken out whole.
+//   - travelers: a traveler's notebook: booklets under one cover. A booklet can be slipped out.
+//   - cards: an index-card box. Cards go in anywhere and are shuffled.
+//   - accordion: a concertina. One strip, folded: panels are added and cut off at the end only.
+const (
+	BindingSewn      = "sewn"
+	BindingSpiral    = "spiral"
+	BindingTopbound  = "topbound"
+	BindingRing      = "ring"
+	BindingSaddle    = "saddle"
+	BindingTravelers = "travelers"
+	BindingCards     = "cards"
+	BindingAccordion = "accordion"
+)
+
+var NotebookBindings = map[string]bool{
+	BindingSewn: true, BindingSpiral: true, BindingTopbound: true, BindingRing: true,
+	BindingSaddle: true, BindingTravelers: true, BindingCards: true, BindingAccordion: true,
+}
+
+// BindingPageCounts are the sizes a binding is made in, the first being the default. A binding
+// missing here starts with one page and grows.
+var BindingPageCounts = map[string][]int{
+	BindingSewn:     {96, 48, 192},
+	BindingSpiral:   {80, 40, 120},
+	BindingTopbound: {70, 40, 100},
+	BindingSaddle:   {16, 32, 48},
+}
+
+// A stapled notebook's paper comes in folded sheets of this many pages, up to SaddleMaxPages.
+const (
+	SaddleSheetPages = 4
+	SaddleMaxPages   = 48
+)
+
+// Booklet is one insert in a traveler's notebook: a run of pages starting at FirstPageID and
+// ending where the next booklet starts. An archived booklet has been slipped out of the cover:
+// its pages are kept, but not shown.
+type Booklet struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	FirstPageID string `json:"firstPageId"`
+	Archived    bool   `json:"archived,omitempty"`
+}
+
 // NotebookSettings is the typed view of settings_json that the core reads. Other keys (the
-// app's guides) are carried through untouched. Medium and Leaves are owned by the core: a
-// generic settings update never changes them.
+// app's guides, a sewn journal's ribbon) are carried through untouched. Medium, Leaves and the
+// binding's keys are owned by the core: a generic settings update never changes them.
 type NotebookSettings struct {
-	Medium string `json:"medium,omitempty"`
-	Leaves int    `json:"leaves,omitempty"`
+	Medium   string    `json:"medium,omitempty"`
+	Leaves   int       `json:"leaves,omitempty"`
+	Binding  string    `json:"binding,omitempty"`
+	Pages    int       `json:"pages,omitempty"`
+	Torn     int       `json:"torn,omitempty"`
+	Booklets []Booklet `json:"booklets,omitempty"`
 }
 
 // CoreSettingsKeys are the settings keys only the core writes.
-var CoreSettingsKeys = map[string]bool{"medium": true, "leaves": true}
+var CoreSettingsKeys = map[string]bool{"medium": true, "leaves": true, "binding": true, "pages": true, "torn": true, "booklets": true}
 
 // ParsedSettings reads the core's keys from Settings, leniently: a missing or malformed value
 // reads as paper.
@@ -104,6 +163,9 @@ func (n *Notebook) ParsedSettings() NotebookSettings {
 
 // Medium is the notebook's medium; paper when unset.
 func (n *Notebook) Medium() string { return n.ParsedSettings().Medium }
+
+// Binding is a paper notebook's binding; empty for one made without.
+func (n *Notebook) Binding() string { return n.ParsedSettings().Binding }
 
 // MaxNotebookPageContent caps a page's markdown. A page is one A5 sheet that grows by whole
 // rules, not a document, so this is generous.
@@ -171,8 +233,33 @@ func (n *Notebook) Validate() error {
 				}
 			}
 		}
+		if raw, ok := obj["binding"]; ok {
+			var b string
+			if err := json.Unmarshal(raw, &b); err != nil || !NotebookBindings[b] {
+				return errors.Join(ErrInvalidNotebook, errors.New("unknown binding"))
+			}
+			if n.Medium() != MediumPaper {
+				return errors.Join(ErrInvalidNotebook, errors.New("only a paper notebook has a binding"))
+			}
+			if sizes := BindingPageCounts[b]; sizes != nil {
+				var pages int
+				_ = json.Unmarshal(obj["pages"], &pages)
+				if !containsInt(sizes, pages) {
+					return errors.Join(ErrInvalidNotebook, errors.New("that binding isn't made in that size"))
+				}
+			}
+		}
 	}
 	return nil
+}
+
+func containsInt(xs []int, x int) bool {
+	for _, v := range xs {
+		if v == x {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *NotebookPage) Validate() error {

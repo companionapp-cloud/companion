@@ -61,6 +61,7 @@ import { TasksProvider, useTasks } from "./TasksProvider";
 import { ListsProvider } from "./ListsProvider";
 import { NotebooksProvider } from "./notebooks/NotebooksProvider";
 import { NotebooksScreen } from "./notebooks/NotebooksScreen";
+import { useLabsFlag } from "./labs";
 import { CanvasesProvider } from "./canvas/CanvasesProvider";
 import { RemindersProvider, type NotificationScheduler } from "./RemindersProvider";
 import { NotificationsProvider } from "./NotificationsProvider";
@@ -974,7 +975,10 @@ const VIEW_SCREENS: Partial<Record<SurfaceViewId, ComponentType>> = {
 };
 
 function SurfaceBody({ tabRef }: { tabRef: TabRef | null }) {
+  // Notebooks is a Labs feature: switched off, an old tab or a pasted URL lands on nothing.
+  const notebooksOn = useLabsFlag("notebooks");
   if (!tabRef) return <EmptyTab />;
+  if (tabRef.kind === "view" && tabRef.view === "notebooks" && !notebooksOn) return <EmptyTab />;
   if (tabRef.kind === "project") return <ProjectView key={tabRef.projectId} />;
   if (tabRef.kind === "area") return <ProjectView key={tabRef.areaId} />;
   if (tabRef.kind === "view") {

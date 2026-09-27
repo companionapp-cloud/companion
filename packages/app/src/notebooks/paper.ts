@@ -67,7 +67,8 @@ export function paperBackground(paper: PaperStyle, rule: string, dot: string, sh
   const mask = `linear-gradient(${sheet}, ${sheet})`;
   const masks = {
     image: `${mask}, ${mask}`,
-    size: `100% ${y}px, 100% ${page.marginBottom - s + RULE_LIFT[s] - 1}px`,
+    // A short foot (an index card's) can be less than a rule: nothing to mask then.
+    size: `100% ${y}px, 100% ${Math.max(0, page.marginBottom - s + RULE_LIFT[s] - 1)}px`,
     position: `0 0, 0 100%`,
     repeat: `no-repeat, no-repeat`,
   };

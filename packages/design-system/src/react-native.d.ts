@@ -80,6 +80,7 @@ declare module "react-native" {
   interface PressableProps {
     style?: StyleProp | ((state: PressableState) => StyleProp);
     onPress?: (event: GestureResponderEvent) => void;
+    onLongPress?: (event: GestureResponderEvent) => void;
     onHoverIn?: () => void;
     onHoverOut?: () => void;
     disabled?: boolean;

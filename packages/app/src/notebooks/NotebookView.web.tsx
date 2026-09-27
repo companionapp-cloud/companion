@@ -3,8 +3,9 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { colors } from "@companion/design-system";
 import { Editor, type EditorController, type FormatState, type InkGroupRecord, type InkState, type InkTool } from "@companion/editor";
 import type { NotebookDocument, NotebookGuide, NotebookHost, NotebookPage } from "./host";
-import { PAGE, PAGE_GAP, paperBackground, paperTypographyCss, sheetHeightFor } from "./paper";
-import { MEDIUMS, SHERD_FABRICS, mediumCss, pageGeometry, sherdShape, type MediumToolId, type NotebookMedium } from "./mediums";
+import { PAGE_GAP, paperBackground, paperTypographyCss, sheetHeightFor, type PageGeometry } from "./paper";
+import { SHERD_FABRICS, mediumCss, pageGeometry, sherdShape, specFor, type MediumToolId, type NotebookMedium } from "./mediums";
+import { bindingCss, bookletRanges, type NotebookBinding } from "./bindings";
 import { MediumSurface, seedOf } from "./mediumEngine";
 import { sherdPicture } from "./mediumCovers";
 
@@ -86,6 +87,7 @@ function ensureStyles() {
 .nb-draft { position: absolute; z-index: 7; background: ${colors.accent}; pointer-events: none; }
 ${paperTypographyCss()}
 ${mediumCss()}
+${bindingCss()}
 `;
   document.head.appendChild(el);
 }
@@ -94,6 +96,14 @@ ${mediumCss()}
 interface SheetProps {
   host: NotebookHost;
   medium: NotebookMedium;
+  /** A paper notebook's binding, its sheet size and whether the sheet grows with its text. */
+  binding: NotebookBinding | null;
+  geom: PageGeometry;
+  grows: boolean;
+  /** Which edge the binding is on: a book's left page is bound on its right. */
+  spine: "left" | "right" | "top";
+  /** A sewn journal's ribbon lies in this page. */
+  ribbon?: boolean;
   page: NotebookPage;
   index: number;
   scale: number;
@@ -115,7 +125,7 @@ interface SheetProps {
   onHeight(pageId: string, height: number): void;
   /** A page turn (spread mode): this page is leaving, pinned where it was and flipping or
    *  fading out, or entering the new spread. */
-  leaving?: { left: number; top: number; turn: "flip-next" | "flip-prev" | "fade" };
+  leaving?: { left: number; top: number; turn: "flip-next" | "flip-prev" | "flip-up" | "fade" };
   entering?: boolean;
   /** The page is being smoothed flat. */
   busy?: boolean;
@@ -131,6 +141,11 @@ function Sheet(props: SheetProps) {
 /** One page: loads its note and ink from the host and lays the editor on a sheet. */
 function PageSheet({
   host,
+  binding,
+  geom,
+  grows,
+  spine,
+  ribbon,
   page,
   index,
   scale,
@@ -152,7 +167,7 @@ function PageSheet({
 }: SheetProps) {
   const [loaded, setLoaded] = useState<{ md: string; ink: InkGroupRecord[] } | null>(null);
   const [ink, setInk] = useState<InkGroupRecord[]>([]);
-  const [textHeight, setTextHeight] = useState<number>(PAGE.height);
+  const [textHeight, setTextHeight] = useState<number>(geom.height);
   const [inkBottom, setInkBottom] = useState(0);
   const sheetRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<() => void>(() => {});
@@ -174,42 +189,44 @@ function PageSheet({
   useEffect(() => {
     const pm = sheetRef.current?.querySelector<HTMLElement>(".ProseMirror");
     if (!pm || !loaded) return;
-    const measure = () => setTextHeight(sheetHeightFor(pm.offsetHeight, page.paper.spacing));
+    const measure = () => setTextHeight(sheetHeightFor(pm.offsetHeight, page.paper.spacing, geom));
     // Also run on every reported edit: a hidden page delivers no resize observations.
     measureRef.current = measure;
     const ro = new ResizeObserver(measure);
     ro.observe(pm);
     measure();
     return () => ro.disconnect();
-  }, [loaded, page.paper.spacing, page.id]);
-  const height = Math.max(textHeight, sheetHeightFor(inkBottom - PAGE.marginTop - PAGE.marginBottom / 2, page.paper.spacing));
+  }, [loaded, page.paper.spacing, page.id, geom]);
+  // A card or a concertina panel is its size, however much is written on it.
+  const height = grows ? Math.max(textHeight, sheetHeightFor(inkBottom - geom.marginTop - geom.marginBottom / 2, page.paper.spacing, geom)) : geom.height;
   useEffect(() => {
     onHeight(page.id, height);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page.id, height]);
 
   const sheetStyle: CSSProperties = {
-    width: PAGE.width,
+    width: geom.width,
     height,
     ["--nb-sheet-h" as string]: `${height}px`,
-    ["--nb-mx" as string]: `${PAGE.marginX}px`,
-    ["--nb-mt" as string]: `${PAGE.marginTop}px`,
-    ["--nb-mb" as string]: `${PAGE.marginBottom}px`,
-    ["--nb-text-min" as string]: `${PAGE.height - PAGE.marginTop - PAGE.marginBottom}px`,
+    ["--nb-mx" as string]: `${geom.marginX}px`,
+    ["--nb-mt" as string]: `${geom.marginTop}px`,
+    ["--nb-mb" as string]: `${geom.marginBottom}px`,
+    ["--nb-text-min" as string]: `${geom.height - geom.marginTop - geom.marginBottom}px`,
     transform: scale === 1 ? undefined : `scale(${scale})`,
-    ...paperBackground(page.paper, colors.borderDefault, colors.textQuaternary, colors.surfaceCard, scale),
+    ...paperBackground(page.paper, colors.borderDefault, colors.textQuaternary, colors.surfaceCard, scale, geom),
   };
 
   return (
     <div
       className={leaving ? "nb-slot nb-leaving" : entering ? "nb-slot nb-entering" : "nb-slot"}
-      style={{ width: PAGE.width * scale, height: height * scale, ...(leaving ? { left: leaving.left, top: leaving.top } : null) }}
+      style={{ width: geom.width * scale, height: height * scale, ...(leaving ? { left: leaving.left, top: leaving.top } : null) }}
       data-page={leaving ? undefined : index}
       data-turn={leaving?.turn}
     >
       <div
         ref={sheetRef}
         className="nb-sheet"
+        data-binding={binding ?? undefined}
         data-spacing={page.paper.spacing}
         data-active={active}
         style={sheetStyle}
@@ -266,10 +283,175 @@ function PageSheet({
             ))
           : null}
       </div>
+      {binding ? <BindingMarks binding={binding} geom={geom} height={height} scale={scale} spine={spine} index={index} ribbon={ribbon} pageId={page.id} /> : null}
     </div>
   );
 }
 
+/** What holds the page in its binding, drawn over the sheet in page px: a wire coil through
+ *  punched holes, binder rings, staples in the fold, a sewn gutter and its ribbon, an index
+ *  card's red rule, a concertina's folds. The coil and rings reach past the sheet's edge. */
+function BindingMarks({
+  binding,
+  geom,
+  height,
+  scale,
+  spine,
+  index,
+  ribbon,
+  pageId,
+}: {
+  binding: NotebookBinding;
+  geom: PageGeometry;
+  height: number;
+  scale: number;
+  spine: "left" | "right" | "top";
+  index: number;
+  ribbon?: boolean;
+  pageId: string;
+}) {
+  const w = geom.width;
+  const h = height;
+  const id = `nb-b-${pageId}`;
+  // The spine edge's x, and which way is out of the page from it.
+  const edge = spine === "right" ? w : 0;
+  const out = spine === "right" ? 1 : -1;
+  const at = (inset: number) => edge - out * inset;
+  const marks: React.ReactNode[] = [];
+  const gutter = (width: number, dark: number) => (
+    <g key="gutter">
+      <defs>
+        <linearGradient id={`${id}-g`} x1={spine === "right" ? 1 : 0} x2={spine === "right" ? 0 : 1} y1="0" y2="0">
+          <stop offset="0" stopColor={`rgba(20,16,10,${dark})`} />
+          <stop offset="1" stopColor="rgba(20,16,10,0)" />
+        </linearGradient>
+      </defs>
+      <rect x={spine === "right" ? w - width : 0} y={0} width={width} height={h} fill={`url(#${id}-g)`} />
+    </g>
+  );
+  switch (binding) {
+    case "spiral":
+    case "topbound": {
+      const top = binding === "topbound";
+      const run = top ? w : h;
+      const loops: React.ReactNode[] = [];
+      for (let t = 22; t < run - 14; t += 17) {
+        loops.push(
+          top ? (
+            <g key={t}>
+              <circle cx={t} cy={15} r={3.4} fill="#2b2a27" />
+              <path d={`M ${t - 3} ${-12} C ${t - 9} ${-2}, ${t - 3} ${14}, ${t + 1.5} ${15}`} stroke={`url(#${id}-w)`} strokeWidth={2.4} fill="none" strokeLinecap="round" />
+            </g>
+          ) : (
+            <g key={t}>
+              <circle cx={at(15)} cy={t} r={3.4} fill="#2b2a27" />
+              <path d={`M ${edge + out * 12} ${t - 3} C ${edge + out * 2} ${t - 9}, ${at(14)} ${t - 3}, ${at(15)} ${t + 1.5}`} stroke={`url(#${id}-w)`} strokeWidth={2.4} fill="none" strokeLinecap="round" />
+            </g>
+          ),
+        );
+      }
+      marks.push(
+        <defs key="d">
+          <linearGradient id={`${id}-w`} x1="0" x2="1" y1="0" y2="1">
+            <stop offset="0" stopColor="#d9dadc" />
+            <stop offset="0.5" stopColor="#8c8f94" />
+            <stop offset="1" stopColor="#4d5055" />
+          </linearGradient>
+        </defs>,
+        // The perforation a page tears along.
+        top ? (
+          <line key="perf" x1={0} x2={w} y1={32} y2={32} stroke="rgba(40,36,30,0.28)" strokeWidth={1} strokeDasharray="1 3" />
+        ) : (
+          <line key="perf" x1={at(30)} x2={at(30)} y1={0} y2={h} stroke="rgba(40,36,30,0.28)" strokeWidth={1} strokeDasharray="1 3" />
+        ),
+        ...loops,
+      );
+      break;
+    }
+    case "ring": {
+      // Three punched holes, and the rings through them standing out past the edge.
+      [0.16, 0.5, 0.84].forEach((f, i) => {
+        const y = geom.height * f;
+        marks.push(
+          <g key={i}>
+            <circle cx={at(20)} cy={y} r={5.5} fill="#2b2a27" />
+            <path d={`M ${at(20)} ${y - 4} C ${at(20)} ${y - 22}, ${edge + out * 22} ${y - 22}, ${edge + out * 22} ${y}`} stroke="#9ea2a8" strokeWidth={4.5} fill="none" />
+            <path d={`M ${at(20)} ${y - 4} C ${at(20)} ${y - 22}, ${edge + out * 22} ${y - 22}, ${edge + out * 22} ${y}`} stroke="rgba(255,255,255,0.55)" strokeWidth={1.3} fill="none" />
+            <path d={`M ${at(20)} ${y + 4} C ${at(20)} ${y + 22}, ${edge + out * 22} ${y + 22}, ${edge + out * 22} ${y}`} stroke="#7d8187" strokeWidth={4.5} fill="none" />
+          </g>,
+        );
+      });
+      break;
+    }
+    case "saddle": {
+      marks.push(gutter(26, 0.1));
+      [0.28, 0.72].forEach((f, i) => {
+        const y = geom.height * f;
+        marks.push(
+          <g key={i}>
+            <line x1={at(2)} x2={at(2)} y1={y - 12} y2={y + 12} stroke="#8e9297" strokeWidth={2.6} strokeLinecap="round" />
+            <line x1={at(2) - out * 0.6} x2={at(2) - out * 0.6} y1={y - 11} y2={y + 11} stroke="rgba(255,255,255,0.6)" strokeWidth={0.8} />
+          </g>,
+        );
+      });
+      break;
+    }
+    case "sewn":
+    case "travelers":
+      marks.push(gutter(34, binding === "sewn" ? 0.14 : 0.08));
+      if (binding === "sewn") {
+        // The thread showing in the fold, at each sewing station.
+        [0.12, 0.37, 0.63, 0.88].forEach((f, i) =>
+          marks.push(<line key={`s${i}`} x1={at(0.8)} x2={at(0.8)} y1={geom.height * f - 9} y2={geom.height * f + 9} stroke="#c9b99a" strokeWidth={1.4} />),
+        );
+      }
+      if (ribbon) {
+        const x = w * 0.72;
+        marks.push(
+          <g key="ribbon">
+            <path d={`M ${x} -8 L ${x + 12} -8 L ${x + 12} ${h + 34} L ${x + 6} ${h + 26} L ${x} ${h + 34} Z`} fill="#8b1e2b" />
+            <path d={`M ${x + 2} -8 L ${x + 2} ${h + 30}`} stroke="rgba(255,255,255,0.18)" strokeWidth={1.2} />
+          </g>,
+        );
+      }
+      break;
+    case "cards":
+      // An index card's heading rule, in red above the blue.
+      marks.push(<line key="head" x1={0} x2={w} y1={geom.marginTop - 9} y2={geom.marginTop - 9} stroke="#d0605b" strokeWidth={1.3} />);
+      break;
+    case "accordion": {
+      // Folded back and forth: each panel is shaded down the fold it shares with the last.
+      if (index > 0) {
+        const valley = index % 2 === 1;
+        marks.push(
+          <g key="fold">
+            <defs>
+              <linearGradient id={`${id}-f`} x1="0" x2="1" y1="0" y2="0">
+                <stop offset="0" stopColor={valley ? "rgba(20,16,10,0.16)" : "rgba(255,255,255,0.5)"} />
+                <stop offset="1" stopColor="rgba(20,16,10,0)" />
+              </linearGradient>
+            </defs>
+            <rect x={0} y={0} width={30} height={h} fill={`url(#${id}-f)`} />
+            <line x1={0.5} x2={0.5} y1={0} y2={h} stroke="rgba(20,16,10,0.18)" strokeWidth={1} />
+          </g>,
+        );
+      }
+      break;
+    }
+  }
+  return (
+    <svg
+      className="nb-bind"
+      width={w}
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      style={{ transform: scale === 1 ? undefined : `scale(${scale})` }}
+      aria-hidden
+    >
+      {marks}
+    </svg>
+  );
+}
 
 /** A page of clay, wax or pottery: a pen-only surface (mediumEngine.ts) that draws itself,
  *  its marks kept as the page's ink rows. The toolbar's undo reaches it through a stand-in
@@ -555,7 +737,7 @@ function RulerTicks({ axis, origin, length, scale, pageSize }: { axis: "x" | "y"
 }
 
 export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps>(function NotebookView(
-  { host, notebookId, mode: requestedMode, zoom, onZoom, tool, penTool, mediumTool, mediumSize, rulers, revision, onState, onActivePage, onFormatState, onInkState, onExitDrawing },
+  { host, notebookId, mode: requestedMode, zoom, onZoom, tool, penTool, mediumTool, mediumSize, rulers, booklet, revision, onState, onActivePage, onFormatState, onInkState, onExitDrawing },
   ref,
 ) {
   ensureStyles();
@@ -584,18 +766,41 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
     void reload();
   }, [reload, revision]);
 
-  const pages = doc?.pages ?? [];
   const guides = doc?.notebook.guides ?? [];
   const medium: NotebookMedium = doc?.notebook.medium ?? "paper";
-  // Only a book pages two-up; clay tablets always scroll, and sherds lie in a grid on a table
-  // (a scrolling list that wraps).
-  const grid = MEDIUMS[medium].flow === "grid";
-  const mode = MEDIUMS[medium].flow === "book" ? requestedMode : "scroll";
+  const binding = doc?.notebook.binding ?? null;
+  const spec = specFor(medium, binding);
+  // A traveler's notebook shows the booklet open in its cover; everything else, every page.
+  const pagesOf = useCallback(
+    (d: NotebookDocument | null): NotebookPage[] => {
+      if (!d) return [];
+      if (d.notebook.binding !== "travelers") return d.pages;
+      const runs = bookletRanges(d.notebook.booklets, d.pages.map((p) => p.id));
+      const run = runs.find((r) => r.booklet.id === booklet) ?? runs.find((r) => !r.booklet.archived);
+      return run ? d.pages.slice(run.start, run.end) : d.pages;
+    },
+    [booklet],
+  );
+  const pages = useMemo(() => pagesOf(doc), [pagesOf, doc]);
+  // Opening another booklet opens it at its first page.
+  const [shownBooklet, setShownBooklet] = useState(booklet);
+  if (shownBooklet !== booklet) {
+    setShownBooklet(booklet);
+    setCurrent(0);
+    setActiveId(null);
+  }
+  // A book pages two-up and a pad one page at a time; clay tablets always scroll, sherds and
+  // cards lie in a grid on a table (a scrolling list that wraps), and a concertina unfolds
+  // sideways.
+  const grid = spec.flow === "grid";
+  const strip = spec.flow === "strip";
+  const paged = spec.flow === "book" || spec.flow === "pad" || spec.flow === "pad-top";
+  const mode = paged ? requestedMode : "scroll";
+  const perSpread = spec.flow === "book" ? 2 : 1;
   // The heap a new sherd is picked from: candidate page ids (a sherd's shape comes from its id).
   const [heap, setHeap] = useState<string[] | null>(null);
-  const spec = MEDIUMS[medium];
   const base = spec.page;
-  const geomOf = (p: NotebookPage | null | undefined) => (p ? pageGeometry(medium, p.id) : base);
+  const geomOf = (p: NotebookPage | null | undefined) => (p ? pageGeometry(medium, p.id, binding) : base);
   // Pages being smoothed flat, and a remount count for pages the core cleared (a surface loads
   // its marks once, so a smoothed page needs a fresh one).
   const [busy, setBusy] = useState<Record<string, boolean>>({});
@@ -611,25 +816,27 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
     return () => ro.disconnect();
   }, []);
 
-  const across = mode === "spread" ? 2 : 1;
+  const across = mode === "spread" ? perSpread : 1;
   const fitScale = useMemo(() => {
     if (!stage.w) return 1;
+    // A concertina fits its height and unfolds sideways past the edge.
+    if (strip) return Math.max(0.25, Math.min(1.25, (stage.h - STAGE_PAD * 2 - (rulers ? RULER : 0)) / base.height));
     // A phone fits the text column, not the sheet: the side margins scroll off either edge.
     if (stage.w < PHONE_W) return stage.w / (base.width - base.marginX * 2 + 32);
-    // About three sherds across the table.
-    if (grid) return Math.max(0.3, Math.min(1, (stage.w - STAGE_PAD * 2 - PAGE_GAP * 3) / (base.width * 2.7)));
+    // About three sherds across the table, or two cards.
+    if (grid) return Math.max(0.3, Math.min(1, (stage.w - STAGE_PAD * 2 - PAGE_GAP * 3) / (base.width * (binding === "cards" ? 2.2 : 2.7))));
     const chrome = STAGE_PAD * 2 + (rulers ? RULER : 0) + (across - 1) * PAGE_GAP;
     const byWidth = (stage.w - chrome) / (base.width * across);
     // A spread shows whole pages; a scrolling list only fits the width.
     const byHeight = mode === "spread" ? (stage.h - STAGE_PAD * 2 - (rulers ? RULER : 0)) / base.height : Infinity;
     // Tablets, leaves and sherds are hand-sized objects: fit never blows them up past 125%.
     return Math.max(0.25, Math.min(byWidth, byHeight, spec.grows ? 2 : 1.25));
-  }, [stage, rulers, across, mode, base, spec, grid]);
+  }, [stage, rulers, across, mode, base, spec, grid, strip, binding]);
   const scale = zoom === "fit" ? fitScale : zoom;
 
-  // The pages on screen: a spread's pair, or every page of the list.
-  const spreadStart = current - (current % 2);
-  const visible = mode === "spread" ? pages.slice(spreadStart, spreadStart + 2) : pages;
+  // The pages on screen: a spread's pair (a pad's one page), or every page of the list.
+  const spreadStart = current - (current % perSpread);
+  const visible = mode === "spread" ? pages.slice(spreadStart, spreadStart + perSpread) : pages;
   const visibleOffset = mode === "spread" ? spreadStart : 0;
 
   const activePage = pages.find((p) => p.id === activeId) ?? visible[0] ?? null;
@@ -650,19 +857,21 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
     if (!el) return;
     setScroll({ x: el.scrollLeft, y: el.scrollTop });
     if (mode !== "scroll") return;
-    const mid = el.getBoundingClientRect().top + el.clientHeight / 2;
+    // A concertina reads sideways: its current panel is the one crossing the middle across.
+    const box = el.getBoundingClientRect();
+    const mid = strip ? box.left + el.clientWidth / 2 : box.top + el.clientHeight / 2;
     const slots = el.querySelectorAll<HTMLElement>("[data-page]");
     let best = 0;
     const next = new Set<number>();
     slots.forEach((s) => {
       const r = s.getBoundingClientRect();
       const i = Number(s.dataset.page);
-      if (r.top <= mid) best = i;
-      if (r.bottom > -el.clientHeight && r.top < el.clientHeight * 2) next.add(i);
+      if ((strip ? r.left : r.top) <= mid) best = i;
+      if (strip ? r.right > -el.clientWidth && r.left < el.clientWidth * 2 : r.bottom > -el.clientHeight && r.top < el.clientHeight * 2) next.add(i);
     });
     setCurrent(best);
     setNear((prev) => (prev.size === next.size && [...next].every((i) => prev.has(i)) ? prev : next));
-  }, [mode]);
+  }, [mode, strip]);
   useEffect(() => {
     onScroll();
   }, [onScroll, pages.length, scale]);
@@ -670,9 +879,9 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
   // Phone fit leaves the sheet wider than the screen: start centred on the text column.
   useLayoutEffect(() => {
     const el = stageRef.current;
-    if (!el || zoom !== "fit" || stage.w >= PHONE_W) return;
+    if (!el || zoom !== "fit" || stage.w >= PHONE_W || strip) return;
     el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
-  }, [zoom, stage.w, scale, doc]);
+  }, [zoom, stage.w, scale, doc, strip]);
 
   /** Turn the page: in a spread the leaving pages stay put and flip away (the outer one of the
    *  pair hinges on the spine; its partner fades) while the new spread comes in beneath. */
@@ -701,7 +910,7 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
     (page: number) => {
       const i = Math.max(0, Math.min(page, pages.length - 1));
       if (mode === "spread") {
-        const nextStart = i - (i % 2);
+        const nextStart = i - (i % perSpread);
         if (nextStart !== spreadStart) startTurn(nextStart > spreadStart ? 1 : -1);
       }
       setCurrent(i);
@@ -711,16 +920,18 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
         const el = stageRef.current?.querySelector<HTMLElement>(`[data-page="${i}"]`);
         // Smooth scrolling never progresses in a hidden page (no animation frames), so a
         // background tab jumps instead; the folio would otherwise report a page not on screen.
-        if (el) stageRef.current?.scrollTo({ top: el.offsetTop - (STAGE_PAD / 2 + (rulers ? RULER : 0)), behavior: document.hidden ? "auto" : "smooth" });
+        const behavior = document.hidden ? "auto" : "smooth";
+        if (el && strip) stageRef.current?.scrollTo({ left: el.offsetLeft - (STAGE_PAD + (rulers ? RULER : 0)), behavior });
+        else if (el) stageRef.current?.scrollTo({ top: el.offsetTop - (STAGE_PAD / 2 + (rulers ? RULER : 0)), behavior });
       }
     },
-    [pages, mode, rulers, spreadStart, startTurn],
+    [pages, mode, rulers, spreadStart, startTurn, perSpread, strip],
   );
 
   // Arrow and Page keys turn pages when the keyboard isn't in a text field. Only a visible
   // view answers (background tabs keep their editors mounted).
   useEffect(() => {
-    const step = mode === "spread" ? 2 : 1;
+    const step = mode === "spread" ? perSpread : 1;
     const onKey = (e: KeyboardEvent) => {
       if (stageRef.current?.offsetParent === null) return;
       const t = e.target as HTMLElement | null;
@@ -736,7 +947,7 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [goTo, mode, spreadStart, current]);
+  }, [goTo, mode, spreadStart, current, perSpread]);
 
   // A single finger swiped sideways turns the page, on any touch screen, unless a drawing
   // tool is active (fingers then draw or pan) or the page is zoomed in (a sideways drag then
@@ -754,7 +965,7 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
     const dx = e.clientX - s.x;
     const dy = e.clientY - s.y;
     if (Date.now() - s.t > SWIPE_MAX_MS || Math.abs(dx) < SWIPE_MIN_PX || Math.abs(dx) < Math.abs(dy) * 1.8) return;
-    const step = mode === "spread" ? 2 : 1;
+    const step = mode === "spread" ? perSpread : 1;
     goTo((mode === "spread" ? spreadStart : current) + (dx < 0 ? step : -step));
   };
 
@@ -762,7 +973,7 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
     const after = activePage ?? pages[pages.length - 1] ?? null;
     if (!spec.addLabel) return;
     // A sherd is chosen from a heap first; the one picked comes back here with its id.
-    if (grid && !id) {
+    if (medium === "sherd" && !id) {
       setHeap(freshHeap());
       return;
     }
@@ -770,11 +981,41 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
     // A new page takes the paper of the page you are on.
     const made = await host.addPage(notebookId, after?.id ?? null, spec.paper ?? after?.paper ?? { kind: "lined", spacing: 28 }, id);
     const d = await reload();
-    const i = d.pages.findIndex((p) => p.id === made.id);
+    const i = pagesOf(d).findIndex((p) => p.id === made.id);
     setActiveId(made.id);
     setCurrent(i);
-    if (mode === "scroll") requestAnimationFrame(() => stageRef.current?.querySelector<HTMLElement>(`[data-page="${i}"]`)?.scrollIntoView({ block: "start" }));
-  }, [activePage, pages, host, notebookId, reload, mode, spec, grid]);
+    if (mode === "scroll") requestAnimationFrame(() => stageRef.current?.querySelector<HTMLElement>(`[data-page="${i}"]`)?.scrollIntoView({ block: "start", inline: "start" }));
+  }, [activePage, pages, host, notebookId, reload, mode, spec, medium, pagesOf]);
+
+  /** A ring binder or a box of cards: move the current page one place along. */
+  const movePageBy = useCallback(
+    async (dir: 1 | -1) => {
+      const all = doc?.pages ?? [];
+      const p = activePage;
+      const from = p ? all.findIndex((q) => q.id === p.id) : -1;
+      const to = from + dir;
+      if (!p || from < 0 || to < 0 || to >= all.length) return;
+      const ids = all.map((q) => q.id);
+      [ids[from], ids[to]] = [ids[to], ids[from]];
+      await host.reorderPages(notebookId, ids);
+      const d = await reload();
+      const i = pagesOf(d).findIndex((q) => q.id === p.id);
+      setCurrent(i);
+      setActiveId(p.id);
+    },
+    [doc, activePage, host, notebookId, reload, pagesOf],
+  );
+
+  /** A box of cards: shuffle it. */
+  const shuffle = useCallback(async () => {
+    const ids = (doc?.pages ?? []).map((q) => q.id);
+    for (let i = ids.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [ids[i], ids[j]] = [ids[j], ids[i]];
+    }
+    await host.reorderPages(notebookId, ids);
+    await reload();
+  }, [doc, host, notebookId, reload]);
 
   /** Smooth the current page flat (wax: the flat of the stylus; clay: kneading). */
   const smoothPage = useCallback(async () => {
@@ -798,9 +1039,11 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
       goTo,
       addPage: () => void addPage(),
       smoothPage: () => void smoothPage(),
+      movePageBy: (dir) => void movePageBy(dir),
+      shuffle: () => void shuffle(),
       editor: () => (activePage ? (editors.current.get(activePage.id) ?? null) : null),
     }),
-    [goTo, addPage, smoothPage, activePage],
+    [goTo, addPage, smoothPage, movePageBy, shuffle, activePage],
   );
 
   // Undo, redo and Escape while drawing go to the current page only. Each ink layer would
@@ -895,7 +1138,7 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
   return (
     <div className={rulers ? "nb-root nb-rulers" : "nb-root"}>
       <div ref={stageRef} className="nb-stage" onScroll={onScroll} data-swipe={swipeOn} onPointerDown={onSwipeDown} onPointerUp={onSwipeEnd} onPointerCancel={onSwipeEnd}>
-        <div className="nb-flow" data-mode={grid ? "grid" : mode}>
+        <div className="nb-flow" data-mode={grid ? "grid" : strip ? "strip" : mode} data-binding={binding ?? undefined}>
           {visible.map((page, i) => {
             const index = visibleOffset + i;
             const mounted = mode === "spread" || near.has(index);
@@ -910,6 +1153,11 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
                   key={epochs[page.id] ?? 0}
                   host={host}
                   medium={medium}
+                  binding={binding}
+                  geom={geomOf(page)}
+                  grows={spec.grows}
+                  spine={spec.flow === "pad-top" ? "top" : mode === "spread" && perSpread === 2 && index % 2 === 0 ? "right" : "left"}
+                  ribbon={doc?.notebook.ribbon === page.id}
                   page={page}
                   index={index}
                   busy={!!busy[page.id]}
@@ -958,6 +1206,11 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
                         key={epochs[page.id] ?? 0}
                         host={host}
                         medium={medium}
+                        binding={binding}
+                        geom={geomOf(page)}
+                        grows={spec.grows}
+                        spine={spec.flow === "pad-top" ? "top" : perSpread === 2 && l.index % 2 === 0 ? "right" : "left"}
+                        ribbon={doc?.notebook.ribbon === page.id}
                         page={page}
                         index={l.index}
                         scale={scale}
@@ -978,13 +1231,18 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
                         onPinch={() => {}}
                         onGuideDrag={() => {}}
                         onHeight={() => {}}
-                        leaving={{ left: l.left, top: l.top, turn: l.flip ? (turn.dir === 1 ? "flip-next" : "flip-prev") : "fade" }}
+                        leaving={{
+                          left: l.left,
+                          top: l.top,
+                          // A top-bound pad flips its page up over the coil; going back, the page just comes back.
+                          turn: !l.flip ? "fade" : spec.flow === "pad-top" ? (turn.dir === 1 ? "flip-up" : "fade") : turn.dir === 1 ? "flip-next" : "flip-prev",
+                        }}
                       />
                     </div>
                   );
                 })
             : null}
-          {doc && mode === "spread" && visible.length === 1 && spec.addLabel ? (
+          {doc && mode === "spread" && perSpread === 2 && visible.length === 1 && spec.addLabel ? (
             <button className="nb-slot nb-blank" style={{ width: base.width * scale, height: base.height * scale }} onClick={() => void addPage()}>
               {spec.addLabel.replace(/ after this one$/, "")}
             </button>

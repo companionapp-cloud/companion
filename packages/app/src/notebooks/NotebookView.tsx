@@ -39,7 +39,7 @@ type Message =
   | { type: "ready"; payload: null };
 
 export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps>(function NotebookView(
-  { host, notebookId, mode, zoom, onZoom, tool, penTool, mediumTool, mediumSize, rulers, revision, onState, onActivePage, onFormatState, onInkState, onExitDrawing },
+  { host, notebookId, mode, zoom, onZoom, tool, penTool, mediumTool, mediumSize, rulers, booklet, revision, onState, onActivePage, onFormatState, onInkState, onExitDrawing },
   ref,
 ) {
   const webRef = useRef<WebView>(null);
@@ -59,8 +59,8 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
 
   // Push the view's props whenever they change (and once the page reports ready).
   const props = useMemo(
-    () => ({ mode, zoom, tool, penTool, mediumTool, mediumSize, rulers, revision }),
-    [mode, zoom, tool, penTool, mediumTool, mediumSize, rulers, revision],
+    () => ({ mode, zoom, tool, penTool, mediumTool, mediumSize, rulers, booklet, revision }),
+    [mode, zoom, tool, penTool, mediumTool, mediumSize, rulers, booklet, revision],
   );
   useEffect(() => {
     if (ready.current) inject(`window.__notebookProps && window.__notebookProps(${jsonArg(props)});`);
@@ -87,6 +87,8 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
       goTo: (page) => call("goTo", page),
       addPage: () => call("addPage"),
       smoothPage: () => call("smoothPage"),
+      movePageBy: (dir) => call("movePageBy", dir),
+      shuffle: () => call("shuffle"),
       editor: () => editor,
     }),
     [editor],
