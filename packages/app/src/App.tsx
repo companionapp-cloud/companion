@@ -11,6 +11,7 @@ import { TasksProvider } from "./TasksProvider";
 import { ProjectsProvider } from "./ProjectsProvider";
 import { ObjectTypesProvider } from "./ObjectTypesProvider";
 import { CanvasesProvider } from "./canvas/CanvasesProvider";
+import { NotebooksProvider } from "./notebooks/NotebooksProvider";
 import { CalendarProvider } from "./CalendarProvider";
 import { AppShell, type WindowControls } from "./AppShell";
 import { MobileWebShell } from "./mobile/MobileShell";
@@ -118,12 +119,15 @@ export function App({
             <TasksProvider>
               <ProjectsProvider>
                 <CanvasesProvider>
-                  <ObjectTypesProvider>
-                    {/* The calendars, for New event. */}
-                    <CalendarProvider>
-                      <CaptureView />
-                    </CalendarProvider>
-                  </ObjectTypesProvider>
+                  {/* The palette finds notebooks and their pages too. */}
+                  <NotebooksProvider>
+                    <ObjectTypesProvider>
+                      {/* The calendars, for New event. */}
+                      <CalendarProvider>
+                        <CaptureView />
+                      </CalendarProvider>
+                    </ObjectTypesProvider>
+                  </NotebooksProvider>
                 </CanvasesProvider>
               </ProjectsProvider>
             </TasksProvider>
