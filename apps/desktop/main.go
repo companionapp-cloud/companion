@@ -127,12 +127,6 @@ func main() {
 	core.SetDeviceInfo(desktopPlatform(), defaultDeviceName(), true)
 	core.SetAgentDiscoverer(agentrt.NewDiscoverer())
 	core.SetAgentRunners(agentrt.NewFactory(filepath.Dir(dbPath)))
-	// Terminal agents (terminal.go): Claude Code / Codex in the user's own terminal, through
-	// `companion mcp`. Restores the server if it was left switched on.
-	if err := core.SetTerminalAgents(filepath.Dir(dbPath), terminalCommand()); err != nil {
-		log.Printf("terminal agents: %v", err)
-	}
-	defer core.StopTerminalAgents()
 
 	// Reminder delivery (PLAN §6.4): the Wails notifications service registers real OS
 	// notifications for the plan core computes. Registering it as a service runs its
@@ -278,6 +272,15 @@ func main() {
 				contextMenuHandler(func() *application.WebviewWindow { return mainWindow }), pomodoro.handleShow, pomodoro.handleEnabled, pomodoro.handleGlass, pomodoro.handleCapture, pomodoro.handleOpenApp),
 		},
 	})
+
+	// Terminal agents (terminal.go): Claude Code / Codex and `companion tui` in the user's own
+	// terminal. Started only now, past the single-instance check above: a second launch exits
+	// inside application.New, and if it had already started a server it would have published
+	// its own port to terminal-agents.json and left it pointing at nothing.
+	if err := core.SetTerminalAgents(filepath.Dir(dbPath), terminalCommand()); err != nil {
+		log.Printf("terminal agents: %v", err)
+	}
+	defer core.StopTerminalAgents()
 
 	// Transparent titlebar: the standard window controls stay, but the titlebar is
 	// see-through and content extends to the top edge, so the app's own toolbar
