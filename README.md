@@ -7,7 +7,10 @@ A Corepack-managed npm workspaces monorepo.
 ```
 apps/       Deployable applications
 packages/   Reusable npm packages shared across the workspace
+plugins/    Claude Code and Codex plugins (listed in .claude-plugin/marketplace.json)
 ```
+
+To use Companion from Claude Code, run `/plugin install companion --marketplace companionapp-cloud/companion`. For Codex and setup details, see [plugins/companion](plugins/companion/README.md).
 
 ## Requirements
 

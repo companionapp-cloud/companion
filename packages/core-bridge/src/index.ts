@@ -175,7 +175,7 @@ export type {
 export { llmApi } from "./llm";
 export type { LlmApi, ChatMessage, ToolCall, ToolResult, LLMTokenEvent, LLMToolEvent, LLMErrorEvent } from "./llm";
 export { agentsApi, runtimeLabel, isCliRuntime, isCloudRuntime, CLI_RUNTIMES, CLOUD_RUNTIMES } from "./agents";
-export type { AgentsApi, Agent, AgentRuntime, DiscoveredAgent, InstallAgentInput, UpdateAgentInput } from "./agents";
+export type { AgentsApi, Agent, AgentRuntime, DiscoveredAgent, InstallAgentInput, UpdateAgentInput, TerminalAgents } from "./agents";
 export { devicesApi } from "./devices";
 export type { DevicesApi, Device, DevicePresenceEvent } from "./devices";
 export { createSyncNotifier } from "./notifier";

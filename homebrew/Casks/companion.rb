@@ -35,6 +35,9 @@ cask "companion" do
   depends_on :macos
 
   app "Companion.app"
+  # `companion mcp` is the MCP server Claude Code and Codex start from a terminal; the
+  # Companion plugin for both runs it by this name (plugins/companion in the main repo).
+  binary "#{appdir}/Companion.app/Contents/MacOS/companion-desktop", target: "companion"
 
   # Strip the quarantine attribute Homebrew applied to the download so the ad-hoc
   # signed bundle launches like a locally built one. Runs after the app is moved

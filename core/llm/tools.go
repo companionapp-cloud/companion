@@ -60,6 +60,18 @@ func (r *Registry) ReadOnly() *Registry {
 	return out
 }
 
+// Without returns a copy of the registry minus the named tools.
+func (r *Registry) Without(names ...string) *Registry {
+	out := NewRegistry()
+	for name, t := range r.tools {
+		out.tools[name] = t
+	}
+	for _, name := range names {
+		delete(out.tools, name)
+	}
+	return out
+}
+
 // IsWrite reports whether the named tool mutates state (unknown tools report false).
 func (r *Registry) IsWrite(name string) bool {
 	t, ok := r.tools[name]

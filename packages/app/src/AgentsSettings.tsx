@@ -23,11 +23,12 @@ import {
   type AgentRuntime,
   type DiscoveredAgent,
   type InstallAgentInput,
+  type TerminalAgents,
 } from "@companion/core-bridge";
 import { useDialogKeys } from "./ConfirmDialog";
 import { useCore } from "./CoreContext";
 import { Dialog } from "./Dialog";
-import { CheckBox, Segmented, SettingsField, SettingsNote } from "./settingsUi";
+import { CheckBox, CodeBlock, Segmented, SettingsField, SettingsNote } from "./settingsUi";
 
 // Settings › AI (PLAN-agents.md §6.1). Agents are installed, not configured: local tools found
 // on this computer (Claude Code, Codex, Ollama, LM Studio) install with one tap and are hosted
@@ -102,7 +103,106 @@ export function AgentsSettings() {
           installedCount={list?.length ?? 0}
         />
       ) : null}
+
+      <TerminalAgentsSettings />
     </View>
+  );
+}
+
+// --- terminal agents --------------------------------------------------------
+
+/** Claude Code and Codex started in the user's own terminal reach this workspace through
+ *  `companion mcp` (core/bridge/terminal.go). Only the desktop app serves them; elsewhere the
+ *  section doesn't show. */
+function TerminalAgentsSettings() {
+  const { agents } = useCore();
+  const [state, setState] = useState<TerminalAgents | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    agents
+      .terminal()
+      .then(setState)
+      .catch(() => setState(null));
+  }, [agents]);
+
+  if (!state?.available) return null;
+
+  const update = async (fields: { enabled?: boolean; allowWrite?: boolean }) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setState(await agents.updateTerminal(fields));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // The plugin runs `companion`, which the Homebrew cask puts on PATH. Without it, register the
+  // MCP server by the binary's own path instead.
+  const onPath = state.command === "companion";
+  const cmd = /\s/.test(state.command) ? `"${state.command}"` : state.command;
+
+  return (
+    <>
+      <Divider />
+      <View style={styles.stack}>
+        <Text variant="eyebrow" tone="quaternary">
+          Terminal agents
+        </Text>
+        <SettingsField
+          label="Claude Code and Codex in your terminal"
+          help="Sessions you start in a terminal can search and read your notes, tasks, projects and calendar while Companion runs on this computer. Turning on write tools lets them create and edit items too."
+        >
+          <View style={styles.stack}>
+            <CheckBox
+              checked={state.enabled}
+              label="Let terminal agents use Companion"
+              onPress={() => void update({ enabled: !state.enabled })}
+            />
+            {state.enabled ? (
+              <CheckBox
+                checked={state.allowWrite}
+                label="Write tools: create and edit notes, tasks and events"
+                onPress={() => void update({ allowWrite: !state.allowWrite })}
+              />
+            ) : null}
+          </View>
+        </SettingsField>
+        {state.enabled ? (
+          <>
+            <SettingsField
+              label="Claude Code"
+              help={onPath ? "Installs the Companion plugin: the MCP server and a skill for using it." : "Adds the Companion MCP server for every project."}
+            >
+              <CodeBlock>
+                {onPath
+                  ? "claude plugin marketplace add companionapp-cloud/companion\nclaude plugin install companion@companion"
+                  : `claude mcp add --scope user companion -- ${cmd} mcp`}
+              </CodeBlock>
+            </SettingsField>
+            <SettingsField
+              label="Codex"
+              help={onPath ? "Installs the same plugin in Codex." : "Adds the Companion MCP server to ~/.codex/config.toml."}
+            >
+              <CodeBlock>
+                {onPath
+                  ? "codex plugin marketplace add companionapp-cloud/companion\ncodex plugin add companion@companion"
+                  : `codex mcp add companion -- ${cmd} mcp`}
+              </CodeBlock>
+            </SettingsField>
+            <SettingsNote>
+              Restart any session that was already open. Companion starts in the menu bar when a session needs it.
+            </SettingsNote>
+          </>
+        ) : null}
+        {error ? <SettingsNote tone="danger">{error}</SettingsNote> : null}
+      </View>
+    </>
   );
 }
 

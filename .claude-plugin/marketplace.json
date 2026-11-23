@@ -1,0 +1,15 @@
+{
+  "name": "companion",
+  "description": "Companion's plugins for Claude Code and Codex",
+  "owner": {
+    "name": "Companion",
+    "url": "https://companionapp.cloud"
+  },
+  "plugins": [
+    {
+      "name": "companion",
+      "source": "./plugins/companion",
+      "description": "Read and update your Companion notes, tasks, projects, calendar and canvases from Claude Code or Codex"
+    }
+  ]
+}

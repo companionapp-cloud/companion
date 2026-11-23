@@ -132,7 +132,22 @@ export function agentsApi(core: CoreBridge) {
     models: (agentId: string) => core.invoke<string[]>("agents.models", { agentId }),
     /** Fires when the agent list or any agent's online state changes — re-fetch. */
     onChanged: (cb: () => void) => core.on("agents.changed", () => cb()),
+    /** Claude Code / Codex run in the user's own terminal, through `companion mcp`. */
+    terminal: () => core.invoke<TerminalAgents>("terminalAgents.get"),
+    updateTerminal: (fields: { enabled?: boolean; allowWrite?: boolean }) =>
+      core.invoke<TerminalAgents>("terminalAgents.update", fields),
   };
+}
+
+/** Terminal agents on this computer (mirrors core/bridge/terminal.go). */
+export interface TerminalAgents {
+  /** Only the desktop app can serve them. */
+  available: boolean;
+  enabled: boolean;
+  allowWrite: boolean;
+  /** What a terminal runs to start the MCP server: `companion`, or the app binary's path. */
+  command: string;
+  running: boolean;
 }
 
 export type AgentsApi = ReturnType<typeof agentsApi>;

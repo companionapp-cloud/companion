@@ -1,0 +1,13 @@
+{
+  "name": "companion",
+  "displayName": "Companion",
+  "version": "0.1.0",
+  "description": "Read and update your Companion notes, tasks, projects, calendar and canvases from Claude Code or Codex. Needs the Companion desktop app with Settings › AI › Terminal agents switched on.",
+  "author": {
+    "name": "Companion",
+    "url": "https://companionapp.cloud"
+  },
+  "homepage": "https://companionapp.cloud",
+  "repository": "https://github.com/companionapp-cloud/companion",
+  "keywords": ["notes", "tasks", "calendar", "productivity"]
+}

@@ -101,6 +101,10 @@ type Core struct {
 
 	// exports is the scheduled-export scheduler's state (export.go).
 	exports exportState
+
+	// terminal serves Companion's tools to Claude Code / Codex run in the user's own terminal
+	// (terminal.go); desktop only.
+	terminal terminalState
 }
 
 // New builds a Core over an already-open store.
@@ -405,6 +409,10 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.llmModelsList(payload)
 	case "agents.discover":
 		return c.agentsDiscover()
+	case "terminalAgents.get":
+		return c.terminalAgentsGet()
+	case "terminalAgents.update":
+		return c.terminalAgentsUpdate(payload)
 	case "devices.this":
 		return c.devicesThis()
 	case "devices.rename":

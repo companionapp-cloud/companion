@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"companion/core/agentrt"
@@ -71,6 +72,12 @@ func main() {
 	updater.HandleHelperMode()
 
 	dev := version == ""
+	// `companion mcp`: the stdio MCP server for terminal agents (terminal.go). It talks to the
+	// running app and must not open the database or take the single-instance lock.
+	if len(os.Args) > 1 && os.Args[1] == "mcp" {
+		runMCPProxy(dev)
+		return
+	}
 	dbPath, err := databasePath(dev)
 	if err != nil {
 		log.Fatalf("resolve database path: %v", err)
@@ -115,6 +122,12 @@ func main() {
 	core.SetDeviceInfo(desktopPlatform(), defaultDeviceName(), true)
 	core.SetAgentDiscoverer(agentrt.NewDiscoverer())
 	core.SetAgentRunners(agentrt.NewFactory(filepath.Dir(dbPath)))
+	// Terminal agents (terminal.go): Claude Code / Codex in the user's own terminal, through
+	// `companion mcp`. Restores the server if it was left switched on.
+	if err := core.SetTerminalAgents(filepath.Dir(dbPath), terminalCommand()); err != nil {
+		log.Printf("terminal agents: %v", err)
+	}
+	defer core.StopTerminalAgents()
 
 	// Reminder delivery (PLAN §6.4): the Wails notifications service registers real OS
 	// notifications for the plan core computes. Registering it as a service runs its
@@ -234,7 +247,8 @@ func main() {
 	pomodoro.openApp = updates.openApp
 	updates.markerPath = relaunchMarkerPath(dbPath)
 	// An update restart while the main window was closed to the menu bar comes back hidden.
-	startHidden := consumeRelaunchMarker(updates.markerPath)
+	// So does a launch by `companion mcp` for a terminal agent (terminal.go).
+	startHidden := consumeRelaunchMarker(updates.markerPath) || slices.Contains(os.Args[1:], backgroundArg)
 
 	app = application.New(application.Options{
 		Name:        "Companion",

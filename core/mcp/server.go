@@ -44,6 +44,8 @@ type Server struct {
 	authorize Authorizer
 	// onWrite, when set, is called after a write tool ran so the host can emit refresh events.
 	onWrite func(tool string)
+	// instructions is the server-wide guidance sent in the initialize result.
+	instructions string
 
 	mu     sync.Mutex
 	ln     net.Listener
@@ -54,15 +56,25 @@ type Server struct {
 // New builds a server over a registry. A nil authorizer uses the built-in token table
 // (see IssueToken).
 func New(registry *llm.Registry, authorize Authorizer) *Server {
-	s := &Server{registry: registry, authorize: authorize, tokens: map[string]Grant{}}
+	s := &Server{registry: registry, authorize: authorize, tokens: map[string]Grant{}, instructions: chatInstructions}
 	if s.authorize == nil {
 		s.authorize = s.lookupToken
 	}
 	return s
 }
 
+// chatInstructions is the guidance for CLI agents Companion hosts, whose replies show in its chat.
+const chatInstructions = "Tools over the user's Companion workspace: notes, tasks, projects, habits, calendar events and canvases. " +
+	"Call get_date before reasoning about relative dates. Load a note with get_note before quoting it; " +
+	"read the schedule with list_events and a canvas with get_canvas. " +
+	"The render_* tools show an entity as an inline preview in the user's chat. " +
+	"Reference entities with the [[note:…]] / [[task:…]] wikilinks the tools return."
+
 // SetWriteHook registers a callback invoked after each successful write-tool call.
 func (s *Server) SetWriteHook(fn func(tool string)) { s.onWrite = fn }
+
+// SetInstructions replaces the server-wide guidance sent in the initialize result.
+func (s *Server) SetInstructions(text string) { s.instructions = text }
 
 // IssueToken mints a bearer token bound to a grant (built-in authorizer only).
 func (s *Server) IssueToken(g Grant) string {
@@ -237,11 +249,7 @@ func (s *Server) dispatch(ctx context.Context, g Grant, req rpcRequest) (rpcResp
 			"protocolVersion": ProtocolVersion,
 			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
 			"serverInfo":      map[string]any{"name": "companion", "version": "1"},
-			"instructions": "Tools over the user's Companion workspace: notes, tasks, projects, habits, calendar events and canvases. " +
-				"Call get_date before reasoning about relative dates. Load a note with get_note before quoting it; " +
-				"read the schedule with list_events and a canvas with get_canvas. " +
-				"The render_* tools show an entity as an inline preview in the user's chat. " +
-				"Reference entities with the [[note:…]] / [[task:…]] wikilinks the tools return.",
+			"instructions":    s.instructions,
 		}, nil)
 	case "notifications/initialized", "notifications/cancelled", "notifications/progress":
 		return reply(nil, nil)
@@ -258,7 +266,7 @@ func (s *Server) dispatch(ctx context.Context, g Grant, req rpcRequest) (rpcResp
 			return reply(nil, &rpcError{codeInvalidParams, "name is required"})
 		}
 		if s.registry.IsWrite(params.Name) && !g.AllowWrite {
-			return reply(toolError("this agent is read-only; enable \"Allow this agent to write\" in Companion › Settings › AI to use "+params.Name), nil)
+			return reply(toolError("this agent is read-only; turn on write tools for it in Companion › Settings › AI to use "+params.Name), nil)
 		}
 		args := params.Arguments
 		if len(args) == 0 {
