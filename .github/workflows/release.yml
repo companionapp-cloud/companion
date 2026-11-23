@@ -235,8 +235,14 @@ jobs:
           # companion-fm drives Apple Foundation Models for the desktop (apps/desktop/foundation).
           # It needs the macOS 26 SDK; on an older runner image the release still ships, just
           # without Apple Intelligence. arm64 only: Apple Intelligence needs Apple silicon.
+          # A helper that fails to build must not hold back the desktop release: warn and ship
+          # without it.
           if [ -d "$(xcrun --show-sdk-path)/System/Library/Frameworks/FoundationModels.framework" ]; then
-            swiftc -O -target arm64-apple-macos26.0 apps/desktop/foundation/main.swift -o build/companion-fm
+            swift --version
+            if ! swiftc -O -target arm64-apple-macos26.0 apps/desktop/foundation/main.swift -o build/companion-fm; then
+              rm -f build/companion-fm
+              echo "::warning::companion-fm failed to build; this release will not offer Apple Intelligence."
+            fi
           else
             echo "::warning::The runner's SDK has no FoundationModels; this build will not offer Apple Intelligence."
           fi

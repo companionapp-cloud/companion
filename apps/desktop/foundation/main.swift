@@ -359,6 +359,9 @@ func describe(_ error: Error) -> (String, String) {
         if e.underlyingError is StuckError { return stuck }
         return ("A tool failed: \(e.underlyingError.localizedDescription)", "error")
     }
+    // LanguageModelError only exists in the macOS 27 SDK (Swift 6.4); an older SDK can't name it,
+    // even behind #available, so builds against it rely on the text match below.
+    #if compiler(>=6.4)
     if #available(macOS 27.0, *), let e = error as? LanguageModelError {
         switch e {
         case .contextSizeExceeded: return tooLong
@@ -369,6 +372,7 @@ func describe(_ error: Error) -> (String, String) {
         default: return (e.localizedDescription, "error")
         }
     }
+    #endif
     // Overflow also surfaces as wrapped framework errors; match the text so it reads the same.
     let text = String(describing: error)
     if text.contains("exceeds the maximum allowed context size") || (text.contains("Provided") && text.contains("maximum allowed is")) {
