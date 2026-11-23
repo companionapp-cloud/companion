@@ -1,5 +1,5 @@
 import type { CoreBridge } from "./types";
-import type { NoteInkInput } from "./noteInk";
+import type { InkTranscript, NoteInkInput } from "./noteInk";
 
 // Notebooks (PLAN-notebooks.md): paper notebooks of fixed A5 pages. Pages are their own
 // entity, never notes: they don't appear under Notes and only open on their sheet.
@@ -192,6 +192,9 @@ export function notebooksApi(core: CoreBridge) {
       list: (pageId: string) => core.invoke<NotebookPageInk[]>("notebooks.ink.list", { pageId }),
       upsert: (pageId: string, groups: NoteInkInput[]) => core.invoke<NotebookPageInk[]>("notebooks.ink.upsert", { pageId, groups }),
       remove: (pageId: string, ids: string[]) => core.invoke<{ count: number }>("notebooks.ink.delete", { pageId, ids }),
+      /** Read the handwriting on a page as stored (noteInk.canTranscribe says whether it can). */
+      transcribe: (pageId: string, groupIds?: string[]) =>
+        core.invoke<{ transcripts: InkTranscript[]; unread: string[] }>("notebooks.ink.transcribe", { pageId, groupIds }),
     },
   };
 }

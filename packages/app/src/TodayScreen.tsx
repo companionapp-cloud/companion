@@ -24,6 +24,7 @@ import { FormattingBar } from "./FormattingBar";
 import { DrawingBar, useDrawingTool } from "./DrawingBar";
 import { useNoteInk } from "./useNoteInk";
 import { useInkConvert } from "./useInkConvert";
+import { useCore } from "./CoreContext";
 import { tableMenuPresenter } from "./tableMenu";
 import { useNav } from "./nav-context";
 import { useNotes } from "./NotesProvider";
@@ -277,11 +278,13 @@ function DailyNoteBody({
   );
   const [tool, setTool] = useDrawingTool();
   const [inkState, setInkState] = useState<InkState | null>(null);
-  const inkConvert = useInkConvert(
-    useCallback(() => noteIdRef.current, []),
-    editorRef,
-    ink,
-  );
+  const { noteInk } = useCore();
+  const inkConvert = useInkConvert({
+    editor: () => editorRef.current,
+    flush: ink.flush,
+    // The day's note may only exist once its first ink is saved: read the id after the flush.
+    transcribe: async () => (noteIdRef.current ? noteInk.transcribe(noteIdRef.current) : null),
+  });
   const exitDrawing = () => onDrawingChange?.(false);
 
   // Writing assists, as in the note editor. The day's note may not exist yet: applying a

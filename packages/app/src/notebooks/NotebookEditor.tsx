@@ -5,6 +5,7 @@ import type { IconName, PressState } from "@companion/design-system";
 import type { EditorController, FormatState, InkState } from "@companion/editor";
 import { FormattingBar } from "../FormattingBar";
 import { DrawingBar, useDrawingTool } from "../DrawingBar";
+import { useInkConvert } from "../useInkConvert";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { Dialog } from "../Dialog";
 import { useCore } from "../CoreContext";
@@ -64,6 +65,15 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
   const [page, setPage] = useState<NotebookPage | null>(null);
   const [formatState, setFormatState] = useState<FormatState | null>(null);
   const [inkState, setInkState] = useState<InkState | null>(null);
+  // "Convert to text" for the current page's handwriting (paper notebooks, where the device can
+  // read it): the page's editor places the text on the lines it was written on.
+  const inkConvert = useInkConvert({
+    editor: () => viewRef.current?.editor() ?? null,
+    flush: async () => {
+      await host.flushInk?.();
+    },
+    transcribe: async () => (page && host.transcribeInk ? host.transcribeInk(page.id) : null),
+  });
   const [paperOpen, setPaperOpen] = useState(false);
   const [cover, setCover] = useState(false);
   const [confirm, setConfirm] = useState<"delete" | "smooth" | null>(null);
@@ -392,7 +402,15 @@ export function NotebookEditor({ host, notebookId, onBack, showTopBar = true, in
           onRedo={() => viewRef.current?.editor()?.inkRedo()}
         />
       ) : drawing ? (
-        <DrawingBar tool={tool} onChange={setTool} state={inkState} onUndo={() => viewRef.current?.editor()?.inkUndo()} onRedo={() => viewRef.current?.editor()?.inkRedo()} onDone={() => setDrawing(false)} />
+        <DrawingBar
+          tool={tool}
+          onChange={setTool}
+          state={inkState}
+          onUndo={() => viewRef.current?.editor()?.inkUndo()}
+          onRedo={() => viewRef.current?.editor()?.inkRedo()}
+          onDone={() => setDrawing(false)}
+          convert={host.transcribeInk ? inkConvert : undefined}
+        />
       ) : (
         <FormattingBar state={formatState} editorRef={editorRef} canAttach={false} />
       )}

@@ -1,3 +1,4 @@
+import type { InkTranscript } from "@companion/core-bridge";
 import type { InkGroupRecord } from "@companion/editor";
 import type { PaperStyle } from "./paper";
 import type { NotebookMedium, WaxLeaves } from "./mediums";
@@ -60,6 +61,10 @@ export interface NotebookHost {
   loadInk(pageId: string): Promise<InkGroupRecord[]>;
   saveInk(pageId: string, groups: InkGroupRecord[]): Promise<void>;
   deleteInk(pageId: string, ids: string[]): Promise<void>;
+  /** Write every held ink group now. Absent where writes aren't held (the WebView proxy). */
+  flushInk?(): Promise<void>;
+  /** Read a page's handwriting as stored ("Convert to text"). Absent where the device can't. */
+  transcribeInk?(pageId: string): Promise<{ transcripts: InkTranscript[]; unread: string[] }>;
   /** Insert a blank page after `afterPageId` (or at the end), with the given paper. `id`
    *  chooses the page's id (a sherd picked from the heap keeps the shape it was shown with). */
   addPage(notebookId: string, afterPageId: string | null, paper: PaperStyle, id?: string): Promise<NotebookPage>;

@@ -191,6 +191,7 @@ export function useNotebookHost(): NotebookHost {
       async flushInk() {
         await Promise.all([...held.current.keys()].map(flush));
       },
+      transcribeInk: (pageId) => api.ink.transcribe(pageId),
     } as NotebookHost & { flushInk(): Promise<void> };
   }, [api, syncTrigger]);
 

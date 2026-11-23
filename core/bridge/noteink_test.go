@@ -115,3 +115,21 @@ func TestNoteInkTranscribe(t *testing.T) {
 		t.Errorf("content changed to %q", n.ContentMD)
 	}
 }
+
+// A page's ink is read as one image of the sheet, and the lines map back to its groups.
+func TestNotebookInkTranscribe(t *testing.T) {
+	c, _ := newTestCore(t)
+	c.SetFoundationModels(inkFoundation{})
+	nb := invoke[domain.Notebook](t, c, "notebooks.create", map[string]string{"title": "Journal"})
+	doc := invoke[notebookDocument](t, c, "notebooks.get", map[string]string{"id": nb.ID})
+	page := doc.Pages[0]
+	pen := map[string]any{"v": 1, "anchor": map[string]any{"before": "", "after": "", "offset": 0, "page": true},
+		"strokes": []any{map[string]any{"id": "s", "tool": "pen", "color": "ink", "width": 4, "points": []int{400, 600, 50, 300, 0, 0}}}}
+	invoke[[]domain.NotebookPageInk](t, c, "notebooks.ink.upsert", map[string]any{"pageId": page.ID, "groups": []map[string]any{{"id": bridgeInkID, "data": pen}}})
+	got := invoke[struct {
+		Transcripts []ink.Transcript `json:"transcripts"`
+	}](t, c, "notebooks.ink.transcribe", map[string]string{"pageId": page.ID})
+	if len(got.Transcripts) != 1 || got.Transcripts[0].GroupIDs[0] != bridgeInkID || got.Transcripts[0].Text != "hello" {
+		t.Fatalf("transcripts = %+v", got.Transcripts)
+	}
+}

@@ -88,30 +88,65 @@ func (c *Core) noteInkTranscribe(payload []byte) ([]byte, error) {
 	if err := unmarshal(payload, &args); err != nil {
 		return nil, err
 	}
-	rec := c.inkRecognizer()
-	if rec == nil {
-		return nil, errors.New("handwriting recognition isn't available on this device")
-	}
 	rows, err := c.store.NoteInk.ListForNote(args.NoteID)
 	if err != nil {
 		return nil, err
 	}
+	stored := make([]storedInk, len(rows))
+	for i, r := range rows {
+		stored[i] = storedInk{r.ID, r.Data}
+	}
+	return c.transcribeInk(stored, args.GroupIDs, false)
+}
+
+// notebooksInkTranscribe is noteInkTranscribe for a notebook page. A page's groups share the
+// sheet's coordinates, so they are read as one image of the page.
+func (c *Core) notebooksInkTranscribe(payload []byte) ([]byte, error) {
+	var args struct {
+		PageID   string   `json:"pageId"`
+		GroupIDs []string `json:"groupIds"`
+	}
+	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	rows, err := c.store.NotebookInk.ListForPage(args.PageID)
+	if err != nil {
+		return nil, err
+	}
+	stored := make([]storedInk, len(rows))
+	for i, r := range rows {
+		stored[i] = storedInk{r.ID, r.Data}
+	}
+	return c.transcribeInk(stored, args.GroupIDs, true)
+}
+
+type storedInk struct {
+	id   string
+	data json.RawMessage
+}
+
+// transcribeInk reads the writing in stored ink groups (only groupIDs, when given).
+func (c *Core) transcribeInk(rows []storedInk, groupIDs []string, shared bool) ([]byte, error) {
+	rec := c.inkRecognizer()
+	if rec == nil {
+		return nil, errors.New("handwriting recognition isn't available on this device")
+	}
 	want := map[string]bool{}
-	for _, id := range args.GroupIDs {
+	for _, id := range groupIDs {
 		want[id] = true
 	}
 	var groups []*ink.Group
 	for _, r := range rows {
-		if len(want) > 0 && !want[r.ID] {
+		if len(want) > 0 && !want[r.id] {
 			continue
 		}
-		g, err := ink.Parse(r.ID, r.Data)
+		g, err := ink.Parse(r.id, r.data)
 		if err != nil || !g.Writing() {
 			continue
 		}
 		groups = append(groups, g)
 	}
-	transcripts, unread, err := ink.Transcribe(context.Background(), rec, groups, false)
+	transcripts, unread, err := ink.Transcribe(context.Background(), rec, groups, shared)
 	if err != nil {
 		return nil, err
 	}

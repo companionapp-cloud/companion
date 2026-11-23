@@ -564,6 +564,8 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.notebooksInkUpsert(payload)
 	case "notebooks.ink.delete":
 		return c.notebooksInkDelete(payload)
+	case "notebooks.ink.transcribe":
+		return c.notebooksInkTranscribe(payload)
 	case "imports.files.scan":
 		return c.importFilesScan(payload)
 	case "imports.files.run":

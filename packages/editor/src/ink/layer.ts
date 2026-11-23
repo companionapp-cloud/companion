@@ -292,64 +292,39 @@ export class InkLayer {
     this.penTool = tool;
   }
 
-  /** Replace ink groups with typed text (handwriting converted by the host's recognizer). Each
-   *  item's text goes where its first group sits now: into the line it was written over, or as
-   *  a paragraph after the line it was written beside (free ink), or into the empty line it's
-   *  on. The text is one undoable edit; the erased strokes are one drawing undo step. Returns
-   *  how many items were placed. Notes only: page ink has no place in the text. */
+  /** Replace ink groups with typed text (handwriting converted by the host's recognizer). The
+   *  text is one undoable edit; the erased strokes are one drawing undo step. Returns how many
+   *  items were placed.
+   *
+   *  On a note, each item's text goes where its first group is pinned: into the line it was
+   *  written over, as a paragraph after the line it was written beside (free ink), or into the
+   *  empty line it's on. On a notebook page, where ink is fixed to the sheet and every line of
+   *  text sits on a rule, it goes on the line it was written on: into that line of text, or
+   *  below the text after enough empty lines to reach the rule. */
   convertToText(items: InkTextItem[]): number {
-    if (this.opts.page || this.live || this.erasing) return 0;
-    const { state } = this.view;
-    const schema = state.schema;
-    const para = schema.nodes.paragraph;
-    if (!para) return 0;
-    const edits: { pos: number; lines: string[]; block: boolean; order: number }[] = [];
-    const erase: Extract<InkOp, { kind: "erase" }> = { kind: "erase", removed: [] };
+    if (this.live || this.erasing) return 0;
+    const placements: { groups: Group[]; lines: string[]; order: number }[] = [];
     items.forEach((it, order) => {
       const lines = it.text
         .split(/\n+/)
         .map((l) => l.trim())
         .filter(Boolean);
       const groups = it.groupIds.map((id) => this.groups.get(id)).filter((g): g is Group => !!g);
-      if (lines.length === 0 || groups.length === 0) return;
-      const g = groups[0];
-      const pos = Math.max(0, Math.min(g.pos, state.doc.content.size));
-      edits.push({ pos, lines, block: g.orphan || !!g.anchor.free || lines.length > 1, order });
-      for (const grp of groups) {
-        const anchor = grp.anchor;
-        for (const s of [...grp.strokes]) {
-          const index = this.removeStroke(grp, s.id);
-          if (index !== -1) erase.removed.push({ groupId: grp.id, anchor, index, stroke: s });
-        }
-      }
+      if (lines.length && groups.length) placements.push({ groups, lines, order });
     });
-    if (edits.length === 0) return 0;
+    if (placements.length === 0) return 0;
+    const tr = this.view.state.tr;
+    const placed = this.opts.page ? this.placeOnPage(tr, placements) : this.placeInNote(tr, placements);
+    if (placed === 0) return 0;
 
-    // From the end of the document back, so earlier positions stay valid; at one position the
-    // later item goes in first so the earlier one ends up before it.
-    edits.sort((a, b) => b.pos - a.pos || b.order - a.order);
-    const tr = state.tr;
-    let placed = 0;
-    for (const e of edits) {
-      try {
-        const $pos = tr.doc.resolve(e.pos);
-        const block = $pos.parent;
-        if (!block.isTextblock) continue;
-        if (!e.block && block.content.size > 0) {
-          const before = $pos.nodeBefore?.text?.slice(-1) ?? "";
-          const after = $pos.nodeAfter?.text?.charAt(0) ?? "";
-          let text = e.lines[0];
-          if (before && !/\s/.test(before)) text = " " + text;
-          if (after && !/[\s\p{P}]/u.test(after)) text += " ";
-          tr.insertText(text, e.pos);
-        } else {
-          const paragraphs = e.lines.map((l) => para.create(null, schema.text(l)));
-          if (block.content.size === 0) tr.replaceWith($pos.before(), $pos.after(), paragraphs);
-          else tr.insert($pos.after(), paragraphs);
+    const erase: Extract<InkOp, { kind: "erase" }> = { kind: "erase", removed: [] };
+    for (const p of placements) {
+      for (const g of p.groups) {
+        const anchor = g.anchor;
+        for (const s of [...g.strokes]) {
+          const index = this.removeStroke(g, s.id);
+          if (index !== -1) erase.removed.push({ groupId: g.id, anchor, index, stroke: s });
         }
-        placed++;
-      } catch {
-        /* a position the schema can't take text at: leave that item's text out */
       }
     }
     this.view.dispatch(tr);
@@ -358,6 +333,127 @@ export class InkLayer {
     this.queueLayout();
     this.emitState();
     return placed;
+  }
+
+  /** Text for note ink, at each first group's anchor. */
+  private placeInNote(tr: Transaction, placements: { groups: Group[]; lines: string[]; order: number }[]): number {
+    const size = tr.doc.content.size;
+    const edits = placements.map((p) => {
+      const g = p.groups[0];
+      return { pos: Math.max(0, Math.min(g.pos, size)), lines: p.lines, block: g.orphan || !!g.anchor.free || p.lines.length > 1, order: p.order };
+    });
+    // From the end of the document back, so earlier positions stay valid; at one position the
+    // later item goes in first so the earlier one ends up before it.
+    edits.sort((a, b) => b.pos - a.pos || b.order - a.order);
+    let placed = 0;
+    for (const e of edits) if (this.insertText(tr, e.pos, e.lines, e.block)) placed++;
+    return placed;
+  }
+
+  /** Text for page ink, on the rule each item was written on. */
+  private placeOnPage(tr: Transaction, placements: { groups: Group[]; lines: string[] }[]): number {
+    const o = this.origin();
+    const para = tr.doc.type.schema.nodes.paragraph;
+    if (!o || !para) return 0;
+    const pageY = (clientY: number) => (clientY - o.top) / o.scale;
+    const doc = tr.doc;
+    const empty = doc.childCount === 1 && !!doc.firstChild?.isTextblock && doc.firstChild.content.size === 0;
+    let endPos = doc.content.size;
+    for (let p = doc.content.size; p > 0; p--) {
+      if (doc.resolve(p).parent.isTextblock) {
+        endPos = p;
+        break;
+      }
+    }
+    let last: { top: number; bottom: number };
+    try {
+      last = this.view.coordsAtPos(empty ? 1 : endPos);
+    } catch {
+      return 0;
+    }
+    // Every line sits on a rule, so the editor's line height is the rule pitch.
+    const pitch = parseFloat(getComputedStyle(this.view.dom).lineHeight) || (last.bottom - last.top) / o.scale || 28;
+    // Rule 0 is the first line the new text can use: the empty page's first line, or the line
+    // after the text.
+    const firstFree = empty ? pageY(last.top) : pageY(last.bottom);
+
+    const items = placements
+      .map((p) => {
+        let box: Box | null = null;
+        for (const g of p.groups) box = unionBox(box, g.bbox);
+        return { lines: p.lines, box };
+      })
+      .filter((p): p is { lines: string[]; box: Box } => !!p.box)
+      .sort((a, b) => a.box.y - b.box.y);
+
+    const below: { rule: number; lines: string[] }[] = [];
+    const within: { pos: number; lines: string[]; order: number }[] = [];
+    items.forEach((it, order) => {
+      const cy = it.box.y + it.box.h / 2;
+      if (empty || cy >= firstFree) {
+        below.push({ rule: Math.max(0, Math.floor((cy - firstFree) / pitch)), lines: it.lines });
+        return;
+      }
+      const hit = this.view.posAtCoords({ left: o.left + (it.box.x + 4) * o.scale, top: o.top + cy * o.scale });
+      if (hit) within.push({ pos: hit.pos, lines: it.lines, order });
+      else below.push({ rule: 0, lines: it.lines });
+    });
+
+    let placed = 0;
+    if (below.length) {
+      // One paragraph per item, top to bottom. Empty paragraphs don't survive markdown (blank
+      // lines collapse), so the lines down to an item's rule, and between its own lines, are
+      // hard breaks: each one is a line, and so a rule.
+      const schema = tr.doc.type.schema;
+      const br = schema.nodes.hard_break;
+      const nodes = [];
+      let cursor = 0;
+      for (const b of below) {
+        const rule = Math.max(b.rule, cursor);
+        const content = [];
+        if (br) for (let i = cursor; i < rule; i++) content.push(br.create());
+        b.lines.forEach((l, i) => {
+          if (i > 0) content.push(br ? br.create() : schema.text(" "));
+          content.push(schema.text(l));
+        });
+        nodes.push(para.create(null, content));
+        cursor = (br ? rule : cursor) + b.lines.length;
+        placed++;
+      }
+      if (empty) tr.replaceWith(0, tr.doc.content.size, nodes);
+      else tr.insert(tr.doc.content.size, nodes);
+    }
+    within.sort((a, b) => b.pos - a.pos || b.order - a.order);
+    for (const w of within) if (this.insertText(tr, w.pos, w.lines, w.lines.length > 1)) placed++;
+    return placed;
+  }
+
+  /** Put lines of text at a position: inline in its line, or (block) as paragraphs after it.
+   *  An empty line takes the text as it is. */
+  private insertText(tr: Transaction, pos: number, lines: string[], block: boolean): boolean {
+    const schema = tr.doc.type.schema;
+    const para = schema.nodes.paragraph;
+    if (!para) return false;
+    try {
+      const $pos = tr.doc.resolve(pos);
+      const tb = $pos.parent;
+      if (!tb.isTextblock) return false;
+      if (!block && tb.content.size > 0) {
+        const before = $pos.nodeBefore?.text?.slice(-1) ?? "";
+        const after = $pos.nodeAfter?.text?.charAt(0) ?? "";
+        let text = lines[0];
+        if (before && !/\s/.test(before)) text = " " + text;
+        if (after && !/[\s\p{P}]/u.test(after)) text += " ";
+        tr.insertText(text, pos);
+      } else {
+        const paragraphs = lines.map((l) => para.create(null, schema.text(l)));
+        if (tb.content.size === 0) tr.replaceWith($pos.before(), $pos.after(), paragraphs);
+        else tr.insert($pos.after(), paragraphs);
+      }
+      return true;
+    } catch {
+      return false; // a position the schema can't take text at: leave that item's text out
+    }
   }
 
   undo(): void {
