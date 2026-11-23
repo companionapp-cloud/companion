@@ -77,6 +77,9 @@ export const NotebookView = forwardRef<NotebookViewController, NotebookViewProps
       resolveQuickCreate: (target) => call("resolveQuickCreate", target),
       inkUndo: () => call("inkUndo"),
       inkRedo: () => call("inkRedo"),
+      // Page ink has no place in the text.
+      inkToText: () => {},
+      inkFlush: () => call("inkFlush"),
       // A notebook page takes no dropped reference chips and has no AI assist.
       insertRefAt: () => {},
       showDropCaret: () => {},

@@ -26,4 +26,4 @@ export {
   HIGHLIGHTER_WIDTHS,
   ERASER_RADII,
 } from "./ink/types";
-export type { InkTool, InkToolKind, InkColor, InkSize, InkGroupRecord, InkState } from "./ink/types";
+export type { InkTool, InkToolKind, InkColor, InkSize, InkGroupRecord, InkState, InkTextItem } from "./ink/types";

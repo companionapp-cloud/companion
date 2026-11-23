@@ -77,6 +77,12 @@ export interface InkGroupRecord {
   rev?: string;
 }
 
+/** Recognized handwriting to put in place of ink groups (see InkLayer.convertToText). */
+export interface InkTextItem {
+  groupIds: string[];
+  text: string;
+}
+
 /** What the host's drawing toolbar needs to know. */
 export interface InkState {
   canUndo: boolean;

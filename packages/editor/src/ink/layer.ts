@@ -26,6 +26,7 @@ import {
   type InkGroupRecord,
   type InkState,
   type InkStroke,
+  type InkTextItem,
   type InkTool,
 } from "./types";
 
@@ -289,6 +290,74 @@ export class InkLayer {
    *  stays editable by finger and keyboard, and the pencil always writes. */
   setPenTool(tool: InkTool | null): void {
     this.penTool = tool;
+  }
+
+  /** Replace ink groups with typed text (handwriting converted by the host's recognizer). Each
+   *  item's text goes where its first group sits now: into the line it was written over, or as
+   *  a paragraph after the line it was written beside (free ink), or into the empty line it's
+   *  on. The text is one undoable edit; the erased strokes are one drawing undo step. Returns
+   *  how many items were placed. Notes only: page ink has no place in the text. */
+  convertToText(items: InkTextItem[]): number {
+    if (this.opts.page || this.live || this.erasing) return 0;
+    const { state } = this.view;
+    const schema = state.schema;
+    const para = schema.nodes.paragraph;
+    if (!para) return 0;
+    const edits: { pos: number; lines: string[]; block: boolean; order: number }[] = [];
+    const erase: Extract<InkOp, { kind: "erase" }> = { kind: "erase", removed: [] };
+    items.forEach((it, order) => {
+      const lines = it.text
+        .split(/\n+/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+      const groups = it.groupIds.map((id) => this.groups.get(id)).filter((g): g is Group => !!g);
+      if (lines.length === 0 || groups.length === 0) return;
+      const g = groups[0];
+      const pos = Math.max(0, Math.min(g.pos, state.doc.content.size));
+      edits.push({ pos, lines, block: g.orphan || !!g.anchor.free || lines.length > 1, order });
+      for (const grp of groups) {
+        const anchor = grp.anchor;
+        for (const s of [...grp.strokes]) {
+          const index = this.removeStroke(grp, s.id);
+          if (index !== -1) erase.removed.push({ groupId: grp.id, anchor, index, stroke: s });
+        }
+      }
+    });
+    if (edits.length === 0) return 0;
+
+    // From the end of the document back, so earlier positions stay valid; at one position the
+    // later item goes in first so the earlier one ends up before it.
+    edits.sort((a, b) => b.pos - a.pos || b.order - a.order);
+    const tr = state.tr;
+    let placed = 0;
+    for (const e of edits) {
+      try {
+        const $pos = tr.doc.resolve(e.pos);
+        const block = $pos.parent;
+        if (!block.isTextblock) continue;
+        if (!e.block && block.content.size > 0) {
+          const before = $pos.nodeBefore?.text?.slice(-1) ?? "";
+          const after = $pos.nodeAfter?.text?.charAt(0) ?? "";
+          let text = e.lines[0];
+          if (before && !/\s/.test(before)) text = " " + text;
+          if (after && !/[\s\p{P}]/u.test(after)) text += " ";
+          tr.insertText(text, e.pos);
+        } else {
+          const paragraphs = e.lines.map((l) => para.create(null, schema.text(l)));
+          if (block.content.size === 0) tr.replaceWith($pos.before(), $pos.after(), paragraphs);
+          else tr.insert($pos.after(), paragraphs);
+        }
+        placed++;
+      } catch {
+        /* a position the schema can't take text at: leave that item's text out */
+      }
+    }
+    this.view.dispatch(tr);
+    if (erase.removed.length) this.pushUndo(erase);
+    this.activeGroupId = null;
+    this.queueLayout();
+    this.emitState();
+    return placed;
   }
 
   undo(): void {

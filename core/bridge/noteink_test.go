@@ -1,10 +1,14 @@
 package bridge
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
+	"companion/core/agents"
 	"companion/core/domain"
+	"companion/core/ink"
+	"companion/core/llm"
 )
 
 const bridgeInkID = "0190f5a0-0000-7000-8000-0000000000c1"
@@ -65,5 +69,49 @@ func TestNoteInkDeleteOverBridge(t *testing.T) {
 	}
 	if got := invoke[[]domain.NoteInk](t, c, "noteInk.list", map[string]string{"noteId": note.ID}); len(got) != 0 {
 		t.Fatalf("deleted group still listed: %+v", got)
+	}
+}
+
+// inkFoundation stands in for the desktop's on-device helper: a model host that also reads
+// handwriting.
+type inkFoundation struct{}
+
+func (inkFoundation) Provider(agents.FoundationOptions) llm.Provider { return nil }
+
+func (inkFoundation) RecognizeInk(_ context.Context, images [][]byte) ([][]ink.Line, error) {
+	out := make([][]ink.Line, len(images))
+	for i := range images {
+		out[i] = []ink.Line{{Text: "hello", Confidence: 1, Box: ink.Box{W: 1, H: 1}}}
+	}
+	return out, nil
+}
+
+func TestNoteInkTranscribe(t *testing.T) {
+	c, _ := newTestCore(t)
+	if got := invoke[map[string]bool](t, c, "noteInk.canTranscribe", map[string]any{}); got["available"] {
+		t.Fatal("transcription available without a recognizer")
+	}
+	note := invoke[domain.Note](t, c, "notes.create", map[string]string{"title": "Ink", "contentMd": "hi"})
+	pen := map[string]any{"v": 1, "anchor": map[string]any{"before": "hi", "after": "", "offset": 2, "free": true},
+		"strokes": []any{map[string]any{"id": "s", "tool": "pen", "color": "ink", "width": 4, "points": []int{0, 0, 50, 300, 0, 0}}}}
+	invoke[[]domain.NoteInk](t, c, "noteInk.upsert", map[string]any{"noteId": note.ID, "groups": []map[string]any{{"id": bridgeInkID, "data": pen}}})
+	payload, _ := json.Marshal(map[string]string{"noteId": note.ID})
+	if _, err := c.Invoke("noteInk.transcribe", payload); err == nil {
+		t.Fatal("transcribe without a recognizer should fail")
+	}
+
+	c.SetFoundationModels(inkFoundation{})
+	if got := invoke[map[string]bool](t, c, "noteInk.canTranscribe", map[string]any{}); !got["available"] {
+		t.Fatal("transcription unavailable with a recognizer")
+	}
+	got := invoke[struct {
+		Transcripts []ink.Transcript `json:"transcripts"`
+	}](t, c, "noteInk.transcribe", map[string]string{"noteId": note.ID})
+	if len(got.Transcripts) != 1 || got.Transcripts[0].Text != "hello" || got.Transcripts[0].GroupIDs[0] != bridgeInkID {
+		t.Fatalf("transcripts = %+v", got.Transcripts)
+	}
+	// Reading leaves the note and its ink alone: the editor does the converting.
+	if n := invoke[domain.Note](t, c, "notes.get", map[string]string{"id": note.ID}); n.ContentMD != "hi" {
+		t.Errorf("content changed to %q", n.ContentMD)
 	}
 }

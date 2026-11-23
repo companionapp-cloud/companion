@@ -1,6 +1,6 @@
 import type { FormatName, FormatState } from "./formatCommands";
 import type { TableMenuPresenter } from "./tableMenu";
-import type { InkGroupRecord, InkState, InkTool } from "./ink/types";
+import type { InkGroupRecord, InkState, InkTextItem, InkTool } from "./ink/types";
 import type { AiApplyMode, AiTarget } from "./ai";
 
 export type { TableMenuPresenter, TableMenuRequest } from "./tableMenu";
@@ -31,6 +31,11 @@ export interface EditorController {
   /** Undo / redo the last drawing change (PLAN-drawing.md). No-op without {@link EditorProps.ink}. */
   inkUndo(): void;
   inkRedo(): void;
+  /** Replace ink groups with recognized text, where each group sits (PLAN-drawing.md). The text
+   *  is an undoable edit and the erase a drawing undo step. No-op without {@link EditorProps.ink}. */
+  inkToText(items: InkTextItem[]): void;
+  /** Hand the host any ink the editor is still holding (it batches writes briefly). */
+  inkFlush(): void;
   /** Writing assists: capture what an assist acts on — the selection, or the whole note when
    *  nothing is selected. The target follows later edits and stays highlighted until released.
    *  Async because on native the answer comes back over the WebView bridge. Null in the simple

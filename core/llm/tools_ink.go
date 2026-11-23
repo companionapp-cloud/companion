@@ -276,7 +276,7 @@ func addInkTools(r *Registry, s *store.Store, rec ink.Recognizer) {
 				if err != nil {
 					return "", err
 				}
-				transcripts, unread, err := transcribe(ctx, rec, t, groups)
+				transcripts, unread, err := ink.Transcribe(ctx, rec, groups, t.pageID != "")
 				if err != nil {
 					return "", err
 				}
@@ -419,47 +419,4 @@ func addInkTools(r *Registry, s *store.Store, rec ink.Recognizer) {
 			return jsonResult(result)
 		},
 	})
-}
-
-// transcribe runs the recognizer over the groups: one image per note group (each has its own
-// origin), one image of the whole sheet for page ink (its groups share page coordinates).
-func transcribe(ctx context.Context, rec ink.Recognizer, t *inkTarget, groups []*ink.Group) ([]ink.Transcript, []string, error) {
-	type job struct {
-		groups []*ink.Group
-		rend   *ink.Rendering
-	}
-	var jobs []job
-	if t.pageID != "" {
-		if rend, ok := ink.Render(groups...); ok {
-			jobs = append(jobs, job{groups, rend})
-		}
-	} else {
-		for _, g := range groups {
-			if rend, ok := ink.Render(g); ok {
-				jobs = append(jobs, job{[]*ink.Group{g}, rend})
-			}
-		}
-	}
-	if len(jobs) == 0 {
-		return []ink.Transcript{}, nil, nil
-	}
-	images := make([][]byte, len(jobs))
-	for i, j := range jobs {
-		images[i] = j.rend.PNG
-	}
-	results, err := rec.RecognizeInk(ctx, images)
-	if err != nil {
-		return nil, nil, fmt.Errorf("text recognition: %w", err)
-	}
-	if len(results) != len(jobs) {
-		return nil, nil, fmt.Errorf("text recognition returned %d results for %d images", len(results), len(jobs))
-	}
-	transcripts := []ink.Transcript{}
-	var unread []string
-	for i, j := range jobs {
-		got, missed := ink.Assign(j.groups, j.rend, results[i])
-		transcripts = append(transcripts, got...)
-		unread = append(unread, missed...)
-	}
-	return transcripts, unread, nil
 }

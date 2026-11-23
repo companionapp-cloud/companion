@@ -1,10 +1,12 @@
 package bridge
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
 
+	"companion/core/ink"
 	"companion/core/store"
 )
 
@@ -73,4 +75,48 @@ func (c *Core) noteInkDelete(payload []byte) ([]byte, error) {
 	}
 	c.emitNoteInkChanged(args.NoteID)
 	return json.Marshal(map[string]int64{"count": n})
+}
+
+// noteInkTranscribe reads the handwriting on a note with this device's recognizer, for the
+// drawing bar's "Convert to text". It only reads: the editor puts the text in place and erases
+// the ink itself, so the open note stays the one source of its own content.
+func (c *Core) noteInkTranscribe(payload []byte) ([]byte, error) {
+	var args struct {
+		NoteID   string   `json:"noteId"`
+		GroupIDs []string `json:"groupIds"`
+	}
+	if err := unmarshal(payload, &args); err != nil {
+		return nil, err
+	}
+	rec := c.inkRecognizer()
+	if rec == nil {
+		return nil, errors.New("handwriting recognition isn't available on this device")
+	}
+	rows, err := c.store.NoteInk.ListForNote(args.NoteID)
+	if err != nil {
+		return nil, err
+	}
+	want := map[string]bool{}
+	for _, id := range args.GroupIDs {
+		want[id] = true
+	}
+	var groups []*ink.Group
+	for _, r := range rows {
+		if len(want) > 0 && !want[r.ID] {
+			continue
+		}
+		g, err := ink.Parse(r.ID, r.Data)
+		if err != nil || !g.Writing() {
+			continue
+		}
+		groups = append(groups, g)
+	}
+	transcripts, unread, err := ink.Transcribe(context.Background(), rec, groups, false)
+	if err != nil {
+		return nil, err
+	}
+	if unread == nil {
+		unread = []string{}
+	}
+	return json.Marshal(map[string]any{"transcripts": transcripts, "unread": unread})
 }

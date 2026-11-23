@@ -512,6 +512,9 @@ function MediumSheet({
       resolveQuickCreate() {},
       inkUndo: () => s.undo(),
       inkRedo: () => s.redo(),
+      // Page ink has no place in the text; the surface writes through on its own.
+      inkToText() {},
+      inkFlush() {},
       insertRefAt() {},
       showDropCaret() {},
       aiCapture: async () => null,

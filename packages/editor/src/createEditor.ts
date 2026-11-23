@@ -24,7 +24,7 @@ import { buildFormatCommands, computeFormatState, type FormatName, type FormatSt
 import type { DocumentSource, LinkRef, LinkSource, QuickCreateRequest, QuickCreateTarget, RefDragStart } from "./types";
 import { InkLayer } from "./ink/layer";
 import { aiTargetsPlugin, applyAiResult, captureAiTarget, releaseAiTarget, type AiApplyMode, type AiTarget } from "./ai";
-import type { InkCallbacks, InkGroupRecord, InkLayerOptions, InkTool } from "./ink/types";
+import type { InkCallbacks, InkGroupRecord, InkLayerOptions, InkTextItem, InkTool } from "./ink/types";
 
 // The shared ProseMirror setup — pure DOM, no framework. Used directly on web/desktop
 // (Editor.web.tsx) and inside the WebView on native (webview/main.ts). Content is
@@ -76,6 +76,9 @@ export interface EditorHandle {
   setInkPenTool(tool: InkTool | null): void;
   inkUndo(): void;
   inkRedo(): void;
+  /** Replace ink groups with recognized text; returns how many items were placed. */
+  inkToText(items: InkTextItem[]): number;
+  inkFlush(): void;
   /** Capture what a writing assist acts on — the selection, or the whole note — as a target
    *  that follows later edits and stays highlighted until released (ai.ts). Full variant only;
    *  null in the simple editor. */
@@ -669,6 +672,12 @@ export function createEditor(
     },
     inkRedo() {
       ink?.redo();
+    },
+    inkToText(items: InkTextItem[]) {
+      return ink?.convertToText(items) ?? 0;
+    },
+    inkFlush() {
+      ink?.flush();
     },
     aiCapture() {
       if (simple) return null;

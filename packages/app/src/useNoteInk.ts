@@ -10,6 +10,8 @@ export interface NoteInkStore {
   groups: InkGroupRecord[];
   save: (groups: InkGroupRecord[]) => void;
   remove: (ids: string[]) => void;
+  /** Write anything still held now, resolving once the core has it. */
+  flush: () => Promise<void>;
 }
 
 const EMPTY: InkGroupRecord[] = [];
@@ -200,5 +202,10 @@ export function useNoteInk(noteId: string | null, ensureNoteId?: () => Promise<s
     [hold],
   );
 
-  return { groups, save, remove };
+  const flushNow = useCallback(async () => {
+    flush();
+    await writes.current;
+  }, [flush]);
+
+  return { groups, save, remove, flush: flushNow };
 }

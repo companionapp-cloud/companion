@@ -522,6 +522,10 @@ func (c *Core) Invoke(method string, payload []byte) ([]byte, error) {
 		return c.noteInkUpsert(payload)
 	case "noteInk.delete":
 		return c.noteInkDelete(payload)
+	case "noteInk.canTranscribe":
+		return json.Marshal(map[string]bool{"available": c.inkRecognizer() != nil})
+	case "noteInk.transcribe":
+		return c.noteInkTranscribe(payload)
 	case "notebooks.list":
 		return c.notebooksList()
 	case "notebooks.get":

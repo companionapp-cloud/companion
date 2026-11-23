@@ -6,6 +6,7 @@ import { Editor, type EditorController, type FormatState, type InkState, type Li
 import { FormattingBar } from "./FormattingBar";
 import { DrawingBar, useDrawingTool } from "./DrawingBar";
 import { useNoteInk } from "./useNoteInk";
+import { useInkConvert } from "./useInkConvert";
 import { tableMenuPresenter } from "./tableMenu";
 import { useTasks } from "./TasksProvider";
 import { useNotes } from "./NotesProvider";
@@ -122,6 +123,7 @@ export function NoteEditor({
   );
   const [tool, setTool] = useDrawingTool();
   const [inkState, setInkState] = useState<InkState | null>(null);
+  const inkConvert = useInkConvert(useCallback(() => note.id, [note.id]), editorRef, ink);
   // Touch web: the formatting bar only shows while the editor is focused (with a pointer it
   // is always there). Tapping a bar button briefly blurs the editor (then the action
   // refocuses it), so hiding is delayed a beat to avoid a flicker — a toolbar tap never
@@ -362,6 +364,7 @@ export function NoteEditor({
               onUndo={() => editorRef.current?.inkUndo()}
               onRedo={() => editorRef.current?.inkRedo()}
               onDone={() => setDrawing(false)}
+              convert={inkConvert}
             />
           ) : showBar ? (
             <FormattingBar

@@ -1,6 +1,8 @@
 package ink
 
 import (
+	"context"
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -110,4 +112,49 @@ func Assign(groups []*Group, r *Rendering, lines []Line) (out []Transcript, unre
 	}
 	sort.SliceStable(out, func(a, b int) bool { return out[a].Box.Y < out[b].Box.Y })
 	return out, unread
+}
+
+// Transcribe reads groups with rec. Note groups each have their own origin, so each is drawn
+// as its own image; page groups share the sheet's coordinates (shared), so they're drawn as one
+// image and the lines are mapped back to the groups they cover. Groups with no pen strokes are
+// skipped.
+func Transcribe(ctx context.Context, rec Recognizer, groups []*Group, shared bool) ([]Transcript, []string, error) {
+	type job struct {
+		groups []*Group
+		rend   *Rendering
+	}
+	var jobs []job
+	if shared {
+		if rend, ok := Render(groups...); ok {
+			jobs = append(jobs, job{groups, rend})
+		}
+	} else {
+		for _, g := range groups {
+			if rend, ok := Render(g); ok {
+				jobs = append(jobs, job{[]*Group{g}, rend})
+			}
+		}
+	}
+	if len(jobs) == 0 {
+		return []Transcript{}, nil, nil
+	}
+	images := make([][]byte, len(jobs))
+	for i, j := range jobs {
+		images[i] = j.rend.PNG
+	}
+	results, err := rec.RecognizeInk(ctx, images)
+	if err != nil {
+		return nil, nil, fmt.Errorf("text recognition: %w", err)
+	}
+	if len(results) != len(jobs) {
+		return nil, nil, fmt.Errorf("text recognition returned %d results for %d images", len(results), len(jobs))
+	}
+	transcripts := []Transcript{}
+	var unread []string
+	for i, j := range jobs {
+		got, missed := Assign(j.groups, j.rend, results[i])
+		transcripts = append(transcripts, got...)
+		unread = append(unread, missed...)
+	}
+	return transcripts, unread, nil
 }

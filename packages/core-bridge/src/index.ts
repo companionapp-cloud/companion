@@ -108,7 +108,7 @@ export type { ListsApi, CreateListInput, UpdateListInput, ListDetail, CreatedLis
 export { canvasesApi } from "./canvases";
 export type { CanvasesApi, CreateCanvasInput, UpdateCanvasInput, CanvasNodeInput, CanvasEdgeInput } from "./canvases";
 export { noteInkApi } from "./noteInk";
-export type { NoteInkApi, NoteInkInput } from "./noteInk";
+export type { NoteInkApi, NoteInkInput, InkTranscript } from "./noteInk";
 export { notebooksApi } from "./notebooks";
 export type {
   NotebooksApi,

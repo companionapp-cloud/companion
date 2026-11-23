@@ -6,7 +6,7 @@ import { createEditor } from "../createEditor";
 import type { FormatName } from "./../formatCommands";
 import type { DocumentSource, LinkSource, LinkSuggestion, QuickCreateTarget, ResolvedDocument } from "../types";
 import type { TableMenuRequest } from "../tableMenu";
-import type { InkGroupRecord, InkTool } from "../ink/types";
+import type { InkGroupRecord, InkTextItem, InkTool } from "../ink/types";
 import type { AiApplyMode } from "../ai";
 
 declare global {
@@ -40,6 +40,8 @@ declare global {
     __inkSetTool?: (tool: InkTool | null) => void;
     __inkUndo?: () => void;
     __inkRedo?: () => void;
+    __inkToText?: (items: InkTextItem[]) => void;
+    __inkFlush?: () => void;
     // Writing assists: the host captures a target (answered as an aiTarget message), applies a
     // result to it, releases it, and says whether Mod-j is its to take.
     __aiCapture?: (requestId: number) => void;
@@ -197,6 +199,8 @@ function init(): void {
   window.__inkSetTool = (tool) => handle.setInkTool(tool);
   window.__inkUndo = () => handle.inkUndo();
   window.__inkRedo = () => handle.inkRedo();
+  window.__inkToText = (items) => void handle.inkToText(items);
+  window.__inkFlush = () => handle.inkFlush();
   window.__aiCapture = (requestId) => post("aiTarget", { requestId, target: handle.aiCapture() });
   window.__aiApply = (id, mode, markdown) => void handle.aiApply(id, mode, markdown);
   window.__aiRelease = (id) => handle.aiRelease(id);

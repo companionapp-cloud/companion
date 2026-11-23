@@ -17,11 +17,19 @@ import (
 // toolRegistry builds the registry every agent works with.
 func (c *Core) toolRegistry() *llm.Registry {
 	opts := []llm.Option{llm.WithEventWriter(eventWriter{c})}
-	// Handwriting recognition runs on the on-device helper where there is one (desktop, macOS).
-	if rec, ok := c.foundation.(ink.Recognizer); ok && rec != nil {
+	if rec := c.inkRecognizer(); rec != nil {
 		opts = append(opts, llm.WithInkRecognizer(rec))
 	}
 	return llm.NewStoreRegistry(c.store, opts...)
+}
+
+// inkRecognizer reads handwriting on this device: the on-device helper where there is one
+// (desktop, macOS), else nil.
+func (c *Core) inkRecognizer() ink.Recognizer {
+	if rec, ok := c.foundation.(ink.Recognizer); ok && rec != nil {
+		return rec
+	}
+	return nil
 }
 
 // eventWriter lets the calendar tools create and edit events exactly as the calendar UI does

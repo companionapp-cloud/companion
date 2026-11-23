@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
-import { Button, Divider, Icon, IconButton, colors, control, layout, radius, row, space, useDensity } from "@companion/design-system";
+import { Button, Divider, Icon, IconButton, Spinner, Text, colors, control, layout, radius, row, space, useDensity } from "@companion/design-system";
 import type { IconName, PressState } from "@companion/design-system";
+import type { InkConvert } from "./useInkConvert";
 import { INK_COLORS, type InkColor, type InkSize, type InkState, type InkTool, type InkToolKind } from "@companion/editor";
 
 // Drawing on notes (PLAN-drawing.md): the toolbar shown in place of the formatting bar while a
@@ -86,6 +87,7 @@ export function DrawingBar({
   onUndo,
   onRedo,
   onDone,
+  convert,
 }: {
   tool: InkTool;
   onChange: (patch: InkToolPatch) => void;
@@ -93,6 +95,8 @@ export function DrawingBar({
   onUndo: () => void;
   onRedo: () => void;
   onDone: () => void;
+  /** "Convert to text", where this device can read handwriting (see useInkConvert). */
+  convert?: InkConvert;
 }) {
   const touch = useDensity() === "touch";
   const size = touch ? "lg" : "sm";
@@ -165,6 +169,24 @@ export function DrawingBar({
       <IconButton label="Redo drawing" size={size} disabled={!state?.canRedo} onPress={onRedo}>
         <Icon name="redo" size={glyph} color={colors.textSecondary} />
       </IconButton>
+      {convert?.available ? (
+        <>
+          <Divider vertical style={styles.divider} />
+          <Button
+            variant="ghost"
+            size={touch ? "md" : "sm"}
+            label={convert.busy ? "Converting…" : "Convert to text"}
+            icon={convert.busy ? <Spinner inline size={12} /> : undefined}
+            disabled={convert.busy || !state?.hasInk}
+            onPress={convert.convert}
+          />
+          {convert.message ? (
+            <Text variant="caption" tone="secondary" numberOfLines={1} style={styles.message}>
+              {convert.message}
+            </Text>
+          ) : null}
+        </>
+      ) : null}
     </>
   );
 
@@ -203,6 +225,7 @@ const styles = {
   touchContent: { alignItems: "center" as const, gap: space.xxs, paddingHorizontal: space.sm },
   done: { paddingHorizontal: space.sm, justifyContent: "center" as const },
   divider: { alignSelf: "center" as const, height: 12, marginHorizontal: space.xs },
+  message: { marginLeft: space.xs, flexShrink: 1 },
   option: { alignItems: "center" as const, justifyContent: "center" as const, borderRadius: radius.sm },
   swatchRing: { borderRadius: 999, borderWidth: 1.5, alignItems: "center" as const, justifyContent: "center" as const },
   swatch: { borderRadius: 999 },
