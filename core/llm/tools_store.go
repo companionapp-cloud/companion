@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"companion/core/domain"
+	"companion/core/ink"
 	"companion/core/store"
 	"companion/core/sync/protocol"
 )
@@ -18,6 +19,7 @@ type Option func(*storeOptions)
 
 type storeOptions struct {
 	events EventWriter
+	ink    ink.Recognizer
 }
 
 // WithEventWriter enables the calendar write tools (create_event, update_event), which take the
@@ -136,10 +138,14 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 					number = i + 1
 				}
 			}
-			return jsonResult(map[string]any{
+			out := map[string]any{
 				"id": p.ID, "notebookId": n.ID, "notebookTitle": n.Title, "pageNumber": number,
 				"paperKind": p.PaperKind, "paperSpacing": p.PaperSpacing, "contentMd": p.ContentMD,
-			})
+			}
+			if k := inkCount(s, "", p.ID); k > 0 {
+				out["inkGroups"] = k
+			}
+			return jsonResult(out)
 		},
 	})
 
@@ -396,10 +402,15 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 			if err != nil {
 				return "", err
 			}
-			return jsonResult(map[string]any{
+			out := map[string]any{
 				"id": n.ID, "title": n.Title, "contentMd": n.ContentMD, "date": n.Date,
 				"objectTypeId": n.ObjectTypeID, "props": n.Props,
-			})
+			}
+			// Handwriting isn't in contentMd: say it's there so the model can read it with read_ink.
+			if k := inkCount(s, n.ID, ""); k > 0 {
+				out["inkGroups"] = k
+			}
+			return jsonResult(out)
 		},
 	})
 
@@ -840,6 +851,7 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 	addCanvasTools(r, s)
 	addFilingTools(r, s)
 	addWebTools(r)
+	addInkTools(r, s, o.ink)
 
 	return r
 }

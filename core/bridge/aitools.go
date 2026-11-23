@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"companion/core/calendar"
+	"companion/core/ink"
 	"companion/core/llm"
 )
 
@@ -15,7 +16,12 @@ import (
 
 // toolRegistry builds the registry every agent works with.
 func (c *Core) toolRegistry() *llm.Registry {
-	return llm.NewStoreRegistry(c.store, llm.WithEventWriter(eventWriter{c}))
+	opts := []llm.Option{llm.WithEventWriter(eventWriter{c})}
+	// Handwriting recognition runs on the on-device helper where there is one (desktop, macOS).
+	if rec, ok := c.foundation.(ink.Recognizer); ok && rec != nil {
+		opts = append(opts, llm.WithInkRecognizer(rec))
+	}
+	return llm.NewStoreRegistry(c.store, opts...)
 }
 
 // eventWriter lets the calendar tools create and edit events exactly as the calendar UI does

@@ -5,6 +5,7 @@ package agentrt
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"companion/core/agents"
+	"companion/core/ink"
 	"companion/core/llm"
 )
 
@@ -461,4 +463,45 @@ func (l *limitedWriter) Write(p []byte) (int, error) {
 		l.n -= k
 	}
 	return len(p), nil
+}
+
+// RecognizeInk reads handwriting with Apple Vision through the helper's ocr command
+// (ink.Recognizer). Vision runs on-device and needs no Apple Intelligence.
+func (f *FoundationModels) RecognizeInk(ctx context.Context, images [][]byte) ([][]ink.Line, error) {
+	if len(images) == 0 {
+		return nil, nil
+	}
+	encoded := make([]string, len(images))
+	for i, img := range images {
+		encoded[i] = base64.StdEncoding.EncodeToString(img)
+	}
+	req, err := json.Marshal(map[string]any{"images": encoded})
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, f.HelperPath, "ocr")
+	cmd.Stdin = strings.NewReader(string(req))
+	var stderr strings.Builder
+	cmd.Stderr = &limitedWriter{w: &stderr, n: 4096}
+	out, runErr := cmd.Output()
+	var body struct {
+		Results [][]ink.Line `json:"results"`
+		Type    string       `json:"type"`
+		Message string       `json:"message"`
+	}
+	if err := json.Unmarshal(out, &body); err == nil && body.Type == "error" {
+		return nil, errors.New(body.Message)
+	}
+	if runErr != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return nil, fmt.Errorf("%w: %s", runErr, msg)
+		}
+		return nil, runErr
+	}
+	if err := json.Unmarshal(out, &body); err != nil {
+		return nil, fmt.Errorf("bad ocr output: %w", err)
+	}
+	return body.Results, nil
 }

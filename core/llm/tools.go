@@ -12,13 +12,31 @@ import (
 // the model on the next round.
 type ToolHandler func(ctx context.Context, args json.RawMessage) (string, error)
 
+// ToolImage is an image a tool returns beside its text (e.g. ink drawn as a PNG).
+type ToolImage struct {
+	MIMEType string
+	Data     []byte
+}
+
+// ToolOutput is a tool result with images. Only clients that take image results (CLI agents
+// over MCP) receive the images; everyone else gets Text.
+type ToolOutput struct {
+	Text   string
+	Images []ToolImage
+}
+
+// RichToolHandler is a ToolHandler whose result may carry images.
+type RichToolHandler func(ctx context.Context, args json.RawMessage) (ToolOutput, error)
+
 // Tool couples a ToolSpec advertised to the model with the handler that runs it. Write
 // marks state-mutating tools (create/update) apart from read-only retrieval, so the shell
-// can render or (later) gate them differently.
+// can render or (later) gate them differently. A tool sets Handler, or Rich when its result
+// can include images.
 type Tool struct {
 	Spec    ToolSpec
 	Write   bool
 	Handler ToolHandler
+	Rich    RichToolHandler
 }
 
 // Registry is the set of tools available to the model in a conversation, built once from a
@@ -96,7 +114,24 @@ func (r *Registry) Invoke(ctx context.Context, name string, args json.RawMessage
 	if !ok {
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
+	if t.Handler == nil && t.Rich != nil {
+		out, err := t.Rich(ctx, args)
+		return out.Text, err
+	}
 	return t.Handler(ctx, args)
+}
+
+// InvokeRich runs the named tool, keeping any images its result carries.
+func (r *Registry) InvokeRich(ctx context.Context, name string, args json.RawMessage) (ToolOutput, error) {
+	t, ok := r.tools[name]
+	if !ok {
+		return ToolOutput{}, fmt.Errorf("unknown tool %q", name)
+	}
+	if t.Rich != nil {
+		return t.Rich(ctx, args)
+	}
+	text, err := t.Handler(ctx, args)
+	return ToolOutput{Text: text}, err
 }
 
 // jsonResult marshals a handler's structured result to the string the model receives.

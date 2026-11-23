@@ -14,6 +14,11 @@
 //                            {"type":"done","text":…,"contextTokens":…} the full reply
 //                            {"type":"error","message":…,"code":…}
 //                          and reads {"type":"tool_result","id","content","isError"} lines back.
+//   companion-fm ocr     → reads {"images":[base64 PNG…],"languages":[…]?} from stdin and prints
+//                            {"results":[[{"text","confidence","box":{x,y,w,h}}…]…]}, the lines of
+//                            handwriting Vision read in each image (box normalized, origin top-left).
+//                            Vision needs no Apple Intelligence, so this works on any Mac the
+//                            helper runs on.
 //
 // Tool calls run inside the framework's own loop (a Tool's call() suspends until the host
 // replies), so the host answers each one as it comes rather than ending the round.
@@ -26,6 +31,8 @@
 
 import Foundation
 import FoundationModels
+import ImageIO
+import Vision
 
 // MARK: - Wire types
 
@@ -466,17 +473,69 @@ func run() async {
     }
 }
 
+// MARK: - Text recognition
+
+struct OCRRequest: Decodable {
+    let images: [String]
+    let languages: [String]?
+}
+
+/// Reads handwriting in each image with Vision's accurate text recognizer, one result list per
+/// image in reading order.
+func ocr() {
+    let input = FileHandle.standardInput.readDataToEndOfFile()
+    guard let req = try? JSONDecoder().decode(OCRRequest.self, from: input) else {
+        fail("bad ocr request", code: "bad_request")
+    }
+    var results: [[[String: Any]]] = []
+    for encoded in req.images {
+        guard let data = Data(base64Encoded: encoded),
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            results.append([])
+            continue
+        }
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = true
+        if let languages = req.languages, !languages.isEmpty {
+            request.recognitionLanguages = languages
+        } else {
+            request.automaticallyDetectsLanguage = true
+        }
+        do {
+            try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+        } catch {
+            fail("text recognition failed: \(error.localizedDescription)", code: "ocr_failed")
+        }
+        var lines: [[String: Any]] = []
+        for observation in request.results ?? [] {
+            guard let best = observation.topCandidates(1).first else { continue }
+            let b = observation.boundingBox  // normalized, origin bottom-left
+            lines.append([
+                "text": best.string,
+                "confidence": Double(best.confidence),
+                "box": ["x": Double(b.minX), "y": Double(1 - b.maxY), "w": Double(b.width), "h": Double(b.height)],
+            ])
+        }
+        results.append(lines)
+    }
+    emit(["results": results])
+}
+
 // MARK: - Main
 
 let args = CommandLine.arguments.dropFirst()
 switch args.first {
 case "check":
     emit(["models": checkModels()])
+case "ocr":
+    ocr()
 case "run":
     let done = DispatchSemaphore(value: 0)
     Task { await run(); done.signal() }
     done.wait()
 default:
-    FileHandle.standardError.write("usage: companion-fm check | run\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: companion-fm check | run | ocr\n".data(using: .utf8)!)
     exit(2)
 }

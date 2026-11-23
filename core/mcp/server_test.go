@@ -4,6 +4,8 @@ package mcp
 
 import (
 	"bytes"
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -136,4 +138,34 @@ func toolNames(list map[string]any) map[string]bool {
 		out[tl.(map[string]any)["name"].(string)] = true
 	}
 	return out
+}
+
+func TestMCPToolResultCarriesImages(t *testing.T) {
+	reg := llm.NewRegistry()
+	reg.Add(llm.Tool{
+		Spec: llm.ToolSpec{Name: "pic", Description: "a picture"},
+		Rich: func(context.Context, json.RawMessage) (llm.ToolOutput, error) {
+			return llm.ToolOutput{Text: "one image", Images: []llm.ToolImage{{MIMEType: "image/png", Data: []byte("png!")}}}, nil
+		},
+	})
+	s := New(reg, nil)
+	url, err := s.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Stop()
+	tok := s.IssueToken(Grant{AgentID: "a"})
+	_, out := rpc(t, url, tok, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"pic"}}`)
+	content := out["result"].(map[string]any)["content"].([]any)
+	if len(content) != 2 {
+		t.Fatalf("content = %v", content)
+	}
+	img := content[1].(map[string]any)
+	if img["type"] != "image" || img["mimeType"] != "image/png" || img["data"] != base64.StdEncoding.EncodeToString([]byte("png!")) {
+		t.Errorf("image block = %v", img)
+	}
+	// The text-only path still answers with the text.
+	if text, _ := reg.Invoke(context.Background(), "pic", nil); text != "one image" {
+		t.Errorf("Invoke = %q", text)
+	}
 }

@@ -24,7 +24,7 @@ const terminalAgentID = "terminal"
 // terminalInstructions replaces the chat-oriented server guidance for terminal sessions.
 const terminalInstructions = "Tools over the user's Companion workspace: notes, tasks, projects, habits, calendar events and canvases. " +
 	"Call get_date before reasoning about relative dates. Find the user's own content with search_notes, list_tasks, list_projects and list_events; " +
-	"load a note with get_note before quoting it. The user reads your reply in a terminal, so quote or summarize what matters " +
+	"load a note with get_note before quoting it. Handwriting (inkGroups on get_note or get_page) is read with read_ink and turned into typed text with convert_ink_to_text. The user reads your reply in a terminal, so quote or summarize what matters " +
 	"and give titles rather than bare ids. Tool results reference entities as [[note:…]] / [[task:…]] wikilinks; " +
 	"use the same form when writing links into note content. Ask before creating or changing many items at once."
 

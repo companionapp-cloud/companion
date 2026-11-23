@@ -18,9 +18,17 @@ Companion is the user's notes, tasks, projects, calendar and canvases app. Its d
 
 Prefer these tools over guessing what the user has written. If a search comes back empty, try other words before you say something doesn't exist.
 
+## Handwriting
+
+Ink drawn on a note or notebook page isn't in its `contentMd`. When `get_note` or `get_page` reports `inkGroups`, the user wrote or drew there by hand.
+
+- `read_ink` returns the ink as images: one per group on a note, with the text each was written over or beside, or one image of the whole sheet for a notebook page. Read the handwriting yourself.
+- `transcribe_ink` reads it with on-device text recognition (Apple Vision, on a Mac). Use it when you can't see the images, or to check your own reading.
+- To convert handwriting to typed text, call `convert_ink_to_text` with items of `groupIds` and `text`. Each item's text goes where its ink was, and that ink is erased. Convert only writing: leave drawings, arrows and circles as ink. When it's unclear which marks are writing, ask first.
+
 ## Write carefully
 
-- `create_note`, `create_task`, `create_event`, `create_canvas` and the `update_*` tools change the workspace. Write tools are hidden unless the user allowed them in Companion › Settings › AI › Terminal agents.
+- `create_note`, `create_task`, `create_event`, `create_canvas`, `convert_ink_to_text` and the `update_*` tools change the workspace. Write tools are hidden unless the user allowed them in Companion › Settings › AI › Terminal agents.
 - Before creating or changing more than a few items, show the user what you will do and ask.
 - Link to other items with the wikilinks the tools return, such as `[[note:ID]]` and `[[task:ID]]`, so the links work inside Companion.
 - After a write, say what changed and give the item's title.

@@ -369,7 +369,9 @@ func (c *Core) buildEngine(a *domain.Agent, model string) (*llm.Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	registry := c.toolRegistry()
+	// read_ink answers with images, which only CLI agents over MCP receive; the built-in engine
+	// reads handwriting with transcribe_ink instead.
+	registry := c.toolRegistry().Without("read_ink")
 	system := systemPrompt
 	if a.Runtime.IsNative() {
 		// The on-device model's context holds the instructions and the tool definitions, so it

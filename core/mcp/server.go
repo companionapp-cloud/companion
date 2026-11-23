@@ -12,6 +12,7 @@ package mcp
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -88,6 +89,7 @@ func New(registry *llm.Registry, authorize Authorizer) *Server {
 const chatInstructions = "Tools over the user's Companion workspace: notes, tasks, projects, habits, calendar events and canvases. " +
 	"Call get_date before reasoning about relative dates. Load a note with get_note before quoting it; " +
 	"read the schedule with list_events and a canvas with get_canvas. " +
+	"When get_note or get_page reports inkGroups, the user wrote by hand there: see it with read_ink, and turn it into typed text with convert_ink_to_text. " +
 	"The render_* tools show an entity as an inline preview in the user's chat. " +
 	"Reference entities with the [[note:…]] / [[task:…]] wikilinks the tools return."
 
@@ -295,7 +297,7 @@ func (s *Server) dispatch(ctx context.Context, g Grant, req rpcRequest) (rpcResp
 		if len(args) == 0 {
 			args = json.RawMessage(`{}`)
 		}
-		out, err := s.registry.Invoke(ctx, params.Name, args)
+		out, err := s.registry.InvokeRich(ctx, params.Name, args)
 		if err != nil {
 			if strings.HasPrefix(err.Error(), "unknown tool") {
 				return reply(nil, &rpcError{codeInvalidParams, err.Error()})
@@ -305,10 +307,13 @@ func (s *Server) dispatch(ctx context.Context, g Grant, req rpcRequest) (rpcResp
 		if s.onWrite != nil && s.registry.IsWrite(params.Name) {
 			s.onWrite(params.Name)
 		}
-		return reply(map[string]any{
-			"content": []map[string]any{{"type": "text", "text": out}},
-			"isError": false,
-		}, nil)
+		content := []map[string]any{{"type": "text", "text": out.Text}}
+		for _, img := range out.Images {
+			content = append(content, map[string]any{
+				"type": "image", "mimeType": img.MIMEType, "data": base64.StdEncoding.EncodeToString(img.Data),
+			})
+		}
+		return reply(map[string]any{"content": content, "isError": false}, nil)
 	default:
 		return reply(nil, &rpcError{codeMethodMissing, "method not found: " + req.Method})
 	}
