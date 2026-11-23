@@ -46,20 +46,13 @@ func NewStoreRegistry(s *store.Store, opts ...Option) *Registry {
 	r.Add(Tool{
 		Spec: ToolSpec{
 			Name:        "get_date",
-			Description: "Get the current date and time in the user's local timezone. ALWAYS call this before reasoning about 'today', 'now', 'tomorrow', 'this week', 'next Friday', or any relative date, and before setting a task's due date — your own sense of the current date is unreliable and often wrong. Returns the local date, weekday, time, and UTC offset.",
+			Description: "Get the current date and time in the user's local timezone. ALWAYS call this before reasoning about 'today', 'now', 'tomorrow', 'this week', 'next Friday', or any relative date, and before setting a task's due date — your own sense of the current date is unreliable and often wrong. Returns the local date, weekday, time, UTC offset, and the dates of the coming week by weekday name.",
 			Schema:      json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{}}`),
 		},
 		Handler: func(_ context.Context, _ json.RawMessage) (string, error) {
 			// time.Now() is local: the browser's timezone in the wasm build, the OS timezone
 			// on desktop/mobile — i.e. the user's actual local time on every platform.
-			now := time.Now()
-			return jsonResult(map[string]any{
-				"date":      now.Format("2006-01-02"),
-				"weekday":   now.Weekday().String(),
-				"time":      now.Format("15:04"),
-				"iso":       now.Format(time.RFC3339),
-				"utcOffset": now.Format("-07:00"),
-			})
+			return jsonResult(DateFacts(time.Now()))
 		},
 	})
 
@@ -983,4 +976,29 @@ func writeResult(nodeType, id, title string) (string, error) {
 		"title":    title,
 		"wikilink": fmt.Sprintf("[[%s:%s]]", nodeType, id),
 	})
+}
+
+// DateFacts is get_date's answer for the moment now: the local date and time, plus the dates of
+// the next seven days by weekday name and the Monday that starts next week, so "Friday" or "next
+// Monday" is a lookup rather than arithmetic (small models count weekdays badly).
+func DateFacts(now time.Time) map[string]any {
+	coming := map[string]string{"tomorrow": now.AddDate(0, 0, 1).Format("2006-01-02")}
+	for i := 1; i <= 7; i++ {
+		d := now.AddDate(0, 0, i)
+		coming[strings.ToLower(d.Weekday().String())] = d.Format("2006-01-02")
+	}
+	daysToMonday := (8 - int(now.Weekday())) % 7
+	if daysToMonday == 0 {
+		daysToMonday = 7
+	}
+	return map[string]any{
+		"date":          now.Format("2006-01-02"),
+		"weekday":       now.Weekday().String(),
+		"time":          now.Format("15:04"),
+		"iso":           now.Format(time.RFC3339),
+		"utcOffset":     now.Format("-07:00"),
+		"year":          now.Year(),
+		"comingDays":    coming,
+		"nextWeekStart": now.AddDate(0, 0, daysToMonday).Format("2006-01-02"),
+	}
 }
