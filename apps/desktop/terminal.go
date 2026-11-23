@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"companion/core/mcp"
+	"companion/desktop/term"
 )
 
 // Terminal agents (core/bridge/terminal.go): `companion mcp` is the stdio MCP server that Claude
@@ -45,6 +46,45 @@ func runMCPProxy(dev bool) {
 		fmt.Fprintln(os.Stderr, "companion mcp:", err)
 		os.Exit(1)
 	}
+}
+
+// runTerminalCommand runs `companion tui|new|rex`, reporting whether name was one of them.
+func runTerminalCommand(dev bool, name string, args []string) bool {
+	if name != "tui" && name != "new" && name != "rex" {
+		return false
+	}
+	dbPath, err := databasePath(dev)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "companion:", err)
+		os.Exit(1)
+	}
+	client := &term.Client{ConfigPath: filepath.Join(filepath.Dir(dbPath), mcp.TerminalConfigFile)}
+	if app := appBundlePath(); app != "" {
+		client.Launch = func() error {
+			return exec.Command("/usr/bin/open", "-g", "-a", app, "--args", backgroundArg).Run()
+		}
+	}
+	switch name {
+	case "tui":
+		start := ""
+		if len(args) > 0 {
+			start = args[0]
+		}
+		err = term.RunTUI(client, term.StartTab(start))
+	case "new":
+		err = term.RunNew(client, args, os.Stdout)
+	case "rex":
+		if len(args) != 1 || args[0] != "install" {
+			err = fmt.Errorf("usage: companion rex install")
+			break
+		}
+		err = term.RexInstall(terminalCommand(), os.Stdout)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "companion:", err)
+		os.Exit(1)
+	}
+	return true
 }
 
 // appBundlePath is the Companion.app this binary belongs to, following the symlink Homebrew puts

@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,5 +149,58 @@ func TestTerminalAgentsUnavailableWithoutDesktop(t *testing.T) {
 	}
 	if _, err := c.Invoke("terminalAgents.update", []byte(`{"enabled":true}`)); err == nil {
 		t.Fatal("enabling without a desktop shell should fail")
+	}
+}
+
+// Terminal programs get reads, note and task writes only when allowed, and nothing else.
+func TestTerminalInvokeAllowlist(t *testing.T) {
+	c, _ := newTestCore(t)
+	dir := t.TempDir()
+	if err := c.SetTerminalAgents(dir, "companion"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(c.StopTerminalAgents)
+	call[terminalAgentsView](t, c, "terminalAgents.update", `{"enabled":true}`)
+	cfg, _ := mcp.ReadTerminalConfig(filepath.Join(dir, mcp.TerminalConfigFile))
+	base := strings.TrimSuffix(cfg.URL, "/mcp")
+
+	invoke := func(token, method, payload string) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, base+"/invoke", strings.NewReader(`{"method":"`+method+`","payload":`+payload+`}`))
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(body)
+	}
+
+	if code, _ := invoke("wrong", "notes.list", "null"); code != http.StatusUnauthorized {
+		t.Errorf("bad token: %d", code)
+	}
+	if code, body := invoke(cfg.Token, "notes.list", "null"); code != http.StatusOK || body != "[]" {
+		t.Errorf("read: %d %s", code, body)
+	}
+	if code, body := invoke(cfg.Token, "notes.create", `{"title":"x"}`); code != http.StatusForbidden || !strings.Contains(body, "read-only") {
+		t.Errorf("write while read-only: %d %s", code, body)
+	}
+	call[terminalAgentsView](t, c, "terminalAgents.update", `{"allowWrite":true}`)
+	code, body := invoke(cfg.Token, "notes.create", `{"title":"From the TUI"}`)
+	if code != http.StatusOK || !strings.Contains(body, "From the TUI") {
+		t.Fatalf("write: %d %s", code, body)
+	}
+	var created struct{ ID string }
+	_ = json.Unmarshal([]byte(body), &created)
+	// Deletes stay out of reach even with writes on.
+	if code, _ := invoke(cfg.Token, "notes.delete", `{"id":"`+created.ID+`"}`); code != http.StatusForbidden {
+		t.Errorf("delete: %d", code)
+	}
+	if code, _ := invoke(cfg.Token, "sync.now", "null"); code != http.StatusForbidden {
+		t.Errorf("sync: %d", code)
+	}
+	if notes, _ := c.store.Notes.List(); len(notes) != 1 {
+		t.Errorf("notes = %d, want 1", len(notes))
 	}
 }

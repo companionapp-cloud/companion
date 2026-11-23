@@ -78,6 +78,11 @@ func main() {
 		runMCPProxy(dev)
 		return
 	}
+	// `companion tui`, `companion new`, `companion rex install`: terminal programs that, like
+	// mcp, talk to the running app instead of opening the database.
+	if len(os.Args) > 1 && runTerminalCommand(dev, os.Args[1], os.Args[2:]) {
+		return
+	}
 	dbPath, err := databasePath(dev)
 	if err != nil {
 		log.Fatalf("resolve database path: %v", err)

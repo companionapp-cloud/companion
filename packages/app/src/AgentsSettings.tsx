@@ -195,6 +195,12 @@ function TerminalAgentsSettings() {
                   : `codex mcp add companion -- ${cmd} mcp`}
               </CodeBlock>
             </SettingsField>
+            <SettingsField
+              label="Rex"
+              help="Adds Companion to Rex's palette: the Companion TUI (today's note, calendar, notes, tasks, canvases and the graph) and quick New Note / New Task."
+            >
+              <CodeBlock>{`${cmd} rex install`}</CodeBlock>
+            </SettingsField>
             <SettingsNote>
               Restart any session that was already open. Companion starts in the menu bar when a session needs it.
             </SettingsNote>

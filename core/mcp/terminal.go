@@ -68,10 +68,10 @@ func WriteTerminalConfig(path string, cfg TerminalConfig) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// The proxy's answers when it cannot reach the app.
+// What terminal programs say when they cannot reach the app.
 const (
-	msgTerminalOff = "Companion's terminal agents are switched off. Turn them on in Companion › Settings › AI › Terminal agents, then restart this session."
-	msgAppDown     = "Companion isn't running. Open the Companion app, then try again."
+	MsgTerminalOff = "Companion's terminal agents are switched off. Turn them on in Companion › Settings › AI › Terminal agents, then restart this session."
+	MsgAppDown     = "Companion isn't running. Open the Companion app, then try again."
 )
 
 // Proxy serves MCP over stdio by forwarding each JSON-RPC message to the desktop app.
@@ -143,7 +143,7 @@ func (p *Proxy) handle(ctx context.Context, msg []byte) []byte {
 }
 
 // errUnreachable means nothing answered at the endpoint: the app isn't running.
-var errUnreachable = errors.New(msgAppDown)
+var errUnreachable = errors.New(MsgAppDown)
 
 func (p *Proxy) forward(ctx context.Context, msg []byte) ([]byte, error) {
 	cfg, err := ReadTerminalConfig(p.ConfigPath)
@@ -151,7 +151,7 @@ func (p *Proxy) forward(ctx context.Context, msg []byte) ([]byte, error) {
 		return nil, fmt.Errorf("read %s: %w", p.ConfigPath, err)
 	}
 	if !cfg.Enabled {
-		return nil, errors.New(msgTerminalOff)
+		return nil, errors.New(MsgTerminalOff)
 	}
 	reply, err := p.post(ctx, cfg, msg)
 	if !errors.Is(err, errUnreachable) || p.Launch == nil {

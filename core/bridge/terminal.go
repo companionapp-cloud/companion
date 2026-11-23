@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"path/filepath"
 	"sync"
 
@@ -79,6 +81,8 @@ func (c *Core) applyTerminalLocked() error {
 		srv := mcp.New(c.toolRegistry().Without("render_note", "render_task", "render_event", "render_canvas", "render_graph"), nil)
 		srv.SetInstructions(terminalInstructions)
 		srv.SetWriteHook(func(string) { c.emitDataChanged("", "") })
+		srv.Mount("/invoke", c.serveTerminalInvoke)
+		srv.Mount("/events", c.serveTerminalEvents)
 		url, err := srv.Start()
 		if err != nil {
 			return fmt.Errorf("start terminal agents server: %w", err)
@@ -134,4 +138,105 @@ func (c *Core) terminalAgentsUpdate(payload []byte) ([]byte, error) {
 		return nil, err
 	}
 	return json.Marshal(c.terminalViewLocked())
+}
+
+// Terminal programs (`companion tui`, `companion new`) call the core directly through /invoke,
+// but only these methods: reads, plus creating and editing notes and tasks when the user allowed
+// writes. Deletes, sync, encryption, agents and secrets stay out of reach of a terminal.
+var terminalReads = map[string]bool{
+	"core.version": true, "dates.parse": true,
+	"notes.list": true, "notes.get": true,
+	"tasks.list": true, "tasks.get": true,
+	"projects.list": true, "projects.members": true, "projects.forEntity": true,
+	"lists.list": true, "lists.items": true,
+	"calendar.range": true, "calendar.events.get": true, "calendar.feeds.list": true,
+	"canvases.list": true, "canvases.get": true,
+	"graph.full": true, "graph.neighborhood": true, "graph.backlinks": true,
+	"graph.search": true, "graph.lookup": true,
+}
+
+var terminalWrites = map[string]bool{
+	"notes.create": true, "notes.update": true,
+	"tasks.create": true, "tasks.update": true,
+}
+
+// terminalEvents are the refresh hints /events forwards.
+var terminalEvents = map[string]bool{
+	dataChangedEvent: true, notesChangedEvent: true, tasksChangedEvent: true,
+	calendarChangedEvent: true, canvasesChangedEvent: true, listsChangedEvent: true,
+}
+
+// serveTerminalInvoke handles POST /invoke {"method", "payload"}, like the desktop webview's.
+func (c *Core) serveTerminalInvoke(g mcp.Grant, w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Method  string          `json:"method"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 8<<20)).Decode(&req); err != nil {
+		writeTerminalError(w, http.StatusBadRequest, "bad request: "+err.Error())
+		return
+	}
+	switch {
+	case terminalReads[req.Method]:
+	case terminalWrites[req.Method] && g.AllowWrite:
+	case terminalWrites[req.Method]:
+		writeTerminalError(w, http.StatusForbidden, "terminal agents are read-only; turn on write tools in Companion › Settings › AI › Terminal agents")
+		return
+	default:
+		writeTerminalError(w, http.StatusForbidden, req.Method+" isn't available to terminal programs")
+		return
+	}
+	out, err := c.Invoke(req.Method, req.Payload)
+	if err != nil {
+		writeTerminalError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if out == nil {
+		out = []byte("null")
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(out)
+}
+
+func writeTerminalError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// serveTerminalEvents streams refresh hints as Server-Sent Events until the client goes away.
+func (c *Core) serveTerminalEvents(_ mcp.Grant, w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	ch := make(chan string, 16)
+	stop := c.tapEvents(func(name string, _ []byte) {
+		if !terminalEvents[name] {
+			return
+		}
+		select {
+		case ch <- name:
+		default: // a slow reader misses a hint, not the data
+		}
+	})
+	defer stop()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case name := <-ch:
+			fmt.Fprintf(w, "event: %s\ndata: {}\n\n", name)
+			flusher.Flush()
+		}
+	}
 }

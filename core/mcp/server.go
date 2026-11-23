@@ -51,6 +51,27 @@ type Server struct {
 	ln     net.Listener
 	srv    *http.Server
 	tokens map[string]Grant // issued tokens (when the default authorizer is used)
+	extra  map[string]http.Handler
+}
+
+// Mount serves another route beside /mcp, authorized by the same tokens; call before Start.
+// The handler receives the request's grant.
+func (s *Server) Mount(path string, h func(Grant, http.ResponseWriter, *http.Request)) {
+	if s.extra == nil {
+		s.extra = map[string]http.Handler{}
+	}
+	s.extra[path] = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		grant, ok := s.authorize(bearer(r))
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		h(grant, w, r)
+	})
+}
+
+func bearer(r *http.Request) string {
+	return strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer"))
 }
 
 // New builds a server over a registry. A nil authorizer uses the built-in token table
@@ -120,6 +141,9 @@ func (s *Server) Start() (string, error) {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", s)
+	for path, h := range s.extra {
+		mux.Handle(path, h)
+	}
 	s.ln = ln
 	s.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
@@ -176,8 +200,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer"))
-	grant, ok := s.authorize(token)
+	grant, ok := s.authorize(bearer(r))
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
