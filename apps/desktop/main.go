@@ -125,7 +125,13 @@ func main() {
 		core.SetOAuthProvider(oauth.Google(id, secret, ""))
 	}
 	core.SetDeviceInfo(desktopPlatform(), defaultDeviceName(), true)
-	core.SetAgentDiscoverer(agentrt.NewDiscoverer())
+	discoverer := agentrt.NewDiscoverer()
+	// Apple Intelligence, when the companion-fm helper ships beside this binary (macOS).
+	if fm := agentrt.NewFoundationModels(); fm != nil {
+		discoverer.Foundation = fm
+		core.SetFoundationModels(fm)
+	}
+	core.SetAgentDiscoverer(discoverer)
 	core.SetAgentRunners(agentrt.NewFactory(filepath.Dir(dbPath)))
 
 	// Reminder delivery (PLAN §6.4): the Wails notifications service registers real OS

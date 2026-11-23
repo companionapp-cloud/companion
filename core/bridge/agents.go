@@ -19,6 +19,11 @@ import (
 
 const eventAgentsChanged = "agents.changed"
 
+// FoundationModels is the shell's handle on the device's built-in models (Apple Intelligence).
+type FoundationModels interface {
+	Provider(opts agents.FoundationOptions) llm.Provider
+}
+
 // emitAgentsChanged tells open chat surfaces to re-fetch the agent list. The legacy
 // llm.configs.changed name is emitted too for one release.
 func (c *Core) emitAgentsChanged() {
@@ -41,7 +46,12 @@ func (c *Core) agentView(a *domain.Agent) agentView {
 	online := true
 	if a.IsLocal() {
 		if hostedHere {
-			online = a.Runtime.IsHTTP() || c.runners != nil
+			switch {
+			case a.Runtime.IsNative():
+				online = c.foundation != nil
+			case a.Runtime.IsCLI():
+				online = c.runners != nil
+			}
 		} else {
 			online = c.deviceOnline(*a.HostDeviceID)
 		}
@@ -81,6 +91,9 @@ func (c *Core) agentsInstall(payload []byte) ([]byte, error) {
 	}
 	if !domain.ValidRuntime(in.Runtime) {
 		return nil, fmt.Errorf("unknown runtime %q", in.Runtime)
+	}
+	if in.Runtime.IsNative() && c.foundation == nil {
+		return nil, fmt.Errorf("%s isn't available on this device", in.Runtime.Label())
 	}
 	if !in.Runtime.IsCloud() && in.Runtime != domain.RuntimeOpenAICompat {
 		// Discovered local tools are always hosted by the installing device.
@@ -313,8 +326,14 @@ func (c *Core) agentAPIKey(a *domain.Agent) (string, error) {
 	return "", nil
 }
 
-// providerFor builds the wire provider for an HTTP agent.
+// providerFor builds the provider for an HTTP or on-device agent.
 func (c *Core) providerFor(a *domain.Agent) (llm.Provider, error) {
+	if a.Runtime.IsNative() {
+		if c.foundation == nil {
+			return nil, fmt.Errorf("%s can only run on the Mac that hosts it", a.Name)
+		}
+		return c.foundation.Provider(agents.FoundationOptions{}), nil
+	}
 	apiKey, err := c.agentAPIKey(a)
 	if err != nil {
 		return nil, err
@@ -351,15 +370,41 @@ func (c *Core) buildEngine(a *domain.Agent, model string) (*llm.Engine, error) {
 		return nil, err
 	}
 	registry := c.toolRegistry()
+	system := systemPrompt
+	if a.Runtime.IsNative() {
+		// The on-device model's context holds the instructions and the tool definitions, so it
+		// gets a shorter prompt and a tool set sized to fit (llm.go).
+		system = foundationSystemPrompt
+		switch foundationToolMode(a) {
+		case "lean":
+			registry = registry.Only(foundationTools...)
+		case "catalog":
+			system = foundationCatalogPrompt
+			provider = c.foundation.Provider(foundationCatalogOptions)
+		default:
+			provider = c.foundation.Provider(foundationShortOptions)
+		}
+	}
 	if !a.AllowWrite {
 		registry = registry.ReadOnly()
 	}
 	return &llm.Engine{
 		Provider: provider,
 		Registry: registry,
-		System:   systemPrompt,
+		System:   system,
 		Model:    model,
 	}, nil
+}
+
+// foundationToolMode reads an on-device agent's toolMode setting. The default is every tool with
+// trimmed descriptions; "lean" offers the core tools only, "catalog" every tool behind call_tool.
+// core/bridge/foundation_eval_test.go measures them against each other.
+func foundationToolMode(a *domain.Agent) string {
+	var s struct {
+		ToolMode string `json:"toolMode"`
+	}
+	_ = json.Unmarshal([]byte(a.SettingsJSON), &s)
+	return s.ToolMode
 }
 
 // storeSecret writes an API key to the injected keychain, erroring clearly when the shell

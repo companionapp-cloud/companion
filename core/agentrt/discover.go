@@ -54,6 +54,8 @@ type Discoverer struct {
 	UseLoginShell bool
 	// HTTP is the client for local probes; nil uses a short-timeout default.
 	HTTP *http.Client
+	// Foundation, when set, is probed for Apple Intelligence (macOS with the helper installed).
+	Foundation *FoundationModels
 }
 
 // NewDiscoverer returns a discoverer with the platform's default search dirs and endpoints.
@@ -87,7 +89,7 @@ func (d *Discoverer) Discover(ctx context.Context) ([]agents.Discovered, error) 
 		out = append(out, *found)
 		mu.Unlock()
 	}
-	probes := []func(context.Context) *agents.Discovered{d.probeClaude, d.probeCodex, d.probeOllama, d.probeLMStudio}
+	probes := []func(context.Context) *agents.Discovered{d.probeClaude, d.probeCodex, d.probeOllama, d.probeLMStudio, d.Foundation.Discover}
 	for _, p := range probes {
 		wg.Add(1)
 		go func(p func(context.Context) *agents.Discovered) {

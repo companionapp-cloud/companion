@@ -8,16 +8,22 @@ export type AgentRuntime =
   | "claude-cli"
   | "codex-cli"
   | "ollama"
-  | "lmstudio";
+  | "lmstudio"
+  | "apple-foundation";
 
 export const CLI_RUNTIMES: readonly AgentRuntime[] = ["claude-cli", "codex-cli"];
 export const CLOUD_RUNTIMES: readonly AgentRuntime[] = ["anthropic-api", "openai-api"];
+/** Models built into the hosting device (Apple Intelligence): no endpoint, no key. */
+export const NATIVE_RUNTIMES: readonly AgentRuntime[] = ["apple-foundation"];
 
 export function isCliRuntime(r: AgentRuntime): boolean {
   return CLI_RUNTIMES.includes(r);
 }
 export function isCloudRuntime(r: AgentRuntime): boolean {
   return CLOUD_RUNTIMES.includes(r);
+}
+export function isNativeRuntime(r: AgentRuntime): boolean {
+  return NATIVE_RUNTIMES.includes(r);
 }
 
 /** Human label for a runtime (matches core/domain.Runtime.Label). */
@@ -37,6 +43,8 @@ export function runtimeLabel(r: AgentRuntime): string {
       return "Ollama";
     case "lmstudio":
       return "LM Studio";
+    case "apple-foundation":
+      return "Apple Intelligence";
     default:
       return r;
   }
@@ -81,7 +89,7 @@ export interface Agent {
 export interface DiscoveredAgent {
   runtime: AgentRuntime;
   name: string;
-  /** Binary path for CLIs, base URL for local servers. */
+  /** Binary path for CLIs, base URL for local servers, empty for built-in models. */
   path: string;
   version?: string;
   status: "ready" | "needs_login" | "not_running" | "unsupported_version";

@@ -18,6 +18,7 @@ import {
 } from "@companion/design-system";
 import {
   isCliRuntime,
+  isNativeRuntime,
   runtimeLabel,
   type Agent,
   type AgentRuntime,
@@ -468,7 +469,7 @@ function LocalTab({
       </SettingsNote>
       {found.length === 0 ? (
         <SettingsNote>
-          Nothing found. Companion looks for Claude Code (`claude`), Codex CLI (`codex`), a running Ollama server, and LM Studio.
+          Nothing found. Companion looks for Claude Code (`claude`), Codex CLI (`codex`), a running Ollama server, LM Studio, and Apple Intelligence.
         </SettingsNote>
       ) : (
         <View style={styles.list}>
@@ -499,7 +500,9 @@ function LocalTab({
                           await onInstall(
                             isCliRuntime(f.runtime)
                               ? { runtime: f.runtime, name: f.name, binaryPath: f.path, binaryVersion: f.version }
-                              : { runtime: f.runtime, name: f.name, baseUrl: f.path },
+                              : isNativeRuntime(f.runtime)
+                                ? { runtime: f.runtime, name: f.name }
+                                : { runtime: f.runtime, name: f.name, baseUrl: f.path },
                           );
                         } finally {
                           setBusy(null);
@@ -508,9 +511,11 @@ function LocalTab({
                     />
                   )}
                 </View>
-                <Text variant="mono" tone="quaternary" numberOfLines={1}>
-                  {f.path}
-                </Text>
+                {f.path ? (
+                  <Text variant="mono" tone="quaternary" numberOfLines={1}>
+                    {f.path}
+                  </Text>
+                ) : null}
                 {f.detail ? <SettingsNote>{f.detail}</SettingsNote> : null}
                 {f.models && f.models.length > 0 ? (
                   <SettingsNote>

@@ -105,3 +105,18 @@ type ModelLister interface {
 	// endpoint and so may fail on network/auth errors.
 	ListModels(ctx context.Context) ([]string, error)
 }
+
+// ToolInvoker runs one tool call on the provider's behalf and returns its result (a failure is
+// an IsError result, never a Go error, so the model can recover).
+type ToolInvoker func(ctx context.Context, call ToolCall) ToolResult
+
+// InlineToolProvider is an optional capability for a Provider whose model runs tools inside its
+// own generation rather than ending the round to ask for them — Apple Foundation Models calls a
+// tool mid-response and carries on with the result. The Engine hands it an invoker instead of
+// looping itself. ChatWithTools returns the turn's new messages in transcript order (an
+// assistant message per tool call, its tool-result message, then the final reply), so the
+// conversation persists exactly as it would from a round-based provider.
+type InlineToolProvider interface {
+	Provider
+	ChatWithTools(ctx context.Context, req ChatRequest, invoke ToolInvoker, onDelta DeltaFunc) ([]Message, error)
+}

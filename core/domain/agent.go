@@ -22,6 +22,9 @@ const (
 	RuntimeCodexCLI  Runtime = "codex-cli"
 	RuntimeOllama    Runtime = "ollama"
 	RuntimeLMStudio  Runtime = "lmstudio"
+	// Apple Foundation Models: the on-device Apple Intelligence model, driven natively by the
+	// hosting Mac (no endpoint, no key). Other devices reach it through the relay.
+	RuntimeAppleFoundation Runtime = "apple-foundation"
 )
 
 // Legacy column values kept for the transition (PLAN §6.8). scope is now derived from
@@ -37,14 +40,18 @@ const (
 // AllRuntimes lists every runtime the core understands, for validation and pickers.
 var AllRuntimes = []Runtime{
 	RuntimeAnthropicAPI, RuntimeOpenAIAPI, RuntimeOpenAICompat,
-	RuntimeClaudeCLI, RuntimeCodexCLI, RuntimeOllama, RuntimeLMStudio,
+	RuntimeClaudeCLI, RuntimeCodexCLI, RuntimeOllama, RuntimeLMStudio, RuntimeAppleFoundation,
 }
 
 // IsCLI reports whether the runtime is a child process (needs a host that can exec it).
 func (r Runtime) IsCLI() bool { return r == RuntimeClaudeCLI || r == RuntimeCodexCLI }
 
+// IsNative reports whether the runtime is a system framework the hosting device calls directly
+// (Apple Foundation Models): no endpoint, no key, and only its host can run it.
+func (r Runtime) IsNative() bool { return r == RuntimeAppleFoundation }
+
 // IsHTTP reports whether the runtime is reached over HTTP with a base URL.
-func (r Runtime) IsHTTP() bool { return r != "" && !r.IsCLI() }
+func (r Runtime) IsHTTP() bool { return r != "" && !r.IsCLI() && !r.IsNative() }
 
 // IsCloud reports whether the runtime is a hosted API reachable from any device with a key.
 func (r Runtime) IsCloud() bool { return r == RuntimeAnthropicAPI || r == RuntimeOpenAIAPI }
@@ -98,6 +105,8 @@ func (r Runtime) Label() string {
 		return "Ollama"
 	case RuntimeLMStudio:
 		return "LM Studio"
+	case RuntimeAppleFoundation:
+		return "Apple Intelligence"
 	default:
 		return string(r)
 	}
@@ -194,6 +203,9 @@ func (a *Agent) Validate() error {
 	}
 	if a.Runtime.IsCLI() && !a.IsLocal() {
 		return errors.Join(ErrInvalidAgent, errors.New("a CLI agent must be hosted by a device"))
+	}
+	if a.Runtime.IsNative() && !a.IsLocal() {
+		return errors.Join(ErrInvalidAgent, errors.New("an on-device model must be hosted by a device"))
 	}
 	if a.SettingsJSON != "" && !strings.HasPrefix(strings.TrimSpace(a.SettingsJSON), "{") {
 		return errors.Join(ErrInvalidAgent, errors.New("settings must be a JSON object"))

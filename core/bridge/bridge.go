@@ -55,6 +55,8 @@ type Core struct {
 	// child processes). Other shells leave both nil: discovery returns nothing and hosted
 	// agents are reached through the relay.
 	discoverer agents.Discoverer
+	// foundation runs Apple Foundation Models on this device (desktop on a capable Mac only).
+	foundation FoundationModels
 	runners    agents.RunnerFactory
 	device     deviceShell
 	presence   presenceTable
@@ -125,6 +127,9 @@ func (c *Core) SetBlobStore(b blob.Store) { c.blobs = b }
 
 // SetAgentDiscoverer registers the local-tool scanner (desktop only, PLAN-agents.md §3).
 func (c *Core) SetAgentDiscoverer(d agents.Discoverer) { c.discoverer = d }
+
+// SetFoundationModels registers the on-device model host (desktop on a capable Mac only).
+func (c *Core) SetFoundationModels(f FoundationModels) { c.foundation = f }
 
 // SetAgentRunners registers the CLI runner factory (desktop only, PLAN-agents.md §4).
 func (c *Core) SetAgentRunners(f agents.RunnerFactory) { c.runners = f }

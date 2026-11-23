@@ -45,6 +45,10 @@ func (e *Engine) Run(ctx context.Context, messages []Message, onDelta DeltaFunc,
 		tools = e.Registry.Specs()
 	}
 
+	if inline, ok := e.Provider.(InlineToolProvider); ok {
+		return e.runInline(ctx, inline, messages, tools, maxRounds, onDelta, onTool)
+	}
+
 	for round := 0; round < maxRounds; round++ {
 		resp, err := e.Provider.Chat(ctx, ChatRequest{
 			Model:    e.Model,
@@ -63,20 +67,43 @@ func (e *Engine) Run(ctx context.Context, messages []Message, onDelta DeltaFunc,
 
 		results := make([]ToolResult, 0, len(resp.Message.ToolCalls))
 		for _, tc := range resp.Message.ToolCalls {
-			content, err := e.Registry.Invoke(ctx, tc.Name, tc.Args)
-			tr := ToolResult{CallID: tc.ID, Content: content}
-			if err != nil {
-				// Surface the failure to the model as an error result so it can recover,
-				// rather than aborting the whole turn.
-				tr.Content = err.Error()
-				tr.IsError = true
-			}
-			results = append(results, tr)
-			if onTool != nil {
-				onTool(ToolEvent{Call: tc, Result: tr})
-			}
+			results = append(results, e.invoke(ctx, tc, onTool))
 		}
 		messages = append(messages, Message{Role: RoleTool, ToolResults: results})
 	}
 	return messages, fmt.Errorf("llm: exceeded max tool rounds (%d)", maxRounds)
+}
+
+// invoke runs one tool call against the registry and reports it.
+func (e *Engine) invoke(ctx context.Context, tc ToolCall, onTool func(ToolEvent)) ToolResult {
+	tr := ToolResult{CallID: tc.ID}
+	if e.Registry == nil {
+		tr.Content, tr.IsError = "no tools are available", true
+	} else if content, err := e.Registry.Invoke(ctx, tc.Name, tc.Args); err != nil {
+		// Surface the failure to the model as an error result so it can recover, rather than
+		// aborting the whole turn.
+		tr.Content, tr.IsError = err.Error(), true
+	} else {
+		tr.Content = content
+	}
+	if onTool != nil {
+		onTool(ToolEvent{Call: tc, Result: tr})
+	}
+	return tr
+}
+
+// runInline drives a provider that runs tools inside its own generation. The same cap applies,
+// counted in tool calls (maxRounds × 4) since there are no rounds to count: past it, calls are
+// refused so the model has to answer with what it has.
+func (e *Engine) runInline(ctx context.Context, p InlineToolProvider, messages []Message, tools []ToolSpec, maxRounds int, onDelta DeltaFunc, onTool func(ToolEvent)) ([]Message, error) {
+	budget := maxRounds * 4
+	invoke := func(ctx context.Context, tc ToolCall) ToolResult {
+		if budget <= 0 {
+			return ToolResult{CallID: tc.ID, Content: "tool call limit reached; answer with what you have", IsError: true}
+		}
+		budget--
+		return e.invoke(ctx, tc, onTool)
+	}
+	added, err := p.ChatWithTools(ctx, ChatRequest{Model: e.Model, System: e.System, Messages: messages, Tools: tools}, invoke, onDelta)
+	return append(messages, added...), err
 }

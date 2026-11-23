@@ -7,7 +7,7 @@ WASM_EXEC := $(shell $(GO) env GOROOT)/lib/wasm/wasm_exec.js
 WEB_WASM := apps/web/src/wasm
 MOBILE_MODULE := apps/mobile/modules/companion-core
 
-.PHONY: all test test-go fmt vet desktop desktop-frontend desktop-run desktop-app desktop-app-run core-wasm web-assets \
+.PHONY: all test test-go fmt vet desktop desktop-fm desktop-frontend desktop-run desktop-app desktop-app-run core-wasm web-assets \
         web-run website-run server server-run emails cloud cloud-frontend cloud-run gomobile-init core-android core-ios android-lib \
         mobile-artifacts mobile-run db-up db-down db-logs db-reset clean
 
@@ -47,9 +47,19 @@ desktop-frontend:
 ## mode), which leaves out the Web Inspector. Unset (the default) is a dev build, which
 ## never self-updates and keeps the inspector.
 DESKTOP_VERSION ?=
-desktop: desktop-frontend
+desktop: desktop-frontend desktop-fm
 	mkdir -p $(BUILD_DIR)
 	cd apps/desktop && $(GO) build $(if $(DESKTOP_VERSION),-tags production -ldflags "-X main.version=$(DESKTOP_VERSION)") -o ../../$(BUILD_DIR)/companion-desktop .
+
+## desktop-fm: build companion-fm, the Swift helper that runs Apple Foundation Models (Apple
+## Intelligence) for the desktop (apps/desktop/foundation). Needs macOS with the Foundation
+## Models SDK (Xcode 26+); elsewhere it is skipped and the desktop doesn't offer Apple
+## Intelligence. Targets macOS 26, the first release with the framework.
+desktop-fm:
+	@mkdir -p $(BUILD_DIR)
+	@if [ "$$(uname)" = "Darwin" ] && [ -d "$$(xcrun --show-sdk-path 2>/dev/null)/System/Library/Frameworks/FoundationModels.framework" ]; then \
+		swiftc -O -target arm64-apple-macos26.0 apps/desktop/foundation/main.swift -o $(BUILD_DIR)/companion-fm; \
+	else echo "skipping companion-fm: needs macOS with the Foundation Models SDK (Xcode 26+)"; fi
 
 ## desktop-app: package the binary into build/Companion.app (macOS). The bundle +
 ## identifier + a real code signature are what make notifications and launch-at-login work
@@ -71,6 +81,10 @@ desktop-app: desktop
 	cp apps/desktop/packaging/Info.plist "$(DESKTOP_APP)/Contents/Info.plist"
 	cp apps/desktop/packaging/AppIcon.icns "$(DESKTOP_APP)/Contents/Resources/AppIcon.icns"
 	cp $(BUILD_DIR)/companion-desktop "$(DESKTOP_APP)/Contents/MacOS/companion-desktop"
+	if [ -x $(BUILD_DIR)/companion-fm ]; then \
+		cp $(BUILD_DIR)/companion-fm "$(DESKTOP_APP)/Contents/MacOS/companion-fm" && \
+		codesign --force --sign "$(DESKTOP_SIGN)" --identifier $(DESKTOP_BUNDLE_ID).fm "$(DESKTOP_APP)/Contents/MacOS/companion-fm"; \
+	fi
 	$(if $(DESKTOP_VERSION),plutil -replace CFBundleShortVersionString -string "$(DESKTOP_VERSION)" "$(DESKTOP_APP)/Contents/Info.plist")
 	plutil -replace CFBundleIdentifier -string "$(DESKTOP_BUNDLE_ID)" "$(DESKTOP_APP)/Contents/Info.plist"
 	plutil -replace CFBundleName -string "$(DESKTOP_BUNDLE_NAME)" "$(DESKTOP_APP)/Contents/Info.plist"

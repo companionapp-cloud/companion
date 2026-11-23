@@ -18,7 +18,7 @@ Companion has a chat built in, but no model of its own. You bring an *agent*: an
 
 Open **Chat** and, until you have an agent, it'll point you at **Settings → AI**. Choose **Add agent**, then pick a tab:
 
-- **On this computer** — in the [desktop app](/docs/getting-the-apps), the AI tools Companion found on your machine: Claude Code, Codex, a running Ollama server, and LM Studio. Choose **Install** and the tool becomes an agent hosted by that computer. There's no URL to type.
+- **On this computer** — in the [desktop app](/docs/getting-the-apps), the AI tools Companion found on your machine: Claude Code, Codex, a running Ollama server, LM Studio, and Apple Intelligence on a Mac that has it turned on. Choose **Install** and the tool becomes an agent hosted by that computer. There's no URL to type.
 - **Cloud** — Anthropic or OpenAI, with an API key.
 - **Advanced** — any other server that speaks the OpenAI Chat Completions API, by URL: Ollama on another machine, vLLM, OpenRouter.
 
@@ -31,6 +31,8 @@ The *model* isn't chosen here. Each chat has its own picker, filled from whateve
 ## Agents on your computer, from anywhere
 
 An agent installed on your desktop runs there, but it isn't stuck there. Sign in to the same sync account on both devices and you can chat with it from the web app or your phone: your message travels through your sync server to the desktop, the desktop runs the turn, and the answer streams back. On an encrypted account those messages are end-to-end encrypted too, so the server passes them along without reading them.
+
+That includes Apple Intelligence: install it on your Mac and you can use your Mac's on-device model from the web app, your phone or a PC. Every turn still runs on the Mac.
 
 It only works while that computer is on with Companion running. If it isn't, the chat tells you the agent's computer is offline rather than holding the message for later.
 
@@ -49,7 +51,9 @@ Two switches on each agent decide what else it may do:
 - **Write tools** — create and edit notes, tasks and calendar events. On by default; off, the agent can only read and search. Events can go in any calendar of an account you've connected — Google, iCloud or another CalDAV server — but not in subscriptions, which are read-only. A change shows on your calendar at once and reaches your provider moments later.
 - **System access** — Claude Code and Codex only: edit files in the agent's own workspace folder and run commands on your computer. Off by default, and worth leaving off unless you need it — when it's on, that includes turns you start from your phone.
 
-On an encrypted account, the agent reads your workspace on the device that runs it, against local, decrypted data; the sync server only ever holds ciphertext. What you send to a model, though, goes to whoever runs that model, under their terms: Anthropic or OpenAI for the cloud APIs, and for Claude Code and Codex as well, since they call their makers' models with your account. Ollama and LM Studio are the options that keep everything on your own hardware.
+On an encrypted account, the agent reads your workspace on the device that runs it, against local, decrypted data; the sync server only ever holds ciphertext. What you send to a model, though, goes to whoever runs that model, under their terms: Anthropic or OpenAI for the cloud APIs, and for Claude Code and Codex as well, since they call their makers' models with your account. Ollama, LM Studio and Apple Intelligence are the options that keep everything on your own hardware.
+
+Apple Intelligence runs on the Mac's own model, which is small. It can use all of Companion's tools, described more briefly than other agents see them, and it only sees the most recent part of a long chat. It is less reliable than the bigger models, especially at multi-step changes like moving or refiling something, so check what it did. Turn it on in **System Settings → Apple Intelligence & Siri**; until then, Companion shows why it isn't ready.
 
 ## Browsing
 

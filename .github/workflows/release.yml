@@ -230,6 +230,17 @@ jobs:
             fi
           fi
 
+      - name: Build the Apple Intelligence helper
+        run: |
+          # companion-fm drives Apple Foundation Models for the desktop (apps/desktop/foundation).
+          # It needs the macOS 26 SDK; on an older runner image the release still ships, just
+          # without Apple Intelligence. arm64 only: Apple Intelligence needs Apple silicon.
+          if [ -d "$(xcrun --show-sdk-path)/System/Library/Frameworks/FoundationModels.framework" ]; then
+            swiftc -O -target arm64-apple-macos26.0 apps/desktop/foundation/main.swift -o build/companion-fm
+          else
+            echo "::warning::The runner's SDK has no FoundationModels; this build will not offer Apple Intelligence."
+          fi
+
       - name: Bundle, sign (ad-hoc) and zip
         id: pack
         env:
@@ -242,6 +253,10 @@ jobs:
           cp apps/desktop/packaging/Info.plist "$app/Contents/Info.plist"
           cp apps/desktop/packaging/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
           cp build/companion-desktop "$app/Contents/MacOS/companion-desktop"
+          if [ -x build/companion-fm ]; then
+            cp build/companion-fm "$app/Contents/MacOS/companion-fm"
+            codesign --force --sign - --identifier com.companion.desktop.fm "$app/Contents/MacOS/companion-fm"
+          fi
           # Stamp the release version over the placeholder in the checked-in plist.
           plutil -replace CFBundleShortVersionString -string "$version" "$app/Contents/Info.plist"
           plutil -replace CFBundleVersion -string "$GITHUB_RUN_NUMBER" "$app/Contents/Info.plist"

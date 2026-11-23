@@ -105,3 +105,17 @@ type RunnerFactory interface {
 	// WorkDir returns (creating if needed) the scratch directory for an agent id.
 	WorkDir(agentID string) (string, error)
 }
+
+// FoundationOptions shapes how tools reach an on-device model's small context. With Short set,
+// every tool is defined with its blurb as its description and argument descriptions cut to
+// their first clause. With Catalog set, only the tools named in Direct are defined up front; the
+// rest sit behind one call_tool whose description is a menu of blurbs (an experiment: the
+// on-device model rarely uses it).
+type FoundationOptions struct {
+	Short   bool
+	Catalog bool
+	Direct  []string
+	// Blurbs are a few words per catalog tool for the model's menu; a missing one falls back to
+	// the first sentence of the tool's description.
+	Blurbs map[string]string
+}
