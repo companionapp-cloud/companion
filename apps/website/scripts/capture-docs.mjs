@@ -11,10 +11,15 @@
 // Set CAPTURE_BASE_URL to point at an already-running dev server instead of spawning one.
 // Set CAPTURE_OUT_DIR to write somewhere else (e.g. a scratch dir while fixing a broken
 // step) — a run starts by emptying its output directory.
+//
+// The `companion tui` shots (tui-*.png) come from the desktop module's Go tests, so a run needs
+// Go too. CAPTURE_ONLY=terminal captures just those, without the dev server, and leaves the
+// other images in place.
 
 import { spawn } from "node:child_process";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import os from "node:os";
 import path from "node:path";
 import { chromium } from "playwright";
 
@@ -462,9 +467,50 @@ async function capture(page, seeded) {
   await shot(page, "chat-empty");
 }
 
+// ---------------------------------------------------------------- terminal UI
+
+// `companion tui` frames. The desktop module's TestDocsFrames seeds its own throwaway workspace,
+// drives the real TUI to each screen and writes the frames as HTML terminal windows; this
+// screenshots them. Needs Go, like building the desktop app does.
+const TUI_FRAMES = ["tui-today", "tui-calendar", "tui-notes", "tui-tasks", "tui-canvas", "tui-graph"];
+
+async function captureTerminal(browser) {
+  const framesDir = await mkdtemp(path.join(os.tmpdir(), "companion-tui-"));
+  try {
+    await new Promise((resolve, reject) => {
+      const child = spawn("go", ["test", "./term", "-run", "TestDocsFrames", "-count=1"], {
+        cwd: path.join(repoRoot, "apps/desktop"),
+        stdio: ["ignore", "inherit", "inherit"],
+        env: { ...process.env, COMPANION_TUI_FRAMES: framesDir },
+      });
+      child.on("error", reject);
+      child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`TUI frames: go test exited ${code}`))));
+    });
+    const page = await browser.newPage({ deviceScaleFactor: 2 });
+    for (const name of TUI_FRAMES) {
+      await page.goto(`file://${path.join(framesDir, `${name}.html`)}`);
+      await page.locator(".term").screenshot({ path: path.join(outDir, `${name}.png`) });
+    }
+    await page.close();
+  } finally {
+    await rm(framesDir, { recursive: true, force: true });
+  }
+}
+
 // ---------------------------------------------------------------- main
 
 async function main() {
+  if (process.env.CAPTURE_ONLY === "terminal") {
+    await mkdir(outDir, { recursive: true });
+    const browser = await chromium.launch();
+    try {
+      process.stdout.write("capturing the terminal UI…\n");
+      await captureTerminal(browser);
+    } finally {
+      await browser.close();
+    }
+    return;
+  }
   await rm(outDir, { recursive: true, force: true });
   await mkdir(outDir, { recursive: true });
 
@@ -489,6 +535,9 @@ async function main() {
 
     process.stdout.write(`capturing to ${path.relative(repoRoot, outDir)}\n`);
     await capture(page, seeded);
+
+    process.stdout.write("capturing the terminal UI…\n");
+    await captureTerminal(browser);
   } finally {
     await browser.close();
     stopDevServer(server);

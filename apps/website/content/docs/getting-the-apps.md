@@ -24,7 +24,7 @@ Companion for Mac installs with [Homebrew](https://brew.sh). It's one universal 
 brew install --cask companionapp-cloud/tap/companion
 ```
 
-That adds the Companion tap and puts **Companion** in your Applications folder. Open it from Launchpad or Spotlight.
+That adds the Companion tap and puts **Companion** in your Applications folder. Open it from Launchpad or Spotlight. It also adds a `companion` command for your terminal, used by [Companion in your terminal](/docs/companion-in-your-terminal) and by [Claude Code and Codex](/docs/terminal-agents).
 
 Companion keeps itself up to date. When a new version comes out, it downloads it, installs it and restarts. If one is waiting when you open Companion, a small window shows its progress, and Companion opens on the new version.
 :::

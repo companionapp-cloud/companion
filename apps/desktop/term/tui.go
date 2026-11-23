@@ -3,6 +3,7 @@ package term
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -59,6 +60,8 @@ type canvasDoc struct {
 	Nodes  []struct {
 		ID      string         `json:"id"`
 		Kind    string         `json:"kind"`
+		X       float64        `json:"x"`
+		Y       float64        `json:"y"`
 		RefType *string        `json:"refType"`
 		RefID   *string        `json:"refId"`
 		Data    map[string]any `json:"data"`
@@ -1089,8 +1092,9 @@ func (m model) renderMarkdown(n note, width int) string {
 	if s, ok := m.preview[key]; ok {
 		return s
 	}
-	src := "# " + n.Title + "\n\n" + n.ContentMD
-	r, err := glamour.NewTermRenderer(glamour.WithStandardStyle("dark"), glamour.WithWordWrap(max(width, 20)))
+	src := "# " + n.Title + "\n\n" + m.linkTitles(n.ContentMD)
+	r, err := glamour.NewTermRenderer(glamour.WithStandardStyle("dark"), glamour.WithWordWrap(max(width, 20)),
+		glamour.WithColorProfile(lipgloss.ColorProfile()))
 	out := src
 	if err == nil {
 		if s, err := r.Render(src); err == nil {
@@ -1099,6 +1103,33 @@ func (m model) renderMarkdown(n note, width int) string {
 	}
 	m.preview[key] = out
 	return out
+}
+
+var wikilinkRe = regexp.MustCompile(`!?\[\[\s*([a-zA-Z]+)\s*:\s*([^\]|]+?)\s*(?:\|([^\]]*))?\]\]`)
+
+// linkTitles turns [[type:id|alias]] wikilinks into their titles for the preview, which can't
+// show the app's link chips: the alias when there is one, else the linked note's or task's title.
+func (m model) linkTitles(md string) string {
+	return wikilinkRe.ReplaceAllStringFunc(md, func(link string) string {
+		parts := wikilinkRe.FindStringSubmatch(link)
+		title := strings.TrimSpace(parts[3])
+		if title == "" {
+			for _, n := range m.notes {
+				if n.ID == parts[2] {
+					title = n.Title
+				}
+			}
+			for _, t := range m.tasks {
+				if t.ID == parts[2] {
+					title = t.Title
+				}
+			}
+		}
+		if title == "" {
+			title = parts[1]
+		}
+		return "*" + title + "*"
+	})
 }
 
 func (m model) viewTasks() string {
@@ -1178,7 +1209,15 @@ func (m model) viewCanvas(doc *canvasDoc) string {
 		return b.String() + dim.Render("This canvas is empty. Add cards to it in the Companion app.")
 	}
 	b.WriteString(heading.Render("Cards") + "\n")
-	for _, n := range doc.Nodes {
+	// Reading order: top to bottom, then left to right, as the cards sit on the board.
+	nodes := doc.Nodes
+	sort.SliceStable(nodes, func(i, j int) bool {
+		if nodes[i].Y != nodes[j].Y {
+			return nodes[i].Y < nodes[j].Y
+		}
+		return nodes[i].X < nodes[j].X
+	})
+	for _, n := range nodes {
 		text := canvasLabel(doc, n.Kind, n.RefType, n.RefID, n.Data)
 		label[n.ID] = text
 		b.WriteString(truncate("  "+kindIcon(n.Kind)+" "+text, m.w-4) + "\n")
